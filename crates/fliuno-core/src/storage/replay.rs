@@ -4,6 +4,14 @@ use super::*;
 pub const MAX_EVENT_TARGET_BYTES: u32 = 8 * 1024 * 1024;
 
 impl Kernel {
+    pub fn event_watermark(&self) -> Result<u64> {
+        Ok(self
+            .db
+            .query_row("SELECT COALESCE(MAX(sequence),0) FROM events", [], |row| {
+                row.get::<_, i64>(0)
+            })? as u64)
+    }
+
     pub fn list_events(&self, task_id: &str, after: u64, limit: u32) -> Result<EventsPage> {
         self.list_events_with_target(task_id, after, limit, None)
     }
@@ -35,9 +43,19 @@ impl Kernel {
         limit: u32,
         target_bytes: Option<u32>,
     ) -> Result<EventsPage> {
+        self.list_all_events_through(after, None, limit, target_bytes)
+    }
+
+    pub fn list_all_events_through(
+        &self,
+        after: u64,
+        through: Option<u64>,
+        limit: u32,
+        target_bytes: Option<u32>,
+    ) -> Result<EventsPage> {
         self.query_event_page(
-            "SELECT sequence,task_id,data FROM events WHERE sequence>?1 ORDER BY sequence LIMIT ?2",
-            params![validate_event_cursor(after)?, validate_event_limit(limit)?],
+            "SELECT sequence,task_id,data FROM events WHERE sequence>?1 AND sequence<=?2 ORDER BY sequence LIMIT ?3",
+            params![validate_event_cursor(after)?, through.map(validate_event_cursor).transpose()?.unwrap_or(i64::MAX), validate_event_limit(limit)?],
             after,
             limit,
             target_bytes,

@@ -50,7 +50,7 @@ impl Kernel {
     pub fn session_context(&self, session: &str, options: ContextOptions) -> Result<TaskContext> {
         self.require_session(session)?;
         let options = normalize_options(options)?;
-        let through_sequence = self.context_watermark()?;
+        let through_sequence = self.event_watermark()?;
         let mut snapshot = TaskContext {
             options,
             through_sequence,

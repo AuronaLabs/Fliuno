@@ -601,10 +601,19 @@ pub struct EventsListParams {
 pub struct EventsListAllParams {
     #[serde(default)]
     pub after: u64,
+    #[serde(default)]
+    pub through: Option<u64>,
     #[serde(default = "default_limit")]
     pub limit: u32,
     #[serde(default)]
     pub target_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EventSubscription {
+    /// Replay through this sequence. Live notifications cover later events.
+    pub through_sequence: u64,
 }
 
 fn default_limit() -> u32 {
@@ -648,6 +657,7 @@ pub fn schema_bundle() -> Value {
             "approval/respond": schemars::schema_for!(ApprovalRespondParams),
             "events/list": schemars::schema_for!(EventsListParams),
             "events/listAll": schemars::schema_for!(EventsListAllParams),
+            "events/resubscribe": {"type":"object","properties":{},"additionalProperties":false},
             "artifacts/list": schemars::schema_for!(TaskIdParams),
             "artifacts/listSummaries": schemars::schema_for!(ArtifactListParams),
             "artifacts/get": schemars::schema_for!(ArtifactGetParams),
@@ -672,6 +682,7 @@ pub fn schema_bundle() -> Value {
             "Artifact": schemars::schema_for!(Artifact),
             "ArtifactSummariesPage": schemars::schema_for!(ObjectPage<ArtifactSummary>),
             "Event": schemars::schema_for!(Event),
+            "EventSubscription": schemars::schema_for!(EventSubscription),
             "ModelProgress": schemars::schema_for!(ModelProgress),
             "ModelBudget": schemars::schema_for!(ModelBudget),
             "EventsPage": schemars::schema_for!(EventsPage)

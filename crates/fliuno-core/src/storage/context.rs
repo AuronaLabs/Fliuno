@@ -112,14 +112,6 @@ impl Kernel {
         Ok((total, turns))
     }
 
-    pub(crate) fn context_watermark(&self) -> Result<u64> {
-        Ok(self
-            .db
-            .query_row("SELECT COALESCE(MAX(sequence),0) FROM events", [], |row| {
-                row.get::<_, i64>(0)
-            })? as u64)
-    }
-
     pub(crate) fn context_turn_count(&self, session: &str, through: u64) -> Result<u64> {
         let count: i64 = self.db.query_row(
             "SELECT COUNT(*) FROM session_turns WHERE session_id=?1 AND sequence<=?2",

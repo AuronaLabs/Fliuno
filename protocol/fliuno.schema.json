@@ -656,6 +656,15 @@
           "minimum": 0,
           "default": 0
         },
+        "through": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
         "limit": {
           "type": "integer",
           "format": "uint32",
@@ -672,6 +681,11 @@
           "default": null
         }
       },
+      "additionalProperties": false
+    },
+    "events/resubscribe": {
+      "type": "object",
+      "properties": {},
       "additionalProperties": false
     },
     "artifacts/list": {
@@ -3875,6 +3889,23 @@
           ]
         }
       }
+    },
+    "EventSubscription": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "EventSubscription",
+      "type": "object",
+      "properties": {
+        "throughSequence": {
+          "description": "Replay through this sequence. Live notifications cover later events.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "throughSequence"
+      ]
     },
     "ModelProgress": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -17,6 +17,8 @@ use std::{
 mod a2a;
 #[path = "process/context.rs"]
 mod context;
+#[path = "process/event_stream.rs"]
+mod event_stream;
 #[cfg(feature = "test-fixtures")]
 #[path = "process/execution.rs"]
 mod execution;
@@ -126,6 +128,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["maxContextCandidates"], 128);
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
+        assert_eq!(init["capabilities"]["eventResubscribe"], true);
         assert_eq!(
             init["capabilities"]["eventReplayTargetBytes"],
             8 * 1024 * 1024

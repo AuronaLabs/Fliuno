@@ -13,6 +13,7 @@ pub struct RpcServer {
     kernel: Arc<Mutex<Kernel>>,
     scheduler: TaskScheduler,
     event_receiver: Option<EventReceiver>,
+    event_stream_gap: bool,
     progress_receiver: Option<ProgressReceiver>,
     initialized: bool,
     provider_name: String,
@@ -84,6 +85,7 @@ impl RpcServer {
             kernel,
             scheduler,
             event_receiver: Some(event_receiver),
+            event_stream_gap: false,
             progress_receiver: Some(progress_receiver),
             initialized: false,
             provider_name,
@@ -93,9 +95,16 @@ impl RpcServer {
     }
 
     pub fn take_event_receiver(&mut self) -> EventReceiver {
-        self.event_receiver
-            .take()
+        self.take_pending_event_receiver()
             .expect("app-server event receiver was already taken")
+    }
+
+    pub fn take_pending_event_receiver(&mut self) -> Option<EventReceiver> {
+        self.event_receiver.take()
+    }
+
+    pub fn mark_event_stream_gap(&mut self) {
+        self.event_stream_gap = true;
     }
 
     pub fn take_progress_receiver(&mut self) -> ProgressReceiver {
@@ -230,6 +239,7 @@ impl RpcServer {
                     "registrationAuthority":true,
                     "eventNotifications":true, "globalEventReplay":true,
                     "eventReplayTargetBytes":fliuno_core::MAX_EVENT_TARGET_BYTES,
+                    "eventResubscribe":true,
                     "provider":self.provider_name, "liveModels":self.provider_name != "demo",
                     "externalTools":external_tools, "backgroundTasks":true,
                     "externalAgents":!self.kernel()?.agent_specs().is_empty(),
@@ -461,11 +471,29 @@ impl RpcServer {
             }
             "events/listAll" => {
                 let p: EventsListAllParams = decode(params)?;
-                json!(self.kernel()?.list_all_events_with_target(
+                json!(self.kernel()?.list_all_events_through(
                     p.after,
+                    p.through,
                     p.limit,
                     p.target_bytes
                 )?)
+            }
+            "events/resubscribe" => {
+                if params != json!({}) {
+                    return Err(Error::Invalid("events/resubscribe takes no params".into()).into());
+                }
+                if !self.event_stream_gap {
+                    return Err(Error::Conflict("event stream is already subscribed".into()).into());
+                }
+                let (through_sequence, receiver) = {
+                    // Committing workers hold this lock. The watermark and
+                    // subscription therefore cover adjacent event ranges.
+                    let kernel = self.kernel()?;
+                    (kernel.event_watermark()?, kernel.subscribe_events()?)
+                };
+                self.event_receiver = Some(receiver);
+                self.event_stream_gap = false;
+                json!(EventSubscription { through_sequence })
             }
             "artifacts/list" => {
                 let p: TaskIdParams = decode(params)?;
