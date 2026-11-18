@@ -6,6 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Fixture;
 impl AgentBackend for Fixture {
+    fn supports_remote_continuation(&self) -> bool {
+        true
+    }
     fn spec(&self) -> AgentSpec {
         AgentSpec {
             id: "fixture".into(),

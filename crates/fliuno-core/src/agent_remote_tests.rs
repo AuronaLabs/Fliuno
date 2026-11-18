@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn queued_continuation_recovery_cannot_resume_outside_its_claim() {
+    let (mut kernel, session) = setup();
+    let (source, run) = start(&mut kernel, &session);
+    kernel
+        .observe_agent(
+            &source.id,
+            &run.request.run_id,
+            AgentObservation::RemoteTask(AgentRemoteTask {
+                id: "paused".into(),
+                context_id: Some("context".into()),
+                state: AgentTaskState::InputRequired,
+            }),
+        )
+        .unwrap();
+    kernel
+        .finish_agent_run(
+            &source.id,
+            &run.request.run_id,
+            AgentOutcome {
+                stop_reason: Some(AgentStopReason::InputRequired),
+                outcome_unknown: false,
+            },
+        )
+        .unwrap();
+    let (queued, created) = kernel
+        .create_remote_continuation(&source.id, "answer", "first")
+        .unwrap();
+    assert!(created);
+    kernel.interrupt_running_tasks().unwrap();
+    let (next, created) = kernel
+        .create_remote_continuation(&source.id, "answer", "second")
+        .unwrap();
+    assert!(created);
+    assert_ne!(queued.id, next.id);
+    let (recovered, created) = kernel
+        .create_remote_continuation(&source.id, "answer", "first")
+        .unwrap();
+    assert!(!created);
+    assert_eq!(recovered.id, queued.id);
+    assert_eq!(recovered.status, TaskStatus::Interrupted);
+    assert!(recovered.agent_run.is_none());
+    assert!(matches!(
+        kernel.prepare_resume_task(&queued.id, false),
+        Err(Error::Conflict(_))
+    ));
+    assert!(matches!(
+        kernel.create_remote_continuation(&source.id, "answer", "third"),
+        Err(Error::Conflict(_))
+    ));
+}
+
+#[test]
 fn remote_identity_and_terminal_evidence_survive_local_cancellation() {
     let (mut kernel, session) = setup();
     let (task, run) = start(&mut kernel, &session);

@@ -333,6 +333,11 @@ impl Kernel {
         if task.status != TaskStatus::Interrupted {
             return Err(Error::Conflict("only interrupted tasks can resume".into()));
         }
+        if task.remote_continuation.is_some() {
+            return Err(Error::Conflict(
+                "remote continuations cannot resume; inspect submission evidence before creating another attempt".into(),
+            ));
+        }
         if task.agent_run.is_some() {
             return Err(Error::Conflict("started agent runs cannot be replayed; create a new task after inspecting the outcome".into()));
         }
