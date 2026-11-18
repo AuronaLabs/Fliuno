@@ -6,6 +6,8 @@
 
 每次启动创建随机 UUID 命名的 AppContainer profile，不复用身份。将主机指定的单个原生 `.exe` 通过新建文件写入私有 `LocalState/fliuno`，不使用会携带源文件 ACL 的 Windows 文件复制操作。工作目录、用户目录与临时目录环境变量指向此私有目录。没有宿主目录授权、网络能力或 loopback exemption；不改宿主工作区或祖先目录的 ACL。
 
+回收 profile 时，`DeleteAppContainerProfile` 若返回文件共享冲突，则最多追加四次尝试，等待合计 300 ms。持续占用或其他错误仍写入诊断。原生测试持有一个禁止删除的文件句柄，验证释放后私有目录会被清除。
+
 此模式支持自包含原生工具，以及通过固定摘要 `assets` 清单明确暂存依赖的解释器；Windows 已验收真实 Node/CPython 的多文件 MCP。清单不开放宿主目录；工作区访问和网络代理仍需独立接口，见[伴随文件边界](runtime-bundles.md)。Windows 的已有共享资源 ACL（例如授予所有 AppContainer 的系统文件）仍然生效，不能将此后端描述为严格的路径白名单、文件系统命名空间或虚拟机。它也没有阻止在私有目录写入并执行程序。
 
 ## Linux Landlock 模式

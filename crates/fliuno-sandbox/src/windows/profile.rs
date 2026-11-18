@@ -2,9 +2,11 @@ use super::{path_wide, wide};
 use std::{
     fs, io,
     path::{Path, PathBuf},
+    thread::sleep,
+    time::Duration,
 };
 use windows_sys::Win32::{
-    Foundation::LocalFree,
+    Foundation::{ERROR_SHARING_VIOLATION, LocalFree},
     Security::{
         Authorization::ConvertSidToStringSidW,
         FreeSid,
@@ -120,13 +122,32 @@ impl Profile {
         crate::program::stage(program, &path, expected)?;
         Ok(path)
     }
+
+    fn try_delete(&self) -> i32 {
+        // SAFETY: this owner holds the uniquely generated, NUL-terminated name.
+        unsafe { DeleteAppContainerProfile(self.name.as_ptr()) }
+    }
 }
+
+const SHARING_VIOLATION: i32 = (0x8007_0000 | ERROR_SHARING_VIOLATION) as i32;
+
 impl Drop for Profile {
     fn drop(&mut self) {
-        // SAFETY: profile name is uniquely generated and this owner deletes it once.
-        let result = unsafe { DeleteAppContainerProfile(self.name.as_ptr()) };
-        if result < 0 {
-            eprintln!("fliuno: cannot remove sandbox profile: 0x{result:08x}");
+        // Windows can keep a file in the profile temporarily open after the
+        // process has exited. Retry only that error for up to 300 ms of delay.
+        let mut delays = [20, 40, 80, 160].into_iter();
+        loop {
+            let result = self.try_delete();
+            if result == SHARING_VIOLATION
+                && let Some(delay) = delays.next()
+            {
+                sleep(Duration::from_millis(delay));
+                continue;
+            }
+            if result < 0 {
+                eprintln!("fliuno: cannot remove sandbox profile: 0x{result:08x}");
+            }
+            break;
         }
     }
 }
@@ -139,5 +160,33 @@ unsafe fn read_wide(raw: *const u16) -> String {
             length += 1;
         }
         String::from_utf16_lossy(std::slice::from_raw_parts(raw, length))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs::OpenOptions, os::windows::fs::OpenOptionsExt, thread};
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+    #[test]
+    fn profile_drop_retries_a_transient_windows_sharing_violation() {
+        let profile = Profile::create().unwrap();
+        let directory = profile.directory().to_owned();
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(directory.join("held.txt"))
+            .unwrap();
+        // A real file handle without FILE_SHARE_DELETE prevents cleanup.
+        assert_eq!(profile.try_delete(), SHARING_VIOLATION);
+        let release = thread::spawn(move || {
+            sleep(Duration::from_millis(80));
+            drop(file);
+        });
+        drop(profile);
+        release.join().unwrap();
+        assert!(!directory.exists());
     }
 }
