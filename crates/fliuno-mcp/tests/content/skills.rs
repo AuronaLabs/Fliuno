@@ -106,3 +106,65 @@ fn unrelated_or_invalid_metadata_is_rejected_without_resource_reads() {
         assert_eq!(count(&fixture, "resources/read"), 0);
     }
 }
+
+#[test]
+fn resource_directory_requires_advertisement_and_returns_one_opaque_page() {
+    let fixture = Fixture::start(|request| match request.body["method"].as_str().unwrap() {
+        "server/discover" => content::result(
+            request,
+            json!({"resultType":"complete",
+            "supportedVersions":["2026-07-28"],
+            "capabilities":{"extensions":{"io.modelcontextprotocol/skills":{"directoryRead":true}}},
+            "ttlMs":0,"cacheScope":"private"}),
+        ),
+        "resources/directory/read" => {
+            assert_eq!(request.body["params"]["uri"], "file:/opaque/");
+            match request.body["params"]["cursor"].as_str() {
+                None => content::result(
+                    request,
+                    json!({"resources":[{
+                    "uri":"file:/opaque/subdir/","name":"subdir","mimeType":"inode/directory"
+                }],"nextCursor":"more"}),
+                ),
+                Some("more") => content::result(request, json!({"resources":[]})),
+                _ => panic!("unexpected cursor"),
+            }
+        }
+        _ => content::reply(request),
+    });
+    let tools = connect(&fixture, 2000);
+    assert_eq!(fixture.requests().len(), 1);
+    let list = tool(&tools, "resources_directory");
+    for invalid in [
+        json!({"uri":"relative"}),
+        json!({"uri":"file:/opaque/","cursor":null}),
+        json!({"uri":"file:/opaque/","cursor":"x".repeat(4097)}),
+        json!({"uri":"file:/opaque/","recursive":true}),
+    ] {
+        assert!(list.validate(&invalid).is_err());
+    }
+    let cancellation = CancellationToken::new();
+    let result = invoke(list, json!({"uri":"file:/opaque/"}), &cancellation).unwrap();
+    assert_eq!(
+        result.output["result"]["resources"][0]["mimeType"],
+        "inode/directory"
+    );
+    assert_eq!(result.output["result"]["nextCursor"], "more");
+    assert_eq!(result.output["grantsPermissions"], false);
+    assert_eq!(count(&fixture, "resources/directory/read"), 1);
+    let next = invoke(
+        list,
+        json!({"uri":"file:/opaque/","cursor":"more"}),
+        &cancellation,
+    )
+    .unwrap();
+    assert_eq!(next.output["result"]["resources"], json!([]));
+    assert_eq!(count(&fixture, "resources/directory/read"), 2);
+    assert_eq!(count(&fixture, "resources/read"), 0);
+    let unadvertised = Fixture::start(capability);
+    assert!(
+        !connect(&unadvertised, 2000)
+            .iter()
+            .any(|tool| tool.spec().name.ends_with("_resources_directory"))
+    );
+}

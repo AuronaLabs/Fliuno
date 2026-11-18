@@ -4,7 +4,8 @@ use super::Kind;
 use rmcp::model::{
     ClientRequest, GetPromptRequest, GetPromptRequestParams, GetSkillRequest,
     GetSkillRequestParams, ListPromptsRequest, ListResourceTemplatesRequest, ListResourcesRequest,
-    ListSkillsRequest, PaginatedRequestParams, ReadResourceRequest, ReadResourceRequestParams,
+    ListSkillsRequest, PaginatedRequestParams, ReadResourceDirectoryRequest,
+    ReadResourceDirectoryRequestParams, ReadResourceRequest, ReadResourceRequestParams,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -19,6 +20,12 @@ struct Page {
 #[serde(deny_unknown_fields)]
 struct Resource {
     uri: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResourceDirectory {
+    uri: String,
+    cursor: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -62,6 +69,13 @@ impl Kind {
                     "uri":{"type":"string","minLength":1,"maxLength":4096}
                 }),
             ),
+            Self::ResourceDirectory => (
+                vec!["uri"],
+                json!({
+                    "uri":{"type":"string","minLength":1,"maxLength":4096},
+                    "cursor":{"type":"string","minLength":1,"maxLength":4096}
+                }),
+            ),
             Self::Get => (
                 vec!["name"],
                 json!({
@@ -84,12 +98,7 @@ impl Kind {
         Ok(match self {
             Self::Resources | Self::Templates | Self::Prompts | Self::SkillsList => {
                 let args: Page = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
-                if value.get("cursor").is_some_and(|v| !v.is_string())
-                    || args
-                        .cursor
-                        .as_ref()
-                        .is_some_and(|cursor| !valid_cursor(cursor))
-                {
+                if !valid_optional_cursor(value, args.cursor.as_deref()) {
                     return Err(invalid());
                 }
                 let params = PaginatedRequestParams::default().with_cursor(args.cursor);
@@ -125,6 +134,20 @@ impl Kind {
                     ))
                 }
             }
+            Self::ResourceDirectory => {
+                let args: ResourceDirectory =
+                    serde_json::from_value(value.clone()).map_err(|_| invalid())?;
+                if !valid_uri(&args.uri) || !valid_optional_cursor(value, args.cursor.as_deref()) {
+                    return Err(invalid());
+                }
+                let mut params = ReadResourceDirectoryRequestParams::new(args.uri);
+                if let Some(cursor) = args.cursor {
+                    params = params.with_cursor(cursor);
+                }
+                ClientRequest::ReadResourceDirectoryRequest(ReadResourceDirectoryRequest::new(
+                    params,
+                ))
+            }
             Self::Get => {
                 let args: Prompt = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
                 if !valid_name(&args.name) || !valid_arguments(&args.arguments) {
@@ -142,6 +165,10 @@ impl Kind {
             Self::Complete => return super::completion::request(value).ok_or_else(invalid),
         })
     }
+}
+
+fn valid_optional_cursor(value: &Value, cursor: Option<&str>) -> bool {
+    value.get("cursor").is_none_or(Value::is_string) && cursor.is_none_or(valid_cursor)
 }
 
 pub(super) fn valid_arguments(arguments: &BTreeMap<String, String>) -> bool {

@@ -14,12 +14,15 @@
 | `mcp_<id>_complete` | `completion/complete` | `{ref,argument:{name,value},context?:{arguments}}` |
 | `mcp_<id>_skills_list` | `skills/list` | `{cursor?:string}` |
 | `mcp_<id>_skills_get` | `skills/get` | `{uri:string}` |
+| `mcp_<id>_resources_directory` | `resources/directory/read` | `{uri:string,cursor?:string}` |
 
 补全的 `ref` 可以是 `{"type":"ref/prompt","name":"draft"}` 或 `{"type":"ref/resource","uri":"fixture:report/{id}"}`。`argument.value` 是已输入的前缀，可为空字符串。`context.arguments` 是可选的已知参数值，遵循提示参数的字符串与字节预算。
 
 补全返回 `result.completion.values` 中的最多 100 项建议，并保留服务返回的 `total` 和 `hasMore`。取用这些建议来读取资源或获取提示时，需要分别提出调用并获得审批。
 
 技能列表每页最多 256 个条目。`skills/get` 的 `uri` 必须指向技能的 `SKILL.md`，返回项须匹配请求的 URI。内核检查技能名称和清单结构，每份清单最多 256 个文件引用。结果是元数据。客户端要读取技能内容，可以针对已注册资源工具发起新的审批请求。
+
+技能扩展声明 `directoryRead:true` 时，目录工具可以读取一个页面的直接子项。目录项和 `nextCursor` 作为数据返回，内核不会递归读取，分页仍需逐次审批。
 
 ## 返回数据与权限
 
@@ -45,7 +48,7 @@
 
 每个内容工具的注册摘要包含已冻结的服务注册身份、方法和公开契约。端点、原生程序、参数、环境、凭据或伴随文件配置改变后，同名别名的旧待批调用不能授权新服务；更换 URI 或提示参数也需要新的调用审批。资源和提示内容不是注册时固定的快照，服务在不同获批调用之间可以返回不同内容。协议元数据也不构成内容发布者认证。
 
-已开始的外部请求遵循普通未知结果规则，重启不重放。已完成的结果、事件和任务快照保存在 SQLite，重启读取不再发送请求。通用契约见[注册身份](authority.md)与[MCP 传输](mcp.md)。资源更新订阅、目录资源、OAuth 和 MRTR/Tasks 持久继续仍未实现。
+已开始的外部请求遵循普通未知结果规则，重启不重放。已完成的结果、事件和任务快照保存在 SQLite，重启读取不再发送请求。通用契约见[注册身份](authority.md)与[MCP 传输](mcp.md)。资源更新订阅、OAuth 和 MRTR/Tasks 持久继续仍未实现。
 
 ## 验证
 

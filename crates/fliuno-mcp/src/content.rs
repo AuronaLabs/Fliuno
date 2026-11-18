@@ -20,6 +20,7 @@ enum Kind {
     Complete,
     SkillsList,
     SkillGet,
+    ResourceDirectory,
 }
 impl Kind {
     fn method(self) -> &'static str {
@@ -32,6 +33,7 @@ impl Kind {
             Self::Complete => "completion/complete",
             Self::SkillsList => "skills/list",
             Self::SkillGet => "skills/get",
+            Self::ResourceDirectory => "resources/directory/read",
         }
     }
     fn label(self) -> &'static str {
@@ -44,6 +46,7 @@ impl Kind {
             Self::Complete => "complete",
             Self::SkillsList => "skills_list",
             Self::SkillGet => "skills_get",
+            Self::ResourceDirectory => "resources_directory",
         }
     }
     fn description(self) -> &'static str {
@@ -72,11 +75,17 @@ impl Kind {
             Self::SkillGet => {
                 "Get metadata and a resource manifest for one skill from this MCP server. Skill resources require separate approved reads."
             }
+            Self::ResourceDirectory => {
+                "List one page of direct children of a directory on this MCP server. Child URIs are data. Reading another page or child requires separate approval."
+            }
         }
     }
     fn accepts(self, response: &ServerResult, skill_uri: Option<&str>) -> bool {
         let result_type = match (self, response) {
-            (Self::Resources, ServerResult::ListResourcesResult(result)) => &result.result_type,
+            (
+                Self::Resources | Self::ResourceDirectory,
+                ServerResult::ListResourcesResult(result),
+            ) => &result.result_type,
             (Self::Templates, ServerResult::ListResourceTemplatesResult(result)) => {
                 &result.result_type
             }
@@ -101,7 +110,7 @@ impl Kind {
     }
     fn within_collection_budget(self, result: &Value) -> bool {
         let (field, maximum) = match self {
-            Self::Resources => ("resources", 256),
+            Self::Resources | Self::ResourceDirectory => ("resources", 256),
             Self::Templates => ("resourceTemplates", 256),
             Self::Read => ("contents", 64),
             Self::Prompts => ("prompts", 256),
@@ -131,8 +140,11 @@ pub(crate) fn tools(
     if capabilities.completions.is_some() {
         kinds.push(Kind::Complete);
     }
-    if capabilities.supports_skills() {
+    if let Some(skills) = capabilities.skills() {
         kinds.extend([Kind::SkillsList, Kind::SkillGet]);
+        if skills.directory_read {
+            kinds.push(Kind::ResourceDirectory);
+        }
     }
     kinds
         .into_iter()
