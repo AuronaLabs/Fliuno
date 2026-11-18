@@ -70,8 +70,16 @@ fn inspect(host_path: &str, endpoint: &str) -> serde_json::Value {
         "network":std::net::TcpStream::connect_timeout(&endpoint.parse().unwrap(), std::time::Duration::from_millis(100)).is_ok(),
         "cwd":std::env::current_dir().unwrap(), "insideWrite":std::fs::write("inside.txt","fixture output").is_ok()})
 }
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // The stdio transport uses blocking pipe handles. A timer is enough here;
+    // Tokio's Unix signal reactor would try to create a blocked socket pair.
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().is_some_and(|arg| arg == "--probe-native") {
         println!("{}", inspect(&args[1], &args[2]));

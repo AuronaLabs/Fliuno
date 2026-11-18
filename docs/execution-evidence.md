@@ -174,3 +174,14 @@ core 的 `register_tools` 先暂存并校验整组工具的名称、摘要和与
 两个 HTTP 适配器在网络 dispatch 前以有界 JSON 序列化器限制请求体为 8 MiB，精确上限接受、超出一字节已知拒绝；此限制只界定序列化的传输体大小，不估算 token 或模型窗口。core 测试覆盖真实 `start_task` 的已知失败/取消状态；provider 测试覆盖精确边界、预发送错误与取消不建连接，以及不完整 SSE 保留未知结果。
 
 变更后的 Windows `scripts/check.ps1` 完整退出成功：**292 项测试，0 失败、0 忽略，48 条 Cargo 测试结果汇总**，通过 fmt、全 workspace Clippy、独立 sandbox Clippy、Schema 一致性及 **24 个离线演示**。记录为 `target/verification/model-request-budget-full-native.log`。Linux 全 workspace、all-targets、all-features cross-Clippy 退出成功，记录为 `target/verification/model-request-budget-linux-clippy.log`；它不代表 Linux 原生行为已运行。
+
+## 0.0.2 Windows 与 Linux 双平台验收
+
+2026 年 11 月 19 日，在 Windows 主机上用便携 QEMU 启动 Debian x86_64 来宾（Linux 6.12.107），运行 Zig 交叉链接的原生测试进程。来宾没有外部网络，启用回环和 cgroup v2 `cpu`、`memory`、`pids` 控制器。测试使用实际 SQLite、子进程和 PTY。
+
+- Rust 内核 72 项、工作区工具 20 项通过，覆盖 FIFO 非阻塞拒绝、符号链接路径、文件元数据和持久审批。
+- 工作区事件回放和产物索引各有一个真实 app-server 进程用例通过，覆盖数据库迁移、分页和重启。
+- 三项异步管道、五项隔离及对应两项委派 cgroup 探针、一个 sandbox guardian 硬杀探针通过。终端两个专门启用的 cgroup 用例也通过，覆盖 app-server 被强制结束后的重连，以及 supervisor 结束后回收已脱离会话的后代。
+- Linux MCP 的四项伴随文件契约和两项隔离进程契约通过。首次真实进程测试发现 stdio fixture 使用了不需要的 Tokio 信号驱动，启动时尝试创建 socket pair。改用只启用定时器的 runtime 后，通过了 SQLite 审批绑定、固定伴随文件读取、超时回收和宿主文件及网络拒绝的验证。Windows 同时复跑了九项 MCP 集成测试。
+
+Windows 工作区在加入 Job 预算后通过 381 项测试、rustfmt 和两种 Clippy。此前的 380 项版本还执行了完整 `scripts/check.ps1`，涵盖协议 Schema 和离线演示。Linux 已完成全工作区测试二进制的交叉编译与链接，上述条目已在来宾运行。Linux Node/CPython 解释器打包和外部付费模型、商业 Agent 的验收仍分别待做。

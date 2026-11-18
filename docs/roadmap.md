@@ -77,25 +77,25 @@
 2. [ ] 编辑与文件变更审阅、平台执行器与真实沙箱。
    - [x] 有基线哈希校验的单文件补丁；审批保存 unified diff，旧基线拒绝写入。
    - [x] 工作区文件有界读取、超长/取消与 Unix FIFO 拒绝；显式 base64 原始字节读取、原始哈希/长度和持久审批。
-   - [x] 独立文件读取模块：普通文件校验、分块字节/取消预算、读取/补丁/预览复用，以及 Unix FIFO 非阻塞打开；真实 FIFO 限时探针待 Linux runner 运行。
+   - [x] 独立文件读取模块：普通文件校验、分块字节/取消预算、读取/补丁/预览复用，以及 Unix FIFO 非阻塞打开；真实 FIFO 限时探针已在 Debian Linux 来宾通过。
    - [x] 主机固定注册的前台命令执行、逐调用审批、有界 stdin/stdout/stderr、取消/超时证据和进程树回收。
    - [x] 定位原生命令执行验收的偶发 unknown 结果：原生启动证据复现 AppContainer 启动耗时 8.35/8.95 秒超过成功 fixture 的 5 秒预算；修正测试预算，保留独立超时/取消探针，stdin shutdown 错误、跳过/中止写入、首次停止原因与重启证据均有单独报告和验收，见 execution-evidence.md。
-   - [x] 隔离执行器的共享 reactor 管道：Windows overlapped IO / Linux nonblocking pipe、输入完成错误、EOF 与取消收尾；exec/MCP/ACP 复用，原生对端保持存活的 runtime 退出探针。Linux 运行验收待 runner。
+   - [x] 隔离执行器的共享 reactor 管道：Windows overlapped IO / Linux nonblocking pipe、输入完成错误、EOF 与取消收尾；exec/MCP/ACP 复用，原生对端保持存活的 runtime 退出探针。Linux 三项异步管道探针已通过。
    - [x] Windows TrustedHost 命令/MCP 接入同一 native launcher、创建时 Job 和 reactor；启动策略、句柄继承、原生创建、进程所有权独立分模块，无隐式 scratch 资源上限；同一组真实 pending IO 探针覆盖 host 与隔离两种模式。
    - [x] 修复真实并发下的跨调用句柄继承：宿主仅持不可继承端点、挂起中转选择句柄表、Job 原子归属；无关 std::Command 存活时 EOF 和创建者硬杀回收探针，不扩张清理预算。
    - [x] 独立 Windows AppContainer 原生执行器；MCP 私有目录模式；文件/TCP/环境/子孙进程探针及真实 MCP 超时回收测试。
    - [x] Windows AppContainer 与 Linux Landlock/seccomp MCP 子进程边界；以宿主对照和隔离探针验证文件/TCP 拒绝，策略缺失时强制失败。
    - [x] Windows 隔离 ACP 的宿主文件代理：虚拟路径、逐操作审批、写入 diff/基线核验、按行读取和真实进程探针。
    - [x] exec/MCP/ACP 的伴随文件清单、SHA-256 复制核验、路径/容量边界、资源变更后的待批身份回归；Windows 真实 Node/CPython 多文件 MCP 允许/拒绝/篡改验收。
-   - [ ] MCP 宿主工具代理；Linux runner 实际执行伴随文件与真实解释器探针；其他 Python 版本/任意依赖的打包。
+   - [ ] MCP 宿主工具代理；Linux 上的 Node/CPython 等解释器打包及实际执行。Rust MCP 伴随文件与隔离进程契约已在 Debian 来宾通过。
    - [x] MCP/Agent 全配置注册摘要：端点/程序/参数/实际环境/凭据/schema 与旧待批/排队任务绑定，v8 不替旧记录补造授权；隔离启动核验实际复制的 executable pin。
    - [x] 跨轮次 PTY preset、独立 supervisor/actor、逐操作审批、字节 spool、幂等输入、app-server 重启观察、Windows Job 预算与硬崩溃进程树回收。
    - [x] 终端输出事件订阅：认证 IPC 长连接、字节游标回放、状态通知、取消、队列溢出与公平调度、离线收尾和 app-server 重连。
    - [ ] supervisor 迁移/交接协议、应用 UI/终端 emulator adapter；受信任主机目录本身的本机 ACL/威胁模型设计。
    - [x] Linux delegated cgroup v2 子树与 `cgroup.kill`；宿主可配置 cgroup parent 与 CPU/内存/PID 硬预算，CI 探针验证进程上限。
-   - [x] Linux terminal worker cgroup 所有权与资源预算配置透传；Ubuntu delegated-cgroup 探针覆盖 setsid 后代和预算值，runner 验证待执行。
+   - [x] Linux terminal worker cgroup 所有权与资源预算配置透传；Debian 来宾的 delegated-cgroup 探针已覆盖 setsid 后代和预算值。
    - [x] 独立 Linux cgroup guardian：sandbox 绑定宿主 pidfd、持久 terminal 绑定 worker pidfd，exec 前交接与失败拒绝；不依赖创建线程或 app-server reaper。
-   - [ ] Ubuntu runner 实际执行 guardian 硬杀/重连探针：创建线程退出、宿主 SIGKILL、app-server 退出后终端继续工作、supervisor SIGKILL 后 setsid 后代与 cgroup 回收。
+   - [x] 在 Debian Linux 来宾执行 guardian 硬杀与重连探针，覆盖创建线程退出、宿主 SIGKILL、app-server 退出后终端继续工作、supervisor SIGKILL 后 setsid 后代与 cgroup 回收。
    - [ ] macOS 隔离后端及 hard-crash containment；任何不支持能力必须显式拒绝或报告。
    - [x] 终端显式归档与持久 tombstone；监督进程所有权锁、延迟 worker 启动屏障、输出回收、分页历史与有界公平补清理，保留原身份阻止重放。
    - [x] 受信客户端有界批量归档：全部 ID 预检、最多 32 项、逐项已知/不确定结果、独立提交与重启重试，真实 SQLite 锁和原生 PTY 契约。
@@ -137,7 +137,7 @@
 - 集成测试：真实 SQLite、重启和锁；本机 HTTP fixture 验证请求与工具回传。
 - 进程测试：启动真正的 app-server，通过 stdio 完成任务和恢复。
 - 协议测试：MCP stdio 与 Streamable HTTP discover/initialize、JSON/SSE、标准头、工具调用和拒绝无效参数；ACP v1 会话、通知、权限、取消及输入边界；A2A 1.0 JSON-RPC 关联、Part/状态/身份、卡片固定接口、取消证据与未知结果恢复。
-- 隔离测试：先运行无隔离的成功对照，再检查真实子进程的令牌/过滤器、文件/TCP 访问拒绝、空白环境、管道/参数和平台回收。Windows 与 Linux 都有真实行为探针；当前 Windows 主机不能本机执行 Linux 探针。
+- 隔离测试：先运行无隔离的成功对照，再检查真实子进程的令牌/过滤器、文件/TCP 访问拒绝、空白环境、管道/参数和平台回收。Windows 主机与 Debian Linux 来宾都已运行实际行为探针。
 - CI：Windows 和 Linux 编译、rustfmt、Clippy、cargo test --all-features --locked，包含显式测试服务器。
 
 真实模型测试必须显式开启，不能在普通测试或 CI 中隐式产生付费请求。尚未用真实模型凭据验收的部分应在交付记录中明确说明。
