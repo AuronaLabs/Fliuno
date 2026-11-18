@@ -322,7 +322,7 @@ impl Kernel {
         for artifact in artifacts {
             artifacts::record(&tx, &task.id, artifact)?;
         }
-        let mut pending = Vec::with_capacity(events.len());
+        let mut sequences = Vec::with_capacity(events.len());
         for event in events {
             tx.execute(
                 "INSERT INTO events(task_id,data) VALUES(?1,?2)",
@@ -332,15 +332,21 @@ impl Kernel {
             if matches!(event, EventKind::TaskCompleted { .. }) {
                 context::record(&tx, task, sequence, true)?;
             }
-            let persisted = Event {
-                sequence,
-                task_id: task.id.clone(),
-                data: event.clone(),
-            };
-            pending.push(persisted);
+            sequences.push(sequence);
         }
         tx.commit()?;
-        self.events.publish(&task.session_id, pending);
+        if !sequences.is_empty() {
+            let committed = sequences
+                .iter()
+                .copied()
+                .zip(events)
+                .map(|(sequence, data)| Event {
+                    sequence,
+                    task_id: task.id.clone(),
+                    data: data.clone(),
+                });
+            self.events.publish(&task.session_id, committed);
+        }
         Ok(())
     }
 
@@ -357,11 +363,11 @@ impl Kernel {
         )?;
         self.events.publish(
             &session_id,
-            vec![Event {
+            std::iter::once(Event {
                 sequence: self.db.last_insert_rowid() as u64,
                 task_id,
                 data,
-            }],
+            }),
         );
         Ok(())
     }

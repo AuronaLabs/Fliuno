@@ -1,6 +1,6 @@
 //! Bounded in-process event fan-out; SQLite remains the replay source of truth.
 use crate::{Error, Result};
-use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
+use crossbeam_channel::{Receiver, Sender, bounded};
 use fliuno_protocol::{Event, ModelProgress};
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, Weak};
@@ -94,10 +94,12 @@ impl EventHub {
         })
     }
 
-    pub(crate) fn publish(&self, session_id: &str, events: Vec<Event>) {
-        if events.is_empty() {
-            return;
-        }
+    /// Evaluate the iterator only when delivering to a matching subscriber.
+    pub(crate) fn publish(
+        &self,
+        session_id: &str,
+        mut events: impl Iterator<Item = Event> + Clone,
+    ) {
         let Ok(mut subscribers) = self.subscribers.lock() else {
             return;
         };
@@ -106,9 +108,7 @@ impl EventHub {
             // event directly into its queue, even for large tool payloads.
             if subscriber.active.strong_count() == 0
                 || (subscriber.accepts(session_id)
-                    && events
-                        .into_iter()
-                        .any(|event| subscriber.sender.try_send(event).is_err()))
+                    && events.any(|event| subscriber.sender.try_send(event).is_err()))
             {
                 subscribers.clear();
             }
@@ -121,15 +121,9 @@ impl EventHub {
             if !subscriber.accepts(session_id) {
                 return true;
             }
-            for event in &events {
-                match subscriber.sender.try_send(event.clone()) {
-                    Ok(()) => {}
-                    Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
-                        return false;
-                    }
-                }
-            }
-            true
+            events
+                .clone()
+                .all(|event| subscriber.sender.try_send(event).is_ok())
         });
     }
 }
@@ -236,13 +230,11 @@ mod tests {
     fn slow_subscriber_is_disconnected_without_blocking_event_commit() {
         let hub = EventHub::new();
         let receiver = hub.subscribe(None).unwrap();
-        let events = (1..=SUBSCRIBER_CAPACITY + 1)
-            .map(|sequence| Event {
-                sequence: sequence as u64,
-                task_id: "task_test".into(),
-                data: fliuno_protocol::EventKind::TaskStarted,
-            })
-            .collect();
+        let events = (1..=SUBSCRIBER_CAPACITY + 1).map(|sequence| Event {
+            sequence: sequence as u64,
+            task_id: "task_test".into(),
+            data: fliuno_protocol::EventKind::TaskStarted,
+        });
 
         hub.publish("session_test", events);
 
@@ -250,6 +242,33 @@ mod tests {
             assert_eq!(receiver.recv().unwrap().sequence, sequence as u64);
         }
         assert!(receiver.recv().is_err());
+    }
+
+    #[test]
+    fn event_payloads_are_only_materialized_for_matching_subscribers() {
+        let hub = EventHub::new();
+        let scoped = hub.subscribe(Some("other")).unwrap();
+        let copies = std::cell::Cell::new(0);
+        let events = || {
+            std::iter::once_with(|| {
+                copies.set(copies.get() + 1);
+                Event {
+                    sequence: 1,
+                    task_id: "task_test".into(),
+                    data: fliuno_protocol::EventKind::TaskStarted,
+                }
+            })
+        };
+        hub.publish("current", events());
+        assert_eq!(copies.get(), 0);
+
+        let global = hub.subscribe(None).unwrap();
+        let matching = hub.subscribe(Some("current")).unwrap();
+        hub.publish("current", events());
+        assert_eq!(copies.get(), 2);
+        assert!(scoped.is_empty());
+        assert_eq!(global.try_recv().unwrap().sequence, 1);
+        assert_eq!(matching.try_recv().unwrap().sequence, 1);
     }
 
     #[test]
