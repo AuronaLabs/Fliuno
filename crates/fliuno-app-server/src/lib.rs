@@ -294,6 +294,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["contextConversationDetail"] = json!(true);
             capabilities["taskSummaryById"] = json!(true);
             capabilities["pendingApprovalInbox"] = json!(true);
             capabilities["pendingApprovalDetails"] = json!(true);

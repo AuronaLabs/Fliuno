@@ -13,7 +13,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 21;
+pub(crate) const SCHEMA_VERSION: u32 = 22;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 impl Kernel {
@@ -208,6 +208,9 @@ impl Kernel {
         if version < 21 {
             artifacts::migrate(&mut db)?;
         }
+        if version < 22 {
+            context::migrate_conversations(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         let mut kernel = Self {
@@ -324,7 +327,7 @@ impl Kernel {
             )?;
             let sequence = tx.last_insert_rowid() as u64;
             if matches!(event, EventKind::TaskCompleted { .. }) {
-                context::record(&tx, task, sequence)?;
+                context::record(&tx, task, sequence, true)?;
             }
             let persisted = Event {
                 sequence,

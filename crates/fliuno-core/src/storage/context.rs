@@ -3,6 +3,25 @@
 use super::*;
 use rusqlite::Transaction;
 
+mod conversation;
+pub(super) use conversation::migrate as migrate_conversations;
+
+fn projection(detail: ContextDetail, budget: &str) -> String {
+    // These SQL fragments are internal constants. Use octet_length on the
+    // column itself so rejected records do not require reading overflow pages.
+    match detail {
+        ContextDetail::Full => format!(
+            "SELECT CASE WHEN octet_length(s.data)<={budget} THEN s.data END FROM session_turns s"
+        ),
+        ContextDetail::Conversation => format!(
+            "SELECT CASE WHEN c.task_id IS NOT NULL
+                THEN CASE WHEN octet_length(c.data)<={budget} THEN c.data END
+                ELSE CASE WHEN octet_length(s.data)<={budget} THEN s.data END END
+             FROM session_turns s LEFT JOIN conversation_turns c ON c.task_id=s.task_id"
+        ),
+    }
+}
+
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
     tx.execute_batch(
@@ -26,7 +45,7 @@ pub(super) fn migrate(db: &mut Connection) -> Result<()> {
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             let task: Task = serde_json::from_str(&row.get::<_, String>(0)?)?;
-            record(&tx, &task, row.get::<_, i64>(1)? as u64)?;
+            record(&tx, &task, row.get::<_, i64>(1)? as u64, false)?;
         }
     }
     tx.pragma_update(None, "user_version", 5)?;
@@ -61,7 +80,12 @@ pub(super) fn migrate_turn_stats(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn record(tx: &Transaction<'_>, task: &Task, sequence: u64) -> Result<()> {
+pub(super) fn record(
+    tx: &Transaction<'_>,
+    task: &Task,
+    sequence: u64,
+    index_conversation: bool,
+) -> Result<()> {
     let mut statement = tx.prepare("SELECT id, json_extract(data,'$.title'), json_extract(data,'$.mediaType') FROM artifacts WHERE task_id=?1 ORDER BY rowid")?;
     let artifacts = statement
         .query_map([&task.id], |row| {
@@ -72,7 +96,7 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task, sequence: u64) -> Result
             })
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
-    let Some(turn) = crate::context::project_turn(task, sequence, artifacts) else {
+    let Some(mut turn) = crate::context::project_turn(task, sequence, artifacts) else {
         return Ok(());
     };
     tx.execute(
@@ -84,6 +108,9 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task, sequence: u64) -> Result
             serde_json::to_string(&turn)?
         ],
     )?;
+    if index_conversation {
+        conversation::record(tx, &mut turn)?;
+    }
     Ok(())
 }
 
@@ -102,10 +129,11 @@ impl Kernel {
             .task_ids
             .as_ref()
             .ok_or_else(|| Error::Invalid("selected context requires taskIds".into()))?;
-        let mut statement = self.db.prepare(
-            "SELECT CASE WHEN octet_length(data)<=?4 THEN data END FROM session_turns
-            WHERE session_id=?1 AND task_id=?2 AND sequence<=?3",
-        )?;
+        let sql = format!(
+            "{} WHERE s.session_id=?1 AND s.task_id=?2 AND s.sequence<=?3",
+            projection(options.detail, "?4")
+        );
+        let mut statement = self.db.prepare_cached(&sql)?;
         let mut turns: Vec<ContextTurn> = Vec::new();
         let mut bytes = 0;
         for id in ids {
@@ -164,12 +192,11 @@ impl Kernel {
             ContextSelection::Recent => options.max_turns,
             ContextSelection::FitRecent => crate::MAX_CONTEXT_CANDIDATES,
         };
-        // For a direct TEXT column, SQLite can compute octet_length from the
-        // record header without reading the body of a rejected projection.
-        let mut statement = self.db.prepare(
-            "SELECT CASE WHEN octet_length(data)<=?3 THEN data END FROM session_turns
-            WHERE session_id=?1 AND sequence<=?2 ORDER BY sequence DESC LIMIT ?4",
-        )?;
+        let sql = format!(
+            "{} WHERE s.session_id=?1 AND s.sequence<=?2 ORDER BY s.sequence DESC LIMIT ?4",
+            projection(options.detail, "?3")
+        );
+        let mut statement = self.db.prepare_cached(&sql)?;
         let rows = statement.query_map(
             params![session, through, options.max_bytes, candidates],
             |row| row.get::<_, Option<String>>(0),

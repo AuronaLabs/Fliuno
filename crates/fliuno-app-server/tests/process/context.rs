@@ -147,3 +147,78 @@ fn fit_recent_skips_large_turns_and_keeps_the_selection_across_restart() {
     }
     fs::remove_dir(root).unwrap();
 }
+
+#[test]
+fn conversation_history_fits_larger_tool_turns_and_backfills_without_rewriting_tasks() {
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("fliuno-conversation-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let input = "界".repeat(600);
+    let done = approve_report(&mut peer, &session, &input, "source");
+    let full = peer.call("session/context", json!({"sessionId":session["id"]}));
+    assert!(
+        full["turns"][0]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["role"] == "tool_result")
+    );
+    assert!(full["options"].get("detail").is_none());
+
+    let narrow = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"options":{"maxBytes":3000}}),
+    );
+    assert_eq!(narrow["omittedTurns"], 1);
+    assert_eq!(narrow["turns"], json!([]));
+    let params =
+        json!({"sessionId":session["id"],"options":{"detail":"conversation","maxBytes":3000}});
+    let compact = peer.call("session/context", params.clone());
+    let turn = &compact["turns"][0];
+    assert_eq!(compact["omittedTurns"], 0);
+    assert_eq!(turn["taskId"], done["id"]);
+    assert_eq!(turn["artifacts"], full["turns"][0]["artifacts"]);
+    assert_eq!(
+        turn["messages"],
+        json!([
+            {"role":"user","text":input},
+            {"role":"assistant","text":"Demo artifact created."}
+        ])
+    );
+    let selected = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"options":{
+            "detail":"conversation","maxBytes":3000,"taskIds":[done["id"]]
+        }}),
+    );
+    assert_eq!(selected["turns"], compact["turns"]);
+    drop(peer);
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch("DROP TABLE conversation_turns; PRAGMA user_version=21;")
+        .unwrap();
+    let mut peer = Peer::start(&db);
+    assert_eq!(peer.call("session/context", params.clone()), compact);
+    assert_eq!(peer.call("task/get", json!({"taskId":done["id"]})), done);
+
+    let request = json!({"sessionId":session["id"],"input":"follow up","clientRequestId":"compact","context":params["options"]});
+    let follow = peer.call("task/start", request.clone());
+    assert_eq!(follow["context"], compact);
+    peer.wait_for_status(follow["id"].as_str().unwrap(), "waiting_approval");
+    drop(peer);
+    let mut peer = Peer::start(&db);
+    let retry = peer.call("task/start", request.clone());
+    assert_eq!(retry["id"], follow["id"]);
+    assert_eq!(retry["context"], compact);
+    let mut changed = request;
+    changed["context"]["detail"] = json!("full");
+    assert_eq!(peer.request("task/start", changed)["error"]["code"], -32009);
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

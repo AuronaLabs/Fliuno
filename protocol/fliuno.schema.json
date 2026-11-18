@@ -216,6 +216,9 @@
               "description": "FitRecent may skip whole records within a bounded recent window.",
               "$ref": "#/$defs/ContextSelection"
             },
+            "detail": {
+              "$ref": "#/$defs/ContextDetail"
+            },
             "taskIds": {
               "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
               "type": [
@@ -241,6 +244,22 @@
           "enum": [
             "recent",
             "fit_recent"
+          ]
+        },
+        "ContextDetail": {
+          "description": "Controls which parts of a completed record count toward the context budget.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            },
+            {
+              "description": "Keep user and assistant messages and artifact references.",
+              "type": "string",
+              "const": "conversation"
+            }
           ]
         }
       }
@@ -543,6 +562,9 @@
               "description": "FitRecent may skip whole records within a bounded recent window.",
               "$ref": "#/$defs/ContextSelection"
             },
+            "detail": {
+              "$ref": "#/$defs/ContextDetail"
+            },
             "taskIds": {
               "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
               "type": [
@@ -568,6 +590,22 @@
           "enum": [
             "recent",
             "fit_recent"
+          ]
+        },
+        "ContextDetail": {
+          "description": "Controls which parts of a completed record count toward the context budget.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            },
+            {
+              "description": "Keep user and assistant messages and artifact references.",
+              "type": "string",
+              "const": "conversation"
+            }
           ]
         }
       }
@@ -1367,6 +1405,9 @@
               "description": "FitRecent may skip whole records within a bounded recent window.",
               "$ref": "#/$defs/ContextSelection"
             },
+            "detail": {
+              "$ref": "#/$defs/ContextDetail"
+            },
             "taskIds": {
               "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
               "type": [
@@ -1392,6 +1433,22 @@
           "enum": [
             "recent",
             "fit_recent"
+          ]
+        },
+        "ContextDetail": {
+          "description": "Controls which parts of a completed record count toward the context budget.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            },
+            {
+              "description": "Keep user and assistant messages and artifact references.",
+              "type": "string",
+              "const": "conversation"
+            }
           ]
         },
         "ContextTurn": {
@@ -2127,6 +2184,9 @@
               "description": "FitRecent may skip whole records within a bounded recent window.",
               "$ref": "#/$defs/ContextSelection"
             },
+            "detail": {
+              "$ref": "#/$defs/ContextDetail"
+            },
             "taskIds": {
               "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
               "type": [
@@ -2152,6 +2212,22 @@
           "enum": [
             "recent",
             "fit_recent"
+          ]
+        },
+        "ContextDetail": {
+          "description": "Controls which parts of a completed record count toward the context budget.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            },
+            {
+              "description": "Keep user and assistant messages and artifact references.",
+              "type": "string",
+              "const": "conversation"
+            }
           ]
         },
         "ContextTurn": {

@@ -27,6 +27,11 @@ pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
             return Err(Error::Invalid("context taskIds require 1..maxTurns unique printable ASCII IDs of at most 128 bytes in session mode".into()));
         }
     }
+    if options.detail == ContextDetail::Conversation && options.mode == ContextMode::Isolated {
+        return Err(Error::Invalid(
+            "context conversation detail requires session mode".into(),
+        ));
+    }
     if options.selection == ContextSelection::FitRecent
         && (options.mode != ContextMode::Session || options.task_ids.is_some())
     {

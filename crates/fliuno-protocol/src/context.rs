@@ -27,6 +27,22 @@ impl ContextSelection {
     }
 }
 
+/// Controls which parts of a completed record count toward the context budget.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextDetail {
+    #[default]
+    Full,
+    /// Keep user and assistant messages and artifact references.
+    Conversation,
+}
+
+impl ContextDetail {
+    fn is_full(&self) -> bool {
+        *self == Self::Full
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextOptions {
@@ -39,6 +55,8 @@ pub struct ContextOptions {
     /// FitRecent may skip whole records within a bounded recent window.
     #[serde(default, skip_serializing_if = "ContextSelection::is_recent")]
     pub selection: ContextSelection,
+    #[serde(default, skip_serializing_if = "ContextDetail::is_full")]
+    pub detail: ContextDetail,
     /// Explicit completed tasks from this session; None keeps recent history.
     /// The kernel sorts IDs for stable request identity, then orders records by
     /// their completion sequence. Selected records are never silently omitted.
@@ -60,6 +78,7 @@ impl Default for ContextOptions {
             max_turns: default_turns(),
             max_bytes: default_bytes(),
             selection: ContextSelection::Recent,
+            detail: ContextDetail::Full,
             task_ids: None,
         }
     }
