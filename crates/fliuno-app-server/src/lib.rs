@@ -336,6 +336,7 @@ impl RpcServer {
             capabilities["sessionArchiving"] = json!(true);
             capabilities["artifactByteReads"] = json!(true);
             capabilities["artifactSummaryById"] = json!(true);
+            capabilities["scopedArtifactSummaries"] = json!(true);
             capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
             return Ok(json!({
                 "protocolVersion": PROTOCOL_VERSION,
@@ -678,6 +679,13 @@ impl RpcServer {
                 json!(
                     self.kernel()?
                         .list_artifact_summaries(&p.task_id, p.after, p.limit)?
+                )
+            }
+            "artifacts/listScopedSummaries" => {
+                let p: ArtifactCatalogParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .list_artifact_catalog(&p.scope, p.after, p.limit)?
                 )
             }
             "artifacts/read" => {

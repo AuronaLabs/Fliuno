@@ -154,3 +154,105 @@ fn artifact_byte_reads_and_catalog_cursors_survive_v20_migration() {
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn scoped_artifact_catalog_backfills_and_paginates_across_tasks() {
+    let temp = std::env::temp_dir().canonicalize().unwrap();
+    let root = temp.join(format!("fliuno-catalog-{}", uuid::Uuid::new_v4()));
+    let foreign_root = root.join("foreign");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&foreign_root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let foreign_workspace = peer.call("workspace/open", json!({"root":foreign_root}));
+    let first_session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let second_session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let foreign_session = peer.call(
+        "session/create",
+        json!({"workspaceId":foreign_workspace["id"]}),
+    );
+    let first = create_artifact(&mut peer, &first_session["id"], "First");
+    let foreign = create_artifact(&mut peer, &foreign_session["id"], "Foreign");
+    let second = create_artifact(&mut peer, &second_session["id"], "Second");
+    peer.call(
+        "session/setArchived",
+        json!({"sessionId":second_session["id"],"archived":true}),
+    );
+    drop(peer);
+
+    // Remove the new projection so this is a real backfill of existing rows.
+    rusqlite::Connection::open(&db).unwrap().execute_batch(
+        "DROP TRIGGER artifact_catalog_insert; DROP TABLE artifact_catalog; PRAGMA user_version=25;",
+    ).unwrap();
+    let mut peer = Peer::start(&db);
+    let catalog = "artifacts/listScopedSummaries";
+    let scope = json!({"kind":"workspace","workspaceId":workspace["id"]});
+    let head = peer.call(catalog, json!({"scope":scope,"limit":1}));
+    assert_eq!(head["items"], json!([first]));
+    assert_eq!(head["hasMore"], true);
+    let tail = peer.call(
+        catalog,
+        json!({"scope":scope,"after":head["nextAfter"],"limit":1}),
+    );
+    assert_eq!(tail["items"], json!([second]));
+    assert_eq!(tail["hasMore"], false);
+    assert_eq!(
+        peer.call(
+            catalog,
+            json!({"scope":{"kind":"workspace","workspaceId":foreign_workspace["id"]}})
+        )["items"],
+        json!([foreign])
+    );
+
+    let third = create_artifact(&mut peer, &first_session["id"], "Third");
+    assert_eq!(
+        peer.call(
+            catalog,
+            json!({"scope":{"kind":"session","sessionId":first_session["id"]}})
+        )["items"],
+        json!([first, third])
+    );
+    drop(peer);
+    let mut peer = Peer::start(&db);
+    let resumed = peer.call(catalog, json!({"scope":scope,"after":tail["nextAfter"]}));
+    assert_eq!(resumed["items"], json!([third]));
+    assert_eq!(resumed["hasMore"], false);
+    assert_eq!(
+        peer.call(catalog, json!({"scope":scope,"after":resumed["nextAfter"]})),
+        json!({"items":[],"nextAfter":resumed["nextAfter"],"hasMore":false})
+    );
+    assert_eq!(
+        peer.request(
+            catalog,
+            json!({"scope":{"kind":"session","sessionId":"absent"}})
+        )["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request(catalog, json!({"scope":scope,"after":u64::MAX}))["error"]["code"],
+        -32602
+    );
+    assert_eq!(
+        peer.request(catalog, json!({"scope":scope,"limit":101}))["error"]["code"],
+        -32602
+    );
+    drop(peer);
+    let root = root.canonicalize().unwrap();
+    assert_eq!(root.parent(), Some(temp.as_path()));
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn create_artifact(peer: &mut Peer, session_id: &Value, input: &str) -> Value {
+    let started = peer.call("task/start", json!({"sessionId":session_id,"input":input}));
+    let task_id = started["id"].as_str().unwrap();
+    let waiting = peer.wait_for_status(task_id, "waiting_approval");
+    peer.call("approval/respond", json!({"taskId":task_id,"approvalId":waiting["pendingApproval"]["id"],"decision":"allow_once"}));
+    peer.wait_for_status(task_id, "completed");
+    let page = peer.call("artifacts/listSummaries", json!({"taskId":task_id}));
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["taskId"], task_id);
+    assert!(items[0].get("content").is_none());
+    items[0].clone()
+}

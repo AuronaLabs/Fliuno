@@ -1149,6 +1149,73 @@
         "taskId"
       ]
     },
+    "artifacts/listScopedSummaries": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactCatalogParams",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/ArtifactCatalogScope"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "$defs": {
+        "ArtifactCatalogScope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "session"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "workspace"
+                },
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "workspaceId"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "artifacts/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ArtifactGetParams",

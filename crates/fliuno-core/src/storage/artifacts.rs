@@ -1,4 +1,4 @@
-//! Task-scoped metadata and incremental reads of immutable artifact bodies.
+//! Metadata catalogs and incremental reads of immutable artifact bodies.
 use super::*;
 use rusqlite::Transaction;
 
@@ -21,6 +21,42 @@ pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     )?;
     tx.commit()?;
     Ok(())
+}
+
+pub(super) fn migrate_catalog(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS artifact_catalog(
+            sequence INTEGER PRIMARY KEY,
+            artifact_id TEXT NOT NULL UNIQUE REFERENCES artifacts(id),
+            session_id TEXT NOT NULL REFERENCES sessions(id),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id)
+        );
+        INSERT INTO artifact_catalog(artifact_id,session_id,workspace_id)
+        SELECT a.id,t.session_id,s.workspace_id FROM artifacts a
+        JOIN tasks t ON t.id=a.task_id JOIN sessions s ON s.id=t.session_id
+        WHERE NOT EXISTS(SELECT 1 FROM artifact_catalog c WHERE c.artifact_id=a.id)
+        ORDER BY a.rowid;
+        CREATE INDEX IF NOT EXISTS artifact_catalog_session ON artifact_catalog(session_id);
+        CREATE INDEX IF NOT EXISTS artifact_catalog_workspace ON artifact_catalog(workspace_id);
+        CREATE TRIGGER IF NOT EXISTS artifact_catalog_insert AFTER INSERT ON artifacts BEGIN
+            INSERT INTO artifact_catalog(artifact_id,session_id,workspace_id)
+            SELECT NEW.id,t.session_id,s.workspace_id FROM tasks t
+            JOIN sessions s ON s.id=t.session_id WHERE t.id=NEW.task_id;
+        END;
+        PRAGMA user_version=26;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn catalog_cursor(after: u64, limit: u32) -> Result<i64> {
+    let cursor =
+        i64::try_from(after).map_err(|_| Error::Invalid("artifact cursor must fit i64".into()))?;
+    if !(1..=100).contains(&limit) {
+        return Err(Error::Invalid("artifact list limit must be 1..100".into()));
+    }
+    Ok(cursor)
 }
 
 pub(super) fn record(tx: &Transaction<'_>, task_id: &str, artifact: &Artifact) -> Result<()> {
@@ -83,20 +119,62 @@ impl Kernel {
         after: u64,
         limit: u32,
     ) -> Result<ObjectPage<ArtifactSummary>> {
-        let cursor = i64::try_from(after)
-            .map_err(|_| Error::Invalid("artifact cursor must fit i64".into()))?;
-        if !(1..=100).contains(&limit) {
-            return Err(Error::Invalid("artifact list limit must be 1..100".into()));
-        }
+        let cursor = catalog_cursor(after, limit)?;
         self.require_task(task_id)?;
-        let mut statement = self.db.prepare_cached(
+        self.query_catalog_page(
             "SELECT id,json_extract(data,'$.title'),json_extract(data,'$.mediaType'),
-             json_extract(data,'$.contentBytes'),rowid FROM artifacts
+             json_extract(data,'$.contentBytes'),rowid,task_id FROM artifacts
              WHERE task_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3",
-        )?;
-        let mut rows = statement.query(params![task_id, cursor, limit + 1])?;
+            task_id,
+            cursor,
+            limit,
+        )
+    }
+
+    pub fn list_artifact_catalog(
+        &self,
+        scope: &ArtifactCatalogScope,
+        after: u64,
+        limit: u32,
+    ) -> Result<ObjectPage<ArtifactSummary>> {
+        let cursor = catalog_cursor(after, limit)?;
+        // Two fixed predicates let SQLite seek directly into the selected scope.
+        let (id, sql) = match scope {
+            ArtifactCatalogScope::Session { session_id } => {
+                self.require_session(session_id)?;
+                (
+                    session_id,
+                    "SELECT a.id,json_extract(a.data,'$.title'),json_extract(a.data,'$.mediaType'),
+                 json_extract(a.data,'$.contentBytes'),c.sequence,a.task_id
+                 FROM artifact_catalog c JOIN artifacts a ON a.id=c.artifact_id
+                 WHERE c.session_id=?1 AND c.sequence>?2 ORDER BY c.sequence LIMIT ?3",
+                )
+            }
+            ArtifactCatalogScope::Workspace { workspace_id } => {
+                self.require_workspace(workspace_id)?;
+                (
+                    workspace_id,
+                    "SELECT a.id,json_extract(a.data,'$.title'),json_extract(a.data,'$.mediaType'),
+                 json_extract(a.data,'$.contentBytes'),c.sequence,a.task_id
+                 FROM artifact_catalog c JOIN artifacts a ON a.id=c.artifact_id
+                 WHERE c.workspace_id=?1 AND c.sequence>?2 ORDER BY c.sequence LIMIT ?3",
+                )
+            }
+        };
+        self.query_catalog_page(sql, id, cursor, limit)
+    }
+
+    fn query_catalog_page(
+        &self,
+        sql: &str,
+        id: &str,
+        cursor: i64,
+        limit: u32,
+    ) -> Result<ObjectPage<ArtifactSummary>> {
+        let mut statement = self.db.prepare_cached(sql)?;
+        let mut rows = statement.query(params![id, cursor, limit + 1])?;
         let mut items = Vec::with_capacity(limit as usize);
-        let mut next_after = after;
+        let mut next_after = cursor as u64;
         let mut has_more = false;
         while let Some(row) = rows.next()? {
             if items.len() == limit as usize {
@@ -104,7 +182,10 @@ impl Kernel {
                 break;
             }
             next_after = row.get::<_, i64>(4)? as u64;
-            items.push(summary_row(row, task_id)?);
+            items.push(summary_row(
+                row,
+                row.get_ref(5)?.as_str().map_err(rusqlite::Error::from)?,
+            )?);
         }
         Ok(ObjectPage {
             items,

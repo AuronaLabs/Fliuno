@@ -13,7 +13,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 25;
+pub(crate) const SCHEMA_VERSION: u32 = 26;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -228,6 +228,9 @@ impl Kernel {
                 PRAGMA user_version=25;
                 COMMIT;",
             )?;
+        }
+        if version < 26 {
+            artifacts::migrate_catalog(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

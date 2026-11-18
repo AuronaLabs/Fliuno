@@ -2,6 +2,29 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ArtifactCatalogScope {
+    Session { session_id: String },
+    Workspace { workspace_id: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactCatalogParams {
+    pub scope: ArtifactCatalogScope,
+    #[serde(default)]
+    pub after: u64,
+    #[serde(default = "super::default_limit")]
+    #[schemars(range(min = 1, max = 100))]
+    pub limit: u32,
+}
+
 pub const MAX_ARTIFACT_READ_BYTES: u32 = 64 * 1024;
 const fn default_artifact_read_bytes() -> u32 {
     32 * 1024

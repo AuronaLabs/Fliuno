@@ -55,6 +55,7 @@ pub fn schema_bundle() -> Value {
         "modelProgress/resubscribe" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         "artifacts/list" => schema::<TaskIdParams>(),
         "artifacts/listSummaries" => schema::<ArtifactListParams>(),
+        "artifacts/listScopedSummaries" => schema::<ArtifactCatalogParams>(),
         "artifacts/get" => schema::<ArtifactGetParams>(),
         "artifacts/getSummary" => schema::<ArtifactGetParams>(),
         "artifacts/read" => schema::<ArtifactReadParams>(),
