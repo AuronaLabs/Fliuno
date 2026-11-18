@@ -75,16 +75,21 @@ def main():
                     raise RuntimeError(response)
                 return response["result"]
 
-        def wait(task_id, status):
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
+        def wait_for_first_approval(task_id):
+            # AppContainer staging precedes two ACP requests, each with a
+            # 30-second default timeout. Polling must allow those phases to finish.
+            deadline = time.monotonic() + 75
+            while True:
                 task = call("task/get", {"taskId": task_id})
-                if task["status"] == status:
+                if task["status"] == "waiting_approval":
                     return task
-                if task["status"] in {"failed", "cancelled", "interrupted"}:
+                if task["status"] in {"failed", "cancelled", "interrupted", "completed"}:
                     raise RuntimeError(task)
-                time.sleep(0.01)
-            raise TimeoutError(f"task did not reach {status}")
+                if time.monotonic() >= deadline:
+                    run = task.get("agentRun") or {}
+                    phase = "prompt" if run.get("sessionId") else "agent setup"
+                    raise TimeoutError(f"task {task_id} awaiting approval during {phase}: {task['status']}")
+                time.sleep(0.025)
 
         try:
             init = call("initialize", {"protocolVersion": "0.1", "clientName": "agent-demo"})
@@ -95,7 +100,7 @@ def main():
                           "clientRequestId": "offline-agent-once",
                           "backend": {"type": "external_agent", "agentId": "fixture"}}
             task = call("task/start", submission)
-            waiting = wait(task["id"], "waiting_approval")
+            waiting = wait_for_first_approval(task["id"])
             decision = "deny" if args.deny else "allow_once"
             if args.workspace:
                 assert not (directory / "via-agent.txt").exists()
