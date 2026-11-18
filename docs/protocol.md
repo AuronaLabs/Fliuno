@@ -269,6 +269,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 - `workspace_list({path})`：工作区内目录，根目录用 `.`；返回最多 256 项及 truncated。
 - `workspace_list_page({path,after?,limit?:128})` 按文件名的 UTF-8 字节顺序返回 `{entries,nextAfter,hasMore,omittedNames}`，每页 1..256 项。目录不变时，按 `nextAfter` 续页可浏览全部可寻址条目。文件名无法作为工作区相对路径片段时，计入 `omittedNames`。每次扫描最多 16,384 项，超限返回错误。分页期间目录可以变化，游标只表示名称边界。每页按工作区读取工具走审批。
+- `workspace_stat({path})`：查询工作区相对路径，根目录用 `.`。返回 `path`、`kind`（`file`、`directory`、`symlink` 或 `other`）、普通文件的 `bytes` 和可用的 `modifiedUnixMs`。不适用的字段为 `null`。不跟随末级符号链接。每次查询按工作区读取工具走审批。
 - `workspace_read_text({path,line?,limit?})`：读取最多 256 KiB UTF-8 文件；line 从 1 开始，limit 是最大行数，均须为正整数。按行截取保留原换行，SHA-256 始终针对完整文件；超出末行返回空文本。
 - `workspace_read_bytes({path})`：读取最多 256 KiB 原始字节并返回 `{path,encoding:"base64",data,bytes,sha256,grantsPermissions:false}`。长度和摘要针对原始字节；不检测 MIME、不解码格式、不执行，也不自动创建 artifact。该读取和所有其他工具调用一样，每次需要审批；拒绝审批不会返回文件数据。
 - `workspace_create_text({path,content})`：创建新文件，父目录须存在，目标须不存在。

@@ -2,6 +2,7 @@
 //! lexical checks alone are insufficient against symlinks and path races.
 mod directory_page;
 mod file_io;
+mod stat;
 mod workspace;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use cap_fs_ext::{FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
@@ -88,6 +89,7 @@ pub fn register(kernel: &mut Kernel) -> fliuno_core::Result<()> {
     })
     .collect();
     tools.push(Box::new(directory_page::ListPage));
+    tools.push(Box::new(stat::Stat));
     kernel.register_tools(tools)
 }
 

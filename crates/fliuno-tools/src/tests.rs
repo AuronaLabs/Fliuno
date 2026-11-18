@@ -859,6 +859,18 @@ fn symlinks_cannot_escape_the_workspace() {
         task_id: "t",
         workspace: &ws,
     };
+    let stat = stat::Stat;
+    let mut call = ToolCall {
+        id: "s".into(),
+        name: "workspace_stat".into(),
+        arguments: json!({"path":"escape"}),
+    };
+    let token = CancellationToken::new();
+    let link = stat.execute(&context, &call, &token).unwrap();
+    assert_eq!(link.output["kind"], "symlink");
+    assert!(link.output["bytes"].is_null());
+    call.arguments["path"] = json!("escape/secret");
+    assert!(stat.execute(&context, &call, &token).is_err());
     let read = ToolCall {
         id: "r".into(),
         name: "workspace_read_text".into(),
@@ -895,4 +907,106 @@ fn symlinks_cannot_escape_the_workspace() {
     );
     assert!(!outside.join("new").exists());
     fs::remove_dir_all(root).unwrap();
+}
+
+struct StatProvider;
+
+impl fliuno_core::ModelProvider for StatProvider {
+    fn next(
+        &self,
+        task: &fliuno_protocol::Task,
+        _tools: &[ToolSpec],
+        _cancellation: &CancellationToken,
+    ) -> Result<fliuno_core::ModelTurn, String> {
+        use fliuno_core::ModelDecision;
+        if task
+            .messages
+            .iter()
+            .any(|message| matches!(message, fliuno_protocol::Message::ToolResult { .. }))
+        {
+            return Ok(ModelDecision::Complete("metadata inspected".into()).into());
+        }
+        Ok(ModelDecision::Call(ToolCall {
+            id: "stat".into(),
+            name: "workspace_stat".into(),
+            arguments: json!({"path":"资料.bin"}),
+        })
+        .into())
+    }
+}
+
+#[test]
+fn stat_reports_metadata_without_the_file_read_limit() {
+    let root = std::env::temp_dir().canonicalize().unwrap();
+    let directory = root.join(format!(
+        "fliuno-stat-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&directory).unwrap();
+    let workspace = Workspace {
+        id: "ws".into(),
+        root: directory.to_str().unwrap().into(),
+    };
+    let context = ToolContext {
+        session_id: "session_test",
+        task_id: "task",
+        workspace: &workspace,
+    };
+    let name = "资料.bin";
+    fs::File::create(directory.join(name))
+        .unwrap()
+        .set_len(READ_LIMIT + 1)
+        .unwrap();
+    let query = |path: &str| ToolCall {
+        id: "stat".into(),
+        name: "workspace_stat".into(),
+        arguments: json!({"path":path}),
+    };
+    let stat = stat::Stat;
+    let token = CancellationToken::new();
+    let mut kernel = Kernel::in_memory(Box::new(StatProvider)).unwrap();
+    register(&mut kernel).unwrap();
+    let workspace = kernel.open_workspace(directory.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let waiting = kernel.start_task(&session.id, "inspect metadata").unwrap();
+    let approval = waiting.pending_approval.as_ref().unwrap();
+    assert_eq!(approval.call.name, "workspace_stat");
+    let done = kernel
+        .respond_approval(
+            &waiting.id,
+            &approval.id,
+            fliuno_protocol::ApprovalDecision::AllowOnce,
+        )
+        .unwrap();
+    let output = done
+        .messages
+        .iter()
+        .find_map(|message| match message {
+            fliuno_protocol::Message::ToolResult { output, .. } => Some(output),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(output["path"], name);
+    assert_eq!(output["kind"], "file");
+    assert_eq!(output["bytes"], READ_LIMIT + 1);
+    assert!(output["modifiedUnixMs"].is_u64());
+    assert!(output.get("content").is_none());
+    assert!(kernel.list_artifacts(&done.id).unwrap().is_empty());
+    let directory_result = stat.execute(&context, &query("."), &token).unwrap();
+    assert_eq!(directory_result.output["kind"], "directory");
+    assert!(directory_result.output["bytes"].is_null());
+    assert!(
+        stat.execute(&context, &query("../outside"), &token)
+            .is_err()
+    );
+    assert!(stat.execute(&context, &query("missing"), &token).is_err());
+    assert_eq!(
+        directory.canonicalize().unwrap().parent(),
+        Some(root.as_path())
+    );
+    fs::remove_dir_all(directory).unwrap();
 }
