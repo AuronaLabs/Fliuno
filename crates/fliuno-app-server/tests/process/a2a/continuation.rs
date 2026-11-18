@@ -40,18 +40,29 @@ fn encoded_wire_budget_failure_keeps_the_pause_available() {
 fn send_reply(request: &Request, remote: Value, streaming: bool) -> Response {
     let result = json!({"task":remote});
     if streaming {
-        Response::sse(format!(
-            "data: {}\n\n",
-            json!({"jsonrpc":"2.0","id":request.body["id"],"result":result})
-        ))
+        stream_reply(request, [result])
     } else {
         response(request, result)
     }
 }
 
+fn stream_reply(request: &Request, results: impl IntoIterator<Item = Value>) -> Response {
+    Response::sse(
+        results
+            .into_iter()
+            .map(|result| {
+                format!(
+                    "data: {}\n\n",
+                    json!({"jsonrpc":"2.0","id":request.body["id"],"result":result})
+                )
+            })
+            .collect(),
+    )
+}
+
 #[test]
 fn paused_turn_is_claimed_once_and_completed_turn_starts_a_new_remote_task() {
-    for streaming in [false, true] {
+    for (streaming, status_first) in [(false, false), (true, false), (true, true)] {
         let send = if streaming {
             "SendStreamingMessage"
         } else {
@@ -108,8 +119,20 @@ fn paused_turn_is_claimed_once_and_completed_turn_starts_a_new_remote_task() {
                             json!({"statusUpdate":{"taskId":"remote-task","contextId":"remote-context",
                                 "status":{"state":"TASK_STATE_INPUT_REQUIRED"}}}),
                         ];
-                        return Response::sse(results.iter().map(|result| format!("data: {}\n\n",
-                            json!({"jsonrpc":"2.0","id":request.body["id"],"result":result}))).collect());
+                        return stream_reply(request, results);
+                    }
+                    if status_first && n == 1 {
+                        return stream_reply(
+                            request,
+                            [
+                                json!({"statusUpdate":{"taskId":"remote-task","contextId":"remote-context",
+                                "status":{"state":"TASK_STATE_WORKING"}}}),
+                                json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context",
+                                "artifact":{"artifactId":"report","parts":[{"text":"summary"}]},"lastChunk":true}}),
+                                json!({"statusUpdate":{"taskId":"remote-task","contextId":"remote-context",
+                                "status":{"state":"TASK_STATE_COMPLETED"}}}),
+                            ],
+                        );
                     }
                     remote["artifacts"] =
                         json!([{"artifactId":"report","parts":[{"text":"summary"}]}]);
@@ -289,6 +312,53 @@ fn lost_stream_after_submission_is_never_replayed_on_restart() {
         -32009
     );
     assert_eq!(wire.requests().len(), 3);
+}
+
+#[test]
+fn invalid_or_missing_first_status_never_persists_identity_or_replays_submission() {
+    for (task_id, context_id) in [
+        ("foreign-task", "remote-context"),
+        ("remote-task", "foreign-context"),
+        ("remote-task", ""),
+        ("", ""),
+    ] {
+        let wire = Fixture::start(
+            move |request| match request.body["method"].as_str().unwrap() {
+                "GetTask" => response(request, task("TASK_STATE_INPUT_REQUIRED")),
+                "SendStreamingMessage" if request.body["params"]["message"]["taskId"].is_null() => {
+                    send_reply(request, task("TASK_STATE_INPUT_REQUIRED"), true)
+                }
+                "SendStreamingMessage" if task_id.is_empty() => stream_reply(request, []),
+                "SendStreamingMessage" => stream_reply(
+                    request,
+                    [json!({"statusUpdate":{
+                        "taskId":task_id,"contextId":context_id,"status":{"state":"TASK_STATE_COMPLETED"}
+                    }})],
+                ),
+                other => panic!("unexpected method {other}"),
+            },
+        );
+        let directory = Directory::new(&wire, 10_000, false).with_streaming();
+        let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+        let session = directory.session(&mut peer);
+        let source = start(&mut peer, &session, "source");
+        wait_finished(&mut peer, &source["id"]);
+        let retry = params(&source["id"], "invalid-first-status");
+        let sent = peer.call("task/continueRemote", retry.clone());
+        let stopped = wait_finished(&mut peer, &sent["id"]);
+        assert_eq!(stopped["status"], "interrupted");
+        assert_eq!(stopped["agentRun"]["outcomeUnknown"], true);
+        assert!(stopped["agentRun"]["remoteTask"].is_null());
+        assert_eq!(stopped["remoteContinuation"]["submissionStarted"], true);
+        drop(peer);
+        let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+        assert_eq!(peer.call("task/continueRemote", retry), stopped);
+        assert_eq!(
+            peer.request("task/continueRemote", params(&source["id"], "another-send"))["error"]["code"],
+            -32009
+        );
+        assert_eq!(wire.requests().len(), 3);
+    }
 }
 
 #[test]

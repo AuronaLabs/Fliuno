@@ -8,7 +8,7 @@ Fliuno 的 A2A 通道用于调用主机预先注册的远程 Agent。`fliuno-a2a
 
 默认使用 `returnImmediately: true` 与有界 `GetTask` 轮询，不请求历史。配置 `streaming: true` 时改用 `SendStreamingMessage` 和 SSE，不执行轮询回退；如果配置了 Agent Card，卡片还必须声明 `capabilities.streaming: true`。流按 JSON-RPC envelope 校验，每次调用最多接收配置的 `maxResponseBytes`，消费队列容量为 16，客户端变慢时网络读取随之暂停。首个 Task 固定远端任务/上下文身份，后续状态和产物更新必须匹配；状态回退、错序、超预算、非终态断流均保留未知结果，不重发提交。TaskStatusUpdateEvent 按 A2A 1.0 的状态字段判定结束，不依赖非标准的 `final` 标志。ArtifactUpdate 的 append/lastChunk 会在内存中按 artifactId 有界组装，只有完整产物随终态入库。取消在获得 Task 身份后最多发送一次 CancelTask，并要求终态响应确认。
 
-支持 Task、立即返回的 Message 和可选 SSE 实时流。gRPC、HTTP+JSON binding、push notification、扩展、tenancy、OAuth、认证卡片、签名验证、远程多轮继续尚未实现；不声明完整 A2A 一致性。卡片只是可选的主机固定接口校验，不能配置或切换 URL、凭据、tenant 和 binding。
+支持 Task、立即返回的 Message 和可选 SSE 实时流。gRPC、HTTP+JSON binding、push notification、扩展、tenancy、OAuth、认证卡片、签名验证尚未实现；不声明完整 A2A 一致性。卡片只是可选的主机固定接口校验，不能配置或切换 URL、凭据、tenant 和 binding。
 
 ## 配置与调用
 
@@ -111,7 +111,17 @@ python examples/a2a_demo.py --streaming --cancel
 
 `Task.backendAuthority` 在创建时冻结全部 A2A 配置及实际 bearer token 的摘要。相同 Agent ID 更换端点、凭据、卡片地址或执行预算，重启后旧排队任务不能启动；幂等提交仍返回原任务，不刷新摘要。该检查不认证远端代码，也不允许重发结果未知的提交，详见[注册身份](authority.md)。
 
-这些是独立契约 fixture 与本机进程验收。当前未完成官方 A2A SDK 或真实外部 Agent 的互操作验收；上游 Rust 仓库克隆因网络失败，未将其作为已运行的测试依据。
+这些是独立契约 fixture 与本机进程验收。官方 Python SDK `a2a-sdk==1.3.1` 已通过回环验收，覆盖 Agent Card、JSON 轮询和 SSE 的暂停、补答、同一上下文的新任务、幂等与产物入库。真实外部 Agent 验收仍待执行。
+
+A2A 1.0 规定 `SendStreamingMessage` 以 `Task` 或 `Message` 开始。Python SDK 对已有任务补答时可能直接发 `statusUpdate`。Fliuno 仅在 `GetTask` 已核对暂停状态、请求显式携带 `taskId` 和 `contextId`、且首帧两项身份均匹配时兼容这一行为。未收到合法首帧时保留提交结果未知，也不会根据预检取得的旧状态写入本轮身份或产物。新任务和同一上下文的新一轮仍要求标准首帧。
+
+使用 Python 3.12 及隔离环境在 Windows 复现：
+
+```powershell
+python -m venv target/a2a-sdk-interop
+& ./target/a2a-sdk-interop/Scripts/python.exe -m pip install 'a2a-sdk[http-server]==1.3.1' 'uvicorn==0.48.0'
+& ./target/a2a-sdk-interop/Scripts/python.exe examples/a2a_sdk_interop.py
+```
 离线演示覆盖轮询和 SSE 的成功/取消闭环，并验证分块产物组装及流式模式不会回退轮询。
 
 2026-11-18 本机 Windows 最终全工作区回归：204 passed、0 failed、0 ignored，41 个测试目标；fmt、所有目标/feature 的 Clippy、Schema 一致性、两个离线演示与 Linux 目标交叉 Clippy 通过。交叉检查不能代替 Linux 内核探针的实际运行。

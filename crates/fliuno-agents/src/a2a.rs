@@ -703,16 +703,34 @@ impl A2aBackend {
                     state,
                     message,
                 } => {
-                    let current = task.as_mut().ok_or(())?;
-                    if current.id != task_id
-                        || current.context_id != context_id
-                        || !current.state.allows_transition_to(state)
-                    {
-                        return Err(());
+                    if let Some(current) = task.as_mut() {
+                        if current.id != task_id
+                            || current.context_id != context_id
+                            || !current.state.allows_transition_to(state)
+                        {
+                            return Err(());
+                        }
+                        current.state = state;
+                        current.status_message = message.clone();
+                    } else {
+                        // Preflight verified the paused task before submission.
+                        // Only its matching status can stand in for a snapshot.
+                        let expected = &continuation.ok_or(())?.expected;
+                        if expected.state != AgentTaskState::InputRequired
+                            || expected.id != task_id
+                            || expected.context_id != context_id
+                        {
+                            return Err(());
+                        }
+                        task = Some(Task {
+                            id: task_id,
+                            context_id,
+                            state,
+                            status_message: message.clone(),
+                            artifacts: Vec::new(),
+                        });
                     }
-                    current.state = state;
-                    current.status_message = message.clone();
-                    record_task(observer, current)?;
+                    record_task(observer, task.as_ref().ok_or(())?)?;
                     let text = message
                         .as_ref()
                         .map(Message::text)

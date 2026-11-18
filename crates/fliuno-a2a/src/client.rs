@@ -262,6 +262,13 @@ impl Client {
             id,
             bytes,
             streaming,
+            existing_task: if streaming {
+                target.and_then(|target| {
+                    Some((target.task_id?.to_owned(), target.context_id.to_owned()))
+                })
+            } else {
+                None
+            },
         })
     }
 
@@ -292,6 +299,7 @@ impl Client {
         &self,
         id: String,
         bytes: Vec<u8>,
+        existing_task: Option<(String, String)>,
     ) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
         let mut response = self
             .stream_http
@@ -322,7 +330,13 @@ impl Client {
         let (sender, receiver) = mpsc::channel(STREAM_QUEUE_CAPACITY);
         let limit = self.limit;
         tokio::spawn(async move {
-            if let Err(error) = consume_stream(&mut response, &id, limit, sender.clone()).await {
+            let sequence = StreamSequence {
+                existing_task,
+                identity: None,
+            };
+            if let Err(error) =
+                consume_stream(&mut response, &id, limit, sequence, sender.clone()).await
+            {
                 let _ = sender.send(Err(error)).await;
             }
         });
@@ -408,6 +422,7 @@ pub struct PreparedMessage<'a> {
     id: String,
     bytes: Vec<u8>,
     streaming: bool,
+    existing_task: Option<(String, String)>,
 }
 
 impl PreparedMessage<'_> {
@@ -422,7 +437,9 @@ impl PreparedMessage<'_> {
         if !self.streaming {
             return Err(Error::Config);
         }
-        self.client.post_stream(self.id, self.bytes).await
+        self.client
+            .post_stream(self.id, self.bytes, self.existing_task)
+            .await
     }
 }
 
@@ -430,10 +447,10 @@ async fn consume_stream(
     response: &mut reqwest::Response,
     request_id: &str,
     limit: usize,
+    mut sequence: StreamSequence,
     sender: mpsc::Sender<Result<StreamEvent>>,
 ) -> Result<()> {
     let mut decoder = SseDecoder::default();
-    let mut sequence = StreamSequence::default();
     let mut total = 0usize;
     let mut event_count = 0usize;
     while let Some(chunk) = response.chunk().await.map_err(|_| Error::Transport)? {
@@ -571,8 +588,8 @@ impl SseDecoder {
     }
 }
 
-#[derive(Default)]
 struct StreamSequence {
+    existing_task: Option<(String, String)>,
     identity: Option<StreamIdentity>,
 }
 
@@ -586,16 +603,41 @@ impl StreamSequence {
         if self.is_complete() {
             return Err(Error::Protocol);
         }
-        match (&self.identity, event) {
+        match (&mut self.identity, event) {
             (None, StreamEvent::Task(task)) => {
+                if self.existing_task.as_ref().is_some_and(|(id, context)| {
+                    id != &task.id || task.context_id.as_ref() != Some(context)
+                }) {
+                    return Err(Error::Protocol);
+                }
                 self.identity = Some(StreamIdentity::Task(
                     task.id.clone(),
                     task.context_id.clone(),
                     task.state,
                 ));
             }
-            (None, StreamEvent::Message(_)) => {
+            (None, StreamEvent::Message(_)) if self.existing_task.is_none() => {
                 self.identity = Some(StreamIdentity::Message);
+            }
+            // The official Python SDK may omit the Task snapshot when resuming
+            // an existing task. Bind the first status to the submitted IDs.
+            (
+                None,
+                StreamEvent::StatusUpdate {
+                    task_id,
+                    context_id,
+                    state,
+                    ..
+                },
+            ) if self.existing_task.as_ref().is_some_and(|(id, context)| {
+                id == task_id && context_id.as_ref() == Some(context)
+            }) && *state != crate::TaskState::Unspecified =>
+            {
+                self.identity = Some(StreamIdentity::Task(
+                    task_id.clone(),
+                    context_id.clone(),
+                    *state,
+                ));
             }
             (None, _) => return Err(Error::Protocol),
             (
@@ -613,7 +655,7 @@ impl StreamSequence {
                 {
                     return Err(Error::Protocol);
                 }
-                self.identity = Some(StreamIdentity::Task(id.clone(), context.clone(), *state));
+                *previous_state = *state;
             }
             (
                 Some(StreamIdentity::Task(id, context, _)),
