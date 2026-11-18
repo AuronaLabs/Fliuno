@@ -628,6 +628,16 @@
           "format": "uint32",
           "minimum": 0,
           "default": 100
+        },
+        "targetBytes": {
+          "description": "Target size of the compact events array. A single larger event still advances the cursor.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -651,6 +661,15 @@
           "format": "uint32",
           "minimum": 0,
           "default": 100
+        },
+        "targetBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
         }
       },
       "additionalProperties": false

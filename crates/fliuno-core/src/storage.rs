@@ -1,7 +1,9 @@
 //! SQLite snapshots and committed event log. Only this module touches SQL.
 mod artifacts;
 mod context;
+mod replay;
 use super::*;
+pub use replay::MAX_EVENT_TARGET_BYTES;
 use rusqlite::{OptionalExtension, params};
 use serde::de::DeserializeOwned;
 use std::{
@@ -13,6 +15,19 @@ impl Kernel {
     pub(crate) fn workspace_for_task(&self, task_id: &str) -> Result<Workspace> {
         let data: String = self.db.query_row("SELECT workspaces.data FROM workspaces JOIN sessions ON sessions.workspace_id=workspaces.id JOIN tasks ON tasks.session_id=sessions.id WHERE tasks.id=?1", [task_id], |r| r.get(0))?;
         Ok(serde_json::from_str(&data)?)
+    }
+
+    pub(crate) fn require_task(&self, task_id: &str) -> Result<()> {
+        let exists: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
+            [task_id],
+            |row| row.get(0),
+        )?;
+        if exists {
+            Ok(())
+        } else {
+            Err(Error::NotFound("task".into()))
+        }
     }
 
     pub(crate) fn require_session(&self, session_id: &str) -> Result<()> {
@@ -235,59 +250,6 @@ impl Kernel {
         Ok(serde_json::from_str(&data)?)
     }
 
-    pub fn list_events(&self, task_id: &str, after: u64, limit: u32) -> Result<EventsPage> {
-        self.get_task(task_id)?;
-        self.query_event_page(
-            "SELECT sequence,task_id,data FROM events WHERE task_id=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3",
-            params![task_id, validate_event_cursor(after)?, validate_event_limit(limit)?],
-            after,
-            limit,
-        )
-    }
-
-    pub fn list_all_events(&self, after: u64, limit: u32) -> Result<EventsPage> {
-        self.query_event_page(
-            "SELECT sequence,task_id,data FROM events WHERE sequence>?1 ORDER BY sequence LIMIT ?2",
-            params![validate_event_cursor(after)?, validate_event_limit(limit)?],
-            after,
-            limit,
-        )
-    }
-
-    fn query_event_page<P: rusqlite::Params>(
-        &self,
-        sql: &str,
-        params: P,
-        after: u64,
-        limit: u32,
-    ) -> Result<EventsPage> {
-        let mut stmt = self.db.prepare(sql)?;
-        let rows = stmt.query_map(params, |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        let mut events = Vec::new();
-        for row in rows {
-            let (sequence, task_id, data) = row?;
-            events.push(Event {
-                sequence: sequence as u64,
-                task_id,
-                data: serde_json::from_str(&data)?,
-            });
-        }
-        let has_more = events.len() > limit as usize;
-        events.truncate(limit as usize);
-        let next_after = events.last().map_or(after, |e| e.sequence);
-        Ok(EventsPage {
-            events,
-            next_after,
-            has_more,
-        })
-    }
-
     pub(crate) fn commit(
         &mut self,
         task: &Task,
@@ -425,13 +387,6 @@ impl Kernel {
 
 fn validate_event_cursor(after: u64) -> Result<i64> {
     i64::try_from(after).map_err(|_| Error::Invalid("after must fit i64".into()))
-}
-
-fn validate_event_limit(limit: u32) -> Result<u32> {
-    if !(1..=1000).contains(&limit) {
-        return Err(Error::Invalid("limit must be 1..1000".into()));
-    }
-    Ok(limit + 1)
 }
 
 fn decode_rows<T: DeserializeOwned>(

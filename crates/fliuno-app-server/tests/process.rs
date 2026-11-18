@@ -126,6 +126,10 @@ impl Peer {
         assert_eq!(init["capabilities"]["maxContextCandidates"], 128);
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
+        assert_eq!(
+            init["capabilities"]["eventReplayTargetBytes"],
+            8 * 1024 * 1024
+        );
         if base.is_none() {
             assert!(init["capabilities"]["modelBudget"].is_null());
         }
@@ -626,6 +630,101 @@ fn schema_export_is_valid_json_and_needs_no_provider_configuration() {
     let schema: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(schema["protocolVersion"], "0.1");
     assert!(schema["methods"]["task/start"].is_object());
+}
+
+#[test]
+fn event_replay_byte_target_preserves_each_event_and_cursor_across_restart() {
+    let root = std::env::temp_dir().join(format!(
+        "fliuno-event-target-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let first = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"汉字\\\n".repeat(1024)}),
+    );
+    let first_id = first["id"].as_str().unwrap();
+    peer.wait_for_status(first_id, "waiting_approval");
+    let second = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"small"}),
+    );
+    peer.wait_for_status(second["id"].as_str().unwrap(), "waiting_approval");
+    let full = peer.call("events/listAll", json!({}));
+    let scoped = peer.call("events/list", json!({"taskId":first_id}));
+    let first_page = peer.call("events/listAll", json!({"targetBytes":1024}));
+    assert_eq!(first_page["hasMore"], true);
+    assert!(serde_json::to_vec(&first_page["events"]).unwrap().len() <= 1024);
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    for (method, scope, expected, initial) in [
+        (
+            "events/listAll",
+            json!({}),
+            &full["events"],
+            Some(first_page),
+        ),
+        (
+            "events/list",
+            json!({"taskId":first_id}),
+            &scoped["events"],
+            None,
+        ),
+    ] {
+        let mut cursor = 0;
+        let mut received = Vec::new();
+        let mut large_event = false;
+        let mut page = initial;
+        loop {
+            let response = page.take().unwrap_or_else(|| {
+                let mut params = scope.clone();
+                params["after"] = json!(cursor);
+                params["targetBytes"] = json!(1024);
+                peer.call(method, params)
+            });
+            let events = response["events"].as_array().unwrap();
+            assert!(!events.is_empty());
+            if serde_json::to_vec(events).unwrap().len() > 1024 {
+                assert_eq!(events.len(), 1);
+                large_event = true;
+            }
+            let next = response["nextAfter"].as_u64().unwrap();
+            assert!(next > cursor);
+            assert_eq!(events.last().unwrap()["sequence"], next);
+            received.extend(events.iter().cloned());
+            cursor = next;
+            if response["hasMore"] == false {
+                break;
+            }
+        }
+        assert!(large_event);
+        assert_eq!(json!(received), *expected);
+    }
+    assert_eq!(
+        peer.request("events/listAll", json!({"targetBytes":1023}))["error"]["code"],
+        -32602
+    );
+    assert_eq!(
+        peer.request(
+            "events/list",
+            json!({"taskId":first_id,"targetBytes":8388609})
+        )["error"]["code"],
+        -32602
+    );
+    drop(peer);
+    for entry in fs::read_dir(&root).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    fs::remove_dir(root).unwrap();
 }
 
 #[test]

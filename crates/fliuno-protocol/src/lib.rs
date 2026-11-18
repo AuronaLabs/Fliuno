@@ -591,6 +591,9 @@ pub struct EventsListParams {
     pub after: u64,
     #[serde(default = "default_limit")]
     pub limit: u32,
+    /// Target size of the compact events array. A single larger event still advances the cursor.
+    #[serde(default)]
+    pub target_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -600,6 +603,8 @@ pub struct EventsListAllParams {
     pub after: u64,
     #[serde(default = "default_limit")]
     pub limit: u32,
+    #[serde(default)]
+    pub target_bytes: Option<u32>,
 }
 
 fn default_limit() -> u32 {

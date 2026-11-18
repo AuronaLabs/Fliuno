@@ -6,26 +6,6 @@ pub const MAX_CONTEXT_TURNS: u32 = 32;
 pub const MAX_CONTEXT_BYTES: u32 = 256 * 1024;
 pub const MAX_CONTEXT_CANDIDATES: u32 = 128;
 
-#[derive(Default)]
-struct JsonSize(usize);
-
-impl std::io::Write for JsonSize {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0 += bytes.len();
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-fn json_size(value: &impl serde::Serialize) -> Result<usize> {
-    let mut size = JsonSize::default();
-    serde_json::to_writer(&mut size, value)?;
-    Ok(size.0)
-}
-
 pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
     if !(1..=MAX_CONTEXT_TURNS).contains(&options.max_turns)
         || !(1024..=MAX_CONTEXT_BYTES).contains(&options.max_bytes)

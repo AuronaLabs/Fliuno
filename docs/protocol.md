@@ -28,8 +28,8 @@
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |
 | `task/resume` | `{taskId,retryUncertainModelStep?:false}` | Task；恢复后排队；外部未知结果不能重试；模型结果不确定时须显式传 true |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
-| `events/list` | `{taskId, after?:0, limit?:100}` | `{events, nextAfter, hasMore}` |
-| `events/listAll` | `{after?:0, limit?:100}` | 全任务共享全局序号的事件页 |
+| `events/list` | `{taskId, after?:0, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
+| `events/listAll` | `{after?:0, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
 | `artifacts/list` | `{taskId}` | Artifact 数组 |
 | `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
@@ -140,7 +140,9 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 初始化后，服务会发送 `notifications/event`，参数为 `{event}`；每个事件已先提交 SQLite，再进入容量为 64 的有界内存订阅队列。实时通知只覆盖本次进程连接期间的新事件，不补发历史。客户端重连时用 `events/listAll` 从持久游标回放，并按全局 `sequence` 去重，以弥合订阅和回放之间的竞态。
 
-若客户端消费过慢导致订阅队列溢出，服务先排空已排队通知，再发 `notifications/eventGap`，参数 `{afterSequence}` 是本连接最后成功写出的序号。客户端应从自身已提交的游标调用 `events/listAll` 补齐，再继续监听；SQLite 日志是事实来源，通知不承诺可靠投递。事件按 `sequence` 排序，`after` 为严格大于且须在非负 i64 范围，`limit` 在 1..1000。客户端保存 `nextAfter`、处理 `hasMore` 并按序号去重。
+若客户端消费过慢导致订阅队列溢出，服务先排空已排队通知，再发 `notifications/eventGap`。参数 `{afterSequence}` 是本连接最后成功写出的序号。客户端从自身已提交的游标调用 `events/listAll` 补齐。SQLite 日志是事实来源，通知可能丢失。事件按 `sequence` 排序，`after` 为严格大于且须在非负 i64 范围，`limit` 在 1..1000。客户端保存 `nextAfter`、处理 `hasMore` 并按序号去重。
+
+`initialize.capabilities.eventReplayTargetBytes` 表示两个回放方法支持的最大字节目标。客户端可设置 `targetBytes` 为 1024..8388608，按紧凑 JSON 的 `events` 数组大小分页。单个事件已超过目标时，该页完整返回该事件，游标仍会前进。
 
 ## 错误
 

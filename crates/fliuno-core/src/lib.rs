@@ -8,6 +8,8 @@ pub use authority::authority_digest;
 mod context;
 mod error;
 mod events;
+mod json_size;
+use json_size::json_size;
 mod policy;
 mod provider;
 mod query;
@@ -31,6 +33,7 @@ pub use provider::{
     CancellationToken, DemoProvider, ModelDecision, ModelError, ModelProvider, ModelStreamEvent,
     ModelTurn, ProviderReplay,
 };
+pub use storage::MAX_EVENT_TARGET_BYTES;
 pub use task::PreparedModelStep;
 pub use tool::{Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec};
 

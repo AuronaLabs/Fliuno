@@ -2,21 +2,8 @@
 use super::*;
 
 impl Kernel {
-    fn require_artifact_task(&self, task_id: &str) -> Result<()> {
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
-            [task_id],
-            |row| row.get(0),
-        )?;
-        if exists {
-            Ok(())
-        } else {
-            Err(Error::NotFound("task".into()))
-        }
-    }
-
     pub fn list_artifacts(&self, task_id: &str) -> Result<Vec<Artifact>> {
-        self.require_artifact_task(task_id)?;
+        self.require_task(task_id)?;
         let mut stmt = self
             .db
             .prepare("SELECT data FROM artifacts WHERE task_id=?1 ORDER BY rowid")?;
@@ -34,7 +21,7 @@ impl Kernel {
         if !(1..=100).contains(&limit) {
             return Err(Error::Invalid("artifact list limit must be 1..100".into()));
         }
-        self.require_artifact_task(task_id)?;
+        self.require_task(task_id)?;
         // SQLite extracts the metadata from both legacy and new rows without
         // copying or deserializing the artifact body into Rust or onto the wire.
         let mut statement = self.db.prepare_cached(

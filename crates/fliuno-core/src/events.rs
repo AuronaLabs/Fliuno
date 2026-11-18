@@ -93,6 +93,18 @@ impl EventHub {
         let Ok(mut subscribers) = self.subscribers.lock() else {
             return;
         };
+        if let [subscriber] = subscribers.as_slice() {
+            // A stdio server normally has one subscriber. Move the committed
+            // event directly into its queue, even for large tool payloads.
+            if subscriber.active.strong_count() == 0
+                || events
+                    .into_iter()
+                    .any(|event| subscriber.sender.try_send(event).is_err())
+            {
+                subscribers.clear();
+            }
+            return;
+        }
         subscribers.retain(|subscriber| {
             if subscriber.active.strong_count() == 0 {
                 return false;

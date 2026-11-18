@@ -229,6 +229,7 @@ impl RpcServer {
                     "artifactSummaries":true,
                     "registrationAuthority":true,
                     "eventNotifications":true, "globalEventReplay":true,
+                    "eventReplayTargetBytes":fliuno_core::MAX_EVENT_TARGET_BYTES,
                     "provider":self.provider_name, "liveModels":self.provider_name != "demo",
                     "externalTools":external_tools, "backgroundTasks":true,
                     "externalAgents":!self.kernel()?.agent_specs().is_empty(),
@@ -451,11 +452,20 @@ impl RpcServer {
             }
             "events/list" => {
                 let p: EventsListParams = decode(params)?;
-                json!(self.kernel()?.list_events(&p.task_id, p.after, p.limit)?)
+                json!(self.kernel()?.list_events_with_target(
+                    &p.task_id,
+                    p.after,
+                    p.limit,
+                    p.target_bytes
+                )?)
             }
             "events/listAll" => {
                 let p: EventsListAllParams = decode(params)?;
-                json!(self.kernel()?.list_all_events(p.after, p.limit)?)
+                json!(self.kernel()?.list_all_events_with_target(
+                    p.after,
+                    p.limit,
+                    p.target_bytes
+                )?)
             }
             "artifacts/list" => {
                 let p: TaskIdParams = decode(params)?;
