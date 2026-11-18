@@ -55,6 +55,16 @@ fn artifact_row(row: &rusqlite::Row<'_>, task_id: &str) -> rusqlite::Result<Arti
     })
 }
 
+fn summary_row(row: &rusqlite::Row<'_>, task_id: &str) -> rusqlite::Result<ArtifactSummary> {
+    Ok(ArtifactSummary {
+        id: row.get(0)?,
+        task_id: task_id.into(),
+        title: row.get(1)?,
+        media_type: row.get(2)?,
+        content_bytes: row.get::<_, i64>(3)? as u64,
+    })
+}
+
 impl Kernel {
     pub fn list_artifacts(&self, task_id: &str) -> Result<Vec<Artifact>> {
         self.require_task(task_id)?;
@@ -80,8 +90,8 @@ impl Kernel {
         }
         self.require_task(task_id)?;
         let mut statement = self.db.prepare_cached(
-            "SELECT rowid,id,json_extract(data,'$.title'),json_extract(data,'$.mediaType'),
-             json_extract(data,'$.contentBytes') FROM artifacts
+            "SELECT id,json_extract(data,'$.title'),json_extract(data,'$.mediaType'),
+             json_extract(data,'$.contentBytes'),rowid FROM artifacts
              WHERE task_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3",
         )?;
         let mut rows = statement.query(params![task_id, cursor, limit + 1])?;
@@ -93,20 +103,31 @@ impl Kernel {
                 has_more = true;
                 break;
             }
-            next_after = row.get::<_, i64>(0)? as u64;
-            items.push(ArtifactSummary {
-                id: row.get(1)?,
-                task_id: task_id.into(),
-                title: row.get(2)?,
-                media_type: row.get(3)?,
-                content_bytes: row.get::<_, i64>(4)? as u64,
-            });
+            next_after = row.get::<_, i64>(4)? as u64;
+            items.push(summary_row(row, task_id)?);
         }
         Ok(ObjectPage {
             items,
             next_after,
             has_more,
         })
+    }
+
+    pub fn get_artifact_summary(
+        &self,
+        task_id: &str,
+        artifact_id: &str,
+    ) -> Result<ArtifactSummary> {
+        self.db
+            .prepare_cached(
+                "SELECT id,json_extract(data,'$.title'),json_extract(data,'$.mediaType'),
+             json_extract(data,'$.contentBytes') FROM artifacts WHERE task_id=?1 AND id=?2",
+            )?
+            .query_row(params![task_id, artifact_id], |row| {
+                summary_row(row, task_id)
+            })
+            .optional()?
+            .ok_or_else(|| Error::NotFound("artifact".into()))
     }
 
     /// Return one byte range and the immutable content length, even when the

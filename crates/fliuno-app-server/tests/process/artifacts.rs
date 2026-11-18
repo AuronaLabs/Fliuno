@@ -73,6 +73,13 @@ fn artifact_byte_reads_and_catalog_cursors_survive_v20_migration() {
     assert_eq!(old_page["items"], summaries["items"]);
     assert_eq!(old_page["nextAfter"], summaries["nextAfter"]);
     assert_eq!(old_page["hasMore"], true);
+    assert_eq!(
+        peer.call(
+            "artifacts/getSummary",
+            json!({"taskId":task_id,"artifactId":artifact["id"]})
+        ),
+        *artifact
+    );
     let next = peer.call(
         "artifacts/listSummaries",
         json!({"taskId":task_id,"after":summaries["nextAfter"]}),
@@ -137,15 +144,13 @@ fn artifact_byte_reads_and_catalog_cursors_survive_v20_migration() {
         "task/start",
         json!({"sessionId":session["id"],"input":"Other task"}),
     );
-    assert_eq!(
-        peer.request(
-            "artifacts/read",
-            json!({
-                "taskId":other["id"],"artifactId":artifact["id"]
-            })
-        )["error"]["code"],
-        -32004
-    );
+    let foreign = json!({"taskId":other["id"],"artifactId":artifact["id"]});
+    for method in ["artifacts/read", "artifacts/getSummary"] {
+        assert_eq!(
+            peer.request(method, foreign.clone())["error"]["code"],
+            -32004
+        );
+    }
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }

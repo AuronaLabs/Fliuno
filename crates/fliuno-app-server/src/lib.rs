@@ -300,6 +300,7 @@ impl RpcServer {
             capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
             capabilities["artifactByteReads"] = json!(true);
+            capabilities["artifactSummaryById"] = json!(true);
             capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
             return Ok(json!({
                 "protocolVersion": PROTOCOL_VERSION,
@@ -630,6 +631,13 @@ impl RpcServer {
                     content_bytes,
                     data_base64: STANDARD.encode(bytes),
                 })
+            }
+            "artifacts/getSummary" => {
+                let p: ArtifactGetParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .get_artifact_summary(&p.task_id, &p.artifact_id)?
+                )
             }
             "artifacts/get" => {
                 let p: ArtifactGetParams = decode(params)?;

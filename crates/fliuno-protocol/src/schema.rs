@@ -52,6 +52,7 @@ pub fn schema_bundle() -> Value {
         "artifacts/list" => schema::<TaskIdParams>(),
         "artifacts/listSummaries" => schema::<ArtifactListParams>(),
         "artifacts/get" => schema::<ArtifactGetParams>(),
+        "artifacts/getSummary" => schema::<ArtifactGetParams>(),
         "artifacts/read" => schema::<ArtifactReadParams>(),
         "tools/list" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         "agents/list" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false})

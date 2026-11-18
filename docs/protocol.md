@@ -41,6 +41,7 @@
 | `events/resubscribe` | `{}` | 在队列溢出后恢复实时通知，返回 `{throughSequence}` |
 | `artifacts/list` | `{taskId}` | Artifact 数组 |
 | `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
+| `artifacts/getSummary` | `{taskId,artifactId}` | 单份 ArtifactSummary |
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
 | `artifacts/read` | `{taskId,artifactId,after?,limit?}` | 返回 `{offset,nextOffset,contentBytes,dataBase64}` |
 | `tools/list` | `{}` | 工具名称、描述、效果类型、输入 Schema |
@@ -61,7 +62,7 @@
 
 `initialize.capabilities.sessionArchiving` 表示支持会话归档。`session/list` 省略 `archived` 时列出全部会话，传 `true` 或 `false` 可按状态筛选。会话对象省略 `archived` 字段时视为 `false`。`session/setArchived` 可以重试；它只更新显示状态，任务、历史和会话 ID 都可照常使用。翻页期间应沿用相同筛选条件。归档状态变动后，从 `after:0` 重拉列表即可反映当前状态。
 
-客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和正文的 UTF-8 字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。
+客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和正文的 UTF-8 字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。`artifactSummaryById` 表示可以用同样的参数调用 `artifacts/getSummary` 单独读取元数据。
 
 客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节后，再按 UTF-8 解码正文，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。SQLite v21 将已有正文移到独立 BLOB 表，保留产物 ID、清单游标和字节偏移。升级在一个事务内完成，迁移中数据库需要空间写入新正文。
 
