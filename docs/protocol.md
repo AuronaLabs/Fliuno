@@ -16,13 +16,14 @@
 | --- | --- | --- |
 | `initialize` | `{protocolVersion, clientName}` | 服务身份与能力 |
 | `workspace/list` | `{after?:0,limit?:100}` | Workspace ObjectPage |
-| `session/list` | `{workspaceId,after?:0,limit?:100}` | Session ObjectPage |
+| `session/list` | `{workspaceId,archived?,after?:0,limit?:100}` | Session ObjectPage，可按归档状态筛选 |
 | `task/list` | `{sessionId,after?:0,limit?:100}` | Task ObjectPage |
 | `task/listSummaries` | `{sessionId,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `session/create` | `{workspaceId,title?,clientRequestId?}` | Session |
 | `session/get` | `{sessionId}` | 单个 Session |
 | `session/rename` | `{sessionId,title}` | 持久化标题并返回 Session |
+| `session/setArchived` | `{sessionId,archived}` | 设置持久归档标记并返回 Session |
 | `session/context` | `{sessionId,options?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | TaskContext；预览当前历史选择 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/get` | `{taskId}` | Task |
@@ -54,6 +55,8 @@
 `initialize.capabilities.sessionTitles` 表示会话支持标题。标题最多 120 个 Unicode 标量值，去除首尾空白后须至少保留一个字符，且不能包含控制字符。未命名的会话省略 `title`。改名保留会话 ID、所属工作区、分页顺序和已有任务。SQLite v15 保留既有会话的快照，新客户端读取旧数据时会看到未命名会话。
 
 `initialize.capabilities.sessionCreateIdempotency` 表示 `session/create` 接受 `clientRequestId`。键由 1 到 128 个可打印且不含空格的 ASCII 字符组成，在工作区内唯一。连接中断后用原键和原始标题重试会返回同一个会话的当前信息。复用键并更改原始标题会返回 `-32009`。创建记录和键同事务保存，重启后仍可重试。
+
+`initialize.capabilities.sessionArchiving` 表示支持会话归档。`session/list` 省略 `archived` 时列出全部会话，传 `true` 或 `false` 可按状态筛选。会话对象省略 `archived` 字段时视为 `false`。`session/setArchived` 可以重试；它只更新显示状态，任务、历史和会话 ID 都可照常使用。翻页期间应沿用相同筛选条件。归档状态变动后，从 `after:0` 重拉列表即可反映当前状态。
 
 客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和正文的 UTF-8 字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。
 

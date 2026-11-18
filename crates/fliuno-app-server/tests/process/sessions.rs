@@ -195,3 +195,116 @@ fn create_request_is_atomic_and_retries_after_a_lost_connection() {
     }
     fs::remove_dir(root).unwrap();
 }
+
+#[test]
+fn session_archive_filter_survives_migration_and_keeps_row_cursors() {
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("fliuno-session-archive-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let workspace_id = &workspace["id"];
+    let list = json!({"workspaceId":workspace_id});
+    let request = json!({"workspaceId":workspace_id,"clientRequestId":"session-archive"});
+    let legacy = peer.call("session/create", request.clone());
+    let legacy_id = &legacy["id"];
+    let middle = peer.call("session/create", list.clone());
+    let last = peer.call("session/create", list.clone());
+    let first_page = peer.call(
+        "session/list",
+        json!({"workspaceId":workspace_id,"limit":1}),
+    );
+    drop(peer);
+    {
+        let old = rusqlite::Connection::open(&db).unwrap();
+        old.execute_batch("DROP INDEX sessions_workspace_archive; PRAGMA user_version=18;")
+            .unwrap();
+    }
+
+    let mut peer = Peer::start(&db);
+    let active = json!({"workspaceId":workspace_id,"archived":false});
+    let archived = json!({"workspaceId":workspace_id,"archived":true});
+    assert_eq!(
+        peer.call("session/list", active.clone())["items"],
+        json!([legacy, middle, last])
+    );
+    assert_eq!(
+        peer.call("session/list", archived.clone())["items"],
+        json!([])
+    );
+
+    let set = json!({"sessionId":legacy_id,"archived":true});
+    let saved = peer.call("session/setArchived", set.clone());
+    assert_eq!(saved["archived"], true);
+    assert_eq!(peer.call("session/setArchived", set), saved);
+    peer.call(
+        "session/setArchived",
+        json!({"sessionId":last["id"],"archived":true}),
+    );
+    let archived_page = peer.call(
+        "session/list",
+        json!({"workspaceId":workspace_id,"archived":true,"limit":1}),
+    );
+    assert_eq!(archived_page["items"], json!([saved]));
+    assert_eq!(archived_page["nextAfter"], first_page["nextAfter"]);
+    assert_eq!(archived_page["hasMore"], true);
+    let work = peer.call(
+        "task/start",
+        json!({"sessionId":legacy_id,"input":"Continue archived session"}),
+    );
+    peer.wait_for_status(work["id"].as_str().unwrap(), "waiting_approval");
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    assert_eq!(peer.call("session/create", request), saved);
+    assert_eq!(
+        peer.call("session/get", json!({"sessionId":legacy_id})),
+        saved
+    );
+    let task = peer.call("task/get", json!({"taskId":work["id"]}));
+    assert_eq!(task["status"], "waiting_approval");
+    assert_eq!(
+        peer.call("session/list", active.clone())["items"],
+        json!([middle])
+    );
+    assert_eq!(
+        peer.call("session/list", list)["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    let remaining = peer.call(
+        "session/list",
+        json!({
+            "workspaceId":workspace_id,"archived":true,"after":archived_page["nextAfter"],"limit":1
+        }),
+    );
+    assert_eq!(remaining["items"][0]["id"], last["id"]);
+    assert_eq!(remaining["hasMore"], false);
+    let restored = peer.call(
+        "session/setArchived",
+        json!({"sessionId":legacy_id,"archived":false}),
+    );
+    assert_eq!(restored, legacy);
+    assert_eq!(
+        peer.call("session/list", active)["items"],
+        json!([legacy, middle])
+    );
+    assert_eq!(
+        peer.request(
+            "session/setArchived",
+            json!({"sessionId":"missing","archived":true})
+        )["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request("session/setArchived", json!({"sessionId":legacy_id}))["error"]["code"],
+        -32602
+    );
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

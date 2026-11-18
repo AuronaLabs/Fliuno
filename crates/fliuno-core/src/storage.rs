@@ -13,6 +13,7 @@ use std::{
     path::Path,
 };
 
+pub(crate) const SCHEMA_VERSION: u32 = 19;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 impl Kernel {
@@ -85,7 +86,7 @@ impl Kernel {
         lock: Option<File>,
     ) -> Result<Self> {
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 18 {
+        if version > SCHEMA_VERSION {
             return Err(Error::Conflict(
                 "database schema is newer than this binary".into(),
             ));
@@ -184,6 +185,9 @@ impl Kernel {
         }
         if version < 18 {
             task_summaries::migrate(&mut db)?;
+        }
+        if version < 19 {
+            sessions::migrate_archive_index(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

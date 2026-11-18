@@ -294,6 +294,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["sessionArchiving"] = json!(true);
             capabilities["artifactByteReads"] = json!(true);
             capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
             return Ok(json!({
@@ -400,10 +401,12 @@ impl RpcServer {
             }
             "session/list" => {
                 let p: SessionListParams = decode(params)?;
-                json!(
-                    self.kernel()?
-                        .list_sessions(&p.workspace_id, p.after, p.limit)?
-                )
+                json!(self.kernel()?.list_sessions_filtered(
+                    &p.workspace_id,
+                    p.after,
+                    p.limit,
+                    p.archived
+                )?)
             }
             "task/list" => {
                 let p: TaskListParams = decode(params)?;
@@ -431,6 +434,13 @@ impl RpcServer {
             "session/rename" => {
                 let p: SessionRenameParams = decode(params)?;
                 json!(self.kernel()?.rename_session(&p.session_id, &p.title)?)
+            }
+            "session/setArchived" => {
+                let p: SessionSetArchivedParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .set_session_archived(&p.session_id, p.archived)?
+                )
             }
             "session/context" => {
                 let p: SessionContextParams = decode(params)?;

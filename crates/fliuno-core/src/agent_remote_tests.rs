@@ -287,6 +287,6 @@ fn version_six_agent_snapshots_default_remote_evidence_without_replaying() {
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
             .unwrap(),
-        18
+        crate::storage::SCHEMA_VERSION
     );
 }

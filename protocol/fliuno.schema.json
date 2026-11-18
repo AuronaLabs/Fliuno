@@ -120,6 +120,24 @@
         "title"
       ]
     },
+    "session/setArchived": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionSetArchivedParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "archived"
+      ]
+    },
     "session/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "SessionListParams",
@@ -127,6 +145,13 @@
       "properties": {
         "workspaceId": {
           "type": "string"
+        },
+        "archived": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
         },
         "after": {
           "type": "integer",
@@ -977,6 +1002,9 @@
           ],
           "minLength": 1,
           "maxLength": 120
+        },
+        "archived": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,

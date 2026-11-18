@@ -20,6 +20,16 @@ impl Kernel {
         after: u64,
         limit: u32,
     ) -> Result<ObjectPage<Session>> {
+        self.list_sessions_filtered(workspace, after, limit, None)
+    }
+
+    pub fn list_sessions_filtered(
+        &self,
+        workspace: &str,
+        after: u64,
+        limit: u32,
+        archived: Option<bool>,
+    ) -> Result<ObjectPage<Session>> {
         let exists: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
             [workspace],
@@ -28,7 +38,22 @@ impl Kernel {
         if !exists {
             return Err(Error::NotFound("workspace".into()));
         }
-        self.object_page("SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3",Some(workspace),after,limit)
+        // Filtered reads use sessions_workspace_archive, including the rowid range.
+        let sql = match archived {
+            None => {
+                "SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid>?2
+                 ORDER BY rowid LIMIT ?3"
+            }
+            Some(true) => {
+                "SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid>?2
+                 AND COALESCE(json_extract(data,'$.archived'),0)=1 ORDER BY rowid LIMIT ?3"
+            }
+            Some(false) => {
+                "SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid>?2
+                 AND COALESCE(json_extract(data,'$.archived'),0)=0 ORDER BY rowid LIMIT ?3"
+            }
+        };
+        self.object_page(sql, Some(workspace), after, limit)
     }
 
     pub fn list_tasks(&self, session: &str, after: u64, limit: u32) -> Result<ObjectPage<Task>> {

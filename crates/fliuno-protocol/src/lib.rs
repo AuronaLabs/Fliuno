@@ -543,6 +543,8 @@ pub struct ListParams {
 pub struct SessionListParams {
     pub workspace_id: String,
     #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
     pub after: u64,
     #[serde(default = "default_limit")]
     pub limit: u32,
@@ -656,6 +658,7 @@ pub fn schema_bundle() -> Value {
         "session/create": schemars::schema_for!(SessionCreateParams),
         "session/get": schemars::schema_for!(SessionIdParams),
         "session/rename": schemars::schema_for!(SessionRenameParams),
+        "session/setArchived": schemars::schema_for!(SessionSetArchivedParams),
         "session/list": schemars::schema_for!(SessionListParams),
         "session/context": schemars::schema_for!(SessionContextParams),
         "terminal/list": schemars::schema_for!(TerminalListParams),

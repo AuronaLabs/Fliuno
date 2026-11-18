@@ -1,4 +1,4 @@
-//! Wire types for naming and retrieving a workspace session.
+//! Wire types for organizing and retrieving workspace sessions.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +12,8 @@ pub struct Session {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1, max = MAX_SESSION_TITLE_CHARS))]
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -38,4 +40,11 @@ pub struct SessionRenameParams {
     pub session_id: String,
     #[schemars(length(min = 1, max = MAX_SESSION_TITLE_CHARS))]
     pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionSetArchivedParams {
+    pub session_id: String,
+    pub archived: bool,
 }

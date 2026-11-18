@@ -1,4 +1,4 @@
-//! Session names are display metadata. Updates preserve session identity and row order.
+//! Session metadata updates preserve identity and row order.
 use super::*;
 use crate::task::validate_key;
 
@@ -13,6 +13,17 @@ pub(super) fn migrate_requests(db: &mut Connection) -> Result<()> {
             PRIMARY KEY(workspace_id,request_key)
         ) WITHOUT ROWID;
         PRAGMA user_version=17;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub(super) fn migrate_archive_index(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS sessions_workspace_archive
+         ON sessions(workspace_id, COALESCE(json_extract(data,'$.archived'),0));
+         PRAGMA user_version=19;",
     )?;
     tx.commit()?;
     Ok(())
@@ -79,6 +90,7 @@ impl Kernel {
             id: new_id("session"),
             workspace_id: workspace_id.into(),
             title: title.map(str::to_owned),
+            archived: false,
         };
         let tx = self.db.transaction()?;
         tx.execute(
@@ -117,10 +129,24 @@ impl Kernel {
             return Ok(session);
         }
         session.title = Some(title.into());
+        self.save_session(&session)?;
+        Ok(session)
+    }
+
+    pub fn set_session_archived(&mut self, id: &str, archived: bool) -> Result<Session> {
+        let mut session = self.get_session(id)?;
+        if session.archived != archived {
+            session.archived = archived;
+            self.save_session(&session)?;
+        }
+        Ok(session)
+    }
+
+    fn save_session(&self, session: &Session) -> Result<()> {
         self.db.execute(
             "UPDATE sessions SET data=?2 WHERE id=?1",
-            params![id, serde_json::to_string(&session)?],
+            params![session.id, serde_json::to_string(session)?],
         )?;
-        Ok(session)
+        Ok(())
     }
 }
