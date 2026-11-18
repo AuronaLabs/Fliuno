@@ -373,10 +373,12 @@ fn nonzero_exit_is_a_known_result_and_timeout_keeps_partial_evidence_without_ret
 fn unconsumed_stdin_can_be_cancelled_and_cancelled_tasks_reject_late_results() {
     let directory = Directory::new();
     let marker = directory.0.join("started");
+    let program = config(ProcessIsolation::TrustedHost);
+    let startup_budget = Duration::from_millis(program.timeout_ms) + Duration::from_secs(2);
     let (mut kernel, session) = setup(
         &directory,
         json!({"args":["hang-file",marker],"stdin":"x".repeat(256*1024)}),
-        config(ProcessIsolation::TrustedHost),
+        program,
     );
     let task = kernel
         .start_task(&session.id, "cancel running command")
@@ -398,9 +400,16 @@ fn unconsumed_stdin_can_be_cancelled_and_cancelled_tasks_reject_late_results() {
         let response = execution.execute(&worker_cancel);
         (execution, response)
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + startup_budget;
     while !marker.exists() {
-        assert!(Instant::now() < deadline, "process did not start");
+        if worker.is_finished() || Instant::now() >= deadline {
+            cancellation.cancel();
+            let (_, response) = worker.join().unwrap();
+            match response {
+                Err(error) => panic!("process did not reach the cancellation checkpoint: {error}"),
+                Ok(_) => panic!("process exited successfully before the cancellation checkpoint"),
+            }
+        }
         thread::sleep(Duration::from_millis(10));
     }
     kernel.cancel_task(&task.id).unwrap();
