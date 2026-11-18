@@ -1,4 +1,4 @@
-//! Bounded newline framing and ownership of isolated child processes.
+//! Bounded newline framing and ownership of native ACP peers.
 use agent_client_protocol as acp;
 use futures::{SinkExt, StreamExt};
 use std::{io, path::PathBuf};
@@ -22,23 +22,33 @@ pub(crate) fn lines(
     )
 }
 
-pub(crate) struct Sandbox {
-    child: fliuno_sandbox::Child,
+pub(crate) enum Child {
+    Isolated(fliuno_sandbox::Child),
+    #[cfg(windows)]
+    Trusted(fliuno_sandbox::HostChild),
+}
+
+pub(crate) struct NativePeer {
+    child: Child,
     stderr: Option<JoinHandle<io::Result<u64>>>,
 }
 
-impl Sandbox {
+impl NativePeer {
     pub fn new(
-        child: fliuno_sandbox::Child,
+        child: Child,
         pipes: fliuno_sandbox::AsyncStdio,
     ) -> (
         Self,
         fliuno_sandbox::PipeReader,
         fliuno_sandbox::PipeWriter,
-        PathBuf,
+        Option<PathBuf>,
     ) {
         let mut stderr = pipes.stderr;
-        let directory = child.private_directory().to_owned();
+        let directory = match &child {
+            Child::Isolated(child) => Some(child.private_directory().to_owned()),
+            #[cfg(windows)]
+            Child::Trusted(_) => None,
+        };
         let stderr =
             tokio::spawn(async move { tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await });
         (
@@ -53,11 +63,15 @@ impl Sandbox {
     }
 }
 
-impl Drop for Sandbox {
+impl Drop for NativePeer {
     fn drop(&mut self) {
         // Stderr is reactor-backed and contains untrusted logs. Abort its reader
         // without a blocking join, even if the native stop request fails.
-        let _ = self.child.kill();
+        let _ = match &mut self.child {
+            Child::Isolated(child) => child.kill(),
+            #[cfg(windows)]
+            Child::Trusted(child) => child.kill(),
+        };
         if let Some(stderr) = self.stderr.take() {
             stderr.abort();
         }

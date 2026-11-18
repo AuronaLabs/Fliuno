@@ -9,6 +9,10 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+#[cfg(feature = "test-fixtures")]
+#[path = "fixture/persistent.rs"]
+mod persistent;
+
 /// Opt-in, deterministic stdio peer for process contract tests in other crates.
 #[cfg(feature = "test-fixtures")]
 #[allow(dead_code)] // Also compiled directly into the transport-only tests.
@@ -19,7 +23,11 @@ pub fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
         .worker_threads(2)
         .enable_all()
         .build()?;
-    runtime.block_on(agent().connect_to(acp::Stdio::new()))?;
+    if std::env::args().nth(1).as_deref() == Some("--persistent-fixture") {
+        runtime.block_on(persistent::agent().connect_to(acp::Stdio::new()))?;
+    } else {
+        runtime.block_on(agent().connect_to(acp::Stdio::new()))?;
+    }
     Ok(())
 }
 

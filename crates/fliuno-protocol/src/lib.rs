@@ -203,6 +203,17 @@ pub struct RemoteContinuation {
     pub submission_started: bool,
 }
 
+/// An explicit new turn on an existing Agent session. Its ID comes from a
+/// settled task under the same registration and local session.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentSessionContinuation {
+    pub source_task_id: String,
+    pub agent_session_id: String,
+    /// True once the next prompt may have been dispatched.
+    pub submission_started: bool,
+}
+
 /// A point-in-time check, separate from the original run's recorded outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
@@ -301,6 +312,8 @@ pub struct Task {
     pub agent_run: Option<AgentRun>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_continuation: Option<RemoteContinuation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_session_continuation: Option<AgentSessionContinuation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -539,6 +552,14 @@ pub struct TaskStartParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskContinueRemoteParams {
+    pub task_id: String,
+    pub input: String,
+    pub client_request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskContinueAgentSessionParams {
     pub task_id: String,
     pub input: String,
     pub client_request_id: String,

@@ -117,12 +117,38 @@ impl Client {
                 Error::OutcomeUnknown
             })?
             .map_err(|_| Error::Transport)?;
-        let (sandbox, input, output, directory) = transport::Sandbox::new(child, pipes);
+        Self::connect_native(transport::Child::Isolated(child), pipes, options).await
+    }
+
+    /// Connect to an explicitly trusted Windows program under the current
+    /// OS user's authority. The driver owns its Job and bounded stdio.
+    #[cfg(windows)]
+    pub async fn connect_trusted_host(
+        spec: fliuno_sandbox::HostLaunchSpec,
+        options: ClientOptions,
+    ) -> Result<(Self, Events)> {
+        options.validate()?;
+        let (child, pipes) = tokio::time::timeout(
+            options.request_timeout,
+            fliuno_sandbox::spawn_host_async(spec),
+        )
+        .await
+        .map_err(|_| Error::OutcomeUnknown)?
+        .map_err(|_| Error::Transport)?;
+        Self::connect_native(transport::Child::Trusted(child), pipes, options).await
+    }
+
+    async fn connect_native(
+        child: transport::Child,
+        pipes: fliuno_sandbox::AsyncStdio,
+        options: ClientOptions,
+    ) -> Result<(Self, Events)> {
+        let (peer, input, output, directory) = transport::NativePeer::new(child, pipes);
         Self::connect_inner(
             transport::lines(input, output),
             options,
-            Some(sandbox),
-            Some(directory),
+            Some(peer),
+            directory,
         )
         .await
     }
@@ -130,7 +156,7 @@ impl Client {
     async fn connect_inner(
         transport: impl ConnectTo<acp::Client>,
         options: ClientOptions,
-        sandbox: Option<transport::Sandbox>,
+        peer: Option<transport::NativePeer>,
         directory: Option<PathBuf>,
     ) -> Result<(Self, Events)> {
         options.validate()?;
@@ -280,8 +306,8 @@ impl Client {
             }
             // Keep the protocol future alive until its process is killed, so a
             // stalled peer cannot keep a blocking pipe worker alive on shutdown.
-            if let Some(sandbox) = sandbox {
-                let _ = tokio::task::spawn_blocking(move || drop(sandbox)).await;
+            if let Some(peer) = peer {
+                let _ = tokio::task::spawn_blocking(move || drop(peer)).await;
             }
             worker.fail(Error::Closed);
         });

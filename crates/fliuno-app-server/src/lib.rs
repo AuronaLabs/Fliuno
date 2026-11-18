@@ -329,6 +329,8 @@ impl RpcServer {
             capabilities["taskSummaryById"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["workspaceTaskSummaries"] = json!(true);
+            capabilities["agentSessionContinuation"] =
+                json!(self.kernel()?.agent_session_continuation_supported());
             capabilities["pendingApprovalInbox"] = json!(true);
             capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
@@ -525,6 +527,19 @@ impl RpcServer {
             "task/continueRemote" => {
                 let p: TaskContinueRemoteParams = decode(params)?;
                 let (task, created) = self.kernel()?.create_remote_continuation(
+                    &p.task_id,
+                    &p.input,
+                    &p.client_request_id,
+                )?;
+                json!(if created {
+                    self.schedule_or_fail(task)?
+                } else {
+                    task
+                })
+            }
+            "task/continueAgentSession" => {
+                let p: TaskContinueAgentSessionParams = decode(params)?;
+                let (task, created) = self.kernel()?.create_agent_session_continuation(
                     &p.task_id,
                     &p.input,
                     &p.client_request_id,

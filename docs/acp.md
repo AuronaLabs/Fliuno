@@ -101,6 +101,14 @@ cargo run -p fliuno-acp --example isolated -- E:/Projects/Fliuno/target/debug/fl
 
 新增内核测试覆盖事务写入失败时不交付授权、交付失败后的持久审计、恢复/取消/迟到结果、幂等后端绑定和资源预算。Windows 应用进程测试从真实 JSON-RPC 启动真实隔离 ACP Agent，覆盖审批到完成、重开数据库、等待审批时退出服务、16 项并行权限、权限到期、提示超时与取消。
 
+## 跨重启续接 Agent 会话
+
+Windows 上可以在 `--acp-config` 中为可信 Agent 显式选择 `isolation: "trusted_host"`，并配置绝对且已存在的 `cwd`。这个 Agent 以当前操作系统用户的权限运行。Windows Job 在任务、进程或 app-server 结束时回收进程树。`cwd` 固定为主机配置的目录，Agent 自己保管持久会话状态。`workspaceAccess`、`assets`、资源限制和 `linuxCgroupParent` 属于隔离模式，可信模式会拒绝这些配置。
+
+`task/continueAgentSession` 的参数是 `taskId`、`input` 和 `clientRequestId`。`taskId` 指向成功结束的上一轮。Fliuno 从该任务取出 Agent 会话 ID 和原来的注册身份，把下一轮留在原来的 Fliuno 会话中。每轮最多成功取得一次续接名额。同一个请求键重试只返回原任务。Agent 必须在握手中声明 `sessionCapabilities.resume`，并能在固定目录重新打开该会话。
+
+收到 `session/resume` 确认后，内核先保存 `agentSessionContinuation.submissionStarted`，再发送新 prompt。Agent 使用自己的会话历史，Fliuno 只发送本轮输入。Agent 拒绝恢复时，本次任务失败并释放上一轮的续接名额。提交之后发生断连、取消或重启时，名额保留，结果可能未知。内核不会再次提交该轮。`initialize.capabilities.agentSessionContinuation` 指示当前是否注册了此类后端，具体 Agent 在握手时确认支持。
+
 ## 受控工作区文件代理
 
 `workspaceAccess:true` 在容器私有目录中创建空的 `workspace` 子目录并用作 ACP cwd。它只充当虚拟路径前缀；不复制宿主文件、不授予宿主目录 ACL。只接受此前缀下的普通路径组件，转为工作区相对路径后再经注册工具、策略与 `cap-std` 目录能力校验；Agent 直接进行 OS 文件读取仍不会得到宿主内容。
@@ -120,7 +128,7 @@ python examples/agent_demo.py --workspace --deny
 
 排队任务的 `backendAuthority` 在创建时绑定完整 ACP 注册，包括程序内容、参数、实际环境、文件代理开关及预算。重启后相同 Agent ID 的配置变化会拒绝启动旧任务；原生程序在暂存复制时还会再次核验内容 pin。旧 v7 任务不补造注册摘要，详见[注册身份](authority.md)。
 
-尚未提供 Agent 认证流程、app-server 层持久 ACP 恢复、模式和模型切换、多模态输入、终端或网络代理、ACP 服务端、draft v2 或与真实商业 Agent 的互操作验收。文件代理只覆盖 UTF-8 文本，不支持二进制、自动创建父目录或附加 session roots。不能将当前契约测试描述为完整 ACP 功能兼容认证。
+尚未提供 Agent 认证流程、隔离模式下的持久会话恢复、模式和模型切换、多模态输入、终端或网络代理、ACP 服务端、draft v2 或与真实商业 Agent 的互操作验收。文件代理只覆盖 UTF-8 文本，不支持二进制、自动创建父目录或附加 session roots。不能将当前契约测试描述为完整 ACP 功能兼容认证。
 
 官方来源：
 

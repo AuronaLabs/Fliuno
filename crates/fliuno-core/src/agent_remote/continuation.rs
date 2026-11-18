@@ -75,6 +75,7 @@ impl Kernel {
             backend: source.backend,
             backend_authority: Some(authority),
             agent_run: None,
+            agent_session_continuation: None,
             remote_continuation: Some(RemoteContinuation {
                 source_task_id: source_task_id.into(),
                 expected,

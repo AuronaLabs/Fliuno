@@ -642,6 +642,28 @@
         "clientRequestId"
       ]
     },
+    "task/continueAgentSession": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskContinueAgentSessionParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "input",
+        "clientRequestId"
+      ]
+    },
     "task/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskListParams",
@@ -1356,6 +1378,16 @@
               "type": "null"
             }
           ]
+        },
+        "agentSessionContinuation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentSessionContinuation"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -2046,6 +2078,28 @@
           "required": [
             "sourceTaskId",
             "expected",
+            "submissionStarted"
+          ]
+        },
+        "AgentSessionContinuation": {
+          "description": "An explicit new turn on an existing Agent session. Its ID comes from a\nsettled task under the same registration and local session.",
+          "type": "object",
+          "properties": {
+            "sourceTaskId": {
+              "type": "string"
+            },
+            "agentSessionId": {
+              "type": "string"
+            },
+            "submissionStarted": {
+              "description": "True once the next prompt may have been dispatched.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sourceTaskId",
+            "agentSessionId",
             "submissionStarted"
           ]
         }

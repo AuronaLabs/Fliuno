@@ -7,6 +7,9 @@ use tokio::sync::mpsc;
 #[path = "agent_tests.rs"]
 mod tests;
 
+#[path = "agent_session.rs"]
+mod session;
+
 pub(crate) const MAX_RECORDED_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_UPDATE_BYTES: usize = 256 * 1024;
@@ -21,6 +24,7 @@ pub struct AgentRequest {
     pub context: Option<TaskContext>,
     pub workspace: Workspace,
     pub remote_continuation: Option<RemoteContinuation>,
+    pub agent_session_continuation: Option<AgentSessionContinuation>,
 }
 
 pub enum AgentCommand {
@@ -90,6 +94,9 @@ pub trait AgentBackend: Send + Sync {
         false
     }
     fn supports_remote_continuation(&self) -> bool {
+        false
+    }
+    fn supports_agent_session_continuation(&self) -> bool {
         false
     }
     /// Read the current remote task using the frozen host registration. This
@@ -258,6 +265,7 @@ impl Kernel {
                 context: task.context,
                 workspace,
                 remote_continuation: task.remote_continuation,
+                agent_session_continuation: task.agent_session_continuation,
             },
             backend,
             commands,
@@ -305,6 +313,17 @@ impl Kernel {
             AgentObservation::SessionOpened(session_id) => {
                 if run.session_id.is_some() || session_id.is_empty() || session_id.len() > 256 {
                     return Err(Error::Conflict("invalid or duplicate agent session".into()));
+                }
+                if let Some(continuation) = &mut task.agent_session_continuation {
+                    if continuation.agent_session_id != session_id
+                        || continuation.submission_started
+                    {
+                        return Err(Error::Conflict(
+                            "agent resumed an unexpected session".into(),
+                        ));
+                    }
+                    // The app adapter cannot prompt until this commit succeeds.
+                    continuation.submission_started = true;
                 }
                 run.session_id = Some(session_id.clone());
                 EventKind::AgentSessionOpened {

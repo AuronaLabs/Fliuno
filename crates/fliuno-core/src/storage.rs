@@ -13,7 +13,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 24;
+pub(crate) const SCHEMA_VERSION: u32 = 25;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -218,6 +218,17 @@ impl Kernel {
         if version < 24 {
             task_summaries::migrate_workspace_scope(&mut db)?;
         }
+        if version < 25 {
+            db.execute_batch(
+                "BEGIN;
+                CREATE TABLE IF NOT EXISTS agent_session_continuation_claims(
+                    source_task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+                    attempt_task_id TEXT NOT NULL REFERENCES tasks(id)
+                ) WITHOUT ROWID;
+                PRAGMA user_version=25;
+                COMMIT;",
+            )?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         let mut kernel = Self {
@@ -323,6 +334,22 @@ impl Kernel {
             } else if !running && !continuation.submission_started {
                 tx.execute("DELETE FROM remote_continuation_claims WHERE source_task_id=?1 AND attempt_task_id=?2",
                     params![continuation.source_task_id, task.id])?;
+            }
+        }
+        if let Some(continuation) = &task.agent_session_continuation {
+            if key.is_some() {
+                let claimed = tx.prepare_cached(
+                    "INSERT INTO agent_session_continuation_claims VALUES(?1,?2) ON CONFLICT(source_task_id) DO NOTHING",
+                )?.execute(params![continuation.source_task_id, task.id])?;
+                if claimed == 0 {
+                    return Err(Error::Conflict(
+                        "this agent turn already has a continuation".into(),
+                    ));
+                }
+            } else if !running && !continuation.submission_started {
+                tx.prepare_cached(
+                    "DELETE FROM agent_session_continuation_claims WHERE source_task_id=?1 AND attempt_task_id=?2",
+                )?.execute(params![continuation.source_task_id, task.id])?;
             }
         }
         if let Some(key) = key {

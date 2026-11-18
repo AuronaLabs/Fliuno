@@ -16,6 +16,8 @@ use std::{
 mod authority;
 #[path = "acp_process/context.rs"]
 mod context;
+#[path = "acp_process/persistence.rs"]
+mod persistence;
 
 struct Directory(PathBuf);
 impl Directory {

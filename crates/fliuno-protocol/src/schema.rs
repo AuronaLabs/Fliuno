@@ -34,6 +34,7 @@ pub fn schema_bundle() -> Value {
         "terminal/archives" => schema::<TerminalArchivesParams>(),
         "task/start" => schema::<TaskStartParams>(),
         "task/continueRemote" => schema::<TaskContinueRemoteParams>(),
+        "task/continueAgentSession" => schema::<TaskContinueAgentSessionParams>(),
         "task/list" => schema::<TaskListParams>(),
         "task/listSummaries" => schema::<TaskSummaryListParams>(),
         "task/listWorkspaceSummaries" => schema::<WorkspaceTaskSummaryListParams>(),

@@ -1,4 +1,4 @@
-use fliuno_acp::{Client, ClientOptions, Event, PermissionDecision, schema::*};
+use fliuno_acp::{Client, ClientOptions, Event, Events, PermissionDecision, schema::*};
 use fliuno_core::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
     CancellationToken, Kernel,
@@ -27,8 +27,10 @@ pub struct AcpAgentConfig {
     pub command: PathBuf,
     #[serde(default)]
     pub args: Vec<String>,
-    /// Explicit opt-in to the only supported launch boundary; no host fallback.
     pub isolation: Isolation,
+    /// Fixed workspace of a trusted Agent's own state store and process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
     /// Environment names only. Values come from the trusted host environment.
     #[serde(default)]
     pub env_allow: Vec<String>,
@@ -52,6 +54,7 @@ pub struct AcpAgentConfig {
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {
     NativeScratch,
+    TrustedHost,
 }
 fn default_request_ms() -> u64 {
     30_000
@@ -78,6 +81,7 @@ struct AcpBackend {
     authority: String,
     id: String,
     launch: fliuno_sandbox::LaunchSpec,
+    trusted_cwd: Option<PathBuf>,
     options: ClientOptions,
 }
 
@@ -141,14 +145,45 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
                 .map_err(|_| "ACP SystemRoot must be available and Unicode at registration")?;
             env.insert("SYSTEMROOT".into(), root);
         }
+        if cfg!(windows)
+            && !config
+                .command
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+        {
+            return Err("ACP on Windows requires an explicit native .exe".into());
+        }
+        let trusted_cwd = match config.isolation {
+            Isolation::NativeScratch if config.cwd.is_none() => None,
+            Isolation::NativeScratch => return Err("ACP cwd requires trusted_host".into()),
+            Isolation::TrustedHost => {
+                if !cfg!(windows) {
+                    return Err("ACP trusted_host is supported on Windows".into());
+                }
+                if config.workspace_access
+                    || !config.assets.is_empty()
+                    || !config.resources.is_empty()
+                    || config.linux_cgroup_parent.is_some()
+                {
+                    return Err("ACP trusted_host does not accept sandbox options".into());
+                }
+                let cwd = config
+                    .cwd
+                    .as_ref()
+                    .filter(|path| path.is_absolute() && path.is_dir())
+                    .ok_or("ACP trusted_host requires an absolute existing cwd")?;
+                Some(cwd.canonicalize().map_err(|_| "cannot resolve ACP cwd")?)
+            }
+        };
         let executable_digest = fliuno_sandbox::program_digest(&config.command)
             .map_err(|_| "cannot hash ACP executable")?;
-        let authority = fliuno_core::authority_digest(
-            "acp.registration.v1",
-            &serde_json::json!({
-                "configuration":config, "environment":env,"executableSha256":executable_digest,
-            }),
-        );
+        let mut identity = serde_json::json!({
+            "configuration":config, "environment":env,"executableSha256":executable_digest,
+        });
+        if let Some(cwd) = &trusted_cwd {
+            identity["resolvedCwd"] = serde_json::json!(cwd);
+        }
+        let authority = fliuno_core::authority_digest("acp.registration.v1", &identity);
         let launch = fliuno_sandbox::LaunchSpec {
             program_sha256: Some(executable_digest),
             assets: config.assets,
@@ -165,6 +200,7 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             authority,
             id: config.id,
             launch,
+            trusted_cwd,
             options: ClientOptions {
                 request_timeout: Duration::from_millis(config.request_timeout_ms),
                 prompt_timeout: Duration::from_millis(config.prompt_timeout_ms),
@@ -190,9 +226,18 @@ impl AgentBackend for AcpBackend {
         AgentSpec {
             id: self.id.clone(),
             protocol: "acp_v1".into(),
-            isolation: "native_scratch".into(),
+            isolation: if self.trusted_cwd.is_some() {
+                "trusted_host"
+            } else {
+                "native_scratch"
+            }
+            .into(),
             workspace_access: self.options.filesystem,
         }
+    }
+
+    fn supports_agent_session_continuation(&self) -> bool {
+        self.trusted_cwd.is_some()
     }
 
     fn execute(
@@ -217,6 +262,38 @@ impl AgentBackend for AcpBackend {
 }
 
 impl AcpBackend {
+    async fn connect(&self) -> Result<(Client, Events), fliuno_acp::Error> {
+        #[cfg(windows)]
+        if let Some(cwd) = &self.trusted_cwd {
+            let program = self.launch.program.clone();
+            let expected = self.launch.program_sha256.clone();
+            let actual = tokio::time::timeout(
+                self.options.request_timeout,
+                tokio::task::spawn_blocking(move || fliuno_sandbox::program_digest(&program)),
+            )
+            .await
+            .map_err(|_| fliuno_acp::Error::OutcomeUnknown)?
+            .map_err(|_| fliuno_acp::Error::Transport)?
+            .map_err(|_| fliuno_acp::Error::Transport)?;
+            if Some(actual) != expected {
+                return Err(fliuno_acp::Error::InvalidInput(
+                    "trusted ACP executable changed",
+                ));
+            }
+            return Client::connect_trusted_host(
+                fliuno_sandbox::HostLaunchSpec {
+                    program: self.launch.program.clone(),
+                    args: self.launch.args.clone(),
+                    env: self.launch.env.clone(),
+                    cwd: cwd.clone(),
+                },
+                self.options.clone(),
+            )
+            .await;
+        }
+        Client::connect_isolated(self.launch.clone(), self.options.clone()).await
+    }
+
     async fn run(
         &self,
         request: &AgentRequest,
@@ -227,7 +304,7 @@ impl AcpBackend {
         let (client, mut events) = tokio::select! {
             biased;
             _ = cancellation.cancelled() => return Err(()),
-            result = Client::connect_isolated(self.launch.clone(), self.options.clone()) => result.map_err(|error| {
+            result = self.connect() => result.map_err(|error| {
                 // ACP errors expose only fixed local text and numeric remote
                 // codes, never peer messages, credentials or prompt content.
                 eprintln!("fliuno: ACP initialization failed: {error}");
@@ -236,7 +313,9 @@ impl AcpBackend {
         let operations_cancel = cancellation.child_token();
         let _operations_guard = operations_cancel.clone().drop_guard();
         let result = async {
-            let cwd = if self.options.filesystem {
+            let cwd = if let Some(cwd) = &self.trusted_cwd {
+                cwd.clone()
+            } else if self.options.filesystem {
                 let cwd = client.private_directory().ok_or(())?.join("workspace");
                 tokio::fs::create_dir(&cwd).await.map_err(|_| ())?;
                 cwd
@@ -244,9 +323,25 @@ impl AcpBackend {
             let session = tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => return Err(()),
-                result = client.new_session(&cwd) => result.map_err(|error| {
-                    eprintln!("fliuno: ACP session setup failed: {error}");
-                })?.session_id,
+                result = async {
+                    if let Some(continuation) = &request.agent_session_continuation {
+                        let id = SessionId::new(continuation.agent_session_id.clone());
+                        client.resume_session(&id, &cwd).await?;
+                        Ok(id)
+                    } else {
+                        client.new_session(&cwd).await.map(|session| session.session_id)
+                    }
+                } => match result {
+                    Ok(id) => id,
+                    Err(error) => {
+                        eprintln!("fliuno: ACP session setup failed: {error}");
+                        if request.agent_session_continuation.is_some() && matches!(error,
+                            fliuno_acp::Error::Unsupported(_) | fliuno_acp::Error::Remote(_) | fliuno_acp::Error::InvalidInput(_)) {
+                            return Ok(AgentOutcome { stop_reason: Some(AgentStopReason::Failed), outcome_unknown: false });
+                        }
+                        return Err(());
+                    }
+                },
             };
             let mut broker = crate::filesystem::WorkspaceBroker::new(self.options.filesystem, request.workspace.root.clone().into(), cwd, operations_cancel.clone());
             observer.observe(AgentObservation::SessionOpened(session.to_string())).map_err(|_| ())?;
@@ -289,7 +384,7 @@ impl AcpBackend {
                             if session_id != session { return Err(()); }
                             broker.closed(id, observer)?;
                         }
-                        // This runner opens a fresh session for each task.
+                        // This runner accepts live updates only. Resume does not replay history.
                         Event::SessionHistory(_) => return Err(()),
                         Event::Update(update) => {
                             if update.session_id != session { return Err(()); }

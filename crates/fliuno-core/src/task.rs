@@ -65,6 +65,7 @@ impl Kernel {
                     && task.backend == backend
                     && same_context
                     && task.remote_continuation.is_none()
+                    && task.agent_session_continuation.is_none()
                 {
                     Ok((task, false))
                 } else {
@@ -99,6 +100,7 @@ impl Kernel {
             backend_authority,
             agent_run: None,
             remote_continuation: None,
+            agent_session_continuation: None,
         };
         self.commit_with_request(&task, &[EventKind::TaskStarted], &[], key)?;
         Ok((task, true))
