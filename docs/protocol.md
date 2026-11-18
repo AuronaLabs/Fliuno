@@ -27,6 +27,7 @@
 | `session/context` | `{sessionId,options?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | TaskContext；预览当前历史选择 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/get` | `{taskId}` | Task |
+| `task/getSummary` | `{taskId}` | 单条 `TaskSummary`，可以轻量轮询任务状态 |
 | `task/checkRemote` | `{taskId}` | `{checkId}`；后台只读核对，结果经事件返回，见 [A2A](a2a.md#显式核对远端状态) |
 | `task/continueRemote` | `{taskId,input,clientRequestId}` | 独立的本机 Task；后台复核后向原远端任务或上下文提交，见 [A2A](a2a.md#显式续接远端任务) |
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |
@@ -63,6 +64,8 @@
 客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和正文的 UTF-8 字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。
 
 客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节后，再按 UTF-8 解码正文，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。
+
+`initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
 
 `initialize.capabilities.pendingApprovalInbox` 表示客户端可以读取待审批列表。省略两个范围参数时列出整个数据库的待审批项，传 `workspaceId` 或 `sessionId` 可缩小范围，两者只能选一个。每页最多 100 项，按加入列表的顺序返回。可沿用同一范围的 `nextAfter` 翻页或在重连后读取新项。从 `after:0` 读取可以重新核对整份当前列表。
 

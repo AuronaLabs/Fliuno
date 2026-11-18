@@ -294,6 +294,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["taskSummaryById"] = json!(true);
             capabilities["pendingApprovalInbox"] = json!(true);
             capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
@@ -462,6 +463,10 @@ impl RpcServer {
                 } else {
                     task
                 })
+            }
+            "task/getSummary" => {
+                let p: TaskIdParams = decode(params)?;
+                json!(self.kernel()?.get_task_summary(&p.task_id)?)
             }
             "task/get" => {
                 let p: TaskIdParams = decode(params)?;

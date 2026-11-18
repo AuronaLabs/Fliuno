@@ -130,6 +130,7 @@ impl Peer {
         );
         assert_eq!(init["capabilities"]["sessionContext"], true);
         assert_eq!(init["capabilities"]["sessionTitles"], true);
+        assert_eq!(init["capabilities"]["taskSummaryById"], true);
         assert_eq!(init["capabilities"]["sessionArchiving"], true);
         assert_eq!(init["capabilities"]["sessionCreateIdempotency"], true);
         assert_eq!(init["capabilities"]["contextTaskSelection"], true);
@@ -600,7 +601,16 @@ fn stdio_approval_restart_and_artifact_roundtrip() {
         json!([])
     );
     let summary_params = json!({"sessionId":session["id"],"limit":1});
+    let task_params = json!({"taskId":task["id"]});
+    assert_eq!(
+        peer.request("task/getSummary", json!({"taskId":"unknown"}))["error"]["code"],
+        -32004
+    );
     let summaries = peer.call("task/listSummaries", summary_params.clone());
+    assert_eq!(
+        peer.call("task/getSummary", task_params.clone()),
+        summaries["items"][0]
+    );
     assert_eq!(
         summaries["items"],
         json!([{
@@ -628,6 +638,10 @@ fn stdio_approval_restart_and_artifact_roundtrip() {
     assert_eq!(artifacts.as_array().unwrap().len(), 1);
     assert_eq!(artifacts[0]["content"], "中文交付物 ✓");
     let done_page = peer.call("task/listSummaries", summary_params);
+    assert_eq!(
+        peer.call("task/getSummary", task_params),
+        done_page["items"][0]
+    );
     assert_eq!(done_page["nextAfter"], summaries["nextAfter"]);
     assert_eq!(done_page["items"][0]["status"], "completed");
     assert_eq!(done_page["items"][0]["pendingApprovalCount"], 0);

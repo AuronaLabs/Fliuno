@@ -59,6 +59,17 @@ impl Kernel {
         )
     }
 
+    /// Read the same compact, committed projection used by the task catalog.
+    pub fn get_task_summary(&self, task_id: &str) -> Result<TaskSummary> {
+        let mut statement = self
+            .db
+            .prepare_cached("SELECT data FROM task_summaries WHERE task_id=?1")?;
+        let mut rows = statement.query([task_id])?;
+        let row = rows.next()?.ok_or_else(|| Error::NotFound("task".into()))?;
+        let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+        Ok(serde_json::from_str(data)?)
+    }
+
     pub fn list_task_summaries(
         &self,
         session: &str,
