@@ -85,7 +85,13 @@ impl Kernel {
     }
 
     pub fn subscribe_model_progress(&self) -> Result<ProgressReceiver> {
-        self.progress.subscribe()
+        self.progress.subscribe(false)
+    }
+
+    /// Subscribe at a model step boundary so an in-flight suffix is never
+    /// mistaken for a complete preview after a stream gap.
+    pub fn subscribe_model_progress_from_next_step(&self) -> Result<ProgressReceiver> {
+        self.progress.subscribe(true)
     }
 
     pub fn set_model_provider(&mut self, provider: Box<dyn ModelProvider>) {

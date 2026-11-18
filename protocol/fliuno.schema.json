@@ -738,6 +738,11 @@
       "properties": {},
       "additionalProperties": false
     },
+    "modelProgress/resubscribe": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "artifacts/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskIdParams",

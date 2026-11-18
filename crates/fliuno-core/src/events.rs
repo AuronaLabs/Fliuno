@@ -124,52 +124,70 @@ impl EventHub {
 
 #[derive(Clone)]
 pub(crate) struct ProgressHub {
-    subscribers: Arc<Mutex<Vec<Subscriber<ModelProgress>>>>,
+    state: Arc<Mutex<ProgressState>>,
+}
+
+#[derive(Default)]
+struct ProgressState {
+    generation: u64,
+    subscribers: Vec<ProgressSubscriber>,
 }
 
 #[derive(Clone)]
 pub struct ProgressPublisher {
     hub: ProgressHub,
+    generation: Option<u64>,
 }
 
 impl ProgressPublisher {
     pub(crate) fn new(hub: ProgressHub) -> Self {
-        Self { hub }
+        let generation = hub.state.lock().ok().and_then(|mut state| {
+            state.generation = state.generation.checked_add(1)?;
+            Some(state.generation)
+        });
+        Self { hub, generation }
     }
 
     pub fn publish(&self, progress: ModelProgress) {
-        self.hub.publish(progress);
+        if let Some(generation) = self.generation {
+            self.hub.publish(generation, progress);
+        }
     }
 }
 
-struct Subscriber<T> {
-    sender: Sender<T>,
+struct ProgressSubscriber {
+    sender: Sender<ModelProgress>,
     active: Weak<()>,
+    after_generation: u64,
 }
 
 impl ProgressHub {
     pub(crate) fn new() -> Self {
         Self {
-            subscribers: Arc::new(Mutex::new(Vec::new())),
+            state: Arc::new(Mutex::new(ProgressState::default())),
         }
     }
 
-    pub(crate) fn subscribe(&self) -> Result<ProgressReceiver> {
-        let mut subscribers = self
-            .subscribers
+    pub(crate) fn subscribe(&self, new_steps_only: bool) -> Result<ProgressReceiver> {
+        let mut state = self
+            .state
             .lock()
             .map_err(|_| Error::Conflict("progress hub lock is poisoned".into()))?;
-        subscribers.retain(|subscriber| subscriber.active.strong_count() > 0);
-        if subscribers.len() >= MAX_SUBSCRIBERS {
+        let after_generation = if new_steps_only { state.generation } else { 0 };
+        state
+            .subscribers
+            .retain(|subscriber| subscriber.active.strong_count() > 0);
+        if state.subscribers.len() >= MAX_SUBSCRIBERS {
             return Err(Error::Conflict(
                 "maximum progress subscriber count reached".into(),
             ));
         }
         let (sender, receiver) = bounded(SUBSCRIBER_CAPACITY);
         let active = Arc::new(());
-        subscribers.push(Subscriber {
+        state.subscribers.push(ProgressSubscriber {
             sender,
             active: Arc::downgrade(&active),
+            after_generation,
         });
         Ok(ProgressReceiver {
             receiver,
@@ -177,18 +195,23 @@ impl ProgressHub {
         })
     }
 
-    pub(crate) fn publish(&self, progress: ModelProgress) {
-        let Ok(mut subscribers) = self.subscribers.lock() else {
+    fn publish(&self, generation: u64, progress: ModelProgress) {
+        let Ok(mut state) = self.state.lock() else {
             return;
         };
-        subscribers.retain(|subscriber| {
-            if subscriber.active.strong_count() == 0 {
-                return false;
+        if let [subscriber] = state.subscribers.as_slice() {
+            if subscriber.active.strong_count() == 0
+                || (generation > subscriber.after_generation
+                    && subscriber.sender.try_send(progress).is_err())
+            {
+                state.subscribers.clear();
             }
-            match subscriber.sender.try_send(progress.clone()) {
-                Ok(()) => true,
-                Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => false,
-            }
+            return;
+        }
+        state.subscribers.retain(|subscriber| {
+            subscriber.active.strong_count() > 0
+                && (generation <= subscriber.after_generation
+                    || subscriber.sender.try_send(progress.clone()).is_ok())
         });
     }
 }
@@ -234,9 +257,10 @@ mod tests {
     #[test]
     fn slow_progress_subscriber_is_detached_without_blocking_provider() {
         let hub = ProgressHub::new();
-        let receiver = hub.subscribe().unwrap();
+        let receiver = hub.subscribe(false).unwrap();
+        let publisher = ProgressPublisher::new(hub.clone());
         for _ in 0..=SUBSCRIBER_CAPACITY {
-            hub.publish(ModelProgress::TextDelta {
+            publisher.publish(ModelProgress::TextDelta {
                 task_id: "task_test".into(),
                 step: 1,
                 text: "x".into(),

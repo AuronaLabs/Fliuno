@@ -157,6 +157,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         event_rx = new_rx;
                         event_subscription = Some(subscription);
                     }
+                    if let Some(receiver) = server.take_pending_progress_receiver() {
+                        let (new_rx, subscription) = receiver.into_parts();
+                        progress_rx = new_rx;
+                        progress_subscription = Some(subscription);
+                    }
                 }
                 Ok(InputFrame::InvalidUtf8) => {
                     if let Some(response) = server.handle_line("invalid UTF-8") {
@@ -198,6 +203,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }))?;
                     drop(progress_subscription.take());
                     progress_rx = crossbeam_channel::never();
+                    server.mark_progress_stream_gap();
                 }
             }
         }

@@ -15,6 +15,7 @@ pub struct RpcServer {
     event_receiver: Option<EventReceiver>,
     event_stream_gap: bool,
     progress_receiver: Option<ProgressReceiver>,
+    progress_stream_gap: bool,
     initialized: bool,
     provider_name: String,
     terminals: Option<fliuno_terminal::Service>,
@@ -87,6 +88,7 @@ impl RpcServer {
             event_receiver: Some(event_receiver),
             event_stream_gap: false,
             progress_receiver: Some(progress_receiver),
+            progress_stream_gap: false,
             initialized: false,
             provider_name,
             terminals,
@@ -108,9 +110,16 @@ impl RpcServer {
     }
 
     pub fn take_progress_receiver(&mut self) -> ProgressReceiver {
-        self.progress_receiver
-            .take()
+        self.take_pending_progress_receiver()
             .expect("app-server progress receiver was already taken")
+    }
+
+    pub fn take_pending_progress_receiver(&mut self) -> Option<ProgressReceiver> {
+        self.progress_receiver.take()
+    }
+
+    pub fn mark_progress_stream_gap(&mut self) {
+        self.progress_stream_gap = true;
     }
 
     pub fn take_terminal_notification_receiver(&mut self) -> crossbeam_channel::Receiver<()> {
@@ -251,6 +260,7 @@ impl RpcServer {
                     "contextFitRecent":true,
                     "processExecution":process_execution,
                     "modelProgressNotifications":self.kernel()?.model_progress_supported(),
+                    "modelProgressResubscribe":self.kernel()?.model_progress_supported(),
                     "modelBudget":self.kernel()?.configured_model_budget(),
                     "terminalSessions":self.terminals.is_some(),
                     "terminalOutputSubscriptions":self.terminals.is_some(),
@@ -512,6 +522,23 @@ impl RpcServer {
                 self.event_stream_gap = false;
                 json!(EventSubscription { through_sequence })
             }
+            "modelProgress/resubscribe" => {
+                if params != json!({}) {
+                    return Err(
+                        Error::Invalid("modelProgress/resubscribe takes no params".into()).into(),
+                    );
+                }
+                if !self.progress_stream_gap {
+                    return Err(Error::Conflict(
+                        "model progress stream is already subscribed".into(),
+                    )
+                    .into());
+                }
+                let receiver = self.kernel()?.subscribe_model_progress_from_next_step()?;
+                self.progress_receiver = Some(receiver);
+                self.progress_stream_gap = false;
+                json!({"subscribed":true})
+            }
             "artifacts/list" => {
                 let p: TaskIdParams = decode(params)?;
                 json!(self.kernel()?.list_artifacts(&p.task_id)?)
@@ -700,6 +727,62 @@ mod tests {
             progress(fliuno_core::ModelStreamEvent::TextDelta("aft".into()));
             Ok(fliuno_core::ModelDecision::Complete("final answer".into()).into())
         }
+    }
+
+    #[test]
+    fn model_progress_resubscribe_excludes_inflight_steps_after_queue_overflow() {
+        let kernel = Kernel::in_memory(Box::new(StreamingProvider)).unwrap();
+        let mut server = RpcServer::with_provider(kernel, "fixture".into());
+        let initialized = rpc(
+            &mut server,
+            "initialize",
+            json!({"protocolVersion":"0.1","clientName":"progress-recovery-test"}),
+        );
+        assert_eq!(
+            initialized["capabilities"]["modelProgressResubscribe"],
+            true
+        );
+        let (receiver, subscription) = server.take_progress_receiver().into_parts();
+        let active = server.kernel().unwrap().model_progress_publisher();
+        let stale = ModelProgress::TextDelta {
+            task_id: "task-active".into(),
+            step: 1,
+            text: "suffix".into(),
+        };
+        for _ in 0..65 {
+            active.publish(stale.clone());
+        }
+        assert_eq!(receiver.iter().count(), 64);
+        drop(subscription);
+        server.mark_progress_stream_gap();
+        let resubscribe = r#"{"jsonrpc":"2.0","id":10,"method":"modelProgress/resubscribe"}"#;
+        assert_eq!(
+            server.handle_line(resubscribe).unwrap()["result"],
+            json!({"subscribed":true})
+        );
+        assert_eq!(
+            server.handle_line(resubscribe).unwrap()["error"]["code"],
+            -32009
+        );
+        let replacement = server.take_pending_progress_receiver().unwrap();
+        active.publish(stale);
+        active.publish(ModelProgress::Reset {
+            task_id: "task-active".into(),
+            step: 1,
+        });
+        assert!(matches!(
+            replacement.try_recv(),
+            Err(crossbeam_channel::TryRecvError::Empty)
+        ));
+
+        let fresh = server.kernel().unwrap().model_progress_publisher();
+        let preview = ModelProgress::TextDelta {
+            task_id: "task-active".into(),
+            step: 2,
+            text: "new preview".into(),
+        };
+        fresh.publish(preview.clone());
+        assert_eq!(replacement.try_recv().unwrap(), preview);
     }
 
     #[test]

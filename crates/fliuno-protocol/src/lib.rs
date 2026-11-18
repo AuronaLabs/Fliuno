@@ -674,6 +674,7 @@ pub fn schema_bundle() -> Value {
             "events/list": schemars::schema_for!(EventsListParams),
             "events/listAll": schemars::schema_for!(EventsListAllParams),
             "events/resubscribe": {"type":"object","properties":{},"additionalProperties":false},
+            "modelProgress/resubscribe": {"type":"object","properties":{},"additionalProperties":false},
             "artifacts/list": schemars::schema_for!(TaskIdParams),
             "artifacts/listSummaries": schemars::schema_for!(ArtifactListParams),
             "artifacts/get": schemars::schema_for!(ArtifactGetParams),
