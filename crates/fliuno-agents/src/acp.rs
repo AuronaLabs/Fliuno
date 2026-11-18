@@ -162,7 +162,6 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
                 }
                 if config.workspace_access
                     || !config.assets.is_empty()
-                    || !config.resources.is_empty()
                     || config.linux_cgroup_parent.is_some()
                 {
                     return Err("ACP trusted_host does not accept sandbox options".into());
@@ -286,6 +285,7 @@ impl AcpBackend {
                     args: self.launch.args.clone(),
                     env: self.launch.env.clone(),
                     cwd: cwd.clone(),
+                    resources: self.launch.resources,
                 },
                 self.options.clone(),
             )

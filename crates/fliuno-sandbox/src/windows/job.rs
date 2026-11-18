@@ -10,33 +10,34 @@ use std::{
 use windows_sys::Win32::System::JobObjects::*;
 
 pub(super) fn create(resources: ResourceLimits) -> io::Result<OwnedHandle> {
-    let memory =
-        usize::try_from(resources.memory_max_bytes.unwrap_or(512 * 1024 * 1024)).map_err(|_| {
+    configure(
+        Some(resources.memory_max_bytes.unwrap_or(512 * 1024 * 1024)),
+        Some(resources.pids_max.unwrap_or(16)),
+    )
+}
+
+#[cfg(feature = "async-io")]
+pub(super) fn create_host(resources: ResourceLimits) -> io::Result<OwnedHandle> {
+    // A trusted process keeps OS-user authority. Only host-specified limits apply.
+    configure(resources.memory_max_bytes, resources.pids_max)
+}
+
+fn configure(memory: Option<u64>, processes: Option<u32>) -> io::Result<OwnedHandle> {
+    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if let Some(memory) = memory {
+        limits.JobMemoryLimit = usize::try_from(memory).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::Unsupported,
                 "memory limit exceeds Windows Job range",
             )
         })?;
-    let limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
-        BasicLimitInformation: JOBOBJECT_BASIC_LIMIT_INFORMATION {
-            LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-                | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-                | JOB_OBJECT_LIMIT_JOB_MEMORY,
-            ActiveProcessLimit: resources.pids_max.unwrap_or(16),
-            ..Default::default()
-        },
-        JobMemoryLimit: memory,
-        ..Default::default()
-    };
-    allocate(limits)
-}
-
-#[cfg(feature = "async-io")]
-pub(super) fn create_host() -> io::Result<OwnedHandle> {
-    // Trusted host mode retains the caller's full authority and has no implicit
-    // scratch memory/PID defaults. The Job only owns the process tree lifetime.
-    let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+    }
+    if let Some(processes) = processes {
+        limits.BasicLimitInformation.ActiveProcessLimit = processes;
+        limits.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+    }
     allocate(limits)
 }
 

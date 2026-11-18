@@ -103,7 +103,7 @@ cargo run -p fliuno-acp --example isolated -- E:/Projects/Fliuno/target/debug/fl
 
 ## 跨重启续接 Agent 会话
 
-Windows 上可以在 `--acp-config` 中为可信 Agent 显式选择 `isolation: "trusted_host"`，并配置绝对且已存在的 `cwd`。这个 Agent 以当前操作系统用户的权限运行。Windows Job 在任务、进程或 app-server 结束时回收进程树。`cwd` 固定为主机配置的目录，Agent 自己保管持久会话状态。`workspaceAccess`、`assets`、资源限制和 `linuxCgroupParent` 属于隔离模式，可信模式会拒绝这些配置。
+Windows 上可以在 `--acp-config` 中为可信 Agent 显式选择 `isolation: "trusted_host"`，并配置绝对且已存在的 `cwd`。这个 Agent 以当前操作系统用户的权限运行。Windows Job 在任务、进程或 app-server 结束时回收进程树。`cwd` 固定为主机配置的目录，Agent 自己保管持久会话状态。可信模式可以显式配置 `resources.memoryMaxBytes` 和 `resources.pidsMax`，由 Windows Job 在启动前应用。`workspaceAccess`、`assets` 和 `linuxCgroupParent` 属于隔离模式。
 
 `task/continueAgentSession` 的参数是 `taskId`、`input` 和 `clientRequestId`。`taskId` 指向成功结束的上一轮。Fliuno 从该任务取出 Agent 会话 ID 和原来的注册身份，把下一轮留在原来的 Fliuno 会话中。每轮最多成功取得一次续接名额。同一个请求键重试只返回原任务。Agent 必须在握手中声明 `sessionCapabilities.resume`，并能在固定目录重新打开该会话。
 

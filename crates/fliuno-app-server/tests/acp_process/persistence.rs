@@ -9,7 +9,7 @@ fn trusted_config(directory: &Directory) -> PathBuf {
         serde_json::to_vec(&json!({"agents":[{
             "id":"fixture", "command":env!("CARGO_BIN_EXE_fliuno-app-acp-fixture"),
             "args":["--persistent-fixture"], "isolation":"trusted_host", "cwd":path,
-            "promptTimeoutMs":30000
+            "promptTimeoutMs":30000, "resources":{"memoryMaxBytes":67108864,"pidsMax":1}
         }]}))
         .unwrap(),
     )

@@ -1,6 +1,6 @@
 //! Windows trusted host commands with the same reactor and ownership boundary
 //! as isolated commands. Job containment controls lifetime, never authority.
-use crate::{AsyncSpawnError, AsyncSpawnStage, AsyncStdio, LaunchSpec};
+use crate::{AsyncSpawnError, AsyncSpawnStage, AsyncStdio, LaunchSpec, ResourceLimits};
 use std::{collections::BTreeMap, io, path::PathBuf, process::ExitStatus};
 
 /// Explicit host authority. No inherited environment or scratch resource defaults.
@@ -9,6 +9,7 @@ pub struct HostLaunchSpec {
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub cwd: PathBuf,
+    pub resources: ResourceLimits,
 }
 impl HostLaunchSpec {
     fn validate(&self) -> io::Result<()> {
@@ -20,7 +21,7 @@ impl HostLaunchSpec {
             program: self.program.clone(),
             args: self.args.clone(),
             env: self.env.clone(),
-            resources: Default::default(),
+            resources: self.resources,
             linux_cgroup_parent: None,
         }
         .validate()?;

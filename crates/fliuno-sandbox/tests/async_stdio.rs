@@ -61,6 +61,7 @@ async fn spawn(
                 args: spec.args,
                 env: spec.env,
                 cwd: std::env::current_dir().unwrap(),
+                resources: Default::default(),
             })
             .await
             .map(|(child, pipes)| (NativeChild::Host(child), pipes))
@@ -255,4 +256,53 @@ fn failed_pending_native_write_is_reported_by_shutdown() {
             assert_eq!(result.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
         });
     }
+}
+
+#[cfg(windows)]
+#[test]
+fn trusted_resource_limits_are_enforced_by_the_windows_job() {
+    use fliuno_sandbox::{HostLaunchSpec, ResourceLimits, spawn_host_async};
+
+    let cases = [
+        ("process-limit", ResourceLimits::default(), "spawned"),
+        (
+            "process-limit",
+            ResourceLimits {
+                pids_max: Some(1),
+                ..Default::default()
+            },
+            "spawn-blocked",
+        ),
+        ("memory-limit", ResourceLimits::default(), "allocated"),
+        (
+            "memory-limit",
+            ResourceLimits {
+                memory_max_bytes: Some(32 * 1024 * 1024),
+                ..Default::default()
+            },
+            "allocation-blocked",
+        ),
+    ];
+    runtime().block_on(async {
+        for (mode, resources, expected) in cases {
+            let probe = spec(mode);
+            let (child, pipes) = spawn_host_async(HostLaunchSpec {
+                program: probe.program,
+                args: probe.args,
+                env: probe.env,
+                cwd: std::env::current_dir().unwrap(),
+                resources,
+            })
+            .await
+            .unwrap();
+            let mut child = NativeChild::Host(child);
+            drop(pipes.stdin);
+            let output = tokio::time::timeout(Duration::from_secs(10), drain(pipes.stdout))
+                .await
+                .unwrap()
+                .unwrap();
+            reap(&mut child).await;
+            assert_eq!(std::str::from_utf8(&output).unwrap().trim(), expected);
+        }
+    });
 }

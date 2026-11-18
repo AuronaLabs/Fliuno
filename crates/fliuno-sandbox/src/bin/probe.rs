@@ -144,6 +144,20 @@ fn main() -> io::Result<()> {
                 Err(_) => println!("spawn-blocked"),
             }
         }
+        #[cfg(windows)]
+        Some("memory-limit") => {
+            let mut buffer = Vec::<u8>::new();
+            let allocated = buffer.try_reserve_exact(96 * 1024 * 1024).is_ok();
+            std::hint::black_box(buffer);
+            println!(
+                "{}",
+                if allocated {
+                    "allocated"
+                } else {
+                    "allocation-blocked"
+                }
+            );
+        }
         Some("tree-detached") => {
             let descendant = std::process::Command::new(std::env::current_exe()?)
                 .arg("wait-detached")

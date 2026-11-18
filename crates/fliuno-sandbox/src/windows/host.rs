@@ -4,7 +4,7 @@ use crate::{HostChild, HostLaunchSpec};
 use std::{fs::File, io};
 
 pub(crate) fn spawn(spec: &HostLaunchSpec) -> io::Result<(HostChild, (File, File, File))> {
-    let job = job::create_host()?;
+    let job = job::create_host(spec.resources)?;
     let started = launch::start(
         launch::Spec {
             program: &spec.program,

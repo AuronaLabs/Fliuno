@@ -108,6 +108,7 @@ pub(super) async fn connect(
                         args: config.args.clone(),
                         env,
                         cwd: config.cwd.as_ref().unwrap().clone(),
+                        resources: Default::default(),
                     })
                     .await
                     .map_err(|_| "cannot spawn trusted MCP server")?;
