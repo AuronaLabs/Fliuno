@@ -19,6 +19,7 @@ use std::{
 
 pub(super) const QUEUE_CAPACITY: usize = 32;
 pub(super) const WORKER_COUNT: usize = 4;
+const MAX_MODEL_PROGRESS_DELTA_BYTES: usize = 1024;
 type Cancellation = CancellationToken;
 type ActiveTasks = Arc<Mutex<HashMap<String, Reservation>>>;
 
@@ -379,31 +380,24 @@ fn run_model_step(
     let mut last_publish = Instant::now();
     let mut has_published_text = false;
     let mut emit_progress = |update| match update {
-        ModelStreamEvent::TextDelta(text) => {
-            pending_text.push_str(&text);
-            if !has_published_text
-                || pending_text.len() >= 1024
-                || last_publish.elapsed() >= Duration::from_millis(30)
-            {
-                publish_text_progress(
-                    &progress_publisher,
-                    &task_id,
-                    step,
-                    std::mem::take(&mut pending_text),
-                );
-                last_publish = Instant::now();
-                has_published_text = true;
-            }
-        }
+        ModelStreamEvent::TextDelta(text) => append_text_progress(
+            &progress_publisher,
+            &task_id,
+            step,
+            &mut pending_text,
+            &mut last_publish,
+            &mut has_published_text,
+            &text,
+        ),
         ModelStreamEvent::Reset => {
-            if !pending_text.is_empty() {
-                publish_text_progress(
-                    &progress_publisher,
-                    &task_id,
-                    step,
-                    std::mem::take(&mut pending_text),
-                );
-            }
+            flush_text_progress(
+                &progress_publisher,
+                &task_id,
+                step,
+                &mut pending_text,
+                &mut last_publish,
+                &mut has_published_text,
+            );
             progress_publisher.publish(ModelProgress::Reset {
                 task_id: task_id.clone(),
                 step,
@@ -429,6 +423,78 @@ fn run_model_step(
         }
     };
     Ok(Some((task, response)))
+}
+
+fn append_text_progress(
+    publisher: &ProgressPublisher,
+    task_id: &str,
+    step: u32,
+    pending: &mut String,
+    last_publish: &mut Instant,
+    has_published_text: &mut bool,
+    text: &str,
+) {
+    let mut remaining = text;
+    while !remaining.is_empty() {
+        let available = MAX_MODEL_PROGRESS_DELTA_BYTES.saturating_sub(pending.len());
+        if available == 0 {
+            flush_text_progress(
+                publisher,
+                task_id,
+                step,
+                pending,
+                last_publish,
+                has_published_text,
+            );
+            continue;
+        }
+        let mut length = remaining.len().min(available);
+        while !remaining.is_char_boundary(length) {
+            length -= 1;
+        }
+        if length == 0 {
+            flush_text_progress(
+                publisher,
+                task_id,
+                step,
+                pending,
+                last_publish,
+                has_published_text,
+            );
+            continue;
+        }
+        pending.push_str(&remaining[..length]);
+        remaining = &remaining[length..];
+        if !*has_published_text
+            || pending.len() >= MAX_MODEL_PROGRESS_DELTA_BYTES
+            || last_publish.elapsed() >= Duration::from_millis(30)
+        {
+            flush_text_progress(
+                publisher,
+                task_id,
+                step,
+                pending,
+                last_publish,
+                has_published_text,
+            );
+        }
+    }
+}
+
+fn flush_text_progress(
+    publisher: &ProgressPublisher,
+    task_id: &str,
+    step: u32,
+    pending: &mut String,
+    last_publish: &mut Instant,
+    has_published_text: &mut bool,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    publish_text_progress(publisher, task_id, step, std::mem::take(pending));
+    *last_publish = Instant::now();
+    *has_published_text = true;
 }
 
 fn publish_text_progress(publisher: &ProgressPublisher, task_id: &str, step: u32, text: String) {
@@ -498,13 +564,66 @@ fn schedule_followup_model(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fliuno_core::{DemoProvider, ModelDecision, ModelProvider, ToolSpec};
+    use fliuno_core::{DemoProvider, Kernel, ModelDecision, ModelProvider, ToolSpec};
     use fliuno_protocol::TaskStatus;
     use std::{
         fs,
         sync::mpsc,
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn large_provider_delta_is_split_at_utf8_boundaries_before_fanout() {
+        let kernel = Kernel::in_memory(Box::new(DemoProvider)).unwrap();
+        let receiver = kernel.subscribe_model_progress().unwrap();
+        let publisher = kernel.model_progress_publisher();
+        let expected = format!(
+            "{}{}{}",
+            "a".repeat(1021),
+            "你好😀".repeat(900),
+            "z".repeat(2048)
+        );
+        let mut pending = String::new();
+        let mut last_publish = Instant::now();
+        let mut has_published_text = false;
+
+        append_text_progress(
+            &publisher,
+            "task_large_delta",
+            1,
+            &mut pending,
+            &mut last_publish,
+            &mut has_published_text,
+            &expected,
+        );
+        flush_text_progress(
+            &publisher,
+            "task_large_delta",
+            1,
+            &mut pending,
+            &mut last_publish,
+            &mut has_published_text,
+        );
+
+        let chunks: Vec<String> = receiver
+            .try_iter()
+            .map(|progress| match progress {
+                ModelProgress::TextDelta {
+                    task_id,
+                    step,
+                    text,
+                } => {
+                    assert_eq!(task_id, "task_large_delta");
+                    assert_eq!(step, 1);
+                    assert!(text.len() <= MAX_MODEL_PROGRESS_DELTA_BYTES);
+                    text
+                }
+                ModelProgress::Reset { .. } => panic!("unexpected reset"),
+            })
+            .collect();
+        assert!(chunks.len() > 1);
+        assert_eq!(chunks.concat(), expected);
+    }
 
     struct BlockingModel {
         entered: mpsc::Sender<()>,
