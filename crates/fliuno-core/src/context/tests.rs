@@ -150,6 +150,52 @@ fn history_follows_completion_order_and_never_crosses_session_scope() {
 }
 
 #[test]
+fn recent_context_honors_the_exact_json_limit_across_omission_digit_changes() {
+    let (mut kernel, session) = setup();
+    for index in 0..9 {
+        complete(
+            &mut kernel,
+            &session.id,
+            &format!("earlier {index}"),
+            "done",
+        );
+    }
+    let escaped = "\u{754c}\n\"\\".repeat(220);
+    let older = complete(&mut kernel, &session.id, "older", &escaped);
+    let newer = complete(&mut kernel, &session.id, "newer", &escaped);
+    let mut options = ContextOptions {
+        max_turns: 2,
+        max_bytes: 9999,
+        ..ContextOptions::default()
+    };
+    let mut expected = kernel
+        .session_context(&session.id, options.clone())
+        .unwrap();
+    assert_eq!(expected.omitted_turns, 9);
+    assert_eq!(expected.turns[0].task_id, older.id);
+    assert_eq!(expected.turns[1].task_id, newer.id);
+    options.max_bytes = serde_json::to_vec(&expected).unwrap().len() as u32;
+    expected.options = options.clone();
+    let exact = kernel
+        .session_context(&session.id, options.clone())
+        .unwrap();
+    assert_eq!(
+        serde_json::to_vec(&exact).unwrap().len(),
+        options.max_bytes as usize
+    );
+    assert_eq!(
+        serde_json::to_value(&exact).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+
+    options.max_bytes -= 1;
+    let bounded = kernel.session_context(&session.id, options).unwrap();
+    assert_eq!(bounded.omitted_turns, 10);
+    assert_eq!(bounded.turns.len(), 1);
+    assert_eq!(bounded.turns[0].task_id, newer.id);
+}
+
+#[test]
 fn selection_bounds_whole_turns_and_reports_every_omission() {
     let (mut kernel, session) = setup();
     for index in 0..35 {

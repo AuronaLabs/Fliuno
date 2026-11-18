@@ -69,12 +69,8 @@ impl Kernel {
         through: u64,
         options: &ContextOptions,
     ) -> Result<(u64, Vec<ContextTurn>)> {
+        let total = self.context_turn_count(session, through)?;
         let through = validate_event_cursor(through)?;
-        let total: i64 = self.db.query_row(
-            "SELECT COUNT(*) FROM session_turns WHERE session_id=?1 AND sequence<=?2",
-            params![session, through],
-            |row| row.get(0),
-        )?;
         let ids = options
             .task_ids
             .as_ref()
@@ -113,7 +109,7 @@ impl Kernel {
             turns.push(serde_json::from_str(&data)?);
         }
         turns.sort_unstable_by_key(|turn| turn.completion_sequence);
-        Ok((total as u64, turns))
+        Ok((total, turns))
     }
 
     pub(crate) fn context_watermark(&self) -> Result<u64> {
@@ -124,18 +120,23 @@ impl Kernel {
             })? as u64)
     }
 
-    pub(crate) fn context_candidates(
+    pub(crate) fn context_turn_count(&self, session: &str, through: u64) -> Result<u64> {
+        let count: i64 = self.db.query_row(
+            "SELECT COUNT(*) FROM session_turns WHERE session_id=?1 AND sequence<=?2",
+            params![session, validate_event_cursor(through)?],
+            |row| row.get(0),
+        )?;
+        Ok(count as u64)
+    }
+
+    pub(crate) fn visit_context_candidates(
         &self,
         session: &str,
         through: u64,
         options: &ContextOptions,
-    ) -> Result<(u64, Vec<Option<ContextTurn>>)> {
+        mut visit: impl FnMut(ContextTurn) -> Result<bool>,
+    ) -> Result<()> {
         let through = validate_event_cursor(through)?;
-        let total: i64 = self.db.query_row(
-            "SELECT COUNT(*) FROM session_turns WHERE session_id=?1 AND sequence<=?2",
-            params![session, through],
-            |row| row.get(0),
-        )?;
         let mut statement = self.db.prepare(
             "SELECT CASE WHEN length(CAST(data AS BLOB))<=?3 THEN data END FROM session_turns
             WHERE session_id=?1 AND sequence<=?2 ORDER BY sequence DESC LIMIT ?4",
@@ -144,14 +145,12 @@ impl Kernel {
             params![session, through, options.max_bytes, options.max_turns],
             |row| row.get::<_, Option<String>>(0),
         )?;
-        let mut turns = Vec::new();
         for row in rows {
-            let Some(data) = row? else {
-                turns.push(None);
+            let Some(data) = row? else { break };
+            if !visit(serde_json::from_str(&data)?)? {
                 break;
-            };
-            turns.push(Some(serde_json::from_str(&data)?));
+            }
         }
-        Ok((total as u64, turns))
+        Ok(())
     }
 }

@@ -5,6 +5,26 @@ use super::*;
 pub const MAX_CONTEXT_TURNS: u32 = 32;
 pub const MAX_CONTEXT_BYTES: u32 = 256 * 1024;
 
+#[derive(Default)]
+struct JsonSize(usize);
+
+impl std::io::Write for JsonSize {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 += bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn json_size(value: &impl serde::Serialize) -> Result<usize> {
+    let mut size = JsonSize::default();
+    serde_json::to_writer(&mut size, value)?;
+    Ok(size.0)
+}
+
 pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
     if !(1..=MAX_CONTEXT_TURNS).contains(&options.max_turns)
         || !(1024..=MAX_CONTEXT_BYTES).contains(&options.max_bytes)
@@ -57,7 +77,7 @@ impl Kernel {
                 self.selected_context(session, through_sequence, &snapshot.options)?;
             snapshot.omitted_turns = total - turns.len() as u64;
             snapshot.turns = turns;
-            if serde_json::to_vec(&snapshot)?.len() > snapshot.options.max_bytes as usize {
+            if json_size(&snapshot)? > snapshot.options.max_bytes as usize {
                 return Err(Error::Invalid(
                     "selected context tasks exceed maxBytes; choose fewer tasks or a larger budget"
                         .into(),
@@ -65,21 +85,27 @@ impl Kernel {
             }
             return Ok(snapshot);
         }
-        let (total, candidates) =
-            self.context_candidates(session, through_sequence, &snapshot.options)?;
-        snapshot.omitted_turns = total;
+        // Measure the envelope with an empty array and a one-digit omission
+        // count. Adding turns changes only the array and that number's width.
+        let envelope = json_size(&snapshot)?;
+        let mut array_bytes = 0;
+        let mut omitted = self.context_turn_count(session, through_sequence)?;
+        let limit = snapshot.options.max_bytes as usize;
         // Keep a contiguous suffix. Skipping an oversized newest turn and then
         // including older work would silently present stale context as recent.
-        for candidate in candidates {
-            let Some(candidate) = candidate else { break };
-            snapshot.turns.insert(0, candidate);
-            snapshot.omitted_turns -= 1;
-            if serde_json::to_vec(&snapshot)?.len() > snapshot.options.max_bytes as usize {
-                snapshot.turns.remove(0);
-                snapshot.omitted_turns += 1;
-                break;
+        self.visit_context_candidates(session, through_sequence, &snapshot.options, |turn| {
+            let next_bytes = array_bytes + json_size(&turn)? + usize::from(array_bytes > 0);
+            let remaining = omitted - 1;
+            if envelope + next_bytes + remaining.max(1).ilog10() as usize > limit {
+                return Ok(false);
             }
-        }
+            array_bytes = next_bytes;
+            omitted = remaining;
+            snapshot.turns.push(turn);
+            Ok(true)
+        })?;
+        snapshot.turns.reverse();
+        snapshot.omitted_turns = omitted;
         Ok(snapshot)
     }
 }
