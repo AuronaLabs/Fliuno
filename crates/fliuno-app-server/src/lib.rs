@@ -9,6 +9,8 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex, MutexGuard};
 
+const MAX_BATCH_ITEMS: usize = 128;
+
 pub struct RpcServer {
     kernel: Arc<Mutex<Kernel>>,
     scheduler: TaskScheduler,
@@ -162,6 +164,13 @@ impl RpcServer {
                 if items.is_empty() {
                     return Some(error(Value::Null, -32600, "empty batch"));
                 }
+                if items.len() > MAX_BATCH_ITEMS {
+                    return Some(error(
+                        Value::Null,
+                        -32600,
+                        format!("batch exceeds {MAX_BATCH_ITEMS} items"),
+                    ));
+                }
                 let responses: Vec<Value> = items
                     .into_iter()
                     .filter_map(|item| self.handle_request(item))
@@ -177,24 +186,30 @@ impl RpcServer {
     }
 
     fn handle_request(&mut self, value: Value) -> Option<Value> {
-        let id = value.get("id").cloned().unwrap_or(Value::Null);
-        if !value.is_object()
-            || value.get("jsonrpc") != Some(&json!("2.0"))
-            || !value.get("method").is_some_and(Value::is_string)
-            || !(id.is_null() || id.is_string() || id.is_number())
+        let Value::Object(mut request) = value else {
+            return Some(error(Value::Null, -32600, "invalid request"));
+        };
+        let Some(Value::String(method)) = request.remove("method") else {
+            return Some(error(Value::Null, -32600, "invalid request"));
+        };
+        let id = request.remove("id");
+        if request.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
+            || id
+                .as_ref()
+                .is_some_and(|id| !(id.is_null() || id.is_string() || id.is_number()))
         {
             return Some(error(Value::Null, -32600, "invalid request"));
         }
-        let notification = value.get("id").is_none();
-        let method = value["method"].as_str().expect("validated method");
-        let params = value.get("params").cloned().unwrap_or_else(|| json!({}));
+        let notification = id.is_none();
+        let id = id.unwrap_or(Value::Null);
+        let params = request.remove("params").unwrap_or_else(|| json!({}));
         let result = if !params.is_object() && !params.is_array() {
             Err(RpcError {
                 code: -32602,
                 message: "params must be an object or array".into(),
             })
         } else {
-            self.dispatch(method, params)
+            self.dispatch(&method, params)
         };
         if notification {
             return None;
@@ -248,6 +263,7 @@ impl RpcServer {
                 "eventReplayTargetBytes":fliuno_core::MAX_EVENT_TARGET_BYTES,
                 "eventResubscribe":true,
                 "sessionEventReplay":true,
+                "maxBatchItems":MAX_BATCH_ITEMS,
                 "provider":self.provider_name, "liveModels":self.provider_name != "demo",
                 "externalTools":external_tools, "backgroundTasks":true,
                 "externalAgents":!self.kernel()?.agent_specs().is_empty(),
@@ -719,6 +735,33 @@ mod tests {
                 .unwrap()["error"]["code"],
             -32600
         );
+    }
+
+    #[test]
+    fn rejects_oversize_batches_before_dispatching_any_member() {
+        let mut server = server();
+        let init = json!({"jsonrpc":"2.0","id":null,"method":"initialize",
+            "params":{"protocolVersion":PROTOCOL_VERSION,"clientName":"batch-test"}});
+        let read = json!({"jsonrpc":"2.0","id":1,"method":"workspace/list"});
+        let mut batch = vec![read; MAX_BATCH_ITEMS + 1];
+        batch[0] = init;
+        let response = server
+            .handle_line(&serde_json::to_string(&batch).unwrap())
+            .unwrap();
+        assert_eq!(response["error"]["code"], -32600);
+        assert!(response["id"].is_null());
+        batch.pop();
+        let response = server
+            .handle_line(&serde_json::to_string(&batch).unwrap())
+            .unwrap();
+        let responses = response.as_array().unwrap();
+        assert_eq!(responses.len(), MAX_BATCH_ITEMS);
+        assert_eq!(
+            responses[0]["result"]["capabilities"]["maxBatchItems"],
+            MAX_BATCH_ITEMS
+        );
+        assert!(responses[0]["id"].is_null());
+        assert!(responses.iter().all(|reply| reply.get("result").is_some()));
     }
 
     struct BlockingProvider {
