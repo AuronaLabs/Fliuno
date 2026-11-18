@@ -76,7 +76,7 @@ impl Kernel {
             .as_ref()
             .ok_or_else(|| Error::Invalid("selected context requires taskIds".into()))?;
         let mut statement = self.db.prepare(
-            "SELECT CASE WHEN length(CAST(data AS BLOB))<=?4 THEN data END FROM session_turns
+            "SELECT CASE WHEN octet_length(data)<=?4 THEN data END FROM session_turns
             WHERE session_id=?1 AND task_id=?2 AND sequence<=?3",
         )?;
         let mut turns: Vec<ContextTurn> = Vec::new();
@@ -133,8 +133,10 @@ impl Kernel {
             ContextSelection::Recent => options.max_turns,
             ContextSelection::FitRecent => crate::MAX_CONTEXT_CANDIDATES,
         };
+        // For a direct TEXT column, SQLite can compute octet_length from the
+        // record header without reading the body of a rejected projection.
         let mut statement = self.db.prepare(
-            "SELECT CASE WHEN length(CAST(data AS BLOB))<=?3 THEN data END FROM session_turns
+            "SELECT CASE WHEN octet_length(data)<=?3 THEN data END FROM session_turns
             WHERE session_id=?1 AND sequence<=?2 ORDER BY sequence DESC LIMIT ?4",
         )?;
         let rows = statement.query_map(
