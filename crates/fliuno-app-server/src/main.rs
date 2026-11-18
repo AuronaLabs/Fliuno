@@ -2,6 +2,8 @@
 mod configuration;
 use fliuno_app_server::RpcServer;
 use fliuno_core::Kernel;
+use fliuno_protocol::{Event, ModelProgress};
+use serde::Serialize;
 use serde_json::json;
 use std::{
     io::{self, BufRead, BufWriter, Write},
@@ -176,10 +178,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             recv(event_rx) -> event => match event {
                 Ok(event) => {
                     last_event_sequence = event.sequence;
-                    write_frame(&mut stdout, &json!({
-                        "jsonrpc":"2.0", "method":"notifications/event",
-                        "params":{"event":event}
-                    }))?;
+                    write_notification(&mut stdout, "notifications/event", EventParams { event })?;
                 }
                 Err(_) => {
                     write_frame(&mut stdout, &json!({
@@ -193,10 +192,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             },
             recv(progress_rx) -> progress => match progress {
                 Ok(progress) => {
-                    write_frame(&mut stdout, &json!({
-                        "jsonrpc":"2.0", "method":"notifications/modelProgress",
-                        "params":{"progress":progress}
-                    }))?;
+                    write_notification(&mut stdout, "notifications/modelProgress", ProgressParams { progress })?;
                 }
                 Err(_) => {
                     write_frame(&mut stdout, &json!({
@@ -260,7 +256,38 @@ fn read_input_frames(sender: crossbeam_channel::Sender<InputFrame>) {
     }
 }
 
-fn write_frame(stdout: &mut impl Write, frame: &serde_json::Value) -> io::Result<()> {
+#[derive(Serialize)]
+struct EventParams {
+    event: Event,
+}
+
+#[derive(Serialize)]
+struct ProgressParams {
+    progress: ModelProgress,
+}
+
+fn write_notification(
+    stdout: &mut impl Write,
+    method: &str,
+    params: impl Serialize,
+) -> io::Result<()> {
+    #[derive(Serialize)]
+    struct Notification<'a, P> {
+        jsonrpc: &'static str,
+        method: &'a str,
+        params: P,
+    }
+    write_frame(
+        stdout,
+        &Notification {
+            jsonrpc: "2.0",
+            method,
+            params,
+        },
+    )
+}
+
+fn write_frame(stdout: &mut impl Write, frame: &impl Serialize) -> io::Result<()> {
     serde_json::to_writer(&mut *stdout, frame)?;
     stdout.write_all(b"\n")?;
     stdout.flush()
