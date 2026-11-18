@@ -73,7 +73,7 @@ $env:OPENAI_API_KEY = '<你的 key>' # anthropic 使用 ANTHROPIC_API_KEY
 cargo run -p fliuno-app-server
 ```
 
-可同时设置 `FLIUNO_CONTEXT_WINDOW_TOKENS` 和 `FLIUNO_MAX_OUTPUT_TOKENS`，开启整份模型请求的本机预算检查，并给供应商设置生成上限。输入按 JSON 字节估算，详见[模型请求预算](docs/context.md#模型请求预算)。
+可同时设置 `FLIUNO_CONTEXT_WINDOW_TOKENS` 和 `FLIUNO_MAX_OUTPUT_TOKENS`，检查输入预算并给供应商设置生成上限。默认按 JSON 字节估算；可用 `FLIUNO_CONTEXT_COUNT_MODE=provider` 显式启用供应商输入计数，详见[模型请求预算](docs/context.md#模型请求预算)。
 
 可用 `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` 指定兼容服务的 API 基础地址，例如以 `/v1/` 结尾。仅允许 HTTPS 和本机回环 HTTP；禁止自动重定向。模型请求使用有超时的 SSE 流式响应，也接受兼容端点返回的完整 JSON；不会自动重试付费请求。四个固定 worker 最多并发执行四个独立任务步骤，另有容量 32 的有界队列；并发能力会在 `initialize` 中声明。模型与工具执行期间都可查询和取消任务。取消会通知 provider 或工具并丢弃迟到结果，但供应商可能已收到请求并计费，外部副作用也可能已经发生。
 

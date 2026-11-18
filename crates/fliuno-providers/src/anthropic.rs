@@ -25,7 +25,13 @@ impl AnthropicProvider {
         headers.insert("x-api-key", header(key)?);
         headers.insert("anthropic-version", header("2023-06-01")?);
         Ok(Self {
-            http: Http::new(base, "messages", headers)?,
+            http: Http::new(
+                base,
+                "messages",
+                "messages/count_tokens",
+                &["model", "messages", "system", "tools", "tool_choice"],
+                headers,
+            )?,
             model: model.into(),
         })
     }

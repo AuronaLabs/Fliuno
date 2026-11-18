@@ -7,12 +7,12 @@ pub use anthropic::AnthropicProvider;
 use fliuno_core::{DemoProvider, ModelProvider};
 pub use openai::OpenAiProvider;
 
-/// Opt-in local guard. Input is estimated from the complete serialized request,
-/// not from a provider tokenizer or a model-specific window lookup.
+/// Opt-in guard with a host-selected context window and output reserve.
 #[derive(Debug, Clone, Copy)]
 pub struct ModelContextBudget {
     input_allowance: u32,
     max_output_tokens: u32,
+    provider_count: bool,
 }
 
 impl ModelContextBudget {
@@ -23,7 +23,14 @@ impl ModelContextBudget {
         Ok(Self {
             input_allowance: window_tokens - max_output_tokens,
             max_output_tokens,
+            provider_count: false,
         })
+    }
+
+    /// Ask the configured provider to count the input before generating.
+    pub fn with_provider_count(mut self) -> Self {
+        self.provider_count = true;
+        self
     }
 }
 
@@ -40,12 +47,25 @@ fn context_budget_from_env() -> Result<Option<ModelContextBudget>, String> {
             }
         }
     }
+    let provider_count = match std::env::var("FLIUNO_CONTEXT_COUNT_MODE") {
+        Ok(value) if value == "provider" => true,
+        Ok(value) if value == "local" => false,
+        Err(std::env::VarError::NotPresent) => false,
+        _ => return Err("FLIUNO_CONTEXT_COUNT_MODE must be local or provider".into()),
+    };
     match (
         read("FLIUNO_CONTEXT_WINDOW_TOKENS")?,
         read("FLIUNO_MAX_OUTPUT_TOKENS")?,
     ) {
-        (None, None) => Ok(None),
-        (Some(window), Some(output)) => ModelContextBudget::new(window, output).map(Some),
+        (None, None) if !provider_count => Ok(None),
+        (Some(window), Some(output)) => {
+            let budget = ModelContextBudget::new(window, output)?;
+            Ok(Some(if provider_count {
+                budget.with_provider_count()
+            } else {
+                budget
+            }))
+        }
         _ => Err("set both FLIUNO_CONTEXT_WINDOW_TOKENS and FLIUNO_MAX_OUTPUT_TOKENS".into()),
     }
 }

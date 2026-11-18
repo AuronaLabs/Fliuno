@@ -900,6 +900,7 @@ dependencies = [
  "fliuno-core",
  "fliuno-protocol",
  "reqwest",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-util",

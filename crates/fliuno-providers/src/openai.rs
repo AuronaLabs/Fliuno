@@ -23,7 +23,19 @@ impl OpenAiProvider {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, header(&format!("Bearer {key}"))?);
         Ok(Self {
-            http: Http::new(base, "responses", headers)?,
+            http: Http::new(
+                base,
+                "responses",
+                "responses/input_tokens",
+                &[
+                    "model",
+                    "input",
+                    "instructions",
+                    "tools",
+                    "parallel_tool_calls",
+                ],
+                headers,
+            )?,
             model: model.into(),
         })
     }

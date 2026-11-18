@@ -134,14 +134,31 @@ fn directories_and_missing_configuration_paths_fail_without_echoing_the_path() {
 fn invalid_model_context_budget_fails_before_database_creation() {
     let fixture = Directory::new();
     let database = fixture.0.join("kernel.db");
-    for (window, output_limit, diagnostic) in [
-        ("8192", None, "set both FLIUNO_CONTEXT_WINDOW_TOKENS"),
+    for (window, output_limit, mode, diagnostic) in [
+        (
+            "8192",
+            None,
+            "local",
+            "set both FLIUNO_CONTEXT_WINDOW_TOKENS",
+        ),
         (
             "private-invalid-window",
             Some("256"),
+            "local",
             "must be an unsigned integer",
         ),
-        ("8192", Some("8192"), "smaller than the context window"),
+        (
+            "8192",
+            Some("8192"),
+            "local",
+            "smaller than the context window",
+        ),
+        (
+            "8192",
+            Some("256"),
+            "private-invalid-mode",
+            "must be local or provider",
+        ),
     ] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"));
         command
@@ -152,6 +169,7 @@ fn invalid_model_context_budget_fails_before_database_creation() {
             .env("OPENAI_API_KEY", "fixture-key")
             .env("OPENAI_BASE_URL", "http://127.0.0.1:1/v1/")
             .env("FLIUNO_CONTEXT_WINDOW_TOKENS", window)
+            .env("FLIUNO_CONTEXT_COUNT_MODE", mode)
             .env_remove("FLIUNO_MAX_OUTPUT_TOKENS")
             .stdin(Stdio::null());
         if let Some(value) = output_limit {
@@ -162,6 +180,7 @@ fn invalid_model_context_budget_fails_before_database_creation() {
         assert!(!output.status.success());
         assert!(stderr.contains(diagnostic), "{stderr}");
         assert!(!stderr.contains("private-invalid-window"));
+        assert!(!stderr.contains("private-invalid-mode"));
         assert!(!database.exists());
     }
 }

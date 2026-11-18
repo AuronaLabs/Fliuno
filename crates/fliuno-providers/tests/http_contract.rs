@@ -14,6 +14,9 @@ use std::{
     time::Duration,
 };
 
+#[path = "../../fliuno-mcp/tests/support/http.rs"]
+mod wire;
+
 fn read_request(stream: &mut TcpStream) -> (String, Value) {
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -229,6 +232,141 @@ fn budgeted_calls_send_the_reserved_output_limit_to_both_providers() {
     assert_eq!(requests[0].1["max_output_tokens"], 512);
     assert_eq!(requests[1].1["max_tokens"], 512);
     assert_eq!(requests[1].1["stream"], true);
+}
+
+#[test]
+fn provider_counts_the_same_input_and_allows_the_exact_limit() {
+    for (route, count_route, fields, output_field, result) in [
+        (
+            "/v1/responses",
+            "/v1/responses/input_tokens",
+            [
+                "model",
+                "input",
+                "instructions",
+                "tools",
+                "parallel_tool_calls",
+            ],
+            "max_output_tokens",
+            json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}]}),
+        ),
+        (
+            "/v1/messages",
+            "/v1/messages/count_tokens",
+            ["model", "messages", "system", "tools", "tool_choice"],
+            "max_tokens",
+            json!({"stop_reason":"end_turn","content":[{"type":"text","text":"done"}]}),
+        ),
+    ] {
+        let peer = wire::Fixture::start(move |request| match request.path.as_str() {
+            path if path == count_route => wire::Response::json(200, json!({"input_tokens":128})),
+            path if path == route => wire::Response::json(200, result.clone()),
+            other => panic!("unexpected provider route {other}"),
+        });
+        let (task, tools) = prepared_model_step();
+        // The full wire request is much larger than 128 JSON bytes, so this
+        // also distinguishes provider mode from the local estimate.
+        let budget = ModelContextBudget::new(160, 32)
+            .unwrap()
+            .with_provider_count();
+        let base = peer.url("/v1/");
+        let provider: Box<dyn ModelProvider> = if route.ends_with("responses") {
+            Box::new(
+                OpenAiProvider::new(&base, "fixture-key", "model")
+                    .unwrap()
+                    .with_context_budget(budget),
+            )
+        } else {
+            Box::new(
+                AnthropicProvider::new(&base, "fixture-key", "model")
+                    .unwrap()
+                    .with_context_budget(budget),
+            )
+        };
+        let turn = provider
+            .next_with_progress_classified(&task, &tools, &CancellationToken::new(), &mut |_| {})
+            .unwrap();
+        assert!(matches!(turn.decision, ModelDecision::Complete(text) if text == "done"));
+        let requests = peer.requests();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].path, count_route);
+        assert_eq!(requests[1].path, route);
+        let count = &requests[0].body;
+        let generation = &requests[1].body;
+        assert_eq!(count.as_object().unwrap().len(), fields.len());
+        for key in fields {
+            assert_eq!(&count[key], &generation[key], "{key}");
+        }
+        assert_eq!(generation[output_field], 32);
+        assert_eq!(generation["stream"], true);
+    }
+}
+
+#[test]
+fn provider_count_failure_or_overflow_never_dispatches_generation() {
+    for (status, value, diagnostic) in [
+        (
+            200,
+            json!({"input_tokens":129}),
+            "exceeds the configured context budget",
+        ),
+        (200, json!({"input_tokens":-1}), "count unavailable"),
+        (
+            200,
+            json!({"input_tokens":128,"metadata":"x".repeat(18_000)}),
+            "count unavailable",
+        ),
+        (
+            503,
+            json!({"error":"private-provider-error"}),
+            "count unavailable",
+        ),
+    ] {
+        let peer = wire::Fixture::start(move |request| {
+            assert_eq!(request.path, "/v1/responses/input_tokens");
+            wire::Response::json(status, value.clone())
+        });
+        let (task, tools) = prepared_model_step();
+        let provider = OpenAiProvider::new(&peer.url("/v1/"), "fixture-key", "model")
+            .unwrap()
+            .with_context_budget(
+                ModelContextBudget::new(160, 32)
+                    .unwrap()
+                    .with_provider_count(),
+            );
+        let result = provider.next_classified(&task, &tools, &CancellationToken::new());
+        assert!(matches!(result, Err(ModelError::NotDispatched(message))
+            if message.contains(diagnostic) && !message.contains("private-provider-error")));
+        assert_eq!(peer.requests().len(), 1);
+    }
+}
+
+#[test]
+fn cancelling_an_in_flight_count_is_known_before_generation() {
+    let (entered, received) = std::sync::mpsc::sync_channel(1);
+    let peer = wire::Fixture::start(move |request| {
+        assert_eq!(request.path, "/v1/messages/count_tokens");
+        entered.send(()).unwrap();
+        wire::Response::hold()
+    });
+    let (task, tools) = prepared_model_step();
+    let provider = AnthropicProvider::new(&peer.url("/v1/"), "fixture-key", "model")
+        .unwrap()
+        .with_context_budget(
+            ModelContextBudget::new(160, 32)
+                .unwrap()
+                .with_provider_count(),
+        );
+    let cancellation = CancellationToken::new();
+    let cancel = cancellation.clone();
+    let trigger = thread::spawn(move || {
+        received.recv_timeout(Duration::from_secs(5)).unwrap();
+        cancel.cancel();
+    });
+    let result = provider.next_classified(&task, &tools, &cancellation);
+    trigger.join().unwrap();
+    assert!(matches!(result, Err(ModelError::CancelledBeforeDispatch)));
+    assert_eq!(peer.requests().len(), 1);
 }
 
 #[test]

@@ -6,12 +6,13 @@ use reqwest::{
     redirect::Policy,
 };
 use serde_json::Value;
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 use tokio::runtime::Runtime;
 
 const REQUEST_LIMIT: usize = 8 * 1024 * 1024;
 const RESPONSE_LIMIT: u64 = 4 * 1024 * 1024;
 const EVENT_LIMIT: usize = 1024 * 1024;
+const COUNT_RESPONSE_LIMIT: u64 = 16 * 1024;
 
 struct BoundedRequestBody {
     bytes: Vec<u8>,
@@ -36,10 +37,15 @@ impl std::io::Write for BoundedRequestBody {
     }
 }
 
-fn encode_request(body: &Value, budget: Option<ModelContextBudget>) -> Result<Vec<u8>, ModelError> {
-    let limit = budget.map_or(REQUEST_LIMIT, |budget| {
-        REQUEST_LIMIT.min(budget.input_allowance as usize)
-    });
+fn encode_request(
+    body: &impl serde::Serialize,
+    budget: Option<ModelContextBudget>,
+) -> Result<Vec<u8>, ModelError> {
+    let limit = budget
+        .filter(|budget| !budget.provider_count)
+        .map_or(REQUEST_LIMIT, |budget| {
+            REQUEST_LIMIT.min(budget.input_allowance as usize)
+        });
     let mut writer = BoundedRequestBody {
         bytes: Vec::new(),
         limit,
@@ -61,12 +67,20 @@ fn encode_request(body: &Value, budget: Option<ModelContextBudget>) -> Result<Ve
 pub(crate) struct Http {
     client: Client,
     endpoint: Url,
+    count_endpoint: Url,
+    count_fields: &'static [&'static str],
     runtime: Runtime,
     context_budget: Option<ModelContextBudget>,
 }
 
 impl Http {
-    pub fn new(base: &str, route: &str, headers: HeaderMap) -> Result<Self, String> {
+    pub fn new(
+        base: &str,
+        route: &str,
+        count_route: &str,
+        count_fields: &'static [&'static str],
+        headers: HeaderMap,
+    ) -> Result<Self, String> {
         let mut base = Url::parse(base).map_err(|_| "invalid provider base URL")?;
         if !base.username().is_empty()
             || base.password().is_some()
@@ -83,11 +97,15 @@ impl Http {
             base.set_path(&format!("{}/", base.path()));
         }
         let endpoint = base.join(route).map_err(|_| "invalid provider route")?;
+        let count_endpoint = base
+            .join(count_route)
+            .map_err(|_| "invalid provider count route")?;
         let client = Client::builder()
             .default_headers(headers)
             .timeout(Duration::from_secs(45))
             .connect_timeout(Duration::from_secs(10))
             .redirect(Policy::none())
+            .retry(reqwest::retry::never())
             .build()
             .map_err(|_| "cannot initialize HTTP client")?;
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -97,6 +115,8 @@ impl Http {
         Ok(Self {
             client,
             endpoint,
+            count_endpoint,
+            count_fields,
             runtime,
             context_budget: None,
         })
@@ -111,19 +131,58 @@ impl Http {
         self.context_budget.map(|budget| budget.max_output_tokens)
     }
 
+    fn prepare_generation(
+        &self,
+        body: &Value,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<u8>, ModelError> {
+        if cancellation.is_cancelled() {
+            return Err(ModelError::CancelledBeforeDispatch);
+        }
+        let encoded = encode_request(body, self.context_budget)?;
+        if let Some(budget) = self.context_budget.filter(|budget| budget.provider_count) {
+            let count_body: BTreeMap<_, _> = self
+                .count_fields
+                .iter()
+                .copied()
+                .filter_map(|key| body.get(key).map(|value| (key, value)))
+                .collect();
+            let count_body = encode_request(&count_body, None)?;
+            let count = self.runtime.block_on(async {
+                tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => Err(ModelError::CancelledBeforeDispatch),
+                    result = tokio::time::timeout(Duration::from_secs(10), self.post_json(&self.count_endpoint, count_body, cancellation, COUNT_RESPONSE_LIMIT)) => {
+                        let value = result.ok().and_then(Result::ok);
+                        value.as_ref().and_then(|value| value.get("input_tokens"))
+                            .and_then(Value::as_u64)
+                            .ok_or_else(|| ModelError::NotDispatched("provider input token count unavailable; generation not sent".into()))
+                    }
+                }
+            });
+            if cancellation.is_cancelled() {
+                return Err(ModelError::CancelledBeforeDispatch);
+            }
+            if count? > u64::from(budget.input_allowance) {
+                return Err(ModelError::NotDispatched(
+                    "provider input token count exceeds the configured context budget".into(),
+                ));
+            }
+        }
+        if cancellation.is_cancelled() {
+            return Err(ModelError::CancelledBeforeDispatch);
+        }
+        Ok(encoded)
+    }
+
     pub fn post(
         &self,
         body: &Value,
         cancellation: &CancellationToken,
     ) -> Result<Value, ModelError> {
-        if cancellation.is_cancelled() {
-            return Err(ModelError::CancelledBeforeDispatch);
-        }
-        let body = encode_request(body, self.context_budget)?;
-        if cancellation.is_cancelled() {
-            return Err(ModelError::CancelledBeforeDispatch);
-        }
-        self.runtime.block_on(self.post_async(body, cancellation))
+        let body = self.prepare_generation(body, cancellation)?;
+        self.runtime
+            .block_on(self.post_json(&self.endpoint, body, cancellation, RESPONSE_LIMIT))
     }
 
     pub fn post_stream(
@@ -132,25 +191,21 @@ impl Http {
         cancellation: &CancellationToken,
         on_event: impl FnMut(Value) -> Result<(), String>,
     ) -> Result<Option<Value>, ModelError> {
-        if cancellation.is_cancelled() {
-            return Err(ModelError::CancelledBeforeDispatch);
-        }
-        let body = encode_request(body, self.context_budget)?;
-        if cancellation.is_cancelled() {
-            return Err(ModelError::CancelledBeforeDispatch);
-        }
+        let body = self.prepare_generation(body, cancellation)?;
         self.runtime
             .block_on(self.post_stream_async(body, cancellation, on_event))
     }
 
-    async fn post_async(
+    async fn post_json(
         &self,
+        endpoint: &Url,
         body: Vec<u8>,
         cancellation: &CancellationToken,
+        limit: u64,
     ) -> Result<Value, ModelError> {
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err("provider request cancelled".into()),
-            response = self.client.post(self.endpoint.clone())
+            response = self.client.post(endpoint.clone())
                 .header(CONTENT_TYPE, "application/json")
                 .body(body)
                 .send() => {
@@ -164,6 +219,12 @@ impl Http {
         if !status.is_success() {
             return Err(format!("provider HTTP status {}", status.as_u16()).into());
         }
+        if response
+            .content_length()
+            .is_some_and(|length| length > limit)
+        {
+            return Err("provider response exceeds its size limit".into());
+        }
         let mut response = response;
         let mut bytes = Vec::new();
         loop {
@@ -172,8 +233,8 @@ impl Http {
                 chunk = response.chunk() => chunk.map_err(|_| "cannot read provider response")?,
             };
             let Some(chunk) = chunk else { break };
-            if bytes.len().saturating_add(chunk.len()) as u64 > RESPONSE_LIMIT {
-                return Err("provider response exceeds 4 MiB".into());
+            if bytes.len().saturating_add(chunk.len()) as u64 > limit {
+                return Err("provider response exceeds its size limit".into());
             }
             bytes.extend_from_slice(&chunk);
         }
