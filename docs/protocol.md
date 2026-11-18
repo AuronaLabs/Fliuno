@@ -31,6 +31,8 @@
 | `events/list` | `{taskId, after?:0, limit?:100}` | `{events, nextAfter, hasMore}` |
 | `events/listAll` | `{after?:0, limit?:100}` | 全任务共享全局序号的事件页 |
 | `artifacts/list` | `{taskId}` | Artifact 数组 |
+| `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
+| `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
 | `tools/list` | `{}` | 工具名称、描述、效果类型、输入 Schema |
 | `agents/list` | `{}` | 注册 Agent 的 ID、协议、隔离类型和 `workspaceAccess`，不返回启动命令 |
 | `terminal/list` | `{sessionId}` | 此 session 的持久终端快照 |
@@ -41,6 +43,8 @@
 | `terminal/archive` | `{sessionId,terminalId}` | `{snapshot,cleanupPending}`；归档已停止监督器的记录，保留创建身份 |
 | `terminal/archiveBatch` | `{sessionId,terminalIds}` | `{items}`；1..32 个不同 ID，全列表预检、按序逐项归档，独立返回 archived/failed/outcome_unknown |
 | `terminal/archives` | `{sessionId,after?:0,limit?:100}` | 归档历史 ObjectPage，每项为 TerminalArchive |
+
+客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和正文的 UTF-8 字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。
 
 审批不提供“允许全部”模式。未来可新增策略接口，但不得把模型或 MCP 声明的工具注解当作授权来源。
 

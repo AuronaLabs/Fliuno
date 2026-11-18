@@ -1,4 +1,5 @@
 //! SQLite snapshots and committed event log. Only this module touches SQL.
+mod artifacts;
 mod context;
 use super::*;
 use rusqlite::{OptionalExtension, params};
@@ -270,14 +271,6 @@ impl Kernel {
             next_after,
             has_more,
         })
-    }
-
-    pub fn list_artifacts(&self, task_id: &str) -> Result<Vec<Artifact>> {
-        self.get_task(task_id)?;
-        let mut stmt = self
-            .db
-            .prepare("SELECT data FROM artifacts WHERE task_id=?1 ORDER BY rowid")?;
-        decode_rows(stmt.query_map([task_id], |r| r.get::<_, String>(0))?)
     }
 
     pub(crate) fn commit(

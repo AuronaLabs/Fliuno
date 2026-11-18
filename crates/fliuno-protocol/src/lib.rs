@@ -302,6 +302,33 @@ pub struct Artifact {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactSummary {
+    pub id: String,
+    pub task_id: String,
+    pub title: String,
+    pub media_type: String,
+    pub content_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactListParams {
+    pub task_id: String,
+    #[serde(default)]
+    pub after: u64,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactGetParams {
+    pub task_id: String,
+    pub artifact_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "type",
     rename_all = "snake_case",
@@ -592,6 +619,8 @@ pub fn schema_bundle() -> Value {
             "events/list": schemars::schema_for!(EventsListParams),
             "events/listAll": schemars::schema_for!(EventsListAllParams),
             "artifacts/list": schemars::schema_for!(TaskIdParams),
+            "artifacts/listSummaries": schemars::schema_for!(ArtifactListParams),
+            "artifacts/get": schemars::schema_for!(ArtifactGetParams),
             "tools/list": {"type":"object","properties":{},"additionalProperties":false},
             "agents/list": {"type":"object","properties":{},"additionalProperties":false}
         },
@@ -611,6 +640,7 @@ pub fn schema_bundle() -> Value {
             "TerminalArchiveBatch": schemars::schema_for!(TerminalArchiveBatch),
             "TerminalArchivesPage": schemars::schema_for!(ObjectPage<TerminalArchive>),
             "Artifact": schemars::schema_for!(Artifact),
+            "ArtifactSummariesPage": schemars::schema_for!(ObjectPage<ArtifactSummary>),
             "Event": schemars::schema_for!(Event),
             "ModelProgress": schemars::schema_for!(ModelProgress),
             "EventsPage": schemars::schema_for!(EventsPage)

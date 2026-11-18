@@ -226,6 +226,7 @@ impl RpcServer {
                 json!({"protocolVersion":PROTOCOL_VERSION, "serverName":"fliuno-app-server",
                 "serverVersion":env!("CARGO_PKG_VERSION"), "capabilities":{
                     "eventReplay":true, "approvals":true, "artifacts":true,
+                    "artifactSummaries":true,
                     "registrationAuthority":true,
                     "eventNotifications":true, "globalEventReplay":true,
                     "provider":self.provider_name, "liveModels":self.provider_name != "demo",
@@ -456,6 +457,17 @@ impl RpcServer {
             "artifacts/list" => {
                 let p: TaskIdParams = decode(params)?;
                 json!(self.kernel()?.list_artifacts(&p.task_id)?)
+            }
+            "artifacts/listSummaries" => {
+                let p: ArtifactListParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .list_artifact_summaries(&p.task_id, p.after, p.limit)?
+                )
+            }
+            "artifacts/get" => {
+                let p: ArtifactGetParams = decode(params)?;
+                json!(self.kernel()?.get_artifact(&p.task_id, &p.artifact_id)?)
             }
             "agents/list" => {
                 if params != json!({}) {

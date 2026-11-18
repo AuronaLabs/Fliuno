@@ -647,6 +647,50 @@
         "taskId"
       ]
     },
+    "artifacts/listSummaries": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactListParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "artifacts/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactGetParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "artifactId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "artifactId"
+      ]
+    },
     "tools/list": {
       "type": "object",
       "properties": {},
@@ -2926,6 +2970,65 @@
         "mediaType",
         "content"
       ]
+    },
+    "ArtifactSummariesPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ObjectPage",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactSummary"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextAfter",
+        "hasMore"
+      ],
+      "$defs": {
+        "ArtifactSummary": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "title",
+            "mediaType",
+            "contentBytes"
+          ]
+        }
+      }
     },
     "Event": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

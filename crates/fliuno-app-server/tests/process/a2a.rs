@@ -119,6 +119,87 @@ fn wait_checked(peer: &mut Peer, task_id: &Value, check_id: &Value) -> Value {
 }
 
 #[test]
+fn artifact_summaries_page_without_returning_bodies_and_get_is_task_scoped() {
+    let wire = Fixture::start(|request| {
+        assert_eq!(request.body["method"], "SendMessage");
+        let mut completed = task("TASK_STATE_COMPLETED");
+        completed["artifacts"] = json!([
+            {"artifactId":"oversized-preview","name":"数据","parts":[{"text":"报告\n\u{0}".repeat(8192)}]},
+            {"artifactId":"notes","parts":[{"text":"short"}]}
+        ]);
+        response(request, json!({"task":completed}))
+    });
+    let directory = Directory::new(&wire, 10_000, false);
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let first_task = start(&mut peer, &session, "artifacts");
+    let second_task = start(&mut peer, &session, "different-task");
+    for id in [&first_task["id"], &second_task["id"]] {
+        assert_eq!(wait_finished(&mut peer, id)["status"], "completed");
+    }
+    let task_id = &first_task["id"];
+    let first = peer.call(
+        "artifacts/listSummaries",
+        json!({"taskId":task_id,"limit":1}),
+    );
+    assert_eq!(first["hasMore"], true);
+    assert_eq!(first["items"].as_array().unwrap().len(), 1);
+    assert_eq!(first["items"][0]["title"], "数据");
+    assert!(first["items"][0].get("content").is_none());
+    assert!(serde_json::to_vec(&first).unwrap().len() < 512);
+    drop(peer);
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let second = peer.call(
+        "artifacts/listSummaries",
+        json!({"taskId":task_id,"after":first["nextAfter"],"limit":1}),
+    );
+    assert_eq!(second["hasMore"], false);
+    assert_eq!(second["items"][0]["title"], "notes");
+    let end = peer.call(
+        "artifacts/listSummaries",
+        json!({"taskId":task_id,"after":second["nextAfter"]}),
+    );
+    assert_eq!(
+        end,
+        json!({"items":[],"nextAfter":second["nextAfter"],"hasMore":false})
+    );
+    let full = peer.call("artifacts/list", json!({"taskId":task_id}));
+    assert!(serde_json::to_vec(&full).unwrap().len() > 65_536);
+    for (index, page) in [first, second].into_iter().enumerate() {
+        let summary = &page["items"][0];
+        let artifact = peer.call(
+            "artifacts/get",
+            json!({"taskId":task_id,"artifactId":summary["id"]}),
+        );
+        assert_eq!(artifact, full[index]);
+        assert_eq!(
+            summary["contentBytes"],
+            artifact["content"].as_str().unwrap().len()
+        );
+        assert_eq!(summary["taskId"], *task_id);
+        let foreign = peer.request(
+            "artifacts/get",
+            json!({"taskId":second_task["id"],"artifactId":summary["id"]}),
+        );
+        let missing = peer.request(
+            "artifacts/get",
+            json!({"taskId":second_task["id"],"artifactId":"missing"}),
+        );
+        assert_eq!(foreign["error"], missing["error"]);
+        assert_eq!(foreign["error"]["code"], -32004);
+    }
+    for invalid in [
+        json!({"taskId":task_id,"limit":0}),
+        json!({"taskId":task_id,"after":u64::MAX}),
+    ] {
+        assert_eq!(
+            peer.request("artifacts/listSummaries", invalid)["error"]["code"],
+            -32602
+        );
+    }
+}
+
+#[test]
 fn remote_check_after_stream_loss_appends_evidence_without_replaying_or_changing_the_run() {
     let (release, gate) = std::sync::mpsc::sync_channel(1);
     let gate = std::sync::Mutex::new(gate);
