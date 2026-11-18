@@ -9,7 +9,7 @@ use std::{
     process::{Child, ChildStdin, Command, Stdio},
     sync::mpsc::{self, Receiver},
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 #[path = "acp_process/authority.rs"]
@@ -33,14 +33,7 @@ impl Directory {
         fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
     }
     fn new() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "fliuno-acp-rpc-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let root = std::env::temp_dir().join(format!("fliuno-acp-rpc-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
         fs::write(
             root.join("agents.json"),
