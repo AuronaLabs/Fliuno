@@ -57,6 +57,24 @@ impl Drop for Directory {
 }
 
 #[tokio::test]
+async fn terminal_metadata_can_be_read_independently_of_output_chunks() {
+    let fixture = Directory::new();
+    let id = "a".repeat(64);
+    let dir = fixture.spool(&id, "s", Status::Exited);
+    fixture.spool(&"b".repeat(64), "other", Status::Exited);
+    let db = rusqlite::Connection::open(dir.join("output.db")).unwrap();
+    db.execute_batch("DROP TABLE chunks").unwrap();
+    drop(db);
+    let listed = fixture.service.list("s").await.unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].terminal_id, id);
+    assert_eq!(listed[0].status, Status::Exited);
+    assert_eq!(fixture.service.status("s", &id).await.unwrap(), listed[0]);
+    assert!(fixture.service.status("other", &id).await.is_err());
+    assert!(fixture.service.output("s", &id, 0, 8).await.is_err());
+}
+
+#[tokio::test]
 async fn archive_reclaims_spool_but_preserves_session_identity_offsets_and_explicit_gaps() {
     let fixture = Directory::new();
     let service = &fixture.service;

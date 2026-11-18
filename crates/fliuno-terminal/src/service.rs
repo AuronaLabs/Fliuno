@@ -23,6 +23,23 @@ pub struct Service {
     worker: Arc<PathBuf>,
     pub(crate) retention_grace_ms: Option<u64>,
 }
+
+fn check_snapshot_scope(snapshot: &Snapshot, session: &str, id: &str) -> Result<(), String> {
+    if snapshot.terminal_id != id {
+        return Err("terminal identity does not match its spool".into());
+    }
+    if snapshot.session_id != session {
+        return Err("terminal belongs to another session".into());
+    }
+    Ok(())
+}
+
+fn parse_live_status(saved: &Snapshot, value: Value) -> Result<Snapshot, String> {
+    let current: Snapshot = serde_json::from_value(value).map_err(|_| "invalid terminal status")?;
+    check_snapshot_scope(&current, &saved.session_id, &saved.terminal_id)?;
+    Ok(current)
+}
+
 struct StagedDirectory {
     path: PathBuf,
     published: bool,
@@ -108,30 +125,58 @@ impl Service {
         operation: Operation,
     ) -> Result<Value, String> {
         // Check persisted ownership before exposing a capability to any caller.
-        let saved = self.offline(session, id, 0, 1)?;
-        if saved.snapshot.archived_at_unix_ms.is_some() {
+        let saved = self.offline(session, id, 0, 1)?.snapshot;
+        self.call_live(&saved, operation).await
+    }
+
+    async fn call_live(&self, saved: &Snapshot, operation: Operation) -> Result<Value, String> {
+        if saved.archived_at_unix_ms.is_some() {
             return Err(
                 "terminal identity is archived; it cannot be controlled or relaunched".into(),
             );
         }
-        let dir = self.directory(id)?;
-        let descriptor = ipc::descriptor(&dir)?;
-        ipc::call(&descriptor, session, operation).await
+        let directory = self.directory(&saved.terminal_id)?;
+        let descriptor = ipc::descriptor(&directory)?;
+        ipc::call(&descriptor, &saved.session_id, operation).await
     }
+
     pub async fn status(&self, session: &str, id: &str) -> Result<Snapshot, String> {
+        let ledger = Registry::open(&self.root, false)?;
+        let saved = self.saved_snapshot(&ledger, session, id)?;
+        if saved.archived_at_unix_ms.is_some() {
+            return Ok(saved);
+        }
         match tokio::time::timeout(
             OBSERVATION_TIMEOUT,
-            self.call(session, id, Operation::Status),
+            self.call_live(&saved, Operation::Status),
         )
         .await
         {
-            Ok(Ok(value)) => {
-                serde_json::from_value(value).map_err(|_| "invalid terminal status".into())
-            }
-            Err(_) => Ok(self.offline(session, id, 0, 1)?.snapshot),
-            Ok(Err(_)) => Ok(self.offline(session, id, 0, 1)?.snapshot),
+            Ok(Ok(live)) => parse_live_status(&saved, live),
+            Err(_) | Ok(Err(_)) => self.saved_snapshot(&ledger, session, id),
         }
     }
+
+    fn saved_snapshot(
+        &self,
+        ledger: &Registry,
+        session: &str,
+        id: &str,
+    ) -> Result<Snapshot, String> {
+        let snapshot = match ledger.get(id)? {
+            Some(archive) => archive.snapshot,
+            None => match self
+                .directory(id)
+                .and_then(|directory| spool::saved_snapshot(&directory))
+            {
+                Ok(spool) => spool,
+                Err(error) => ledger.get(id)?.ok_or(error)?.snapshot,
+            },
+        };
+        check_snapshot_scope(&snapshot, session, id)?;
+        Ok(snapshot)
+    }
+
     pub async fn output(
         &self,
         session: &str,
@@ -181,9 +226,7 @@ impl Service {
     ) -> Result<Output, String> {
         let ledger = Registry::open(&self.root, false)?;
         let archived = |record: fliuno_protocol::TerminalArchive| {
-            if record.snapshot.session_id != session {
-                return Err("terminal belongs to another session".into());
-            }
+            check_snapshot_scope(&record.snapshot, session, id)?;
             let after = match cursor {
                 OutputCursor::After(after) => after,
                 OutputCursor::Tail => 0,
@@ -205,14 +248,13 @@ impl Service {
                 };
             }
         };
-        if output.snapshot.session_id != session {
-            return Err("terminal belongs to another session".into());
-        }
+        check_snapshot_scope(&output.snapshot, session, id)?;
         Ok(output)
     }
     /// Host-configured roots hold at most 64 records. No unbounded directory
     /// scan or supervisor startup is triggered by a client listing terminals.
     pub async fn list(&self, session: &str) -> Result<Vec<Snapshot>, String> {
+        let ledger = Registry::open(&self.root, false)?;
         let mut snapshots = Vec::new();
         let refresh_deadline = tokio::time::Instant::now() + OBSERVATION_TIMEOUT;
         for entry in fs::read_dir(&*self.root)
@@ -224,8 +266,7 @@ impl Service {
             if id.len() != 64 {
                 continue;
             }
-            if let Ok(output) = self.offline(session, &id, 0, 1) {
-                let mut snapshot = output.snapshot;
+            if let Ok(mut snapshot) = self.saved_snapshot(&ledger, session, &id) {
                 if snapshot.archived_at_unix_ms.is_some() {
                     continue;
                 }
@@ -236,10 +277,12 @@ impl Service {
                         snapshots.push(snapshot);
                         continue;
                     }
-                    if let Ok(Ok(value)) =
-                        tokio::time::timeout(remaining, self.call(session, &id, Operation::Status))
-                            .await
-                        && let Ok(live) = serde_json::from_value(value)
+                    if let Ok(Ok(value)) = tokio::time::timeout(
+                        remaining,
+                        self.call_live(&snapshot, Operation::Status),
+                    )
+                    .await
+                        && let Ok(live) = parse_live_status(&snapshot, value)
                     {
                         snapshot = live;
                     }

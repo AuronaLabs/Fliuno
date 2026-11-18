@@ -41,7 +41,7 @@
 | `tools/list` | `{}` | 工具名称、描述、效果类型、输入 Schema |
 | `agents/list` | `{}` | 注册 Agent 的 ID、协议、隔离类型和 `workspaceAccess`，不返回启动命令 |
 | `terminal/list` | `{sessionId}` | 此 session 的持久终端快照 |
-| `terminal/get` | `{sessionId,terminalId}` | 单个终端快照；live IPC 无响应时返回离线未知状态 |
+| `terminal/get` | `{sessionId,terminalId}` | 单个终端快照，独立于输出读取。live IPC 无响应时按最后持久状态返回 |
 | `terminal/output` | `{sessionId,terminalId,after?:0,limit?:32768}` | base64 原始字节、绝对游标、gap 标志与快照 |
 | `terminal/tail` | `{sessionId,terminalId,limit?:32768}` | 最近保留的原始字节和末尾游标，可用 `next` 续读 |
 | `terminal/subscribe` | `{sessionId,terminalId,after?:0,limit?:32768}` | `{subscriptionId,sessionId,terminalId,after}`；随后推送输出与状态 |

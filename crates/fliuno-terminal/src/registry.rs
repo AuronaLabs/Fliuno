@@ -173,11 +173,11 @@ impl Registry {
         valid_id(id)?;
         let record = self
             .db
-            .query_row(
-                "SELECT snapshot,cleanup_pending FROM archives WHERE id=?1",
-                [id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
-            )
+            .prepare_cached("SELECT snapshot,cleanup_pending FROM archives WHERE id=?1")
+            .map_err(|_| "cannot read terminal archive")?
+            .query_row([id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+            })
             .optional()
             .map_err(|_| "cannot read terminal archive")?;
         record
