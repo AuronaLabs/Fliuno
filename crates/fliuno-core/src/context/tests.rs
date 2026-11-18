@@ -304,6 +304,117 @@ fn completion_projection_failure_rolls_back_task_and_event_together() {
 }
 
 #[test]
+fn turn_stats_backfill_is_session_scoped_and_respects_frozen_cursors() {
+    let (mut kernel, session) = setup();
+    let other = kernel.create_session(&session.workspace_id).unwrap();
+    let empty = kernel.create_session(&session.workspace_id).unwrap();
+    complete(&mut kernel, &session.id, "first", "first answer");
+    let frozen = kernel
+        .create_task_with_key(&session.id, "frozen", Some("stable"))
+        .unwrap()
+        .0;
+    let first = frozen.context.as_ref().unwrap().turns[0].completion_sequence;
+    complete(&mut kernel, &other.id, "separate", "separate answer");
+    complete(&mut kernel, &session.id, "second", "second answer");
+    let previous = kernel.list_all_events(0, 100).unwrap();
+    let second = previous.events.last().unwrap().sequence;
+    kernel
+        .db
+        .execute_batch(
+            "DROP TRIGGER session_turn_stats_insert;
+         DROP TABLE session_turn_stats;
+         PRAGMA user_version=13;",
+        )
+        .unwrap();
+    let db = std::mem::replace(&mut kernel.db, Connection::open_in_memory().unwrap());
+    drop(kernel);
+    let mut restored = Kernel::from_connection(db, Box::new(DemoProvider), None).unwrap();
+    assert_eq!(
+        restored.context_turn_count(&session.id, first - 1).unwrap(),
+        0
+    );
+    assert_eq!(
+        restored
+            .context_turn_count(&session.id, second - 1)
+            .unwrap(),
+        1
+    );
+    assert_eq!(restored.context_turn_count(&session.id, second).unwrap(), 2);
+    assert_eq!(restored.context_turn_count(&other.id, second).unwrap(), 1);
+    assert_eq!(restored.context_turn_count(&empty.id, second).unwrap(), 0);
+    let (retried, created) = restored
+        .create_task_with_key(&session.id, "frozen", Some("stable"))
+        .unwrap();
+    assert!(!created);
+    assert_eq!(
+        serde_json::to_value(retried.context).unwrap(),
+        serde_json::to_value(frozen.context).unwrap()
+    );
+
+    // Fail the aggregate update after the trigger has already seen the new
+    // projection. The event, task snapshot, turn and aggregate must all roll back.
+    let task = restored
+        .create_task_with_key(&session.id, "rollback", None)
+        .unwrap()
+        .0;
+    let PreparedModelStep::Ready { task, .. } = restored.prepare_model_step(&task.id).unwrap()
+    else {
+        panic!("not ready")
+    };
+    restored
+        .db
+        .execute_batch(
+            "CREATE TRIGGER reject_stats BEFORE UPDATE ON session_turn_stats
+         BEGIN SELECT RAISE(ABORT,'fixture'); END;",
+        )
+        .unwrap();
+    let before = restored.list_events(&task.id, 0, 100).unwrap().events.len();
+    assert!(
+        restored
+            .apply_model_response(
+                task.clone(),
+                Ok(ModelDecision::Complete("done".into()).into())
+            )
+            .is_err()
+    );
+    assert_eq!(
+        restored.get_task(&task.id).unwrap().status,
+        TaskStatus::Running
+    );
+    assert_eq!(
+        restored.list_events(&task.id, 0, 100).unwrap().events.len(),
+        before
+    );
+    assert_eq!(
+        restored
+            .db
+            .query_row(
+                "SELECT COUNT(*) FROM session_turns WHERE task_id=?1",
+                [&task.id],
+                |row| row.get::<_, u32>(0)
+            )
+            .unwrap(),
+        0
+    );
+    assert_eq!(restored.context_turn_count(&session.id, second).unwrap(), 2);
+
+    restored
+        .db
+        .execute_batch("DROP TRIGGER reject_stats")
+        .unwrap();
+    complete(&mut restored, &session.id, "third", "third answer");
+    let latest = restored
+        .list_all_events(0, 100)
+        .unwrap()
+        .events
+        .last()
+        .unwrap()
+        .sequence;
+    assert_eq!(restored.context_turn_count(&session.id, latest).unwrap(), 3);
+    assert_eq!(restored.context_turn_count(&session.id, second).unwrap(), 2);
+}
+
+#[test]
 fn version_four_backfill_preserves_old_inputs_events_and_idempotency() {
     let (mut kernel, session) = setup();
     let (task, _) = kernel
@@ -349,7 +460,7 @@ fn version_four_backfill_preserves_old_inputs_events_and_idempotency() {
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
             .unwrap(),
-        13
+        14
     );
 }
 
