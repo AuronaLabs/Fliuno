@@ -152,6 +152,34 @@ impl AgentBackend for A2aBackend {
             workspace_access: false,
         }
     }
+    fn supports_remote_task_check(&self) -> bool {
+        true
+    }
+    fn check_remote_task(
+        &self,
+        expected: &AgentRemoteTask,
+        cancellation: &CancellationToken,
+    ) -> Option<AgentRemoteTask> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        runtime.block_on(async {
+            let client = Client::new(self.options.clone()).ok()?;
+            let budget = self.task_timeout.min(Duration::from_secs(5));
+            let task = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return None,
+                result = timeout(budget, async {
+                    if let Some(card) = &self.card {
+                        client.check_card(card).await?;
+                    }
+                    client.get_task(&expected.id).await
+                }) => result.ok()?.ok()?,
+            };
+            remote_task(&task).ok()
+        })
+    }
     fn execute(
         &self,
         request: &AgentRequest,
@@ -187,7 +215,7 @@ fn stop_reason(state: TaskState) -> Option<AgentStopReason> {
         _ => None,
     }
 }
-fn record_task(observer: &dyn AgentObserver, task: &Task) -> Result<(), ()> {
+fn remote_task(task: &Task) -> Result<AgentRemoteTask, ()> {
     let state = match task.state {
         TaskState::Submitted => AgentTaskState::Submitted,
         TaskState::Working => AgentTaskState::Working,
@@ -199,12 +227,15 @@ fn record_task(observer: &dyn AgentObserver, task: &Task) -> Result<(), ()> {
         TaskState::AuthRequired => AgentTaskState::AuthRequired,
         TaskState::Unspecified => return Err(()),
     };
+    Ok(AgentRemoteTask {
+        id: task.id.clone(),
+        context_id: task.context_id.clone(),
+        state,
+    })
+}
+fn record_task(observer: &dyn AgentObserver, task: &Task) -> Result<(), ()> {
     observer
-        .observe(AgentObservation::RemoteTask(AgentRemoteTask {
-            id: task.id.clone(),
-            context_id: task.context_id.clone(),
-            state,
-        }))
+        .observe(AgentObservation::RemoteTask(remote_task(task)?))
         .map_err(|_| ())
 }
 fn record_message(observer: &dyn AgentObserver, message: Message) -> Result<AgentOutcome, ()> {

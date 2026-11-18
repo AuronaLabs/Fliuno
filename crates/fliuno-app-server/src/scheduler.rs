@@ -1,9 +1,9 @@
 //! Bounded workers run independent task steps without holding database locks.
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 use fliuno_core::{
-    AgentObservation, AgentObserver, AgentOutcome, CancellationToken, Error, Kernel, ModelError,
-    ModelStreamEvent, ModelTurn, PreparedModelStep, PreparedToolExecution, ProgressPublisher,
-    ToolError, ToolOutput,
+    AgentObservation, AgentObserver, AgentOutcome, CancellationToken, CompletedRemoteTaskCheck,
+    Error, Kernel, ModelError, ModelStreamEvent, ModelTurn, PreparedModelStep,
+    PreparedRemoteTaskCheck, PreparedToolExecution, ProgressPublisher, ToolError, ToolOutput,
 };
 use fliuno_protocol::{ModelProgress, Task};
 use std::{
@@ -19,7 +19,12 @@ use std::{
 pub(super) const QUEUE_CAPACITY: usize = 32;
 pub(super) const WORKER_COUNT: usize = 4;
 type Cancellation = CancellationToken;
-type ActiveTasks = Arc<Mutex<HashMap<String, Cancellation>>>;
+type ActiveTasks = Arc<Mutex<HashMap<String, Reservation>>>;
+
+struct Reservation {
+    cancellation: Cancellation,
+    remote_check: bool,
+}
 type ModelResponse = (Task, Result<ModelTurn, ModelError>);
 type ToolResponse = (PreparedToolExecution, Result<ToolOutput, ToolError>);
 type AgentResponse = (String, String, AgentOutcome);
@@ -27,6 +32,7 @@ type AgentResponse = (String, String, AgentOutcome);
 enum ScheduledWork {
     Model,
     Agent,
+    CheckRemote(Box<PreparedRemoteTaskCheck>),
     Tool(Box<PreparedToolExecution>),
     Stop,
 }
@@ -35,6 +41,7 @@ enum ScheduledResponse {
     Model(Box<ModelResponse>),
     Tool(Box<ToolResponse>),
     Agent(Box<AgentResponse>),
+    CheckRemote(Box<CompletedRemoteTaskCheck>),
 }
 
 struct ScheduledTask {
@@ -93,10 +100,12 @@ impl TaskScheduler {
 
     pub(super) fn schedule(&self, task_id: &str) -> Result<(), &'static str> {
         self.schedule_work(task_id, ScheduledWork::Model)
+            .map(|_| ())
     }
 
     pub(super) fn schedule_agent(&self, task_id: &str) -> Result<(), &'static str> {
         self.schedule_work(task_id, ScheduledWork::Agent)
+            .map(|_| ())
     }
 
     pub(super) fn schedule_tool(
@@ -105,18 +114,37 @@ impl TaskScheduler {
     ) -> Result<(), &'static str> {
         let task_id = execution.task_id().to_owned();
         self.schedule_work(&task_id, ScheduledWork::Tool(execution))
+            .map(|_| ())
     }
 
-    fn schedule_work(&self, task_id: &str, work: ScheduledWork) -> Result<(), &'static str> {
+    pub(super) fn schedule_remote_check(
+        &self,
+        check: PreparedRemoteTaskCheck,
+    ) -> Result<(), &'static str> {
+        let task_id = check.task_id().to_owned();
+        if self.schedule_work(&task_id, ScheduledWork::CheckRemote(Box::new(check)))? {
+            Ok(())
+        } else {
+            Err("task already has scheduled work")
+        }
+    }
+
+    fn schedule_work(&self, task_id: &str, work: ScheduledWork) -> Result<bool, &'static str> {
         let mut active = self
             .active
             .lock()
             .map_err(|_| "task scheduler lock is poisoned")?;
         if active.contains_key(task_id) {
-            return Ok(());
+            return Ok(false);
         }
         let cancellation = CancellationToken::new();
-        active.insert(task_id.into(), cancellation.clone());
+        active.insert(
+            task_id.into(),
+            Reservation {
+                cancellation: cancellation.clone(),
+                remote_check: matches!(&work, ScheduledWork::CheckRemote(_)),
+            },
+        );
         let job = ScheduledTask {
             id: task_id.into(),
             cancellation,
@@ -133,17 +161,18 @@ impl TaskScheduler {
                 TrySendError::Disconnected(_) => "task scheduler is unavailable",
             });
         }
-        Ok(())
+        Ok(true)
     }
 
     pub(super) fn cancel(&self, task_id: &str) -> Result<(), &'static str> {
-        if let Some(token) = self
+        if let Some(reservation) = self
             .active
             .lock()
             .map_err(|_| "task scheduler lock is poisoned")?
             .get(task_id)
+            .filter(|reservation| !reservation.remote_check)
         {
-            token.cancel();
+            reservation.cancellation.cancel();
         }
         Ok(())
     }
@@ -158,8 +187,8 @@ impl Drop for TaskScheduler {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
         if let Ok(active) = self.active.lock() {
-            for token in active.values() {
-                token.cancel();
+            for reservation in active.values() {
+                reservation.cancellation.cancel();
             }
         }
         if let Some(sender) = self.sender.take() {
@@ -216,6 +245,9 @@ fn run_worker(
             }
             ScheduledWork::Agent => run_agent_step(&kernel, &id, &cancellation, &stopping)
                 .map(|response| response.map(Box::new).map(ScheduledResponse::Agent)),
+            ScheduledWork::CheckRemote(check) => Ok(Some(ScheduledResponse::CheckRemote(
+                Box::new(check.execute(&cancellation)),
+            ))),
             ScheduledWork::Stop => unreachable!("stop jobs exit before dispatch"),
         };
         let Ok(mut kernel) = kernel.lock() else {
@@ -230,6 +262,9 @@ fn run_worker(
             break;
         }
         let result = match response {
+            Ok(Some(ScheduledResponse::CheckRemote(check))) => {
+                kernel.record_remote_task_check(*check)
+            }
             Ok(Some(ScheduledResponse::Agent(response))) => {
                 let (task_id, run_id, outcome) = *response;
                 kernel
@@ -424,7 +459,13 @@ fn schedule_followup_model(
         return Ok(());
     }
     let cancellation = CancellationToken::new();
-    active.insert(task.id.clone(), cancellation.clone());
+    active.insert(
+        task.id.clone(),
+        Reservation {
+            cancellation: cancellation.clone(),
+            remote_check: false,
+        },
+    );
     let job = ScheduledTask {
         id: task.id.clone(),
         cancellation,

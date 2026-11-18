@@ -143,6 +143,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["sessionContext"], true);
         assert_eq!(init["capabilities"]["contextTaskSelection"], true);
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
+        assert_eq!(init["capabilities"]["remoteTaskChecks"], a2a.is_some());
         assert_eq!(
             init["capabilities"]["modelProgressNotifications"],
             base.is_some()

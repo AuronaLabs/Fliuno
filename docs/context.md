@@ -98,7 +98,7 @@ $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 
 ## 持久化与迁移
 
-历史索引在数据库 v5 引入，当前数据库版本为 v9。`storage/context` 的 `session_turns` 表保存完成记录投影，以 `(session_id,sequence)` 建索引；`task_id` 唯一，sequence 外键指向真实完成事件。投影与 TaskCompleted 及任务最终状态在同一事务提交，失败一起回滚；不会发布未提交的完成通知。
+历史索引在数据库 v5 引入，当前数据库版本为 v10。`storage/context` 的 `session_turns` 表保存完成记录投影，以 `(session_id,sequence)` 建索引；`task_id` 唯一，sequence 外键指向真实完成事件。投影与 TaskCompleted 及任务最终状态在同一事务提交，失败一起回滚；不会发布未提交的完成通知。
 
 从 v4 及更早数据库升级时，迁移在事务中逐条回填已知完成的历史，不修改旧事件或任务输入。旧 `Task.context` 缺失时解码为 null；恢复旧任务仍没有新历史。旧幂等请求在未显式指定 context 时继续返回原任务，显式要求上下文选项则冲突。新任务可使用回填记录。
 

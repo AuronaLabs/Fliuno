@@ -84,6 +84,18 @@ pub trait AgentBackend: Send + Sync {
     fn authority(&self) -> String {
         authority_digest("agent.contract.v1", &serde_json::json!(self.spec()))
     }
+    fn supports_remote_task_check(&self) -> bool {
+        false
+    }
+    /// Read the current remote task using the frozen host registration. This
+    /// hook may not send a prompt, cancel the task, or import content.
+    fn check_remote_task(
+        &self,
+        _remote: &AgentRemoteTask,
+        _cancellation: &CancellationToken,
+    ) -> Option<AgentRemoteTask> {
+        None
+    }
     fn execute(
         &self,
         request: &AgentRequest,

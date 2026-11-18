@@ -488,6 +488,20 @@
         "taskId"
       ]
     },
+    "task/checkRemote": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
     "task/cancel": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskIdParams",
@@ -1724,6 +1738,20 @@
         "id",
         "protocol",
         "isolation"
+      ]
+    },
+    "RemoteTaskCheckAccepted": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RemoteTaskCheckAccepted",
+      "type": "object",
+      "properties": {
+        "checkId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "checkId"
       ]
     },
     "TerminalSnapshot": {
@@ -2966,6 +2994,30 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "agent_remote_task_checked"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "checkId": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "$ref": "#/$defs/RemoteTaskCheckOutcome"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "checkId",
+                "outcome"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "agent_approval_requested"
                 },
                 "approval": {
@@ -3370,6 +3422,67 @@
             "rejected",
             "input_required",
             "auth_required"
+          ]
+        },
+        "RemoteTaskCheckOutcome": {
+          "description": "A point-in-time check, separate from the original run's recorded outcome.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "observed"
+                },
+                "state": {
+                  "$ref": "#/$defs/AgentTaskState"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "identity_mismatch"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "state_conflict"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
           ]
         },
         "AgentApproval": {
@@ -3727,6 +3840,30 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "agent_remote_task_checked"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "checkId": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "$ref": "#/$defs/RemoteTaskCheckOutcome"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "checkId",
+                "outcome"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "agent_approval_requested"
                 },
                 "approval": {
@@ -4131,6 +4268,67 @@
             "rejected",
             "input_required",
             "auth_required"
+          ]
+        },
+        "RemoteTaskCheckOutcome": {
+          "description": "A point-in-time check, separate from the original run's recorded outcome.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "observed"
+                },
+                "state": {
+                  "$ref": "#/$defs/AgentTaskState"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "identity_mismatch"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "state_conflict"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
           ]
         },
         "AgentApproval": {

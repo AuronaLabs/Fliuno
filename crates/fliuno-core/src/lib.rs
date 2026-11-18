@@ -20,7 +20,7 @@ pub use agent::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
     PreparedAgentRun,
 };
-pub use agent_remote::IncomingAgentArtifact;
+pub use agent_remote::{CompletedRemoteTaskCheck, IncomingAgentArtifact, PreparedRemoteTaskCheck};
 pub use agent_tools::AgentToolObservation;
 pub use approval::{ApprovalOutcome, PreparedToolExecution};
 pub use context::{MAX_CONTEXT_BYTES, MAX_CONTEXT_TURNS, context_prompt};

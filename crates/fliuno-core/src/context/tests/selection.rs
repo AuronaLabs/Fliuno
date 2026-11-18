@@ -238,7 +238,7 @@ fn version_eight_upgrade_preserves_snapshots_and_selected_history_survives_disk_
             .db
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        9
+        10
     );
     let recovered = kernel.get_task(&old.id).unwrap();
     assert_eq!(

@@ -60,7 +60,15 @@ cargo run -p fliuno-app-server -- --a2a-config C:/absolute/path/to/agents.json
 
 本地取消立即提交，迟到响应不能改为完成。已知远程身份时，适配器最多发送一次 `CancelTask`，用独立的 2 秒窗口收尾；只有匹配的终态才消除结果未知。取消与完成竞争产生 `TaskNotCancelable` 时，窗口内允许一次 `GetTask` 取证。远端仍为 running、身份变化、错误或超时均保留未知。任务总时限或轮询预算耗尽也走同一取消取证路径，若明确取消则本地成为 cancelled。
 
-提交返回前断线，可能无法获得远端 Task ID；后续轮询断线时，最后已知状态也不能证明任务停止。两者都结束为 `interrupted + outcomeUnknown`。不自动重发、重连提交或尝试另一个 URL。app-server 重启只恢复本地记录；已有运行禁止 `task/resume`。相同 `clientRequestId` 返回原任务。创建新任务前应由主机检查远端状态，当前没有远程核对/继续 RPC。
+提交返回前断线，可能无法获得远端 Task ID；后续轮询断线时，最后已知状态也不能证明任务停止。两者都结束为 `interrupted + outcomeUnknown`。不自动重发、重连提交或尝试另一个 URL。app-server 重启只恢复本地记录；已有运行禁止 `task/resume`。相同 `clientRequestId` 返回原任务。
+
+## 显式核对远端状态
+
+`initialize.capabilities.remoteTaskChecks` 为 true 时，客户端可用 `task/checkRemote` 传入 `{"taskId":"<本机任务 ID>"}`。该任务必须有已结束的 Agent 运行及已保存的远端身份，且当前宿主注册须与原任务的绑定一致。客户端不提供远端 ID、URL 或凭据。请求进入共享后台队列并立即返回 `{"checkId":"..."}`；同一任务已有在途核对或队列已满时返回状态冲突。
+
+如果配置了卡片，先核对固定接口；之后只发一次 `GetTask`，使用已保存的 Task ID，且不请求远端历史。核对总时限为任务超时和 5 秒中的较小值，同时受单请求超时约束。通过 `notifications/event` 或 `events/list` 查找 `agent_remote_task_checked`，按 `checkId` 关联；事件还携带原 `runId`。`outcome.status` 为 `observed` 时有 `state`；`unavailable` 表示未取得可用响应（包括超时、远端错误或坏响应），`identity_mismatch` 表示远端 ID 或上下文不一致，`state_conflict` 表示响应与原记录的终态冲突或退回 submitted。
+
+核对只追加状态证据，不改写原 `agentRun`、`outcomeUnknown`、本机任务状态或产物；也不取消或继续远端任务。若 app-server 在结果写入前退出，受理的核对可能没有结果事件，重启后不会自动恢复。客户端可显式发起新的只读核对。
 
 ## 产物保存
 
@@ -88,7 +96,7 @@ python examples/a2a_demo.py --streaming
 python examples/a2a_demo.py --streaming --cancel
 ```
 
-测试覆盖真实 loopback HTTP wire、标准头与方法、响应关联、Part oneof / ProtoJSON bytes、卡片接口与扩展拒绝、重定向隔离、响应预算、超时，以及真实 app-server 的 SQLite 重启、幂等、产物、上下文、失败/暂停与取消证据。远端任务证据在 v7 引入，旧 Agent 记录的新增字段默认空；v8 增加排队任务的注册绑定，当前 v9 增加[显式上下文选择](context.md)，不改写原远程证据。
+测试覆盖真实 loopback HTTP wire、标准头与方法、响应关联、Part oneof / ProtoJSON bytes、卡片接口与扩展拒绝、重定向隔离、响应预算、超时，以及真实 app-server 的 SQLite 重启、幂等、产物、上下文、失败/暂停、取消和显式核对。远端任务证据在 v7 引入，旧 Agent 记录的新增字段默认空；v8 增加排队任务的注册绑定，v9 增加[显式上下文选择](context.md)，v10 增加核对事件。迁移不改写原远程证据。
 
 `Task.backendAuthority` 在创建时冻结全部 A2A 配置及实际 bearer token 的摘要。相同 Agent ID 更换端点、凭据、卡片地址或执行预算，重启后旧排队任务不能启动；幂等提交仍返回原任务，不刷新摘要。该检查不认证远端代码，也不允许重发结果未知的提交，详见[注册身份](authority.md)。
 

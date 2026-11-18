@@ -231,6 +231,7 @@ impl RpcServer {
                     "provider":self.provider_name, "liveModels":self.provider_name != "demo",
                     "externalTools":external_tools, "backgroundTasks":true,
                     "externalAgents":!self.kernel()?.agent_specs().is_empty(),
+                    "remoteTaskChecks":self.kernel()?.remote_task_check_supported(),
                     "sessionContext":true,
                     "contextTaskSelection":true,
                     "processExecution":process_execution,
@@ -373,6 +374,17 @@ impl RpcServer {
             "task/get" => {
                 let p: TaskIdParams = decode(params)?;
                 json!(self.kernel()?.get_task(&p.task_id)?)
+            }
+            "task/checkRemote" => {
+                let p: TaskIdParams = decode(params)?;
+                let check = self.kernel()?.prepare_remote_task_check(&p.task_id)?;
+                let accepted = RemoteTaskCheckAccepted {
+                    check_id: check.check_id().to_owned(),
+                };
+                self.scheduler
+                    .schedule_remote_check(check)
+                    .map_err(|message| Error::Conflict(message.into()))?;
+                json!(accepted)
             }
             "task/cancel" => {
                 let p: TaskIdParams = decode(params)?;

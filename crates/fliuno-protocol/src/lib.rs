@@ -181,6 +181,22 @@ pub struct AgentRemoteTask {
     pub state: AgentTaskState,
 }
 
+/// A point-in-time check, separate from the original run's recorded outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RemoteTaskCheckOutcome {
+    Observed { state: AgentTaskState },
+    Unavailable,
+    IdentityMismatch,
+    StateConflict,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteTaskCheckAccepted {
+    pub check_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentArtifactLink {
@@ -296,6 +312,11 @@ pub enum EventKind {
     AgentRemoteTaskUpdated {
         run_id: String,
         task: AgentRemoteTask,
+    },
+    AgentRemoteTaskChecked {
+        run_id: String,
+        check_id: String,
+        outcome: RemoteTaskCheckOutcome,
     },
     AgentApprovalRequested {
         approval: AgentApproval,
@@ -540,6 +561,7 @@ pub fn schema_bundle() -> Value {
             "task/start": schemars::schema_for!(TaskStartParams),
             "task/list": schemars::schema_for!(TaskListParams),
             "task/get": schemars::schema_for!(TaskIdParams),
+            "task/checkRemote": schemars::schema_for!(TaskIdParams),
             "task/cancel": schemars::schema_for!(TaskIdParams),
             "task/resume": schemars::schema_for!(TaskResumeParams),
             "approval/respond": schemars::schema_for!(ApprovalRespondParams),
@@ -555,6 +577,7 @@ pub fn schema_bundle() -> Value {
             "Task": schemars::schema_for!(Task),
             "TaskContext": schemars::schema_for!(TaskContext),
             "AgentSpec": schemars::schema_for!(AgentSpec),
+            "RemoteTaskCheckAccepted": schemars::schema_for!(RemoteTaskCheckAccepted),
             "TerminalSnapshot": schemars::schema_for!(TerminalSnapshot),
             "TerminalOutput": schemars::schema_for!(TerminalOutput),
             "TerminalSubscription": schemars::schema_for!(TerminalSubscription),

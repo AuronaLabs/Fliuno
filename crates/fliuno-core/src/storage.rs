@@ -65,7 +65,7 @@ impl Kernel {
         lock: Option<File>,
     ) -> Result<Self> {
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 9 {
+        if version > 10 {
             return Err(Error::Conflict(
                 "database schema is newer than this binary".into(),
             ));
@@ -119,6 +119,10 @@ impl Kernel {
             // Explicit history selection adds a frozen input contract that
             // older binaries cannot decode; existing snapshots stay unchanged.
             db.pragma_update(None, "user_version", 9)?;
+        }
+        if version < 10 {
+            // Older readers do not understand the remote-check event variant.
+            db.pragma_update(None, "user_version", 10)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
@@ -319,6 +323,20 @@ impl Kernel {
         }
         tx.commit()?;
         self.events.publish(pending);
+        Ok(())
+    }
+
+    /// Append evidence without rewriting a task snapshot or projecting a turn.
+    pub(crate) fn append_task_event(&mut self, task_id: String, data: EventKind) -> Result<()> {
+        self.db.execute(
+            "INSERT INTO events(task_id,data) VALUES(?1,?2)",
+            params![task_id, serde_json::to_string(&data)?],
+        )?;
+        self.events.publish(vec![Event {
+            sequence: self.db.last_insert_rowid() as u64,
+            task_id,
+            data,
+        }]);
         Ok(())
     }
 

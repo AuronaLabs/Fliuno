@@ -23,6 +23,7 @@
 | `session/context` | `{sessionId,options?:{mode?,maxTurns?,maxBytes?,taskIds?}}` | TaskContext；预览当前历史选择 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/get` | `{taskId}` | Task |
+| `task/checkRemote` | `{taskId}` | `{checkId}`；后台只读核对，结果经事件返回，见 [A2A](a2a.md#显式核对远端状态) |
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |
 | `task/resume` | `{taskId,retryUncertainModelStep?:false}` | Task；恢复后排队；外部未知结果不能重试；模型结果不确定时须显式传 true |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
@@ -122,7 +123,7 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 `agentRun.hostTools` 保存宿主操作的 ID、不可替换的 call、status、可选 output/error；旧快照默认空数组。状态为 `awaiting_approval`、`approved`、`running`、`succeeded`、`denied`、`failed`、`outcome_unknown` 或 `closed`。`agent_host_tool_requested`、`agent_host_tool_started`、`agent_host_tool_completed` 写入同一事件日志。允许决定先提交，执行前另行提交 started；结果提交成功后才向 Agent 返回文件内容或写入成功。运行中操作在断线/重启时保留未知结果，Agent 的正常结束不能将其覆盖。
 
-主机配置 `workspaceAccess` 默认 false；开启时仅提供虚拟工作区内的文本读写代理，terminal 仍关闭。每个文件操作独立审批，单次文件/内容最大 256 KiB；每运行最多 8 个未完成文件请求、64 个累计宿主操作。写提案读取基线供客户端生成 diff，执行时复核；`baseSha256:null` 仅创建新文件。相关兼容字段在 v6 引入，当前数据库版本为 v9；可读取 v3 中缺少 `source`/`hostTools`、v4 中缺少 `context` 和 v5 中缺少后续事件兼容字段的记录，并事务回填已完成任务的历史索引；不改写旧输入和事件，旧二进制应拒绝新版本。
+主机配置 `workspaceAccess` 默认 false；开启时仅提供虚拟工作区内的文本读写代理，terminal 仍关闭。每个文件操作独立审批，单次文件/内容最大 256 KiB；每运行最多 8 个未完成文件请求、64 个累计宿主操作。写提案读取基线供客户端生成 diff，执行时复核；`baseSha256:null` 仅创建新文件。相关兼容字段在 v6 引入，当前数据库版本为 v10；可读取 v3 中缺少 `source`/`hostTools`、v4 中缺少 `context` 和 v5 中缺少后续事件兼容字段的记录，并事务回填已完成任务的历史索引；不改写旧输入和事件，旧二进制应拒绝新版本。
 
 已启动的 Agent 运行不支持 `task/resume`，即使结果已知或传入模型重试同意也不能重放。服务退出或重启使待审权限失效，活动 Agent 任务进入 interrupted；取消任务保持 cancelled。运行 ID、`outcomeUnknown`、`finished` 和 `stopReason` 区分结果未知、执行器结束和已知但不完整的响应。配置、预算及完整状态映射见 [ACP 文档](acp.md)。
 

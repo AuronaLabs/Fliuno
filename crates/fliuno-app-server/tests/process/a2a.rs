@@ -97,6 +97,137 @@ fn wait_finished(peer: &mut Peer, id: &Value) -> Value {
     }
 }
 
+fn wait_checked(peer: &mut Peer, task_id: &Value, check_id: &Value) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(8);
+    loop {
+        let page = peer.call("events/list", json!({"taskId":task_id}));
+        if let Some(found) = page["events"].as_array().unwrap().iter().find(|event| {
+            event["data"]["type"] == "agent_remote_task_checked"
+                && event["data"]["checkId"] == *check_id
+        }) {
+            return found.clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "remote check did not finish: {page}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn remote_check_after_stream_loss_appends_evidence_without_replaying_or_changing_the_run() {
+    let (release, gate) = std::sync::mpsc::sync_channel(1);
+    let gate = std::sync::Mutex::new(gate);
+    let wire = Fixture::start(
+        move |request| match request.body["method"].as_str().unwrap() {
+            "SendStreamingMessage" => Response::sse(format!(
+                "data: {}\n\n",
+                json!({"jsonrpc":"2.0","id":request.body["id"],"result":{"task":task("TASK_STATE_WORKING")}})
+            )),
+            "GetTask" => {
+                assert_eq!(
+                    request.body["params"],
+                    json!({"id":"remote-task","historyLength":0})
+                );
+                gate.lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(3))
+                    .unwrap();
+                let mut remote = task("TASK_STATE_COMPLETED");
+                remote["artifacts"] =
+                    json!([{"artifactId":"late","parts":[{"text":"private remote content"}]}]);
+                response(request, remote)
+            }
+            other => panic!("unexpected A2A method {other}"),
+        },
+    );
+    let directory = Directory::new(&wire, 10_000, false).with_streaming();
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let submitted = start(&mut peer, &session, "check-after-restart");
+    let id = &submitted["id"];
+    let before = wait_finished(&mut peer, id);
+    assert_eq!(before["status"], "interrupted");
+    assert_eq!(before["agentRun"]["outcomeUnknown"], true);
+    drop(peer);
+    // Simulate a v9 database with an existing, finished A2A run.
+    rusqlite::Connection::open(&directory.db)
+        .unwrap()
+        .pragma_update(None, "user_version", 9)
+        .unwrap();
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    assert_eq!(peer.call("task/get", json!({"taskId":id})), before);
+    let accepted = peer.call("task/checkRemote", json!({"taskId":id}));
+    wire.wait_for("GetTask");
+    assert_eq!(
+        peer.request("task/checkRemote", json!({"taskId":id}))["error"]["code"],
+        -32009
+    );
+    assert_eq!(peer.call("task/get", json!({"taskId":id})), before);
+    release.send(()).unwrap();
+    let event = wait_checked(&mut peer, id, &accepted["checkId"]);
+    assert_eq!(
+        event["data"]["outcome"],
+        json!({"status":"observed","state":"completed"})
+    );
+    assert_eq!(event["data"]["runId"], before["agentRun"]["id"]);
+    assert_eq!(peer.call("task/get", json!({"taskId":id})), before);
+    assert_eq!(peer.call("artifacts/list", json!({"taskId":id})), json!([]));
+    drop(peer);
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    assert_eq!(wait_checked(&mut peer, id, &accepted["checkId"]), event);
+    assert_eq!(wire.requests().len(), 2);
+}
+
+#[test]
+fn remote_check_reports_bad_evidence_and_rejects_changed_registrations_before_io() {
+    let checks = AtomicUsize::new(0);
+    let wire = Fixture::start(
+        move |request| match request.body["method"].as_str().unwrap() {
+            "SendMessage" => response(request, json!({"task": task("TASK_STATE_COMPLETED")})),
+            "GetTask" => match checks.fetch_add(1, Ordering::SeqCst) {
+                0 => {
+                    let mut foreign = task("TASK_STATE_COMPLETED");
+                    foreign["contextId"] = json!("private-other-context");
+                    response(request, foreign)
+                }
+                1 => response(request, task("TASK_STATE_WORKING")),
+                2 => Response::hold(),
+                other => panic!("unexpected check {other}"),
+            },
+            other => panic!("unexpected A2A method {other}"),
+        },
+    );
+    let directory = Directory::new(&wire, 10_000, false);
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let submitted = start(&mut peer, &session, "checks");
+    let id = &submitted["id"];
+    let before = wait_finished(&mut peer, id);
+    for status in ["identity_mismatch", "state_conflict", "unavailable"] {
+        let accepted = peer.call("task/checkRemote", json!({"taskId":id}));
+        let event = wait_checked(&mut peer, id, &accepted["checkId"]);
+        assert_eq!(event["data"]["outcome"], json!({"status":status}));
+        assert!(!event.to_string().contains("private-other-context"));
+        assert_eq!(peer.call("task/get", json!({"taskId":id})), before);
+    }
+    drop(peer);
+    let mut config: Value = serde_json::from_slice(&fs::read(&directory.config).unwrap()).unwrap();
+    config["agents"][0]["requestTimeoutMs"] = json!(2000);
+    fs::write(&directory.config, config.to_string()).unwrap();
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let error = peer.request("task/checkRemote", json!({"taskId":id}));
+    assert_eq!(error["error"]["code"], -32009);
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("registration changed")
+    );
+    assert_eq!(wire.requests().len(), 4);
+}
+
 #[test]
 fn task_polling_artifact_parts_history_idempotency_and_restart_are_durable() {
     let sends = Arc::new(AtomicUsize::new(0));
