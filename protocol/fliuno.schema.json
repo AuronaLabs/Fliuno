@@ -69,6 +69,16 @@
           "minLength": 1,
           "maxLength": 120,
           "default": null
+        },
+        "clientRequestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-~]+$",
+          "default": null
         }
       },
       "additionalProperties": false,

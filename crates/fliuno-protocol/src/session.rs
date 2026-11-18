@@ -21,6 +21,9 @@ pub struct SessionCreateParams {
     #[serde(default)]
     #[schemars(length(min = 1, max = MAX_SESSION_TITLE_CHARS))]
     pub title: Option<String>,
+    #[serde(default)]
+    #[schemars(length(min = 1, max = 128), regex(pattern = "^[!-~]+$"))]
+    pub client_request_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

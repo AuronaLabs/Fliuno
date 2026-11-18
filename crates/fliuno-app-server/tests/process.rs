@@ -126,6 +126,7 @@ impl Peer {
         );
         assert_eq!(init["capabilities"]["sessionContext"], true);
         assert_eq!(init["capabilities"]["sessionTitles"], true);
+        assert_eq!(init["capabilities"]["sessionCreateIdempotency"], true);
         assert_eq!(init["capabilities"]["contextTaskSelection"], true);
         assert_eq!(init["capabilities"]["contextFitRecent"], true);
         assert_eq!(init["capabilities"]["maxContextCandidates"], 128);

@@ -426,7 +426,7 @@ fn version_two_snapshots_upgrade_with_model_defaults_and_preserve_the_event_log(
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
             .unwrap(),
-        16
+        17
     );
     let restored = recovered.get_task(&task.id).unwrap();
     assert_eq!(restored.backend, TaskBackend::Model);
@@ -473,7 +473,7 @@ fn version_three_agent_snapshots_default_host_fields_and_expire_legacy_permissio
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
             .unwrap(),
-        16
+        17
     );
     let task = recovered.get_task(&task.id).unwrap();
     assert_eq!(task.status, TaskStatus::Interrupted);

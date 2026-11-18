@@ -271,6 +271,7 @@ impl RpcServer {
                 "remoteTaskContinuation":self.kernel()?.remote_continuation_supported(),
                 "sessionContext":true,
                 "sessionTitles":true,
+                "sessionCreateIdempotency":true,
                 "taskSummaries":true,
                 "contextTaskSelection":true,
                 "contextFitRecent":true,
@@ -414,10 +415,11 @@ impl RpcServer {
             }
             "session/create" => {
                 let p: SessionCreateParams = decode(params)?;
-                json!(
-                    self.kernel()?
-                        .create_session_with_title(&p.workspace_id, p.title.as_deref())?
-                )
+                json!(self.kernel()?.create_session_with_request(
+                    &p.workspace_id,
+                    p.title.as_deref(),
+                    p.client_request_id.as_deref()
+                )?)
             }
             "session/get" => {
                 let p: SessionIdParams = decode(params)?;

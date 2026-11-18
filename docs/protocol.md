@@ -20,7 +20,7 @@
 | `task/list` | `{sessionId,after?:0,limit?:100}` | Task ObjectPage |
 | `task/listSummaries` | `{sessionId,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
-| `session/create` | `{workspaceId,title?}` | Session |
+| `session/create` | `{workspaceId,title?,clientRequestId?}` | Session |
 | `session/get` | `{sessionId}` | 单个 Session |
 | `session/rename` | `{sessionId,title}` | 持久化标题并返回 Session |
 | `session/context` | `{sessionId,options?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | TaskContext；预览当前历史选择 |
@@ -51,6 +51,8 @@
 | `terminal/archives` | `{sessionId,after?:0,limit?:100}` | 归档历史 ObjectPage，每项为 TerminalArchive |
 
 `initialize.capabilities.sessionTitles` 表示会话支持标题。标题最多 120 个 Unicode 标量值，去除首尾空白后须至少保留一个字符，且不能包含控制字符。未命名的会话省略 `title`。改名保留会话 ID、所属工作区、分页顺序和已有任务。SQLite v15 保留既有会话的快照，新客户端读取旧数据时会看到未命名会话。
+
+`initialize.capabilities.sessionCreateIdempotency` 表示 `session/create` 接受 `clientRequestId`。键由 1 到 128 个可打印且不含空格的 ASCII 字符组成，在工作区内唯一。连接中断后用原键和原始标题重试会返回同一个会话的当前信息。复用键并更改原始标题会返回 `-32009`。创建记录和键同事务保存，重启后仍可重试。
 
 客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和正文的 UTF-8 字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。
 
