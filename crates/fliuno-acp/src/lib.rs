@@ -29,6 +29,8 @@ pub enum Error {
     InvalidInput(&'static str),
     #[error("ACP connection is closed")]
     Closed,
+    #[error("ACP peer did not advertise {0}")]
+    Unsupported(&'static str),
     #[error("ACP session or connection is busy")]
     Busy,
     #[error("unknown ACP session or expired permission")]

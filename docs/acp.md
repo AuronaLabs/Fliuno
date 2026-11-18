@@ -80,6 +80,8 @@ cargo run -p fliuno-acp --example isolated -- E:/Projects/Fliuno/target/debug/fl
 
 省略 `backend` 仍使用模型流程。幂等键同时绑定输入、后端与上下文选项；更换其中任何一个都会冲突。外部运行保存在 `Task.agentRun`，初始化能力以 `externalAgents` 表示是否有注册后端。
 
+宿主可以用 `Client::supports_session_listing()` 探测已连接 Agent 的 `sessionCapabilities.list`，然后用 `Client::list_sessions(cwd, cursor)` 读取一页。隔离进程的筛选路径限制在其私有工作目录，省略筛选时使用该目录。每页最多 128 条，同一连接同时处理一条列表请求。调用方显式使用 `next_cursor` 翻页。列出的 ID 只用于展示或选择，仍需独立打开会话才能发送 prompt。列表目前通过 Rust 适配器调用。
+
 新任务可通过 Fliuno 的冻结 Task.context 延续同会话已完成工作，模型与 ACP 共用中性历史索引。有历史时 `prompt_text_with_context` 在当前输入前单独发送一个 TextContent JSON 数据块；没有历史或选择 isolated 时只发当前输入。历史不包含旧审批、供应商签名或递归 context，不重用 ACP 进程/会话；新的宿主文件操作仍逐次审批。这不实现 ACP session/load，具体选择和字节预算见 [上下文设计](context.md)。
 
 流式通知先写入 `agent_update` 事件；文本消息另外汇总到 `agentRun.text`。计划、思考、工具更新等保持原始只读 JSON，仅文本消息进入最终输出。权限记录位于 `agentRun.pendingApprovals`，最多同时 16 项，各有独立审批 ID、运行 ID、连接内 permission ID、原始请求、单次允许选项可用性和到期时间。客户端显示请求后使用既有 `approval/respond` 的 `allow_once` 或 `deny`，不能提交替换参数。拒绝交回 Agent，不直接判定任务失败。

@@ -11,6 +11,8 @@ use agent_client_protocol::{
 use std::{path::Path, path::PathBuf, sync::Arc, sync::Mutex};
 use tokio::sync::{mpsc, oneshot};
 
+mod catalog;
+
 /// Cloneable handle. Dropping its last owner stops the driver and owned process.
 #[derive(Clone)]
 pub struct Client {
@@ -22,6 +24,7 @@ struct Inner {
     initialized: InitializeResponse,
     shared: Arc<Shared>,
     directory: Option<PathBuf>,
+    catalog: tokio::sync::Mutex<()>,
     driver: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
@@ -299,6 +302,7 @@ impl Client {
                     initialized,
                     shared: Arc::clone(&shared),
                     directory,
+                    catalog: tokio::sync::Mutex::new(()),
                     driver: Mutex::new(Some(driver)),
                 }),
             },
@@ -312,6 +316,18 @@ impl Client {
 
     pub fn private_directory(&self) -> Option<&Path> {
         self.inner.directory.as_deref()
+    }
+
+    fn validate_private_cwd(&self, cwd: &Path) -> Result<()> {
+        if let Some(dir) = &self.inner.directory {
+            let allowed = std::fs::canonicalize(dir).map_err(|_| Error::Transport)?;
+            let requested =
+                std::fs::canonicalize(cwd).map_err(|_| Error::InvalidInput("invalid cwd"))?;
+            if !requested.starts_with(allowed) {
+                return Err(Error::InvalidInput("isolated session must use private cwd"));
+            }
+        }
+        Ok(())
     }
 
     pub fn is_closed(&self) -> bool {
@@ -333,14 +349,7 @@ impl Client {
                 "cwd must be an absolute existing directory",
             ));
         }
-        if let Some(dir) = &self.inner.directory {
-            let allowed = std::fs::canonicalize(dir).map_err(|_| Error::Transport)?;
-            let requested =
-                std::fs::canonicalize(cwd).map_err(|_| Error::InvalidInput("invalid cwd"))?;
-            if !requested.starts_with(allowed) {
-                return Err(Error::InvalidInput("isolated session must use private cwd"));
-            }
-        }
+        self.validate_private_cwd(cwd)?;
         {
             let mut state = shared.state.lock().unwrap();
             if state.opening.is_some() || state.sessions.len() >= MAX_SESSIONS {

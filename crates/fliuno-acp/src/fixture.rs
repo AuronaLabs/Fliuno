@@ -29,13 +29,18 @@ pub fn agent() -> impl ConnectTo<Client> {
     let next_session = AtomicUsize::new(1);
     let directories = Arc::new(Mutex::new(HashMap::new()));
     let prompt_directories = Arc::clone(&directories);
+    let listed_directories = Arc::clone(&directories);
     Agent.v1()
         .on_receive_request(
             async |request: InitializeRequest, responder, _cx| {
                 // Test fixtures require the adapter to advertise its true scope.
                 assert_eq!(request.client_capabilities.fs.read_text_file, request.client_capabilities.fs.write_text_file);
                 assert!(!request.client_capabilities.terminal);
-                responder.respond(InitializeResponse::new(request.protocol_version))
+                responder.respond(InitializeResponse::new(request.protocol_version).agent_capabilities(
+                    AgentCapabilities::new().session_capabilities(
+                        SessionCapabilities::new().list(SessionListCapabilities::new()),
+                    ),
+                ))
             },
             acp::on_receive_request!(),
         )
@@ -46,6 +51,20 @@ pub fn agent() -> impl ConnectTo<Client> {
                 // Explicitly exercise notifications arriving before the response.
                 cx.send_notification(update(&id, "ready"))?;
                 responder.respond(NewSessionResponse::new(id))
+            },
+            acp::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: ListSessionsRequest, responder, _cx| {
+                if request.cursor.is_some() {
+                    return responder.respond_with_error(acp::Error::invalid_params());
+                }
+                let mut sessions: Vec<_> = listed_directories.lock().unwrap().iter()
+                    .filter(|(_, path)| request.cwd.as_ref().is_none_or(|cwd| cwd == *path))
+                    .map(|(id, path)| SessionInfo::new(id.clone(), path.clone()))
+                    .collect();
+                sessions.sort_unstable_by(|a, b| a.session_id.0.cmp(&b.session_id.0));
+                responder.respond(ListSessionsResponse::new(sessions))
             },
             acp::on_receive_request!(),
         )

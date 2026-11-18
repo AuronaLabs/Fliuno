@@ -104,6 +104,14 @@ async fn actual_acp_stdio_isolates_agent_tools_and_stops_process_on_timeout() {
         Err(Error::InvalidInput(_))
     ));
     let session = isolated.new_session(&private).await.unwrap().session_id;
+    assert!(matches!(
+        isolated.list_sessions(Some(&root), None).await,
+        Err(Error::InvalidInput(_))
+    ));
+    let page = isolated.list_sessions(None, None).await.unwrap();
+    assert_eq!(page.sessions.len(), 1);
+    assert_eq!(page.sessions[0].session_id, session);
+    assert_eq!(page.sessions[0].cwd, private);
     assert_eq!(update(&mut events).await, "ready");
     isolated
         .prompt_text(&session, probe, &CancellationToken::new())
