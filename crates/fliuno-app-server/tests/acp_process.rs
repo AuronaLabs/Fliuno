@@ -204,6 +204,13 @@ fn durable_agent_approval_stream_and_completion_survive_reopen() {
     let approval = waiting["agentRun"]["pendingApprovals"][0].clone();
     assert_eq!(waiting["modelSteps"], 0);
     assert_eq!(approval["allowOnceAvailable"], true);
+    let inbox = peer.call("approval/listPending", json!({"sessionId":session}));
+    assert_eq!(
+        inbox["items"],
+        json!([{ "id":approval["id"],"taskId":task["id"],
+        "sessionId":session,"kind":"agent_permission","allowOnceAvailable":true,
+        "expiresAtUnixMs":approval["expiresAtUnixMs"] }])
+    );
     assert_eq!(
         peer.start_task(&session, "permission", "once")["id"],
         task["id"]
@@ -281,6 +288,10 @@ fn waiting_agent_shutdown_expires_approvals_and_restart_never_replays() {
     let approval = waiting["agentRun"]["pendingApprovals"][0]["id"].clone();
     peer.stop();
     let mut reopened = Peer::start(&directory);
+    assert_eq!(
+        reopened.call("approval/listPending", json!({}))["items"],
+        json!([])
+    );
     let restored = reopened.call("task/get", json!({"taskId":task["id"]}));
     assert_eq!(restored["status"], "interrupted");
     assert_eq!(restored["agentRun"]["id"], waiting["agentRun"]["id"]);
@@ -458,6 +469,9 @@ fn virtual_workspace_roundtrip_requires_distinct_write_and_read_approvals() {
     let waiting = peer.wait(&task["id"], |t| t["status"] == "waiting_approval");
     let write = &waiting["agentRun"]["pendingApprovals"][0];
     assert_eq!(write["source"], "host_tool");
+    let inbox = peer.call("approval/listPending", json!({}));
+    assert_eq!(inbox["items"][0]["kind"], "host_tool");
+    assert_eq!(inbox["items"][0]["id"], write["id"]);
     assert_eq!(write["request"]["call"]["name"], "workspace_replace_text");
     assert_eq!(write["request"]["preview"]["createsFile"], true);
     assert!(!directory.0.join("via-agent.txt").exists());

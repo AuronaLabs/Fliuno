@@ -1,4 +1,5 @@
 //! SQLite snapshots and committed event log. Only this module touches SQL.
+mod approvals;
 mod artifacts;
 mod context;
 mod replay;
@@ -13,7 +14,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 19;
+pub(crate) const SCHEMA_VERSION: u32 = 20;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 impl Kernel {
@@ -32,6 +33,19 @@ impl Kernel {
             Ok(())
         } else {
             Err(Error::NotFound("task".into()))
+        }
+    }
+
+    pub(crate) fn require_workspace(&self, workspace_id: &str) -> Result<()> {
+        let exists: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
+            [workspace_id],
+            |row| row.get(0),
+        )?;
+        if exists {
+            Ok(())
+        } else {
+            Err(Error::NotFound("workspace".into()))
         }
     }
 
@@ -189,6 +203,9 @@ impl Kernel {
         if version < 19 {
             sessions::migrate_archive_index(&mut db)?;
         }
+        if version < 20 {
+            approvals::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         let mut kernel = Self {
@@ -272,6 +289,7 @@ impl Kernel {
         tx.execute("INSERT INTO tasks VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET running=excluded.running,data=excluded.data",
             params![task.id, task.session_id, running, serde_json::to_string(task)?])?;
         task_summaries::record(&tx, task)?;
+        approvals::record(&tx, task)?;
         if let Some(continuation) = &task.remote_continuation
             && continuation.expected.state == AgentTaskState::InputRequired
         {

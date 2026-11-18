@@ -294,6 +294,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["pendingApprovalInbox"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
             capabilities["artifactByteReads"] = json!(true);
             capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
@@ -505,6 +506,10 @@ impl RpcServer {
                     .kernel()?
                     .prepare_resume_task(&p.task_id, p.retry_uncertain_model_step)?;
                 json!(self.schedule_or_fail(task)?)
+            }
+            "approval/listPending" => {
+                let p: ApprovalListParams = decode(params)?;
+                json!(self.kernel()?.list_pending_approvals(p)?)
             }
             "approval/respond" => {
                 let p: ApprovalRespondParams = decode(params)?;

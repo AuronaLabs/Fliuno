@@ -30,14 +30,7 @@ impl Kernel {
         limit: u32,
         archived: Option<bool>,
     ) -> Result<ObjectPage<Session>> {
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
-            [workspace],
-            |r| r.get(0),
-        )?;
-        if !exists {
-            return Err(Error::NotFound("workspace".into()));
-        }
+        self.require_workspace(workspace)?;
         // Filtered reads use sessions_workspace_archive, including the rowid range.
         let sql = match archived {
             None => {

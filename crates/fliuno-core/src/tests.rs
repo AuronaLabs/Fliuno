@@ -855,3 +855,42 @@ fn committed_events_fan_out_and_global_cursor_replays_without_gaps() {
         serde_json::to_value(live).unwrap()
     );
 }
+
+#[test]
+fn approval_inbox_failure_rolls_back_resolution_and_events() {
+    let (mut kernel, session) = setup();
+    let task = kernel
+        .start_task(&session.id, "keep consent atomic")
+        .unwrap();
+    let approval_id = &task.pending_approval.unwrap().id;
+    let before = kernel.list_events(&task.id, 0, 100).unwrap().next_after;
+    kernel
+        .db
+        .execute_batch(
+            "CREATE TRIGGER reject_inbox_delete BEFORE DELETE ON pending_approvals
+         BEGIN SELECT RAISE(ABORT,'fixture'); END;",
+        )
+        .unwrap();
+    assert!(
+        kernel
+            .respond_approval(&task.id, approval_id, ApprovalDecision::Deny)
+            .is_err()
+    );
+    let page = kernel
+        .list_pending_approvals(ApprovalListParams {
+            workspace_id: None,
+            session_id: Some(session.id),
+            after: 0,
+            limit: 100,
+        })
+        .unwrap();
+    assert_eq!(page.items[0].id, *approval_id);
+    assert_eq!(
+        kernel.get_task(&task.id).unwrap().status,
+        TaskStatus::WaitingApproval
+    );
+    assert_eq!(
+        kernel.list_events(&task.id, 0, 100).unwrap().next_after,
+        before
+    );
+}

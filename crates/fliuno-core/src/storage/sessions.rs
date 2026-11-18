@@ -78,14 +78,7 @@ impl Kernel {
                 return self.get_session(&session_id);
             }
         }
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
-            [workspace_id],
-            |r| r.get(0),
-        )?;
-        if !exists {
-            return Err(Error::NotFound("workspace".into()));
-        }
+        self.require_workspace(workspace_id)?;
         let session = Session {
             id: new_id("session"),
             workspace_id: workspace_id.into(),

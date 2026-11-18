@@ -15,6 +15,8 @@ use std::{
 
 #[path = "process/a2a.rs"]
 mod a2a;
+#[path = "process/approvals.rs"]
+mod approvals;
 #[path = "process/artifacts.rs"]
 mod artifacts;
 #[path = "process/context.rs"]
@@ -134,6 +136,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["contextFitRecent"], true);
         assert_eq!(init["capabilities"]["maxContextCandidates"], 128);
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
+        assert_eq!(init["capabilities"]["pendingApprovalInbox"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
         assert_eq!(init["capabilities"]["artifactByteReads"], true);
         assert_eq!(init["capabilities"]["maxArtifactReadBytes"], 65_536);
