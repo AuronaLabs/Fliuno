@@ -246,6 +246,7 @@ impl RpcServer {
                     "remoteTaskChecks":self.kernel()?.remote_task_check_supported(),
                     "remoteTaskContinuation":self.kernel()?.remote_continuation_supported(),
                     "sessionContext":true,
+                    "taskSummaries":true,
                     "contextTaskSelection":true,
                     "contextFitRecent":true,
                     "processExecution":process_execution,
@@ -372,6 +373,13 @@ impl RpcServer {
             "task/list" => {
                 let p: TaskListParams = decode(params)?;
                 json!(self.kernel()?.list_tasks(&p.session_id, p.after, p.limit)?)
+            }
+            "task/listSummaries" => {
+                let p: TaskListParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .list_task_summaries(&p.session_id, p.after, p.limit)?
+                )
             }
             "session/create" => {
                 let p: SessionCreateParams = decode(params)?;

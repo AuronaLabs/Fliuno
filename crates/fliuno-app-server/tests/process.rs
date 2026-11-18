@@ -585,12 +585,26 @@ fn stdio_approval_restart_and_artifact_roundtrip() {
         peer.call("artifacts/list", json!({"taskId":task["id"]})),
         json!([])
     );
+    let summary_params = json!({"sessionId":session["id"],"limit":1});
+    let summaries = peer.call("task/listSummaries", summary_params.clone());
+    assert_eq!(
+        summaries["items"],
+        json!([{
+            "id":task["id"],"sessionId":session["id"],"status":"waiting_approval",
+            "backend":{"type":"model"},"inputPreview":"中文交付物 ✓","pendingApprovalCount":1,
+            "modelOutcomeUnknown":false,"agentOutcomeUnknown":false
+        }])
+    );
     drop(peer); // Simulate a daemon crash while the user is reviewing approval.
     let mut peer = Peer::start(&db);
     let restored = peer.call("task/get", json!({"taskId":task["id"]}));
     assert_eq!(
         restored["pendingApproval"]["id"],
         task["pendingApproval"]["id"]
+    );
+    assert_eq!(
+        peer.call("task/listSummaries", summary_params.clone()),
+        summaries
     );
     let resumed=peer.call("approval/respond",json!({"taskId":task["id"],"approvalId":task["pendingApproval"]["id"],"decision":"allow_once"}));
     assert_eq!(resumed["status"], "running");
@@ -599,6 +613,10 @@ fn stdio_approval_restart_and_artifact_roundtrip() {
     let artifacts = peer.call("artifacts/list", json!({"taskId":task["id"]}));
     assert_eq!(artifacts.as_array().unwrap().len(), 1);
     assert_eq!(artifacts[0]["content"], "中文交付物 ✓");
+    let done_page = peer.call("task/listSummaries", summary_params);
+    assert_eq!(done_page["nextAfter"], summaries["nextAfter"]);
+    assert_eq!(done_page["items"][0]["status"], "completed");
+    assert_eq!(done_page["items"][0]["pendingApprovalCount"], 0);
     let events = peer.call("events/list", json!({"taskId":task["id"],"limit":2}));
     assert_eq!(events["hasMore"], true);
     let rest = peer.call(

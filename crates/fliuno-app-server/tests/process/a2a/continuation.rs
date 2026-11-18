@@ -304,6 +304,12 @@ fn lost_stream_after_submission_is_never_replayed_on_restart() {
     let stopped = wait_finished(&mut peer, &sent["id"]);
     assert_eq!(stopped["agentRun"]["remoteTask"]["id"], "remote-task");
     assert_eq!(stopped["agentRun"]["outcomeUnknown"], true);
+    let summaries = peer.call("task/listSummaries", json!({"sessionId":session}));
+    let summary = &summaries["items"][1];
+    assert_eq!(summary["id"], stopped["id"]);
+    assert_eq!(summary["backend"], stopped["backend"]);
+    assert_eq!(summary["agentOutcomeUnknown"], true);
+    assert_eq!(summary["modelOutcomeUnknown"], false);
     drop(peer);
     let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
     assert_eq!(peer.call("task/continueRemote", retry), stopped);

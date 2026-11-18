@@ -612,14 +612,41 @@ fn object_lists_are_scoped_and_paginated() {
         kernel.list_sessions(&workspace.id, 0, 100).unwrap().items[0].id,
         session.id
     );
-    kernel.start_task(&session.id, "one").unwrap();
-    kernel.start_task(&session.id, "two").unwrap();
+    let large = "报告📄".repeat(1000);
+    let old = kernel.start_task(&session.id, &large).unwrap();
+    // These fields were absent from the first stored task format.
+    kernel.db.execute("UPDATE tasks SET data=json_remove(data,'$.backend','$.modelOutcomeUnknown','$.agentRun') WHERE id=?1", [&old.id]).unwrap();
+    let second_task = kernel.start_task(&session.id, "two").unwrap();
     let first = kernel.list_tasks(&session.id, 0, 1).unwrap();
     assert!(first.has_more);
     let second = kernel.list_tasks(&session.id, first.next_after, 1).unwrap();
     assert!(!second.has_more);
     assert_ne!(first.items[0].id, second.items[0].id);
+    let summaries = kernel.list_task_summaries(&session.id, 0, 1).unwrap();
+    assert_eq!(summaries.next_after, first.next_after);
+    assert!(summaries.has_more);
+    let summary = &summaries.items[0];
+    assert_eq!(summary.id, old.id);
+    assert_eq!(summary.backend, TaskBackend::Model);
+    assert_eq!(
+        summary.input_preview,
+        large.chars().take(160).collect::<String>()
+    );
+    assert!(!summary.model_outcome_unknown && !summary.agent_outcome_unknown);
+    let rest = kernel
+        .list_task_summaries(&session.id, first.next_after, 1)
+        .unwrap();
+    assert_eq!(rest.items[0].id, second_task.id);
+    assert!(!rest.has_more);
     let other = kernel.create_session(&workspace.id).unwrap();
+    assert!(
+        kernel
+            .list_task_summaries(&other.id, 0, 100)
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert!(kernel.list_task_summaries(&session.id, 0, 101).is_err());
     assert!(
         kernel
             .list_tasks(&other.id, 0, 100)

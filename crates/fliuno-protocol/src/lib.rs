@@ -293,6 +293,20 @@ pub struct Task {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskSummary {
+    pub id: String,
+    pub session_id: String,
+    pub status: TaskStatus,
+    pub backend: TaskBackend,
+    /// At most 160 Unicode characters from the first user message.
+    pub input_preview: String,
+    pub pending_approval_count: u32,
+    pub model_outcome_unknown: bool,
+    pub agent_outcome_unknown: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Artifact {
     pub id: String,
     pub task_id: String,
@@ -651,6 +665,7 @@ pub fn schema_bundle() -> Value {
             "task/start": schemars::schema_for!(TaskStartParams),
             "task/continueRemote": schemars::schema_for!(TaskContinueRemoteParams),
             "task/list": schemars::schema_for!(TaskListParams),
+            "task/listSummaries": schemars::schema_for!(TaskListParams),
             "task/get": schemars::schema_for!(TaskIdParams),
             "task/checkRemote": schemars::schema_for!(TaskIdParams),
             "task/cancel": schemars::schema_for!(TaskIdParams),
@@ -669,6 +684,7 @@ pub fn schema_bundle() -> Value {
             "Workspace": schemars::schema_for!(Workspace),
             "Session": schemars::schema_for!(Session),
             "Task": schemars::schema_for!(Task),
+            "TaskSummariesPage": schemars::schema_for!(ObjectPage<TaskSummary>),
             "TaskContext": schemars::schema_for!(TaskContext),
             "AgentSpec": schemars::schema_for!(AgentSpec),
             "RemoteTaskCheckAccepted": schemars::schema_for!(RemoteTaskCheckAccepted),

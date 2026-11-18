@@ -41,6 +41,37 @@ impl Kernel {
         )
     }
 
+    pub fn list_task_summaries(
+        &self,
+        session: &str,
+        after: u64,
+        limit: u32,
+    ) -> Result<ObjectPage<TaskSummary>> {
+        self.require_session(session)?;
+        // Extract a small page from the existing records without loading full
+        // histories, tool arguments or artifacts into Rust. The cursor is the
+        // same row position used for the full task list.
+        self.object_page(
+            r#"SELECT rowid,json_object(
+                'id',id,
+                'sessionId',session_id,
+                'status',json_extract(data,'$.status'),
+                'backend',json(COALESCE(json_extract(data,'$.backend'),'{"type":"model"}')),
+                'inputPreview',COALESCE(substr(json_extract(data,'$.messages[0].text'),1,160),''),
+                'pendingApprovalCount',
+                    CASE WHEN json_type(data,'$.pendingApproval')='object' THEN 1 ELSE 0 END
+                    + COALESCE(json_array_length(data,'$.agentRun.pendingApprovals'),0),
+                'modelOutcomeUnknown',json(CASE WHEN json_extract(data,'$.modelOutcomeUnknown')
+                    THEN 'true' ELSE 'false' END),
+                'agentOutcomeUnknown',json(CASE WHEN json_extract(data,'$.agentRun.outcomeUnknown')
+                    THEN 'true' ELSE 'false' END)
+             ) FROM tasks WHERE session_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3"#,
+            Some(session),
+            after,
+            limit,
+        )
+    }
+
     fn object_page<T: DeserializeOwned>(
         &self,
         sql: &str,
@@ -53,21 +84,19 @@ impl Kernel {
                 "after must fit i64 and object list limit must be 1..100".into(),
             ));
         }
-        let mut statement = self.db.prepare(sql)?;
-        let rows = statement.query_map(params![scope, after as i64, limit + 1], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-        })?;
-        let mut items = Vec::new();
+        let mut statement = self.db.prepare_cached(sql)?;
+        let mut rows = statement.query(params![scope, after as i64, limit + 1])?;
+        let mut items = Vec::with_capacity(limit as usize);
         let mut next_after = after;
         let mut has_more = false;
-        for row in rows {
-            let (sequence, data) = row?;
+        while let Some(row) = rows.next()? {
             if items.len() == limit as usize {
                 has_more = true;
                 break;
             }
-            items.push(serde_json::from_str(&data)?);
-            next_after = sequence as u64;
+            let data = row.get_ref(1)?.as_str().map_err(rusqlite::Error::from)?;
+            items.push(serde_json::from_str(data)?);
+            next_after = row.get::<_, i64>(0)? as u64;
         }
         Ok(ObjectPage {
             items,

@@ -18,6 +18,7 @@
 | `workspace/list` | `{after?:0,limit?:100}` | Workspace ObjectPage |
 | `session/list` | `{workspaceId,after?:0,limit?:100}` | Session ObjectPage |
 | `task/list` | `{sessionId,after?:0,limit?:100}` | Task ObjectPage |
+| `task/listSummaries` | `{sessionId,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `session/create` | `{workspaceId}` | Session |
 | `session/context` | `{sessionId,options?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | TaskContext；预览当前历史选择 |
