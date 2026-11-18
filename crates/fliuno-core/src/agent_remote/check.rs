@@ -29,7 +29,11 @@ impl PreparedRemoteTaskCheck {
         let observed = if cancellation.is_cancelled() {
             None
         } else {
-            self.backend.check_remote_task(&self.expected, cancellation)
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.backend.check_remote_task(&self.expected, cancellation)
+            }))
+            .ok()
+            .flatten()
         };
         let outcome = match observed {
             None => RemoteTaskCheckOutcome::Unavailable,

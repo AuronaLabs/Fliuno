@@ -1,6 +1,7 @@
 //! Approval binding and durable preparation for tool execution.
 use super::*;
 use serde_json::Value;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub enum ApprovalOutcome {
     Finished(Task),
@@ -55,7 +56,11 @@ impl PreparedToolExecution {
             session_id: &self.session_id,
             workspace: &self.workspace,
         };
-        self.tool.execute(&context, &self.call, cancellation)
+        // The tool may have completed an external effect before unwinding.
+        catch_unwind(AssertUnwindSafe(|| {
+            self.tool.execute(&context, &self.call, cancellation)
+        }))
+        .unwrap_or_else(|_| Err(ToolError::OutcomeUnknown("tool execution panicked".into())))
     }
 }
 

@@ -128,8 +128,11 @@ impl PreparedAgentRun {
         observer: &dyn AgentObserver,
         cancellation: &CancellationToken,
     ) -> AgentOutcome {
-        self.backend
-            .execute(&self.request, observer, self.commands, cancellation)
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.backend
+                .execute(&self.request, observer, self.commands, cancellation)
+        }))
+        .unwrap_or_else(|_| AgentOutcome::unknown())
     }
 }
 

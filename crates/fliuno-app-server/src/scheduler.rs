@@ -8,6 +8,7 @@ use fliuno_core::{
 use fliuno_protocol::{ModelProgress, Task};
 use std::{
     collections::HashMap,
+    panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -409,12 +410,24 @@ fn run_model_step(
             });
         }
     };
-    let response =
-        provider.next_with_progress_classified(&task, &tools, cancellation, &mut emit_progress);
+    let response = catch_unwind(AssertUnwindSafe(|| {
+        provider.next_with_progress_classified(&task, &tools, cancellation, &mut emit_progress)
+    }));
     drop(emit_progress);
-    if !pending_text.is_empty() {
-        publish_text_progress(&progress_publisher, &task_id, step, pending_text);
-    }
+    let response = match response {
+        Ok(response) => {
+            if !pending_text.is_empty() {
+                publish_text_progress(&progress_publisher, &task_id, step, pending_text);
+            }
+            response
+        }
+        Err(_) => {
+            if has_published_text {
+                progress_publisher.publish(ModelProgress::Reset { task_id, step });
+            }
+            Err(ModelError::OutcomeUnknown("model provider panicked".into()))
+        }
+    };
     Ok(Some((task, response)))
 }
 
@@ -538,6 +551,244 @@ mod tests {
             }
             Ok(ModelDecision::Complete("concurrent result".into()).into())
         }
+    }
+
+    struct FaultyModel;
+
+    impl ModelProvider for FaultyModel {
+        fn next(
+            &self,
+            task: &Task,
+            _tools: &[ToolSpec],
+            _cancellation: &CancellationToken,
+        ) -> Result<ModelTurn, String> {
+            match &task.messages[0] {
+                fliuno_protocol::Message::User { text } if text == "invoke tool" => {
+                    Ok(ModelDecision::Call(fliuno_protocol::ToolCall {
+                        id: "fixture-call".into(),
+                        name: "faulty_tool".into(),
+                        arguments: serde_json::json!({}),
+                    })
+                    .into())
+                }
+                _ => Ok(ModelDecision::Complete("worker still available".into()).into()),
+            }
+        }
+
+        fn next_with_progress(
+            &self,
+            task: &Task,
+            tools: &[ToolSpec],
+            cancellation: &CancellationToken,
+            progress: &mut dyn FnMut(ModelStreamEvent),
+        ) -> Result<ModelTurn, String> {
+            if matches!(&task.messages[0], fliuno_protocol::Message::User { text } if text == "crash model")
+            {
+                progress(ModelStreamEvent::TextDelta("partial".into()));
+                panic!("fixture provider diagnostic");
+            }
+            self.next(task, tools, cancellation)
+        }
+    }
+
+    struct FaultyTool;
+
+    impl fliuno_core::Tool for FaultyTool {
+        fn spec(&self) -> ToolSpec {
+            ToolSpec {
+                name: "faulty_tool".into(),
+                description: "A tool that fails after dispatch".into(),
+                effect: fliuno_core::ToolEffect::External,
+                input_schema: serde_json::json!({"type":"object"}),
+            }
+        }
+
+        fn validate(&self, _arguments: &serde_json::Value) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn execute(
+            &self,
+            _context: &fliuno_core::ToolContext<'_>,
+            _call: &fliuno_protocol::ToolCall,
+            _cancellation: &CancellationToken,
+        ) -> Result<ToolOutput, ToolError> {
+            panic!("fixture tool diagnostic");
+        }
+    }
+
+    struct FaultyAgent;
+
+    impl fliuno_core::AgentBackend for FaultyAgent {
+        fn spec(&self) -> fliuno_protocol::AgentSpec {
+            fliuno_protocol::AgentSpec {
+                id: "faulty-agent".into(),
+                protocol: "fixture".into(),
+                isolation: "fixture".into(),
+                workspace_access: false,
+            }
+        }
+
+        fn supports_remote_task_check(&self) -> bool {
+            true
+        }
+
+        fn check_remote_task(
+            &self,
+            _remote: &fliuno_protocol::AgentRemoteTask,
+            _cancellation: &CancellationToken,
+        ) -> Option<fliuno_protocol::AgentRemoteTask> {
+            panic!("fixture check diagnostic");
+        }
+
+        fn execute(
+            &self,
+            _request: &fliuno_core::AgentRequest,
+            observer: &dyn AgentObserver,
+            _commands: tokio::sync::mpsc::Receiver<fliuno_core::AgentCommand>,
+            _cancellation: &CancellationToken,
+        ) -> AgentOutcome {
+            observer
+                .observe(AgentObservation::RemoteTask(
+                    fliuno_protocol::AgentRemoteTask {
+                        id: "fixture-remote".into(),
+                        context_id: None,
+                        state: fliuno_protocol::AgentTaskState::Working,
+                    },
+                ))
+                .unwrap();
+            panic!("fixture agent diagnostic");
+        }
+    }
+
+    #[test]
+    fn adapter_panics_preserve_uncertain_outcomes_and_keep_the_only_worker_available() {
+        let mut kernel = Kernel::in_memory(Box::new(FaultyModel)).unwrap();
+        kernel.register_tool(Box::new(FaultyTool)).unwrap();
+        kernel.register_agent(Box::new(FaultyAgent)).unwrap();
+        let root = std::env::current_dir().unwrap();
+        let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
+        let session = kernel.create_session(&workspace.id).unwrap();
+        let model = kernel
+            .create_task_with_key(&session.id, "crash model", None)
+            .unwrap()
+            .0;
+        let tool = kernel
+            .create_task_with_key(&session.id, "invoke tool", None)
+            .unwrap()
+            .0;
+        let agent = kernel
+            .create_task_with_backend(
+                &session.id,
+                "crash agent",
+                None,
+                fliuno_protocol::TaskBackend::ExternalAgent {
+                    agent_id: "faulty-agent".into(),
+                },
+            )
+            .unwrap()
+            .0;
+        let healthy = kernel
+            .create_task_with_key(&session.id, "healthy", None)
+            .unwrap()
+            .0;
+        let progress = kernel.subscribe_model_progress().unwrap();
+        let kernel = Arc::new(Mutex::new(kernel));
+        let scheduler = TaskScheduler::with_worker_count(Arc::clone(&kernel), 1);
+        let wait = |id: &str, expected| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                let task = kernel.lock().unwrap().get_task(id).unwrap();
+                if task.status == expected {
+                    return task;
+                }
+                assert!(Instant::now() < deadline, "{id} remained {:?}", task.status);
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        scheduler.schedule(&model.id).unwrap();
+        let model = wait(&model.id, TaskStatus::Interrupted);
+        assert!(model.model_outcome_unknown);
+        assert_eq!(
+            model.output.as_deref(),
+            Some("model outcome unknown: model provider panicked")
+        );
+        assert!(matches!(
+            progress.try_recv().unwrap(),
+            ModelProgress::TextDelta { .. }
+        ));
+        assert_eq!(
+            progress.try_recv().unwrap(),
+            ModelProgress::Reset {
+                task_id: model.id.clone(),
+                step: 1
+            }
+        );
+        assert!(
+            kernel
+                .lock()
+                .unwrap()
+                .prepare_resume_task(&model.id, false)
+                .is_err()
+        );
+
+        scheduler.schedule(&tool.id).unwrap();
+        let pending = wait(&tool.id, TaskStatus::WaitingApproval)
+            .pending_approval
+            .unwrap();
+        let fliuno_core::ApprovalOutcome::Prepared { execution, .. } = kernel
+            .lock()
+            .unwrap()
+            .prepare_approval(
+                &tool.id,
+                &pending.id,
+                fliuno_protocol::ApprovalDecision::AllowOnce,
+            )
+            .unwrap()
+        else {
+            panic!("approval did not prepare the operation")
+        };
+        scheduler.schedule_tool(execution).unwrap();
+        let tool = wait(&tool.id, TaskStatus::Interrupted);
+        assert_eq!(tool.in_flight_tool.unwrap().id, "fixture-call");
+        assert!(
+            kernel
+                .lock()
+                .unwrap()
+                .prepare_resume_task(&tool.id, true)
+                .is_err()
+        );
+
+        scheduler.schedule_agent(&agent.id).unwrap();
+        let run = wait(&agent.id, TaskStatus::Interrupted).agent_run.unwrap();
+        assert!(run.finished && run.outcome_unknown);
+        assert_eq!(run.remote_task.unwrap().id, "fixture-remote");
+        let check = kernel
+            .lock()
+            .unwrap()
+            .prepare_remote_task_check(&agent.id)
+            .unwrap();
+        let check_id = check.check_id().to_owned();
+        scheduler.schedule_remote_check(check).unwrap();
+        scheduler.schedule(&healthy.id).unwrap();
+        assert_eq!(
+            wait(&healthy.id, TaskStatus::Completed).output.as_deref(),
+            Some("worker still available")
+        );
+        let events = kernel
+            .lock()
+            .unwrap()
+            .list_events(&agent.id, 0, 100)
+            .unwrap()
+            .events;
+        assert!(events.iter().any(|event| matches!(
+            &event.data,
+            fliuno_protocol::EventKind::AgentRemoteTaskChecked {
+                check_id: observed,
+                outcome: fliuno_protocol::RemoteTaskCheckOutcome::Unavailable,
+                ..
+            } if observed == &check_id
+        )));
     }
 
     #[test]

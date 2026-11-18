@@ -128,9 +128,11 @@ impl Kernel {
             PreparedModelStep::Ready { task, tools } => (task, tools),
             PreparedModelStep::Finished(task) => return Ok(task),
         };
-        let turn = self
-            .provider
-            .next_classified(&task, &specs, &CancellationToken::new());
+        let turn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.provider
+                .next_classified(&task, &specs, &CancellationToken::new())
+        }))
+        .unwrap_or_else(|_| Err(ModelError::OutcomeUnknown("model provider panicked".into())));
         self.apply_model_response(task, turn)
     }
 
