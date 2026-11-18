@@ -129,3 +129,39 @@ fn directories_and_missing_configuration_paths_fail_without_echoing_the_path() {
         assert!(!fixture.0.join("kernel.db").exists());
     }
 }
+
+#[test]
+fn invalid_model_context_budget_fails_before_database_creation() {
+    let fixture = Directory::new();
+    let database = fixture.0.join("kernel.db");
+    for (window, output_limit, diagnostic) in [
+        ("8192", None, "set both FLIUNO_CONTEXT_WINDOW_TOKENS"),
+        (
+            "private-invalid-window",
+            Some("256"),
+            "must be an unsigned integer",
+        ),
+        ("8192", Some("8192"), "smaller than the context window"),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"));
+        command
+            .arg("--db")
+            .arg(&database)
+            .env("FLIUNO_PROVIDER", "openai")
+            .env("FLIUNO_MODEL", "fixture-model")
+            .env("OPENAI_API_KEY", "fixture-key")
+            .env("OPENAI_BASE_URL", "http://127.0.0.1:1/v1/")
+            .env("FLIUNO_CONTEXT_WINDOW_TOKENS", window)
+            .env_remove("FLIUNO_MAX_OUTPUT_TOKENS")
+            .stdin(Stdio::null());
+        if let Some(value) = output_limit {
+            command.env("FLIUNO_MAX_OUTPUT_TOKENS", value);
+        }
+        let output = command.output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(stderr.contains(diagnostic), "{stderr}");
+        assert!(!stderr.contains("private-invalid-window"));
+        assert!(!database.exists());
+    }
+}

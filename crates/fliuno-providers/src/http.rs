@@ -1,3 +1,4 @@
+use crate::ModelContextBudget;
 use fliuno_core::{CancellationToken, ModelError};
 use reqwest::{
     Client, Url,
@@ -14,12 +15,13 @@ const EVENT_LIMIT: usize = 1024 * 1024;
 
 struct BoundedRequestBody {
     bytes: Vec<u8>,
+    limit: usize,
     exceeded: bool,
 }
 
 impl std::io::Write for BoundedRequestBody {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-        if buffer.len() > REQUEST_LIMIT.saturating_sub(self.bytes.len()) {
+        if buffer.len() > self.limit.saturating_sub(self.bytes.len()) {
             self.exceeded = true;
             return Err(std::io::Error::other(
                 "provider request body limit exceeded",
@@ -34,16 +36,22 @@ impl std::io::Write for BoundedRequestBody {
     }
 }
 
-fn encode_request(body: &Value) -> Result<Vec<u8>, ModelError> {
+fn encode_request(body: &Value, budget: Option<ModelContextBudget>) -> Result<Vec<u8>, ModelError> {
+    let limit = budget.map_or(REQUEST_LIMIT, |budget| {
+        REQUEST_LIMIT.min(budget.input_allowance as usize)
+    });
     let mut writer = BoundedRequestBody {
         bytes: Vec::new(),
+        limit,
         exceeded: false,
     };
     if serde_json::to_writer(&mut writer, body).is_err() {
-        let message = if writer.exceeded {
-            "provider request exceeds 8 MiB"
-        } else {
-            "cannot serialize provider request"
+        let message = match (writer.exceeded, limit < REQUEST_LIMIT) {
+            (true, true) => {
+                "provider input exceeds the configured local context estimate (JSON bytes plus output reserve)"
+            }
+            (true, false) => "provider request exceeds 8 MiB",
+            (false, _) => "cannot serialize provider request",
         };
         return Err(ModelError::NotDispatched(message.into()));
     }
@@ -54,6 +62,7 @@ pub(crate) struct Http {
     client: Client,
     endpoint: Url,
     runtime: Runtime,
+    context_budget: Option<ModelContextBudget>,
 }
 
 impl Http {
@@ -89,7 +98,17 @@ impl Http {
             client,
             endpoint,
             runtime,
+            context_budget: None,
         })
+    }
+
+    pub fn with_context_budget(mut self, budget: ModelContextBudget) -> Self {
+        self.context_budget = Some(budget);
+        self
+    }
+
+    pub fn max_output_tokens(&self) -> Option<u32> {
+        self.context_budget.map(|budget| budget.max_output_tokens)
     }
 
     pub fn post(
@@ -100,7 +119,7 @@ impl Http {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        let body = encode_request(body)?;
+        let body = encode_request(body, self.context_budget)?;
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
@@ -116,7 +135,7 @@ impl Http {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        let body = encode_request(body)?;
+        let body = encode_request(body, self.context_budget)?;
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
@@ -343,12 +362,12 @@ mod tests {
     #[test]
     fn serialized_provider_request_accepts_the_exact_limit_and_rejects_one_more_byte() {
         let exact = Value::String("x".repeat(REQUEST_LIMIT - 2));
-        let encoded = encode_request(&exact).unwrap();
+        let encoded = encode_request(&exact, None).unwrap();
         assert_eq!(encoded.len(), REQUEST_LIMIT);
 
         let over = Value::String("x".repeat(REQUEST_LIMIT - 1));
         assert!(matches!(
-            encode_request(&over),
+            encode_request(&over, None),
             Err(ModelError::NotDispatched(message)) if message == "provider request exceeds 8 MiB"
         ));
     }

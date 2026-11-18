@@ -5,7 +5,7 @@ use fliuno_core::{
     ModelStreamEvent,
 };
 use fliuno_protocol::{ApprovalDecision, Message, Session, Task, TaskStatus};
-use fliuno_providers::{AnthropicProvider, OpenAiProvider};
+use fliuno_providers::{AnthropicProvider, ModelContextBudget, OpenAiProvider};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -156,6 +156,79 @@ fn pre_dispatch_rejection_and_cancellation_never_open_a_provider_connection() {
     assert!(
         matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
     );
+}
+
+#[test]
+fn configured_budget_counts_the_complete_request_before_opening_a_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let budget = ModelContextBudget::new(4096, 512).unwrap();
+    let openai = OpenAiProvider::new(&base, "fixture-key", "model")
+        .unwrap()
+        .with_context_budget(budget);
+    let anthropic = AnthropicProvider::new(&base, "fixture-key", "model")
+        .unwrap()
+        .with_context_budget(budget);
+    let (task, _) = prepared_model_step();
+    // Small user input, oversized tool schema. A history-only or text-only
+    // budget would still send this request.
+    let tools = [fliuno_core::ToolSpec {
+        name: "fixture_tool".into(),
+        description: "Fixture tool".into(),
+        effect: fliuno_core::ToolEffect::ArtifactWrite,
+        input_schema: json!({"type":"object","description":"\u{754c}".repeat(1600)}),
+    }];
+    for provider in [&openai as &dyn ModelProvider, &anthropic] {
+        for streaming in [false, true] {
+            let cancellation = CancellationToken::new();
+            let result = if streaming {
+                provider.next_with_progress_classified(&task, &tools, &cancellation, &mut |_| {})
+            } else {
+                provider.next_classified(&task, &tools, &cancellation)
+            };
+            assert!(matches!(result, Err(ModelError::NotDispatched(message))
+                if message.contains("configured local context estimate")));
+        }
+    }
+    assert!(
+        matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+    );
+}
+
+#[test]
+fn budgeted_calls_send_the_reserved_output_limit_to_both_providers() {
+    let (base, peer) = fixture(vec![
+        (
+            200,
+            json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"OpenAI"}]}]}),
+        ),
+        (
+            200,
+            json!({"stop_reason":"end_turn","content":[{"type":"text","text":"Anthropic"}]}),
+        ),
+    ]);
+    let (task, tools) = prepared_model_step();
+    let budget = ModelContextBudget::new(16_384, 512).unwrap();
+    let openai = OpenAiProvider::new(&base, "fixture-key", "model")
+        .unwrap()
+        .with_context_budget(budget);
+    let anthropic = AnthropicProvider::new(&base, "fixture-key", "model")
+        .unwrap()
+        .with_context_budget(budget);
+    let cancellation = CancellationToken::new();
+    let turn = openai
+        .next_classified(&task, &tools, &cancellation)
+        .unwrap();
+    assert!(matches!(turn.decision, ModelDecision::Complete(text) if text == "OpenAI"));
+    let turn = anthropic
+        .next_with_progress_classified(&task, &tools, &cancellation, &mut |_| {})
+        .unwrap();
+    assert!(matches!(turn.decision, ModelDecision::Complete(text) if text == "Anthropic"));
+    let requests = peer.join().unwrap();
+    assert_eq!(requests[0].1["max_output_tokens"], 512);
+    assert_eq!(requests[1].1["max_tokens"], 512);
+    assert_eq!(requests[1].1["stream"], true);
 }
 
 #[test]

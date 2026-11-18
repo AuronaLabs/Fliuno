@@ -1,4 +1,7 @@
-use crate::http::{Http, header};
+use crate::{
+    ModelContextBudget,
+    http::{Http, header},
+};
 use fliuno_core::{
     CancellationToken, ModelDecision, ModelError, ModelProvider, ModelStreamEvent, ModelTurn,
     ProviderReplay, ToolSpec,
@@ -23,6 +26,25 @@ impl OpenAiProvider {
             http: Http::new(base, "responses", headers)?,
             model: model.into(),
         })
+    }
+
+    pub fn with_context_budget(mut self, budget: ModelContextBudget) -> Self {
+        self.http = self.http.with_context_budget(budget);
+        self
+    }
+
+    fn request(
+        &self,
+        task: &Task,
+        tools: &[ToolSpec],
+        streaming: bool,
+    ) -> Result<Value, ModelError> {
+        let mut body =
+            request(&self.model, task, tools, streaming).map_err(ModelError::NotDispatched)?;
+        if let Some(output) = self.http.max_output_tokens() {
+            body["max_output_tokens"] = json!(output);
+        }
+        Ok(body)
     }
 }
 
@@ -148,7 +170,7 @@ impl ModelProvider for OpenAiProvider {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        let body = request(&self.model, task, tools, false).map_err(ModelError::NotDispatched)?;
+        let body = self.request(task, tools, false)?;
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
@@ -178,8 +200,7 @@ impl ModelProvider for OpenAiProvider {
             if cancellation.is_cancelled() {
                 return Err(ModelError::CancelledBeforeDispatch);
             }
-            let body =
-                request(&self.model, task, tools, true).map_err(ModelError::NotDispatched)?;
+            let body = self.request(task, tools, true)?;
             if cancellation.is_cancelled() {
                 return Err(ModelError::CancelledBeforeDispatch);
             }
