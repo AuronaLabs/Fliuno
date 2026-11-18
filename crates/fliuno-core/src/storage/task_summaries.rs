@@ -125,11 +125,11 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
         model_outcome_unknown: task.model_outcome_unknown,
         agent_outcome_unknown: run.is_some_and(|run| run.outcome_unknown),
     };
-    tx.execute(
+    tx.prepare_cached(
         "INSERT INTO task_summaries(task_id,data) VALUES(?1,?2)
          ON CONFLICT(task_id) DO UPDATE SET data=excluded.data
          WHERE task_summaries.data<>excluded.data",
-        params![task.id, serde_json::to_string(&summary)?],
-    )?;
+    )?
+    .execute(params![task.id, serde_json::to_string(&summary)?])?;
     Ok(())
 }

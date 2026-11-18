@@ -15,6 +15,7 @@ use std::{
 
 pub(crate) const SCHEMA_VERSION: u32 = 24;
 const RECOVERY_BATCH_SIZE: i64 = 64;
+const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
 impl Kernel {
     pub(crate) fn workspace_for_task(&self, task_id: &str) -> Result<Workspace> {
@@ -296,8 +297,16 @@ impl Kernel {
         let tx = self.db.transaction()?;
         let running = task.status == TaskStatus::Running
             || task.agent_run.as_ref().is_some_and(|run| !run.finished);
-        tx.execute("INSERT INTO tasks VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET running=excluded.running,data=excluded.data",
-            params![task.id, task.session_id, running, serde_json::to_string(task)?])?;
+        tx.prepare_cached(
+            "INSERT INTO tasks VALUES(?1,?2,?3,?4)
+             ON CONFLICT(id) DO UPDATE SET running=excluded.running,data=excluded.data",
+        )?
+        .execute(params![
+            task.id,
+            task.session_id,
+            running,
+            serde_json::to_string(task)?
+        ])?;
         task_summaries::record(&tx, task)?;
         approvals::record(&tx, task)?;
         if let Some(continuation) = &task.remote_continuation
@@ -326,16 +335,16 @@ impl Kernel {
             artifacts::record(&tx, &task.id, artifact)?;
         }
         let mut sequences = Vec::with_capacity(events.len());
-        for event in events {
-            tx.execute(
-                "INSERT INTO events(task_id,data) VALUES(?1,?2)",
-                params![task.id, serde_json::to_string(event)?],
-            )?;
-            let sequence = tx.last_insert_rowid() as u64;
-            if matches!(event, EventKind::TaskCompleted { .. }) {
-                context::record(&tx, task, sequence, true)?;
+        if !events.is_empty() {
+            let mut insert = tx.prepare_cached(INSERT_EVENT)?;
+            for event in events {
+                insert.execute(params![task.id, serde_json::to_string(event)?])?;
+                let sequence = tx.last_insert_rowid() as u64;
+                if matches!(event, EventKind::TaskCompleted { .. }) {
+                    context::record(&tx, task, sequence, true)?;
+                }
+                sequences.push(sequence);
             }
-            sequences.push(sequence);
         }
         tx.commit()?;
         if !sequences.is_empty() {
@@ -360,10 +369,9 @@ impl Kernel {
             [&task_id],
             |row| row.get(0),
         )?;
-        self.db.execute(
-            "INSERT INTO events(task_id,data) VALUES(?1,?2)",
-            params![task_id, serde_json::to_string(&data)?],
-        )?;
+        self.db
+            .prepare_cached(INSERT_EVENT)?
+            .execute(params![task_id, serde_json::to_string(&data)?])?;
         self.events.publish(
             &session_id,
             std::iter::once(Event {
