@@ -245,7 +245,7 @@ fn verify_initial_message(
     }
     Ok(())
 }
-fn stop_reason(state: TaskState) -> Option<AgentStopReason> {
+pub(super) fn stop_reason(state: TaskState) -> Option<AgentStopReason> {
     match state {
         TaskState::Completed => Some(AgentStopReason::EndTurn),
         TaskState::Failed => Some(AgentStopReason::Failed),
@@ -820,5 +820,30 @@ impl A2aBackend {
             return Ok(known(stop_reason(task.state).ok_or(())?));
         }
         finish_snapshot(observer, task)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a2a_states_preserve_terminal_and_pause_outcomes() {
+        for (state, expected) in [
+            (TaskState::Completed, Some(AgentStopReason::EndTurn)),
+            (TaskState::Failed, Some(AgentStopReason::Failed)),
+            (TaskState::Canceled, Some(AgentStopReason::Cancelled)),
+            (TaskState::Rejected, Some(AgentStopReason::Rejected)),
+            (
+                TaskState::InputRequired,
+                Some(AgentStopReason::InputRequired),
+            ),
+            (TaskState::AuthRequired, Some(AgentStopReason::AuthRequired)),
+            (TaskState::Submitted, None),
+            (TaskState::Working, None),
+            (TaskState::Unspecified, None),
+        ] {
+            assert_eq!(stop_reason(state), expected, "state: {state:?}");
+        }
     }
 }

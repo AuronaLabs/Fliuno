@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[[bench]]
+name = "json_size"
+harness = false
+
 [dependencies]
 fliuno-protocol.workspace = true
 serde.workspace = true

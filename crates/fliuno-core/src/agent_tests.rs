@@ -199,6 +199,92 @@ fn concurrent_permissions_are_bound_once_and_deny_does_not_fail_agent() {
 }
 
 #[test]
+fn cross_protocol_terminal_outcomes_share_one_durable_event_projection() {
+    let cases = [
+        (Some(AgentStopReason::EndTurn), false, TaskStatus::Completed),
+        (Some(AgentStopReason::Refusal), false, TaskStatus::Completed),
+        (
+            Some(AgentStopReason::Cancelled),
+            false,
+            TaskStatus::Cancelled,
+        ),
+        (Some(AgentStopReason::Failed), false, TaskStatus::Failed),
+        (Some(AgentStopReason::Rejected), false, TaskStatus::Failed),
+        (
+            Some(AgentStopReason::RemotePreflightFailed),
+            false,
+            TaskStatus::Failed,
+        ),
+        (
+            Some(AgentStopReason::MaxTokens),
+            false,
+            TaskStatus::Interrupted,
+        ),
+        (
+            Some(AgentStopReason::MaxTurnRequests),
+            false,
+            TaskStatus::Interrupted,
+        ),
+        (
+            Some(AgentStopReason::InputRequired),
+            false,
+            TaskStatus::Interrupted,
+        ),
+        (
+            Some(AgentStopReason::AuthRequired),
+            false,
+            TaskStatus::Interrupted,
+        ),
+        (None, true, TaskStatus::Interrupted),
+    ];
+
+    let (mut kernel, session) = setup();
+    for (reason, unknown, expected_status) in cases {
+        let (task, run) = start(&mut kernel, &session);
+        let outcome = if unknown {
+            AgentOutcome::unknown()
+        } else {
+            AgentOutcome {
+                stop_reason: reason,
+                outcome_unknown: false,
+            }
+        };
+        let finished = kernel
+            .finish_agent_run(&task.id, &run.request.run_id, outcome)
+            .unwrap();
+        assert_eq!(finished.status, expected_status, "reason: {reason:?}");
+        assert_eq!(finished.agent_run.as_ref().unwrap().stop_reason, reason);
+        assert_eq!(
+            finished.agent_run.as_ref().unwrap().outcome_unknown,
+            unknown
+        );
+
+        let events = kernel.list_events(&task.id, 0, 100).unwrap().events;
+        let finish_index = events
+            .iter()
+            .position(|event| matches!(&event.data, EventKind::AgentFinished { .. }))
+            .unwrap();
+        assert_eq!(finish_index + 1, events.len() - 1, "reason: {reason:?}");
+        match (&events[finish_index + 1].data, expected_status) {
+            (EventKind::TaskCompleted { .. }, TaskStatus::Completed)
+            | (EventKind::TaskCancelled, TaskStatus::Cancelled)
+            | (EventKind::TaskFailed { .. }, TaskStatus::Failed)
+            | (EventKind::TaskInterrupted, TaskStatus::Interrupted) => {}
+            other => panic!("unexpected terminal projection: {other:?}"),
+        }
+
+        kernel
+            .finish_agent_run(&task.id, &run.request.run_id, AgentOutcome::unknown())
+            .unwrap();
+        assert_eq!(
+            kernel.list_events(&task.id, 0, 100).unwrap().events.len(),
+            events.len(),
+            "terminal finish must be idempotent"
+        );
+    }
+}
+
+#[test]
 fn consent_is_committed_before_failed_delivery_and_never_replayed() {
     let (mut kernel, session) = setup();
     let (task, prepared) = start(&mut kernel, &session);

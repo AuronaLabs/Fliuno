@@ -63,6 +63,17 @@ fn default_permission_ms() -> u64 {
     120_000
 }
 
+pub(super) fn stop_reason(reason: StopReason) -> Option<AgentStopReason> {
+    match reason {
+        StopReason::EndTurn => Some(AgentStopReason::EndTurn),
+        StopReason::Refusal => Some(AgentStopReason::Refusal),
+        StopReason::Cancelled => Some(AgentStopReason::Cancelled),
+        StopReason::MaxTokens => Some(AgentStopReason::MaxTokens),
+        StopReason::MaxTurnRequests => Some(AgentStopReason::MaxTurnRequests),
+        _ => None,
+    }
+}
+
 struct AcpBackend {
     authority: String,
     id: String,
@@ -302,14 +313,7 @@ impl AcpBackend {
                         }
                     },
                     response = &mut prompt => {
-                        let reason = match response.map_err(|_| ())?.stop_reason {
-                            StopReason::EndTurn => AgentStopReason::EndTurn,
-                            StopReason::Refusal => AgentStopReason::Refusal,
-                            StopReason::Cancelled => AgentStopReason::Cancelled,
-                            StopReason::MaxTokens => AgentStopReason::MaxTokens,
-                            StopReason::MaxTurnRequests => AgentStopReason::MaxTurnRequests,
-                            _ => return Err(()),
-                        };
+                        let reason = stop_reason(response.map_err(|_| ())?.stop_reason).ok_or(())?;
                         return Ok(AgentOutcome {stop_reason: Some(reason), outcome_unknown: false});
                     }
                 }
@@ -319,5 +323,34 @@ impl AcpBackend {
         // Always wait for Job/profile cleanup, including observer and wire errors.
         client.close().await;
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn acp_stop_reasons_preserve_terminal_and_incomplete_outcomes() {
+        assert_eq!(
+            stop_reason(StopReason::EndTurn),
+            Some(AgentStopReason::EndTurn)
+        );
+        assert_eq!(
+            stop_reason(StopReason::Refusal),
+            Some(AgentStopReason::Refusal)
+        );
+        assert_eq!(
+            stop_reason(StopReason::Cancelled),
+            Some(AgentStopReason::Cancelled)
+        );
+        assert_eq!(
+            stop_reason(StopReason::MaxTokens),
+            Some(AgentStopReason::MaxTokens)
+        );
+        assert_eq!(
+            stop_reason(StopReason::MaxTurnRequests),
+            Some(AgentStopReason::MaxTurnRequests)
+        );
     }
 }
