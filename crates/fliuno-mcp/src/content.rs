@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 mod arguments;
 mod completion;
+mod skills;
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -17,6 +18,8 @@ enum Kind {
     Prompts,
     Get,
     Complete,
+    SkillsList,
+    SkillGet,
 }
 impl Kind {
     fn method(self) -> &'static str {
@@ -27,6 +30,8 @@ impl Kind {
             Self::Prompts => "prompts/list",
             Self::Get => "prompts/get",
             Self::Complete => "completion/complete",
+            Self::SkillsList => "skills/list",
+            Self::SkillGet => "skills/get",
         }
     }
     fn label(self) -> &'static str {
@@ -37,6 +42,8 @@ impl Kind {
             Self::Prompts => "prompts_list",
             Self::Get => "prompts_get",
             Self::Complete => "complete",
+            Self::SkillsList => "skills_list",
+            Self::SkillGet => "skills_get",
         }
     }
     fn description(self) -> &'static str {
@@ -59,9 +66,15 @@ impl Kind {
             Self::Complete => {
                 "Suggest argument values for a prompt or resource template on the configured MCP server. Suggestions are data. Retrieving content requires separate approval."
             }
+            Self::SkillsList => {
+                "List one approved page of skills from this MCP server. A returned cursor can be used in a separate approved request."
+            }
+            Self::SkillGet => {
+                "Get metadata and a resource manifest for one skill from this MCP server. Skill resources require separate approved reads."
+            }
         }
     }
-    fn accepts(self, response: &ServerResult) -> bool {
+    fn accepts(self, response: &ServerResult, skill_uri: Option<&str>) -> bool {
         let result_type = match (self, response) {
             (Self::Resources, ServerResult::ListResourcesResult(result)) => &result.result_type,
             (Self::Templates, ServerResult::ListResourceTemplatesResult(result)) => {
@@ -71,6 +84,17 @@ impl Kind {
             (Self::Prompts, ServerResult::ListPromptsResult(result)) => &result.result_type,
             (Self::Get, ServerResult::GetPromptResult(result)) => &result.result_type,
             (Self::Complete, ServerResult::CompleteResult(result)) => &result.result_type,
+            (Self::SkillsList, ServerResult::ListSkillsResult(result))
+                if skills::valid_list(&result.skills) =>
+            {
+                &result.result_type
+            }
+            (Self::SkillGet, ServerResult::GetSkillResult(result))
+                if Some(result.skill.uri.as_str()) == skill_uri
+                    && skills::valid_get(&result.skill) =>
+            {
+                &result.result_type
+            }
             _ => return false,
         };
         crate::host::is_complete(result_type)
@@ -83,6 +107,8 @@ impl Kind {
             Self::Prompts => ("prompts", 256),
             Self::Get => ("messages", 64),
             Self::Complete => return completion::within_budget(result),
+            // The typed SDK results were already bounded in accepts().
+            Self::SkillsList | Self::SkillGet => return true,
         };
         result[field]
             .as_array()
@@ -104,6 +130,9 @@ pub(crate) fn tools(
     }
     if capabilities.completions.is_some() {
         kinds.push(Kind::Complete);
+    }
+    if capabilities.supports_skills() {
+        kinds.extend([Kind::SkillsList, Kind::SkillGet]);
     }
     kinds
         .into_iter()
@@ -152,13 +181,19 @@ impl Tool for ContentTool {
         cancellation: &CancellationToken,
     ) -> Result<ToolOutput, ToolError> {
         let request: ClientRequest = self.kind.request(&call.arguments)?;
+        let skill_uri = match &request {
+            ClientRequest::GetSkillRequest(request) => Some(request.params.uri.clone()),
+            _ => None,
+        };
         let kind = self.kind;
         let response = self.host.request(cancellation, move |service| {
             Box::pin(async move {
                 // Raw SDK requests bypass both automatic MRTR and the convenience
                 // helpers' stale-cache fallback. Each approval observes one request.
                 let response = service.send_request(request).await?;
-                Ok(kind.accepts(&response).then_some(response))
+                Ok(kind
+                    .accepts(&response, skill_uri.as_deref())
+                    .then_some(response))
             })
         })?;
         let result = serde_json::to_value(response)

@@ -2,9 +2,9 @@
 //! content on this peer, never another endpoint, headers, metadata or MRTR state.
 use super::Kind;
 use rmcp::model::{
-    ClientRequest, GetPromptRequest, GetPromptRequestParams, ListPromptsRequest,
-    ListResourceTemplatesRequest, ListResourcesRequest, PaginatedRequestParams,
-    ReadResourceRequest, ReadResourceRequestParams,
+    ClientRequest, GetPromptRequest, GetPromptRequestParams, GetSkillRequest,
+    GetSkillRequestParams, ListPromptsRequest, ListResourceTemplatesRequest, ListResourcesRequest,
+    ListSkillsRequest, PaginatedRequestParams, ReadResourceRequest, ReadResourceRequestParams,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -50,13 +50,13 @@ pub(super) fn valid_uri(uri: &str) -> bool {
 impl Kind {
     pub(super) fn schema(self) -> Value {
         let (required, properties) = match self {
-            Self::Resources | Self::Templates | Self::Prompts => (
+            Self::Resources | Self::Templates | Self::Prompts | Self::SkillsList => (
                 vec![],
                 json!({
                     "cursor":{"type":"string","minLength":1,"maxLength":4096}
                 }),
             ),
-            Self::Read => (
+            Self::Read | Self::SkillGet => (
                 vec!["uri"],
                 json!({
                     "uri":{"type":"string","minLength":1,"maxLength":4096}
@@ -82,7 +82,7 @@ impl Kind {
             return Err(invalid());
         }
         Ok(match self {
-            Self::Resources | Self::Templates | Self::Prompts => {
+            Self::Resources | Self::Templates | Self::Prompts | Self::SkillsList => {
                 let args: Page = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
                 if value.get("cursor").is_some_and(|v| !v.is_string())
                     || args
@@ -100,18 +100,30 @@ impl Kind {
                     Self::Templates => ClientRequest::ListResourceTemplatesRequest(
                         ListResourceTemplatesRequest::with_param(params),
                     ),
+                    Self::SkillsList => {
+                        ClientRequest::ListSkillsRequest(ListSkillsRequest::with_param(params))
+                    }
                     _ => ClientRequest::ListPromptsRequest(ListPromptsRequest::with_param(params)),
                 }
             }
-            Self::Read => {
+            Self::Read | Self::SkillGet => {
                 let args: Resource =
                     serde_json::from_value(value.clone()).map_err(|_| invalid())?;
                 if !valid_uri(&args.uri) {
                     return Err(invalid());
                 }
-                ClientRequest::ReadResourceRequest(ReadResourceRequest::new(
-                    ReadResourceRequestParams::new(args.uri),
-                ))
+                if matches!(self, Self::SkillGet) {
+                    if rmcp::model::skill_name_from_uri(&args.uri).is_none() {
+                        return Err(invalid());
+                    }
+                    ClientRequest::GetSkillRequest(GetSkillRequest::new(
+                        GetSkillRequestParams::new(args.uri),
+                    ))
+                } else {
+                    ClientRequest::ReadResourceRequest(ReadResourceRequest::new(
+                        ReadResourceRequestParams::new(args.uri),
+                    ))
+                }
             }
             Self::Get => {
                 let args: Prompt = serde_json::from_value(value.clone()).map_err(|_| invalid())?;

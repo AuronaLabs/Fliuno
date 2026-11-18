@@ -11,6 +11,8 @@ use wire::{Fixture, Response};
 mod completion;
 #[path = "content/persistence.rs"]
 mod persistence;
+#[path = "content/skills.rs"]
+mod skills;
 
 fn connect(fixture: &Fixture, timeout: u64) -> Vec<Box<dyn Tool>> {
     fliuno_mcp::connect_server(serde_json::from_value(json!({
