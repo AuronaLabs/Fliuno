@@ -185,3 +185,5 @@ core 的 `register_tools` 先暂存并校验整组工具的名称、摘要和与
 - Linux MCP 的四项伴随文件契约和两项隔离进程契约通过。首次真实进程测试发现 stdio fixture 使用了不需要的 Tokio 信号驱动，启动时尝试创建 socket pair。改用只启用定时器的 runtime 后，通过了 SQLite 审批绑定、固定伴随文件读取、超时回收和宿主文件及网络拒绝的验证。Windows 同时复跑了九项 MCP 集成测试。
 
 Windows 工作区在加入 Job 预算后通过 381 项测试、rustfmt 和两种 Clippy。此前的 380 项版本还执行了完整 `scripts/check.ps1`，涵盖协议 Schema 和离线演示。Linux 已完成全工作区测试二进制的交叉编译与链接，上述条目已在来宾运行。Linux Node/CPython 解释器打包和外部付费模型、商业 Agent 的验收仍分别待做。
+
+Windows 的完整检查脚本随后通过 382 项测试、两种 Clippy、Schema 一致性和离线演示。最新的 Debian app-server 并发回归通过 58 项测试，0 失败，2 项 cgroup 专项默认忽略且已在上面的专门运行中通过。首次 `initialize` 测试等待上限从 5 秒增至 15 秒，为来宾并发启动及 SQLite 打开和迁移留出时间。其余请求仍使用 5 秒。调整后 Windows app-server 进程测试也通过 60 项。

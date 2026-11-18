@@ -220,7 +220,14 @@ impl Peer {
         )
         .unwrap();
         self.input.flush().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        // The first handshake also waits for the process to load and open or
+        // migrate SQLite. Keep the shorter deadline for subsequent requests.
+        let response_timeout = if method == "initialize" && self.id == 1 {
+            Duration::from_secs(15)
+        } else {
+            Duration::from_secs(5)
+        };
+        let deadline = Instant::now() + response_timeout;
         loop {
             let response = self
                 .output
