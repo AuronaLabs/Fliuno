@@ -103,6 +103,15 @@ fn live_event_stream_can_resubscribe_and_catch_up_to_a_fixed_watermark() {
 
 #[test]
 fn scoped_live_events_ignore_other_sessions_and_keep_the_scope_after_a_gap() {
+    exercise_scoped_live_events(false);
+}
+
+#[test]
+fn workspace_subscription_fans_out_across_sessions_and_recovers_a_gap() {
+    exercise_scoped_live_events(true);
+}
+
+fn exercise_scoped_live_events(workspace_scope: bool) {
     fn submit_batch(peer: &mut Peer, session: &Value) {
         let batch: Vec<_> = (0..72)
             .map(|i| json!({"jsonrpc":"2.0","method":"task/start","params":{
@@ -122,15 +131,29 @@ fn scoped_live_events_ignore_other_sessions_and_keep_the_scope_after_a_gap() {
             .to_owned()
     }
 
-    let root = std::env::temp_dir().join(format!("fliuno-scoped-events-{}", uuid::Uuid::new_v4()));
+    let temp = std::env::temp_dir().canonicalize().unwrap();
+    let root = temp.join(format!("fliuno-scoped-events-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
     let mut peer = Peer::start(&root.join("kernel.db"));
     let workspace = peer.call("workspace/open", json!({"root":root}));
     let params = json!({"workspaceId":workspace["id"]});
     let selected = peer.call("session/create", params.clone())["id"].clone();
-    let other = peer.call("session/create", params)["id"].clone();
+    let sibling = peer.call("session/create", params.clone())["id"].clone();
+    let (other, filter, replay) = if workspace_scope {
+        let outside = root.join("outside");
+        fs::create_dir(&outside).unwrap();
+        let foreign = peer.call("workspace/open", json!({"root":outside}));
+        let other = peer.call("session/create", json!({"workspaceId":foreign["id"]}));
+        (other["id"].clone(), params, "events/listWorkspace")
+    } else {
+        (
+            sibling.clone(),
+            json!({"sessionId":selected}),
+            "events/listSession",
+        )
+    };
     let before = submit(&mut peer, &selected);
-    let baseline = peer.call("events/setScope", json!({"sessionId":selected}))["throughSequence"]
+    let baseline = peer.call("events/setScope", filter.clone())["throughSequence"]
         .as_u64()
         .unwrap();
     let before_event = peer.call("events/list", json!({"taskId":before,"limit":1}));
@@ -141,7 +164,21 @@ fn scoped_live_events_ignore_other_sessions_and_keep_the_scope_after_a_gap() {
         -32004
     );
 
-    // Another session can commit more events than fit in the live queue.
+    if workspace_scope {
+        assert_eq!(
+            peer.request("events/setScope", json!({"workspaceId":"missing"}))["error"]["code"],
+            -32004
+        );
+        assert_eq!(
+            peer.request(
+                "events/setScope",
+                json!({"workspaceId":workspace["id"],"sessionId":selected})
+            )["error"]["code"],
+            -32602
+        );
+    }
+
+    // An unrelated scope can commit more events than fit in the live queue.
     // None of those events should count toward this subscriber's capacity.
     submit_batch(&mut peer, &other);
     let selected_task = submit(&mut peer, &selected);
@@ -162,6 +199,11 @@ fn scoped_live_events_ignore_other_sessions_and_keep_the_scope_after_a_gap() {
         }
     }));
 
+    if workspace_scope {
+        let sibling_task = submit(&mut peer, &sibling);
+        let event = peer.wait_for_event(&sibling_task, "task_started");
+        assert!(event["params"]["event"]["sequence"].as_u64().unwrap() > baseline);
+    }
     submit_batch(&mut peer, &selected);
     let deadline = Instant::now() + Duration::from_secs(10);
     let gap_after = loop {
@@ -177,12 +219,11 @@ fn scoped_live_events_ignore_other_sessions_and_keep_the_scope_after_a_gap() {
         .as_u64()
         .unwrap();
     assert!(through > gap_after);
-    let backfill = peer.call(
-        "events/listSession",
-        json!({
-            "sessionId":selected,"after":gap_after,"through":through,"limit":1000
-        }),
-    );
+    let mut replay_params = filter;
+    replay_params["after"] = json!(gap_after);
+    replay_params["through"] = json!(through);
+    replay_params["limit"] = json!(1000);
+    let backfill = peer.call(replay, replay_params);
     assert!(!backfill["events"].as_array().unwrap().is_empty());
     assert_eq!(backfill["hasMore"], false);
     peer.notifications.clear();
@@ -203,10 +244,9 @@ fn scoped_live_events_ignore_other_sessions_and_keep_the_scope_after_a_gap() {
     let event = peer.wait_for_event(&other_task, "task_started");
     assert!(event["params"]["event"]["sequence"].as_u64().unwrap() > through);
     drop(peer);
-    for entry in fs::read_dir(&root).unwrap() {
-        fs::remove_file(entry.unwrap().path()).unwrap();
-    }
-    fs::remove_dir(root).unwrap();
+    let root = root.canonicalize().unwrap();
+    assert_eq!(root.parent(), Some(temp.as_path()));
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

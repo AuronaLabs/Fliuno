@@ -1133,7 +1133,13 @@
       "type": "object",
       "properties": {
         "sessionId": {
-          "description": "Omit or pass null to receive events from all sessions.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "workspaceId": {
           "type": [
             "string",
             "null"

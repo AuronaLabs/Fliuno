@@ -390,7 +390,7 @@ impl Kernel {
                     task_id: task.id.clone(),
                     data: data.clone(),
                 });
-            self.events.publish(&task.session_id, committed);
+            self.publish_task_events(&task.session_id, committed);
         }
         Ok(())
     }
@@ -405,7 +405,7 @@ impl Kernel {
         self.db
             .prepare_cached(INSERT_EVENT)?
             .execute(params![task_id, serde_json::to_string(&data)?])?;
-        self.events.publish(
+        self.publish_task_events(
             &session_id,
             std::iter::once(Event {
                 sequence: self.db.last_insert_rowid() as u64,
@@ -414,6 +414,15 @@ impl Kernel {
             }),
         );
         Ok(())
+    }
+
+    fn publish_task_events(&self, session_id: &str, events: impl Iterator<Item = Event> + Clone) {
+        self.events.publish(session_id, events, || {
+            Ok(self
+                .db
+                .prepare_cached("SELECT workspace_id FROM sessions WHERE id=?1")?
+                .query_row([session_id], |row| row.get(0))?)
+        });
     }
 
     pub(crate) fn recover(&mut self) -> Result<()> {

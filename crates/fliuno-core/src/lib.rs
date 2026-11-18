@@ -81,13 +81,20 @@ impl Kernel {
     }
 
     pub fn subscribe_events(&self) -> Result<EventReceiver> {
-        self.events.subscribe(None)
+        self.events.subscribe(events::EventScope::All)
     }
 
     /// Subscribe to committed events for one existing session.
     pub fn subscribe_session_events(&self, session_id: &str) -> Result<EventReceiver> {
         self.require_session(session_id)?;
-        self.events.subscribe(Some(session_id))
+        self.events
+            .subscribe(events::EventScope::Session(session_id.into()))
+    }
+
+    pub fn subscribe_workspace_events(&self, workspace_id: &str) -> Result<EventReceiver> {
+        self.require_workspace(workspace_id)?;
+        self.events
+            .subscribe(events::EventScope::Workspace(workspace_id.into()))
     }
 
     pub fn subscribe_model_progress(&self) -> Result<ProgressReceiver> {

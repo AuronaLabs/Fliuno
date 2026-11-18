@@ -46,15 +46,25 @@ impl EventReceiver {
     }
 }
 
+pub(crate) enum EventScope {
+    All,
+    Session(String),
+    Workspace(String),
+}
+
 struct EventSubscriber {
     sender: Sender<Event>,
     active: Weak<()>,
-    session_id: Option<String>,
+    scope: EventScope,
 }
 
 impl EventSubscriber {
-    fn accepts(&self, session_id: &str) -> bool {
-        self.session_id.as_deref().is_none_or(|id| id == session_id)
+    fn accepts(&self, session_id: &str, workspace_id: Option<&str>) -> bool {
+        match &self.scope {
+            EventScope::All => true,
+            EventScope::Session(id) => id == session_id,
+            EventScope::Workspace(id) => Some(id.as_str()) == workspace_id,
+        }
     }
 }
 
@@ -70,7 +80,7 @@ impl EventHub {
         }
     }
 
-    pub(crate) fn subscribe(&self, session_id: Option<&str>) -> Result<EventReceiver> {
+    pub(crate) fn subscribe(&self, scope: EventScope) -> Result<EventReceiver> {
         let mut subscribers = self
             .subscribers
             .lock()
@@ -86,7 +96,7 @@ impl EventHub {
         subscribers.push(EventSubscriber {
             sender,
             active: Arc::downgrade(&active),
-            session_id: session_id.map(str::to_owned),
+            scope,
         });
         Ok(EventReceiver {
             receiver,
@@ -99,26 +109,41 @@ impl EventHub {
         &self,
         session_id: &str,
         mut events: impl Iterator<Item = Event> + Clone,
+        lookup_workspace: impl FnOnce() -> Result<String>,
     ) {
         let Ok(mut subscribers) = self.subscribers.lock() else {
             return;
         };
+        subscribers.retain(|subscriber| subscriber.active.strong_count() > 0);
+        let has_workspace_scope = subscribers
+            .iter()
+            .any(|subscriber| matches!(subscriber.scope, EventScope::Workspace(_)));
+        let workspace = if has_workspace_scope {
+            match lookup_workspace() {
+                Ok(id) => Some(id),
+                Err(_) => {
+                    // A disconnected stream signals a gap that can be replayed.
+                    subscribers
+                        .retain(|subscriber| !matches!(subscriber.scope, EventScope::Workspace(_)));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let workspace = workspace.as_deref();
         if let [subscriber] = subscribers.as_slice() {
             // A stdio server normally has one subscriber. Move the committed
             // event directly into its queue, even for large tool payloads.
-            if subscriber.active.strong_count() == 0
-                || (subscriber.accepts(session_id)
-                    && events.any(|event| subscriber.sender.try_send(event).is_err()))
+            if subscriber.accepts(session_id, workspace)
+                && events.any(|event| subscriber.sender.try_send(event).is_err())
             {
                 subscribers.clear();
             }
             return;
         }
         subscribers.retain(|subscriber| {
-            if subscriber.active.strong_count() == 0 {
-                return false;
-            }
-            if !subscriber.accepts(session_id) {
+            if !subscriber.accepts(session_id, workspace) {
                 return true;
             }
             events
@@ -229,14 +254,14 @@ mod tests {
     #[test]
     fn slow_subscriber_is_disconnected_without_blocking_event_commit() {
         let hub = EventHub::new();
-        let receiver = hub.subscribe(None).unwrap();
+        let receiver = hub.subscribe(EventScope::All).unwrap();
         let events = (1..=SUBSCRIBER_CAPACITY + 1).map(|sequence| Event {
             sequence: sequence as u64,
             task_id: "task_test".into(),
             data: fliuno_protocol::EventKind::TaskStarted,
         });
 
-        hub.publish("session_test", events);
+        hub.publish("session_test", events, || unreachable!());
 
         for sequence in 1..=SUBSCRIBER_CAPACITY {
             assert_eq!(receiver.recv().unwrap().sequence, sequence as u64);
@@ -247,7 +272,7 @@ mod tests {
     #[test]
     fn event_payloads_are_only_materialized_for_matching_subscribers() {
         let hub = EventHub::new();
-        let scoped = hub.subscribe(Some("other")).unwrap();
+        let scoped = hub.subscribe(EventScope::Session("other".into())).unwrap();
         let copies = std::cell::Cell::new(0);
         let events = || {
             std::iter::once_with(|| {
@@ -259,12 +284,14 @@ mod tests {
                 }
             })
         };
-        hub.publish("current", events());
+        hub.publish("current", events(), || unreachable!());
         assert_eq!(copies.get(), 0);
 
-        let global = hub.subscribe(None).unwrap();
-        let matching = hub.subscribe(Some("current")).unwrap();
-        hub.publish("current", events());
+        let global = hub.subscribe(EventScope::All).unwrap();
+        let matching = hub
+            .subscribe(EventScope::Session("current".into()))
+            .unwrap();
+        hub.publish("current", events(), || unreachable!());
         assert_eq!(copies.get(), 2);
         assert!(scoped.is_empty());
         assert_eq!(global.try_recv().unwrap().sequence, 1);
@@ -275,13 +302,13 @@ mod tests {
     fn dropped_subscribers_release_capacity_without_waiting_for_an_event() {
         let hub = EventHub::new();
         let mut receivers: Vec<_> = (0..MAX_SUBSCRIBERS)
-            .map(|_| hub.subscribe(None).unwrap())
+            .map(|_| hub.subscribe(EventScope::All).unwrap())
             .collect();
 
         drop(receivers.pop());
 
-        let replacement = hub.subscribe(None).unwrap();
-        assert!(hub.subscribe(None).is_err());
+        let replacement = hub.subscribe(EventScope::All).unwrap();
+        assert!(hub.subscribe(EventScope::All).is_err());
         drop(replacement);
     }
 
