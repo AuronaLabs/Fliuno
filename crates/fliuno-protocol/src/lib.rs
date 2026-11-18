@@ -614,6 +614,20 @@ pub struct EventsListAllParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EventsListSessionParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub after: u64,
+    #[serde(default)]
+    pub through: Option<u64>,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    #[serde(default)]
+    pub target_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventSubscription {
     /// Replay through this sequence. Live notifications cover later events.
     pub through_sequence: u64,
@@ -664,6 +678,7 @@ pub fn schema_bundle() -> Value {
             "approval/respond": schemars::schema_for!(ApprovalRespondParams),
             "events/list": schemars::schema_for!(EventsListParams),
             "events/listAll": schemars::schema_for!(EventsListAllParams),
+            "events/listSession": schemars::schema_for!(EventsListSessionParams),
             "events/resubscribe": {"type":"object","properties":{},"additionalProperties":false},
             "modelProgress/resubscribe": {"type":"object","properties":{},"additionalProperties":false},
             "artifacts/list": schemars::schema_for!(TaskIdParams),

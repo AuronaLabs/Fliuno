@@ -1,7 +1,32 @@
-//! Ordered, durable event replay for both task-scoped and global cursors.
+//! Ordered, durable event replay by task, session, or global cursor.
 use super::*;
 
 pub const MAX_EVENT_TARGET_BYTES: u32 = 8 * 1024 * 1024;
+
+/// Index only the session and sequence so replay can seek directly to the
+/// next page without copying event payloads or sorting a join across tasks.
+pub(super) fn migrate_session_index(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_event_index(
+            session_id TEXT NOT NULL REFERENCES sessions(id),
+            sequence INTEGER NOT NULL REFERENCES events(sequence),
+            PRIMARY KEY(session_id,sequence)
+        ) WITHOUT ROWID;
+        INSERT INTO session_event_index(session_id,sequence)
+        SELECT tasks.session_id,events.sequence FROM tasks
+          JOIN events ON events.task_id=tasks.id WHERE true
+        ON CONFLICT(session_id,sequence) DO NOTHING;
+        CREATE TRIGGER IF NOT EXISTS session_event_index_insert AFTER INSERT ON events
+        BEGIN
+            INSERT INTO session_event_index(session_id,sequence)
+            VALUES((SELECT session_id FROM tasks WHERE id=NEW.task_id),NEW.sequence);
+        END;
+        PRAGMA user_version=16;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
 
 impl Kernel {
     pub fn event_watermark(&self) -> Result<u64> {
@@ -56,6 +81,35 @@ impl Kernel {
         self.query_event_page(
             "SELECT sequence,task_id,data FROM events WHERE sequence>?1 AND sequence<=?2 ORDER BY sequence LIMIT ?3",
             params![validate_event_cursor(after)?, through.map(validate_event_cursor).transpose()?.unwrap_or(i64::MAX), validate_event_limit(limit)?],
+            after,
+            limit,
+            target_bytes,
+        )
+    }
+
+    pub fn list_session_events_through(
+        &self,
+        session_id: &str,
+        after: u64,
+        through: Option<u64>,
+        limit: u32,
+        target_bytes: Option<u32>,
+    ) -> Result<EventsPage> {
+        self.require_session(session_id)?;
+        self.query_event_page(
+            "SELECT events.sequence,events.task_id,events.data
+             FROM session_event_index AS scoped JOIN events USING(sequence)
+             WHERE scoped.session_id=?1 AND scoped.sequence>?2 AND scoped.sequence<=?3
+             ORDER BY scoped.sequence LIMIT ?4",
+            params![
+                session_id,
+                validate_event_cursor(after)?,
+                through
+                    .map(validate_event_cursor)
+                    .transpose()?
+                    .unwrap_or(i64::MAX),
+                validate_event_limit(limit)?
+            ],
             after,
             limit,
             target_bytes,

@@ -460,7 +460,7 @@ fn version_four_backfill_preserves_old_inputs_events_and_idempotency() {
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))
             .unwrap(),
-        15
+        16
     );
 }
 

@@ -84,7 +84,7 @@ impl Kernel {
         lock: Option<File>,
     ) -> Result<Self> {
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 15 {
+        if version > 16 {
             return Err(Error::Conflict(
                 "database schema is newer than this binary".into(),
             ));
@@ -174,6 +174,9 @@ impl Kernel {
         if version < 15 {
             // Named session snapshots add a field older readers cannot decode.
             db.pragma_update(None, "user_version", 15)?;
+        }
+        if version < 16 {
+            replay::migrate_session_index(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

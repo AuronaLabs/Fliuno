@@ -132,6 +132,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
         assert_eq!(init["capabilities"]["eventResubscribe"], true);
+        assert_eq!(init["capabilities"]["sessionEventReplay"], true);
         assert_eq!(
             init["capabilities"]["eventReplayTargetBytes"],
             8 * 1024 * 1024

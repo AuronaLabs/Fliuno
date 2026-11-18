@@ -247,6 +247,7 @@ impl RpcServer {
                 "eventNotifications":true, "globalEventReplay":true,
                 "eventReplayTargetBytes":fliuno_core::MAX_EVENT_TARGET_BYTES,
                 "eventResubscribe":true,
+                "sessionEventReplay":true,
                 "provider":self.provider_name, "liveModels":self.provider_name != "demo",
                 "externalTools":external_tools, "backgroundTasks":true,
                 "externalAgents":!self.kernel()?.agent_specs().is_empty(),
@@ -514,6 +515,16 @@ impl RpcServer {
             "events/listAll" => {
                 let p: EventsListAllParams = decode(params)?;
                 json!(self.kernel()?.list_all_events_through(
+                    p.after,
+                    p.through,
+                    p.limit,
+                    p.target_bytes
+                )?)
+            }
+            "events/listSession" => {
+                let p: EventsListSessionParams = decode(params)?;
+                json!(self.kernel()?.list_session_events_through(
+                    &p.session_id,
                     p.after,
                     p.through,
                     p.limit,

@@ -33,6 +33,7 @@
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
 | `events/list` | `{taskId, after?:0, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
+| `events/listSession` | `{sessionId, after?:0, through?, limit?:100, targetBytes?}` | 单个会话的持久事件页，沿用全局序号 |
 | `events/resubscribe` | `{}` | 在队列溢出后恢复实时通知，返回 `{throughSequence}` |
 | `artifacts/list` | `{taskId}` | Artifact 数组 |
 | `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
@@ -142,6 +143,8 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 模型步骤和工具执行由 4 个固定 worker 并发处理，单个任务同时最多只有一个在途步骤；队列容量为 32，因此最多接受 36 个活动或排队的步骤。初始化能力会报告 `concurrentExecution: true` 和 `maxConcurrentExecutions: 4`。`backgroundTasks` 和 `taskCancellation` 为 true。`task/start` 和 `task/resume` 返回持久化后的任务快照并调度模型步骤；`approval/respond` 持久化审批决定和工具执行身份后即返回，工具执行完成后会自动排入下一模型步骤。客户端应通过 `task/get` 或事件通知观察后续状态；容量耗尽时任务以 `failed` 及原因结束，原幂等键仍绑定该任务。
 
 模型和工具调用期间数据库锁已释放，因此查询和取消可以继续处理。取消会立即将任务置为 `cancelled`，并通知当前 provider 或工具；provider HTTP 等待和 MCP 调用会响应取消，迟到结果会被忽略。取消不保证阻止供应商计费或撤销已发生的外部副作用。工具调用身份在执行前持久化，重启后结果未知的调用不能自动重试。stdin 关闭后停止启动排队步骤并取消当前执行，再把未完成任务置为 `interrupted`。
+
+支持 `sessionEventReplay` 的客户端可用 `events/listSession` 回放某一会话内各任务的持久事件。它沿用全局的 `sequence`，所以相邻记录的序号可能不连续。使用 `nextAfter` 翻页，并可传入包含式 `through` 固定回放上界。有固定上界时，最后一页即使没有事件，也代表该会话已回放到上界。实时通知继续共用全局事件订阅。
 
 实时 provider 可在模型响应完成前发送 `notifications/modelProgress`，参数为 `{progress}`。`progress` 是带 `type` 的联合类型：`text_delta` 包含 `taskId`、`step` 和文本片段，`reset` 清除该步骤尚未确认的预览。它不写入 SQLite、没有持久序号，且可能与 `notifications/event` 相对乱序。客户端应按 task/step 暂存增量；收到该步骤的审批请求或任务完成、失败、取消、中断等持久状态后，忽略迟到增量并以任务快照和持久事件为准。取消、错误、工具调用会清除预览。`initialize.capabilities.modelProgressNotifications` 表示当前 provider 是否支持此通知。慢订阅者被分离后会收到 `notifications/modelProgressGap`（参数为空）；预览不回放，客户端应清除预览并查询活动任务状态。如果 `capabilities.modelProgressResubscribe` 为 true，收到缺口通知后可用 `modelProgress/resubscribe({})` 在同一连接恢复，成功返回 `{subscribed:true}`。新订阅只接收注册之后开始的模型步骤。正在执行的步骤可通过持久事件或 `task/get` 查看结果。
 

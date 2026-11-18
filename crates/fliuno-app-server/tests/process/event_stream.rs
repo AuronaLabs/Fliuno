@@ -100,3 +100,122 @@ fn live_event_stream_can_resubscribe_and_catch_up_to_a_fixed_watermark() {
     }
     fs::remove_dir(root).unwrap();
 }
+
+#[test]
+fn session_replay_scopes_the_global_cursor_across_upgrade_and_restart() {
+    fn cancelled_task(peer: &mut Peer, session: &Value, input: &str) -> Value {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session,"input":input,"context":{"mode":"isolated"}}),
+        );
+        let id = &task["id"];
+        peer.wait_for_status(id.as_str().unwrap(), "waiting_approval");
+        let stopped = peer.call("task/cancel", json!({"taskId":id}));
+        assert_eq!(stopped["status"], "cancelled");
+        id.clone()
+    }
+
+    let root = std::env::temp_dir().join(format!("fliuno-session-replay-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let other = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let empty = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let session = &session["id"];
+    let other = &other["id"];
+    let first = cancelled_task(&mut peer, session, &"large".repeat(1024));
+    cancelled_task(&mut peer, other, "interleaved");
+    let second = cancelled_task(&mut peer, session, "second scoped item");
+    let last_in_other = cancelled_task(&mut peer, other, "before the watermark");
+    let global = peer.call("events/listAll", json!({}));
+    let through = global["nextAfter"].as_u64().unwrap();
+    assert_eq!(
+        global["events"].as_array().unwrap().last().unwrap()["taskId"],
+        last_in_other
+    );
+    let expected: Vec<_> = global["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["taskId"] == first || event["taskId"] == second)
+        .cloned()
+        .collect();
+    drop(peer);
+    {
+        let old = rusqlite::Connection::open(&db).unwrap();
+        old.execute_batch(
+            "DROP TRIGGER session_event_index_insert;
+            DROP TABLE session_event_index; PRAGMA user_version=15;",
+        )
+        .unwrap();
+    }
+    let mut peer = Peer::start(&db);
+    let newer = cancelled_task(&mut peer, session, "after the watermark");
+    let mut cursor = 0;
+    let mut received = Vec::new();
+    let mut saw_large_event = false;
+    loop {
+        let page = peer.call(
+            "events/listSession",
+            json!({"sessionId":session,
+            "after":cursor,"through":through,"limit":2,"targetBytes":1024}),
+        );
+        let events = page["events"].as_array().unwrap();
+        assert!((1..=2).contains(&events.len()));
+        if serde_json::to_vec(events).unwrap().len() > 1024 {
+            assert_eq!(events.len(), 1);
+            saw_large_event = true;
+        }
+        let next = page["nextAfter"].as_u64().unwrap();
+        assert!(next > cursor && next < through);
+        assert_eq!(events.last().unwrap()["sequence"], next);
+        cursor = next;
+        received.extend(events.iter().cloned());
+        if page["hasMore"] == false {
+            break;
+        }
+    }
+    assert!(saw_large_event);
+    assert_eq!(received, expected);
+    assert_eq!(
+        peer.call(
+            "events/listSession",
+            json!({"sessionId":session,"after":cursor,"through":through})
+        ),
+        json!({"events":[],"nextAfter":cursor,"hasMore":false})
+    );
+    assert_eq!(
+        peer.call("events/listSession", json!({"sessionId":empty["id"]}))["events"],
+        json!([])
+    );
+    assert_eq!(
+        peer.request("events/listSession", json!({"sessionId":"absent"}))["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request(
+            "events/listSession",
+            json!({"sessionId":session,"through":u64::MAX})
+        )["error"]["code"],
+        -32602
+    );
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    let tail = peer.call(
+        "events/listSession",
+        json!({"sessionId":session,"after":through}),
+    );
+    assert_eq!(
+        tail["events"],
+        peer.call("events/list", json!({"taskId":newer}))["events"]
+    );
+    assert_eq!(tail["hasMore"], false);
+    drop(peer);
+    for entry in fs::read_dir(&root).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    fs::remove_dir(root).unwrap();
+}
