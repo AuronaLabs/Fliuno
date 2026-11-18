@@ -101,6 +101,27 @@ fn terminal_archive_requires_approval_preserves_tombstone_and_survives_server_re
     assert_eq!(output["gap"], true);
     assert_eq!(output["dataBase64"], "");
     assert_eq!(output["next"], archive["snapshot"]["endOffset"]);
+    assert_eq!(
+        peer.call(
+            "terminal/tail",
+            json!({"sessionId":session["id"],"terminalId":id})
+        ),
+        output
+    );
+    assert!(
+        peer.request(
+            "terminal/tail",
+            json!({"sessionId":other["id"],"terminalId":id})
+        )["error"]
+            .is_object()
+    );
+    assert!(
+        peer.request(
+            "terminal/tail",
+            json!({"sessionId":session["id"],"terminalId":id,"limit":32769})
+        )["error"]
+            .is_object()
+    );
     let subscription = subscriptions::subscribe(&mut peer, &session, id, 0, 32768);
     assert_eq!(
         subscriptions::notification(&mut peer, &subscription, "notifications/terminalOutput")["output"]

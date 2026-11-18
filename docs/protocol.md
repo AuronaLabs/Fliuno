@@ -39,6 +39,7 @@
 | `terminal/list` | `{sessionId}` | 此 session 的持久终端快照 |
 | `terminal/get` | `{sessionId,terminalId}` | 单个终端快照；live IPC 无响应时返回离线未知状态 |
 | `terminal/output` | `{sessionId,terminalId,after?:0,limit?:32768}` | base64 原始字节、绝对游标、gap 标志与快照 |
+| `terminal/tail` | `{sessionId,terminalId,limit?:32768}` | 最近保留的原始字节和末尾游标，可用 `next` 续读 |
 | `terminal/subscribe` | `{sessionId,terminalId,after?:0,limit?:32768}` | `{subscriptionId,sessionId,terminalId,after}`；随后推送输出与状态 |
 | `terminal/unsubscribe` | `{subscriptionId}` | `{removed}`；取消此连接内的观察 |
 | `terminal/archive` | `{sessionId,terminalId}` | `{snapshot,cleanupPending}`；归档已停止监督器的记录，保留创建身份 |
@@ -82,7 +83,7 @@
 
 ### 跨轮次终端
 
-输出订阅的完整通知、恢复与流控契约见 [终端输出订阅](terminal-subscriptions.md)。`terminalOutputSubscriptions` 为 true 时可使用；单连接最多 `maxTerminalSubscriptions`（当前 8）个订阅。订阅建立前检查 session 归属和输出游标，初始回放与后续实时输出共用字节游标。
+输出订阅的完整通知、恢复与流控契约见 [终端输出订阅](terminal-subscriptions.md)。`terminalOutputSubscriptions` 为 true 时可使用；单连接最多 `maxTerminalSubscriptions`（当前 8）个订阅。订阅建立前检查 session 归属和输出游标，初始回放与后续实时输出共用字节游标。`terminalOutputTail` 为 true 时可用 `terminal/tail` 获取持久末尾并以 `next` 开始订阅。
 
 `--terminal-config PATH` 可选注册 1..16 个主机 preset；配置最多 1 MiB。`stateDirectory` 和每个 `command` 都必须是绝对路径，命令必须为原生可执行文件；Windows 仅接受 `.exe`。未知配置字段被拒绝。程序摘要、固定参数、allowlist 解析出的环境值、生命周期、spool 预算、资源预算、Linux cgroup parent 及状态根共同决定 preset identity；可执行文件在审批执行前和 supervisor 启动时再次核验。每个 preset 提供一个含 identity 摘要的创建工具，另注册 list/status/output/write/resize/kill/release 控制工具。变更设置会改变工具身份，之前未完成的批准不会变成对新设置的授权。
 

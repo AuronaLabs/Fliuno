@@ -7,7 +7,7 @@ use crate::{
     ipc,
     protocol::*,
     registry::{self, Registry},
-    spool,
+    spool::{self, OutputCursor},
 };
 use fliuno_core::{CancellationToken, ToolContext, ToolError};
 use serde_json::Value;
@@ -141,6 +141,14 @@ impl Service {
             Ok(Err(_)) | Err(_) => self.offline(session, id, after, limit),
         }
     }
+    /// Read the latest committed bytes and their resume cursor from one snapshot.
+    pub fn tail(&self, session: &str, id: &str, limit: usize) -> Result<Output, String> {
+        if !(1..=READ_LIMIT).contains(&limit) {
+            return Err("invalid terminal output limit".into());
+        }
+        self.saved_output(session, id, OutputCursor::Tail, limit)
+    }
+
     pub(crate) fn offline(
         &self,
         session: &str,
@@ -148,11 +156,25 @@ impl Service {
         after: u64,
         limit: usize,
     ) -> Result<Output, String> {
+        self.saved_output(session, id, OutputCursor::After(after), limit)
+    }
+
+    fn saved_output(
+        &self,
+        session: &str,
+        id: &str,
+        cursor: OutputCursor,
+        limit: usize,
+    ) -> Result<Output, String> {
         let ledger = Registry::open(&self.root, false)?;
         let archived = |record: fliuno_protocol::TerminalArchive| {
             if record.snapshot.session_id != session {
                 return Err("terminal belongs to another session".into());
             }
+            let after = match cursor {
+                OutputCursor::After(after) => after,
+                OutputCursor::Tail => 0,
+            };
             registry::output(record.snapshot, after, limit)
         };
         if let Some(record) = ledger.get(id)? {
@@ -160,7 +182,7 @@ impl Service {
         }
         let output = match self
             .directory(id)
-            .and_then(|dir| spool::offline(&dir, after, limit))
+            .and_then(|dir| spool::read_saved_output(&dir, cursor, limit))
         {
             Ok(output) => output,
             Err(error) => {

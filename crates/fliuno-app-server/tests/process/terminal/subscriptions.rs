@@ -64,8 +64,21 @@ fn terminal_subscriptions_deliver_live_bytes_and_resume_after_server_restart() {
     let session = session(&mut peer, &dir);
     let start = execute(&mut peer, &session, "start", json!({}), "start");
     let id = start["terminalId"].as_str().unwrap();
-    let ready = wait_text(&mut peer, &session, id, "TERMINAL_READY");
-    let mut cursor = ready["next"].as_u64().unwrap();
+    wait_text(&mut peer, &session, id, "TERMINAL_READY");
+    let tail = peer.call(
+        "terminal/tail",
+        json!({"sessionId":session["id"],"terminalId":id,"limit":8}),
+    );
+    let mut cursor = tail["next"].as_u64().unwrap();
+    assert_eq!(tail["from"], cursor - 8);
+    assert_eq!(tail["snapshot"]["endOffset"], cursor);
+    assert_eq!(tail["snapshot"]["supervisorConnected"], false);
+    assert_eq!(tail["gap"], true);
+    let page = peer.call(
+        "terminal/output",
+        json!({"sessionId":session["id"],"terminalId":id,"after":tail["from"],"limit":8}),
+    );
+    assert_eq!(page["dataBase64"], tail["dataBase64"]);
     let subscription = subscribe(&mut peer, &session, id, cursor, 31);
     execute(
         &mut peer,

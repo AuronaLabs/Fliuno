@@ -81,6 +81,15 @@ pub struct TerminalOutputParams {
     #[serde(default = "limit")]
     pub limit: usize,
 }
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalTailParams {
+    pub session_id: String,
+    pub terminal_id: String,
+    #[serde(default = "limit")]
+    pub limit: usize,
+}
+
 fn limit() -> usize {
     32768
 }

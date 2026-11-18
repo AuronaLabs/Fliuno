@@ -642,6 +642,7 @@ pub fn schema_bundle() -> Value {
             "terminal/list": schemars::schema_for!(TerminalListParams),
             "terminal/get": schemars::schema_for!(TerminalGetParams),
             "terminal/output": schemars::schema_for!(TerminalOutputParams),
+            "terminal/tail": schemars::schema_for!(TerminalTailParams),
             "terminal/subscribe": schemars::schema_for!(TerminalSubscribeParams),
             "terminal/unsubscribe": schemars::schema_for!(TerminalUnsubscribeParams),
             "terminal/archive": schemars::schema_for!(TerminalArchiveParams),

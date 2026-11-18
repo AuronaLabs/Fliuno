@@ -117,7 +117,7 @@ impl Spool {
         Ok(())
     }
     pub fn output(&self, after: u64, limit: usize) -> Result<Output, String> {
-        read_output(&self.db, after, limit)
+        read_output(&self.db, OutputCursor::After(after), limit)
     }
     /// Reserve before an irreversible PTY write. A crash never authorizes a
     /// retry: a reserved ID without a result is explicitly uncertain.
@@ -184,18 +184,56 @@ fn read_snapshot(db: &Connection) -> Result<Snapshot, String> {
         .map_err(|_| "terminal snapshot unavailable")?;
     serde_json::from_str(&text).map_err(|_| "invalid terminal snapshot".into())
 }
-fn read_output(db: &Connection, after: u64, limit: usize) -> Result<Output, String> {
-    if after > i64::MAX as u64 || !(1..=crate::protocol::READ_LIMIT).contains(&limit) {
+#[derive(Clone, Copy)]
+pub(crate) enum OutputCursor {
+    After(u64),
+    Tail,
+}
+
+fn read_output(db: &Connection, cursor: OutputCursor, limit: usize) -> Result<Output, String> {
+    if !(1..=crate::protocol::READ_LIMIT).contains(&limit)
+        || matches!(cursor, OutputCursor::After(after) if after > i64::MAX as u64)
+    {
         return Err("invalid terminal cursor / output limit".into());
     }
     let s = read_snapshot(db)?;
+    if s.start_offset > s.end_offset || s.end_offset > i64::MAX as u64 {
+        return Err("invalid terminal spool offsets".into());
+    }
+    let after = match cursor {
+        OutputCursor::After(after) => after,
+        OutputCursor::Tail => s.end_offset.saturating_sub(limit as u64),
+    };
     if after > s.end_offset {
         return Err("terminal output cursor is in the future".into());
     }
     let from = after.max(s.start_offset);
-    let mut data = Vec::new();
+    let count = (s.end_offset - from).min(limit as u64) as usize;
+    let data = read_chunks(db, from, count)?;
+    Ok(Output {
+        next: from + data.len() as u64,
+        from,
+        gap: match cursor {
+            OutputCursor::After(_) => after < s.start_offset,
+            OutputCursor::Tail => from != 0,
+        },
+        data_base64: base64::engine::general_purpose::STANDARD.encode(data),
+        snapshot: s,
+    })
+}
+
+fn read_chunks(db: &Connection, from: u64, count: usize) -> Result<Vec<u8>, String> {
+    let mut data = Vec::with_capacity(count);
+    if count == 0 {
+        return Ok(data);
+    }
+    // Seek to the chunk containing `from`, then visit only the requested page.
     let mut stmt = db
-        .prepare("SELECT offset,data FROM chunks WHERE offset+length(data)>?1 ORDER BY offset")
+        .prepare(
+            "SELECT offset,data FROM chunks
+                  WHERE offset >= COALESCE((SELECT MAX(offset) FROM chunks WHERE offset<=?1),?1)
+                  ORDER BY offset",
+        )
         .map_err(|_| "cannot query terminal output")?;
     let rows = stmt
         .query_map([from as i64], |r| {
@@ -204,25 +242,35 @@ fn read_output(db: &Connection, after: u64, limit: usize) -> Result<Output, Stri
         .map_err(|_| "cannot query terminal output")?;
     for row in rows {
         let (offset, bytes) = row.map_err(|_| "cannot read terminal output")?;
-        let skip = from.saturating_sub(offset) as usize;
-        let part = &bytes[skip..];
-        let n = part.len().min(limit - data.len());
+        let position = from + data.len() as u64;
+        let skip = position
+            .checked_sub(offset)
+            .ok_or("terminal spool has a gap")?;
+        // Only the first chunk can overlap the requested range.
+        if !data.is_empty() && skip != 0 {
+            return Err("terminal spool chunks overlap".into());
+        }
+        let skip = usize::try_from(skip).map_err(|_| "terminal spool has a gap")?;
+        let part = bytes.get(skip..).ok_or("terminal spool has a gap")?;
+        let n = part.len().min(count - data.len());
         data.extend_from_slice(&part[..n]);
-        if data.len() == limit {
-            break;
+        if data.len() == count {
+            return Ok(data);
         }
     }
-    Ok(Output {
-        next: from + data.len() as u64,
-        from,
-        gap: after < s.start_offset,
-        data_base64: base64::engine::general_purpose::STANDARD.encode(data),
-        snapshot: s,
-    })
+    Err("terminal spool output is incomplete".into())
 }
 /// Offline reads do not claim that an old PID is still alive. They preserve
 /// the last durable bytes after a supervisor failure, without taking over it.
 pub(crate) fn offline(dir: &Path, after: u64, limit: usize) -> Result<Output, String> {
+    read_saved_output(dir, OutputCursor::After(after), limit)
+}
+
+pub(crate) fn read_saved_output(
+    dir: &Path,
+    cursor: OutputCursor,
+    limit: usize,
+) -> Result<Output, String> {
     let db = Connection::open_with_flags(
         dir.join("output.db"),
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
@@ -239,7 +287,8 @@ pub(crate) fn offline(dir: &Path, after: u64, limit: usize) -> Result<Output, St
     let tx = db
         .unchecked_transaction()
         .map_err(|_| "cannot snapshot terminal spool")?;
-    let mut output = read_output(&tx, after, limit)?;
+    let mut output = read_output(&tx, cursor, limit)?;
+    output.snapshot.supervisor_connected = false;
     if matches!(
         output.snapshot.status,
         crate::protocol::Status::Starting | crate::protocol::Status::Running
@@ -317,6 +366,35 @@ mod tests {
         assert_eq!(recovered.snapshot.status, Status::OutcomeUnknown);
         assert_eq!(recovered.next, data.len() as u64);
     }
+    #[test]
+    fn tail_uses_one_durable_cursor_across_trimmed_chunks_and_later_appends() {
+        let dir = Directory::new();
+        let mut spool = Spool::create(&dir.0, 7, &snapshot()).unwrap();
+        let empty = read_saved_output(&dir.0, OutputCursor::Tail, 5).unwrap();
+        assert_eq!((empty.from, empty.next, empty.gap), (0, 0, false));
+        spool.append(b"ab").unwrap();
+        let full = read_saved_output(&dir.0, OutputCursor::Tail, 5).unwrap();
+        assert_eq!((full.from, full.next, full.gap), (0, 2, false));
+        spool.append(b"cdef").unwrap();
+        spool.append(b"ghi").unwrap();
+        let tail = read_saved_output(&dir.0, OutputCursor::Tail, 5).unwrap();
+        assert_eq!((tail.from, tail.next, tail.gap), (4, 9, true));
+        assert_eq!(tail.next, tail.snapshot.end_offset);
+        let decode = |data| {
+            base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .unwrap()
+        };
+        assert_eq!(decode(tail.data_base64), b"efghi");
+        let retained = read_saved_output(&dir.0, OutputCursor::Tail, 9).unwrap();
+        assert_eq!((retained.from, retained.next, retained.gap), (2, 9, true));
+        assert_eq!(decode(retained.data_base64), b"cdefghi");
+        spool.append(b"jk").unwrap();
+        let later = offline(&dir.0, tail.next, 5).unwrap();
+        assert_eq!((later.from, later.next, later.gap), (9, 11, false));
+        assert_eq!(decode(later.data_base64), b"jk");
+    }
+
     #[test]
     fn output_bytes_and_snapshot_rollback_together() {
         let dir = Directory::new();

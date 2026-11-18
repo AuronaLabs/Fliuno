@@ -253,6 +253,7 @@ impl RpcServer {
                     "modelBudget":self.kernel()?.configured_model_budget(),
                     "terminalSessions":self.terminals.is_some(),
                     "terminalOutputSubscriptions":self.terminals.is_some(),
+                    "terminalOutputTail":self.terminals.is_some(),
                     "terminalArchiving":self.terminals.is_some(),
                     "terminalBatchArchiving":self.terminals.is_some(),
                     "maxTerminalArchiveBatch":MAX_TERMINAL_ARCHIVE_BATCH,
@@ -342,6 +343,14 @@ impl RpcServer {
                             p.after,
                             p.limit
                         ))
+                        .map_err(terminal_error)?
+                )
+            }
+            "terminal/tail" => {
+                let p: TerminalTailParams = decode(params)?;
+                json!(
+                    self.terminal_service()?
+                        .tail(&p.session_id, &p.terminal_id, p.limit)
                         .map_err(terminal_error)?
                 )
             }

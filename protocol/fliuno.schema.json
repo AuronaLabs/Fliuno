@@ -229,6 +229,30 @@
         "terminalId"
       ]
     },
+    "terminal/tail": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalTailParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 32768
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "terminalId"
+      ]
+    },
     "terminal/subscribe": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TerminalOutputParams",

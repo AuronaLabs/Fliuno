@@ -10,6 +10,10 @@
 
 stdio 先写出订阅响应，再写通知。客户端按 subscription ID 路由，对每个订阅按到达顺序消费。`after` 是已经消费的绝对字节数；省略表示从 0 开始。`limit` 是单页原始字节预算，范围 1..32768，默认 32768；base64 字符数不计入此预算。未来游标、错误 session 和无效预算在建立订阅前拒绝。
 
+连接后只想读取最近输出时，可在 `capabilities.terminalOutputTail` 为 true 时调用 `terminal/tail({sessionId,terminalId,limit?:32768})`。读取末尾快照和字节都发生在同一次只读事务里。`from` 从保留窗口和请求预算计算，`next` 等于该快照的 `endOffset`。`gap:true` 表示开头有字节未包含在这次回复中，可能是主动取末尾、保留窗口已滚动，或者历史已归档。`limit` 为 1..32768 字节。
+
+`terminal/tail` 直接读持久状态，`supervisorConnected:false`。如果保存的状态为 `starting` 或 `running`，结果显示 `outcome_unknown`，表示此次读取没有核实进程是否仍在线。归档终端返回空字节和原末尾游标。客户端可将 `next` 作为 `terminal/subscribe.after`，收到后一段新输出。读取和建立订阅之间如果保留窗口滚动，订阅会报告缺口。
+
 PTY 可以包含任意字节、ANSI 转义及被切开的 UTF-8 序列。应先 base64 解码，再按连续字节交给终端 emulator 或流式解码器；逐帧独立解码字符串会破坏中文。纯状态更新可以没有字节，`from == next`。每帧快照中的 `endOffset` 可能大于该帧 `next`，表示仍有已提交数据等待后续页。
 
 客户端正常消费时，下一帧 `from` 等于上一帧 `next`。spool 保留窗口已丢弃旧数据时，通知明确设置 `gap:true`，并使 `from` 跳到 `snapshot.startOffset`。客户端应报告缺口并重置受影响的终端渲染状态；无法从已经删除的字节重建完整屏幕。消费完一帧后保存其 `next`，重新订阅时作为 `after`，避免依赖 PID 或旧订阅 ID。
