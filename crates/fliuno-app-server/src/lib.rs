@@ -295,6 +295,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["pendingApprovalInbox"] = json!(true);
+            capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
             capabilities["artifactByteReads"] = json!(true);
             capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
@@ -510,6 +511,13 @@ impl RpcServer {
             "approval/listPending" => {
                 let p: ApprovalListParams = decode(params)?;
                 json!(self.kernel()?.list_pending_approvals(p)?)
+            }
+            "approval/get" => {
+                let p: ApprovalGetParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .get_pending_approval(&p.task_id, &p.approval_id)?
+                )
             }
             "approval/respond" => {
                 let p: ApprovalRespondParams = decode(params)?;

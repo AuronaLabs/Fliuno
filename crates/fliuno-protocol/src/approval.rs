@@ -34,3 +34,18 @@ pub struct ApprovalSummary {
     pub allow_once_available: bool,
     pub expires_at_unix_ms: Option<u64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalGetParams {
+    pub task_id: String,
+    pub approval_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ApprovalDetails {
+    ToolCall { approval: super::Approval },
+    AgentPermission { approval: super::AgentApproval },
+    HostTool { approval: super::AgentApproval },
+}

@@ -741,6 +741,24 @@
       },
       "additionalProperties": false
     },
+    "approval/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalGetParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "approvalId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "approvalId"
+      ]
+    },
     "approval/respond": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ApprovalRespondParams",
@@ -3457,6 +3475,156 @@
           "type": "string",
           "enum": [
             "tool_call",
+            "agent_permission",
+            "host_tool"
+          ]
+        }
+      }
+    },
+    "ApprovalDetails": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalDetails",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "tool_call"
+            },
+            "approval": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "approval"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "agent_permission"
+            },
+            "approval": {
+              "$ref": "#/$defs/AgentApproval"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "approval"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "host_tool"
+            },
+            "approval": {
+              "$ref": "#/$defs/AgentApproval"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "approval"
+          ]
+        }
+      ],
+      "$defs": {
+        "Approval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "authority": {
+              "description": "Absent in legacy snapshots, which cannot authorize a new execution.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "call"
+          ]
+        },
+        "ToolCall": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "arguments"
+          ]
+        },
+        "AgentApproval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "permissionId": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/AgentApprovalSource",
+              "default": "agent_permission"
+            },
+            "request": {
+              "description": "Untrusted, read-only peer context. Never interpreted as host authority."
+            },
+            "allowOnceAvailable": {
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "runId",
+            "permissionId",
+            "request",
+            "allowOnceAvailable",
+            "expiresAtUnixMs"
+          ]
+        },
+        "AgentApprovalSource": {
+          "type": "string",
+          "enum": [
             "agent_permission",
             "host_tool"
           ]

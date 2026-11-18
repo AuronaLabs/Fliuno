@@ -392,6 +392,14 @@ fn persistent_grant_is_rejected_and_burst_permissions_remain_independent() {
             .as_array()
             .is_some_and(|a| a.len() == 16)
     });
+    let second = &pending["agentRun"]["pendingApprovals"][1];
+    assert_eq!(
+        peer.call(
+            "approval/get",
+            json!({"taskId":burst["id"],"approvalId":second["id"]})
+        ),
+        json!({"kind":"agent_permission","approval":second})
+    );
     for approval in pending["agentRun"]["pendingApprovals"].as_array().unwrap() {
         peer.call(
             "approval/respond",
@@ -472,6 +480,13 @@ fn virtual_workspace_roundtrip_requires_distinct_write_and_read_approvals() {
     let inbox = peer.call("approval/listPending", json!({}));
     assert_eq!(inbox["items"][0]["kind"], "host_tool");
     assert_eq!(inbox["items"][0]["id"], write["id"]);
+    assert_eq!(
+        peer.call(
+            "approval/get",
+            json!({"taskId":task["id"],"approvalId":write["id"]})
+        ),
+        json!({"kind":"host_tool","approval":write})
+    );
     assert_eq!(write["request"]["call"]["name"], "workspace_replace_text");
     assert_eq!(write["request"]["preview"]["createsFile"], true);
     assert!(!directory.0.join("via-agent.txt").exists());

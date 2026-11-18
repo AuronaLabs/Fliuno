@@ -100,7 +100,53 @@ fn sql_timestamp(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| Error::Invalid("approval timestamp must fit i64".into()))
 }
 
+fn decode_kind(code: u8) -> Result<ApprovalKind> {
+    match code {
+        0 => Ok(ApprovalKind::ToolCall),
+        1 => Ok(ApprovalKind::AgentPermission),
+        2 => Ok(ApprovalKind::HostTool),
+        _ => Err(Error::Conflict("invalid stored approval kind".into())),
+    }
+}
+
 impl Kernel {
+    pub fn get_pending_approval(
+        &self,
+        task_id: &str,
+        approval_id: &str,
+    ) -> Result<ApprovalDetails> {
+        // Resolve the scope and expiry from the inbox before extracting the
+        // requested value. SQLite returns just that approval to Rust.
+        let mut select = self.db.prepare_cached(
+            "SELECT p.kind, CASE p.kind
+                 WHEN 0 THEN json_extract(t.data,'$.pendingApproval')
+                 ELSE (SELECT a.value FROM json_each(t.data,'$.agentRun.pendingApprovals') a
+                       WHERE json_extract(a.value,'$.id')=p.approval_id)
+             END FROM pending_approvals p CROSS JOIN tasks t ON t.id=p.task_id
+             WHERE p.approval_id=?1 AND p.task_id=?2
+               AND (p.expires_at IS NULL OR p.expires_at>?3)",
+        )?;
+        let mut rows = select.query(params![
+            approval_id,
+            task_id,
+            sql_timestamp(agent::now_ms()?)?
+        ])?;
+        let row = rows
+            .next()?
+            .ok_or_else(|| Error::NotFound("pending approval".into()))?;
+        let data = row.get_ref(1)?.as_str().map_err(rusqlite::Error::from)?;
+        Ok(match decode_kind(row.get(0)?)? {
+            ApprovalKind::ToolCall => ApprovalDetails::ToolCall {
+                approval: serde_json::from_str(data)?,
+            },
+            ApprovalKind::AgentPermission => ApprovalDetails::AgentPermission {
+                approval: serde_json::from_str(data)?,
+            },
+            ApprovalKind::HostTool => ApprovalDetails::HostTool {
+                approval: serde_json::from_str(data)?,
+            },
+        })
+    }
     pub fn list_pending_approvals(
         &self,
         options: ApprovalListParams,
@@ -154,12 +200,7 @@ impl Kernel {
                 break;
             }
             next_after = row.get::<_, i64>(0)? as u64;
-            let kind = match row.get::<_, u8>(4)? {
-                0 => ApprovalKind::ToolCall,
-                1 => ApprovalKind::AgentPermission,
-                2 => ApprovalKind::HostTool,
-                _ => return Err(Error::Conflict("invalid stored approval kind".into())),
-            };
+            let kind = decode_kind(row.get(4)?)?;
             items.push(ApprovalSummary {
                 id: row.get(1)?,
                 task_id: row.get(2)?,

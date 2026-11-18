@@ -44,6 +44,22 @@ fn pending_approval_inbox_migrates_preserves_cursors_and_tracks_resolution() {
         "kind":"tool_call","allowOnceAvailable":true,"expiresAtUnixMs":null});
     assert_eq!(scoped["items"], json!([item]));
     assert_eq!(scoped["hasMore"], true);
+    let details = json!({"taskId":first["id"],"approvalId":item["id"]});
+    assert_eq!(
+        peer.call("approval/get", details.clone()),
+        json!({
+            "kind":"tool_call","approval":first["pendingApproval"]
+        })
+    );
+    assert_eq!(
+        peer.request(
+            "approval/get",
+            json!({
+                "taskId":other["id"],"approvalId":item["id"]
+            })
+        )["error"]["code"],
+        -32004
+    );
     assert_eq!(
         peer.call("approval/listPending", json!({"sessionId":a1["id"]}))["items"],
         json!([item])
@@ -70,6 +86,10 @@ fn pending_approval_inbox_migrates_preserves_cursors_and_tracks_resolution() {
     peer.call(
         "approval/respond",
         json!({"taskId":first["id"],"approvalId":item["id"],"decision":"deny"}),
+    );
+    assert_eq!(
+        peer.request("approval/get", details)["error"]["code"],
+        -32004
     );
     peer.call("task/cancel", json!({"taskId":other["id"]}));
     drop(peer);
