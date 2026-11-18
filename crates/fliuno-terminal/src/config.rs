@@ -12,6 +12,23 @@ use std::{
 pub struct Config {
     pub state_directory: PathBuf,
     pub presets: Vec<PresetConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retention: Option<RetentionConfig>,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RetentionConfig {
+    pub archive_after_expiry_days: u16,
+}
+
+impl RetentionConfig {
+    pub(crate) fn grace_ms(self) -> Result<u64, String> {
+        if !(1..=365).contains(&self.archive_after_expiry_days) {
+            return Err("terminal retention archiveAfterExpiryDays must be 1..365".into());
+        }
+        Ok(u64::from(self.archive_after_expiry_days) * 86_400_000)
+    }
 }
 
 #[derive(Serialize, Deserialize)]

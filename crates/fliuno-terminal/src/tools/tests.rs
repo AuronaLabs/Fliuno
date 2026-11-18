@@ -38,6 +38,7 @@ fn config(root: &Path, preset: crate::PresetConfig) -> Config {
     Config {
         state_directory: root.join("terminals"),
         presets: vec![preset],
+        retention: None,
     }
 }
 struct StartProvider;

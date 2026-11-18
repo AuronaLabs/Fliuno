@@ -8,6 +8,8 @@ use fliuno_core::{CancellationToken, ToolContext};
 
 #[path = "tests/batch.rs"]
 mod batch;
+#[path = "tests/retention.rs"]
+mod retention_tests;
 
 struct Directory {
     root: std::path::PathBuf,

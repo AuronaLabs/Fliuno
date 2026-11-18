@@ -1,6 +1,7 @@
 //! Retire a stopped supervisor's identity before reclaiming any of its files.
 //! Owner locks, not saved PIDs or a stale endpoint, decide cleanup eligibility.
 mod batch;
+pub(crate) mod retention;
 use crate::{
     Service,
     protocol::*,
@@ -29,32 +30,13 @@ impl Service {
             return Ok(record);
         }
         let directory = self.directory(id)?;
-        owns(&spool::offline(&directory, 0, 1)?.snapshot, session)?;
+        owns(&archive_snapshot(&directory, id)?, session)?;
         // Keep this handle across snapshot, tombstone commit and deletion.
         // Even a delayed worker cannot pass its owner lock and ledger check.
         let owner = owner_lock(&directory)?;
-        let mut snapshot = spool::offline(&directory, 0, 1)?.snapshot;
+        let snapshot = archive_snapshot(&directory, id)?;
         owns(&snapshot, session)?;
-        if snapshot.archived_at_unix_ms.is_some() {
-            return Err("terminal archive ledger does not match spool".into());
-        }
-        snapshot.archived_at_unix_ms = Some(now_ms());
-        snapshot.start_offset = snapshot.end_offset;
-        ledger.insert(&snapshot).map_err(|error| match error {
-            registry::CommitError::Rejected(message) => ToolError::from(message),
-            registry::CommitError::Uncertain(message) => ToolError::OutcomeUnknownWithOutput {
-                message,
-                output: serde_json::json!({"terminalId":id,"sessionId":session,"phase":"archive"}),
-            },
-        })?;
-        let mut cleanup_pending = !clean_owned(&directory, owner);
-        if !cleanup_pending {
-            cleanup_pending = ledger.cleaned(id).is_err();
-        }
-        Ok(TerminalArchive {
-            snapshot,
-            cleanup_pending,
-        })
+        archive_owned(&mut ledger, &directory, owner, snapshot, now_ms())
     }
 
     pub fn archives(
@@ -65,6 +47,38 @@ impl Service {
     ) -> Result<ObjectPage<TerminalArchive>, String> {
         Registry::open(&self.root, false)?.list(session, after, limit)
     }
+}
+
+fn archive_snapshot(directory: &Path, id: &str) -> Result<Snapshot, String> {
+    let snapshot = spool::saved_snapshot(directory)?;
+    if snapshot.terminal_id != id || snapshot.archived_at_unix_ms.is_some() {
+        return Err("terminal archive identity does not match spool".into());
+    }
+    Ok(snapshot)
+}
+
+fn archive_owned(
+    ledger: &mut Registry,
+    directory: &Path,
+    owner: File,
+    mut snapshot: Snapshot,
+    now: u64,
+) -> Result<TerminalArchive, ToolError> {
+    snapshot.archived_at_unix_ms = Some(now);
+    snapshot.start_offset = snapshot.end_offset;
+    ledger.insert(&snapshot).map_err(|error| match error {
+        registry::CommitError::Rejected(message) => ToolError::from(message),
+        registry::CommitError::Uncertain(message) => ToolError::OutcomeUnknownWithOutput {
+            message,
+            output: serde_json::json!({"terminalId":snapshot.terminal_id,"sessionId":snapshot.session_id,"phase":"archive"}),
+        },
+    })?;
+    let cleanup_pending =
+        !clean_owned(directory, owner) || ledger.cleaned(&snapshot.terminal_id).is_err();
+    Ok(TerminalArchive {
+        snapshot,
+        cleanup_pending,
+    })
 }
 
 fn owns(snapshot: &Snapshot, session: &str) -> Result<(), String> {

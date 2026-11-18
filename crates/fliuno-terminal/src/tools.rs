@@ -334,7 +334,12 @@ pub fn register_config(
     if config.presets.is_empty() || config.presets.len() > 16 {
         return Err("terminal config needs 1..16 presets".into());
     }
-    let service = Service::new(config.state_directory, worker)?;
+    let grace_ms = config
+        .retention
+        .map(config::RetentionConfig::grace_ms)
+        .transpose()?;
+    let mut service = Service::new(config.state_directory, worker)?;
+    service.retention_grace_ms = grace_ms;
     let mut ids = std::collections::BTreeSet::new();
     let mut tools: Vec<Box<dyn Tool>> = vec![];
     for preset in config.presets {
@@ -373,5 +378,9 @@ pub fn register_config(
         name: format!("terminal_archive_{}", &control_id[..32]),
     }));
     kernel.register_tools(tools).map_err(|e| e.to_string())?;
+    if let Err(error) = service.apply_retention() {
+        // Startup maintenance should not hide otherwise readable history.
+        eprintln!("fliuno: terminal retention deferred: {error}");
+    }
     Ok(service)
 }

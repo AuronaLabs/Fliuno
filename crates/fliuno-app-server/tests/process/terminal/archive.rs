@@ -20,6 +20,68 @@ fn wait_owner_exit(dir: &std::path::Path) {
 }
 
 #[test]
+fn terminal_retention_requires_host_opt_in_and_preserves_closed_output_cursor() {
+    let dir = Directory::new(30000);
+    let fixture = model();
+    let base = fixture.url("/v1/");
+    let mut peer = dir.peer(&base);
+    let session = session(&mut peer, &dir);
+    let start = execute(&mut peer, &session, "start", json!({}), "retention-start");
+    let id = start["terminalId"].as_str().unwrap();
+    let terminal = dir.service.as_ref().unwrap().directory(id).unwrap();
+    wait_text(&mut peer, &session, id, "TERMINAL_READY");
+    execute(
+        &mut peer,
+        &session,
+        "write",
+        json!({"terminalId":id,"data":enter("exit")}),
+        "retention-exit",
+    );
+    wait_text(&mut peer, &session, id, "TERMINAL_EXIT");
+    wait_owner_exit(&terminal);
+    let before = output(&mut peer, &session, id);
+    assert_eq!(before["snapshot"]["outputClosed"], true);
+    drop(peer);
+
+    // Backdate the fixture's expiry without modifying wall clock or PTY state.
+    {
+        let db = rusqlite::Connection::open(terminal.join("output.db")).unwrap();
+        let raw: String = db
+            .query_row("SELECT data FROM snapshot", [], |r| r.get(0))
+            .unwrap();
+        let mut snapshot: Value = serde_json::from_str(&raw).unwrap();
+        snapshot["expiresAtUnixMs"] = json!(1);
+        db.execute("UPDATE snapshot SET data=?1", [snapshot.to_string()])
+            .unwrap();
+    }
+    let mut peer = dir.peer(&base);
+    assert_eq!(
+        output(&mut peer, &session, id)["dataBase64"],
+        before["dataBase64"]
+    );
+    assert!(terminal.is_dir());
+    drop(peer);
+
+    let config_path = dir.root.join("terminal.json");
+    let mut config: Value = serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["retention"] = json!({"archiveAfterExpiryDays":1});
+    fs::write(config_path, config.to_string()).unwrap();
+    let mut peer = dir.peer(&base);
+    let archived = output(&mut peer, &session, id);
+    assert_eq!(archived["snapshot"]["status"], "exited");
+    assert_eq!(archived["snapshot"]["outputClosed"], true);
+    assert!(archived["snapshot"]["archivedAtUnixMs"].is_u64());
+    assert_eq!(archived["next"], before["next"]);
+    assert_eq!(archived["gap"], true);
+    assert_eq!(archived["dataBase64"], "");
+    assert!(!terminal.exists());
+    drop(peer);
+
+    let mut peer = dir.peer(&base);
+    assert_eq!(output(&mut peer, &session, id), archived);
+}
+
+#[test]
 fn terminal_archive_requires_approval_preserves_tombstone_and_survives_server_restart() {
     let dir = Directory::new(30000);
     let fixture = model();

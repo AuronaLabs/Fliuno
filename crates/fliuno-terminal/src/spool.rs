@@ -183,7 +183,12 @@ fn read_snapshot(db: &Connection) -> Result<Snapshot, String> {
     let text: String = db
         .query_row("SELECT data FROM snapshot", [], |r| r.get(0))
         .map_err(|_| "terminal snapshot unavailable")?;
-    serde_json::from_str(&text).map_err(|_| "invalid terminal snapshot".into())
+    let snapshot: Snapshot =
+        serde_json::from_str(&text).map_err(|_| "invalid terminal snapshot")?;
+    if snapshot.start_offset > snapshot.end_offset || snapshot.end_offset > i64::MAX as u64 {
+        return Err("invalid terminal spool offsets".into());
+    }
+    Ok(snapshot)
 }
 #[derive(Clone, Copy)]
 pub(crate) enum OutputCursor {
@@ -198,9 +203,6 @@ fn read_output(db: &Connection, cursor: OutputCursor, limit: usize) -> Result<Ou
         return Err("invalid terminal cursor / output limit".into());
     }
     let s = read_snapshot(db)?;
-    if s.start_offset > s.end_offset || s.end_offset > i64::MAX as u64 {
-        return Err("invalid terminal spool offsets".into());
-    }
     let after = match cursor {
         OutputCursor::After(after) => after,
         OutputCursor::Tail => s.end_offset.saturating_sub(limit as u64),
@@ -272,9 +274,27 @@ pub(crate) fn read_saved_output(
     cursor: OutputCursor,
     limit: usize,
 ) -> Result<Output, String> {
+    let db = open_saved(dir)?;
+    let tx = db
+        .unchecked_transaction()
+        .map_err(|_| "cannot snapshot terminal spool")?;
+    let mut output = read_output(&tx, cursor, limit)?;
+    mark_offline(&mut output.snapshot);
+    Ok(output)
+}
+
+pub(crate) fn saved_snapshot(dir: &Path) -> Result<Snapshot, String> {
+    let mut snapshot = read_snapshot(&open_saved(dir)?)?;
+    mark_offline(&mut snapshot);
+    Ok(snapshot)
+}
+
+fn open_saved(dir: &Path) -> Result<Connection, String> {
+    let path = dir.join("output.db");
+    crate::registry::regular_or_missing(&path)?;
     let db = Connection::open_with_flags(
-        dir.join("output.db"),
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
     .map_err(|_| "terminal spool unavailable")?;
     db.busy_timeout(std::time::Duration::from_millis(50))
@@ -285,18 +305,17 @@ pub(crate) fn read_saved_output(
     if version != 1 {
         return Err("unsupported terminal spool version".into());
     }
-    let tx = db
-        .unchecked_transaction()
-        .map_err(|_| "cannot snapshot terminal spool")?;
-    let mut output = read_output(&tx, cursor, limit)?;
-    output.snapshot.supervisor_connected = false;
+    Ok(db)
+}
+
+fn mark_offline(snapshot: &mut Snapshot) {
+    snapshot.supervisor_connected = false;
     if matches!(
-        output.snapshot.status,
+        snapshot.status,
         crate::protocol::Status::Starting | crate::protocol::Status::Running
     ) {
-        output.snapshot.status = crate::protocol::Status::OutcomeUnknown;
+        snapshot.status = crate::protocol::Status::OutcomeUnknown;
     }
-    Ok(output)
 }
 
 #[cfg(test)]

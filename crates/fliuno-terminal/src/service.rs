@@ -14,11 +14,14 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{fs, io::Write, path::PathBuf, sync::Arc, time::Duration};
 const OBSERVATION_TIMEOUT: Duration = Duration::from_millis(150);
+pub(crate) const REGISTRY_SCAN_LIMIT: usize = 128;
+const MAX_RECORDS: usize = 64;
 
 #[derive(Clone)]
 pub struct Service {
     pub(crate) root: Arc<PathBuf>,
     worker: Arc<PathBuf>,
+    pub(crate) retention_grace_ms: Option<u64>,
 }
 struct StagedDirectory {
     path: PathBuf,
@@ -75,7 +78,17 @@ impl Service {
         Ok(Self {
             root: Arc::new(root),
             worker: Arc::new(worker),
+            retention_grace_ms: None,
         })
+    }
+
+    pub(crate) fn apply_retention(&self) -> Result<(), ToolError> {
+        if let Some(grace_ms) = self.retention_grace_ms {
+            let _lock = registry::lock(&self.root)?;
+            let mut ledger = Registry::open(&self.root, true)?;
+            archive::retention::sweep(self, &mut ledger, now_ms(), grace_ms)?;
+        }
+        Ok(())
     }
     pub fn directory(&self, id: &str) -> Result<PathBuf, String> {
         registry::valid_id(id)?;
@@ -204,7 +217,7 @@ impl Service {
         let refresh_deadline = tokio::time::Instant::now() + OBSERVATION_TIMEOUT;
         for entry in fs::read_dir(&*self.root)
             .map_err(|_| "cannot list terminals")?
-            .take(128)
+            .take(REGISTRY_SCAN_LIMIT)
         {
             let entry = entry.map_err(|_| "cannot list terminals")?;
             let id = entry.file_name().to_string_lossy().into_owned();
@@ -237,6 +250,40 @@ impl Service {
         snapshots.sort_by(|a, b| a.terminal_id.cmp(&b.terminal_id));
         Ok(snapshots)
     }
+    fn capacity(&self, ledger: &Registry) -> Result<(usize, usize), String> {
+        let mut count = 0;
+        let mut live = 0;
+        for (index, entry) in fs::read_dir(&*self.root)
+            .map_err(|_| "cannot inspect terminal capacity")?
+            .enumerate()
+        {
+            if index == REGISTRY_SCAN_LIMIT {
+                return Err("terminal capacity scan limit exceeded".into());
+            }
+            let entry = entry.map_err(|_| "cannot inspect terminal capacity")?;
+            let name = entry.file_name();
+            let Some(id) = name.to_str().filter(|id| registry::valid_id(id).is_ok()) else {
+                continue;
+            };
+            count += 1;
+            if ledger.get(id)?.is_some() {
+                continue;
+            }
+            // Missing or unreadable reservations still occupy an uncertain slot.
+            match self
+                .directory(id)
+                .and_then(|dir| spool::saved_snapshot(&dir))
+            {
+                Ok(snapshot)
+                    if snapshot.terminal_id == id
+                        && snapshot.archived_at_unix_ms.is_none()
+                        && snapshot.status != Status::OutcomeUnknown => {}
+                _ => live += 1,
+            }
+        }
+        Ok((count, live))
+    }
+
     pub(crate) async fn create(
         &self,
         preset: &Preset,
@@ -251,7 +298,7 @@ impl Service {
         // Serialize capacity reservation across independent app-server hosts.
         // std File locks are released on crash; no stale-lock-file inference.
         let lock = registry::lock(&self.root)?;
-        let ledger = Registry::open(&self.root, false)?;
+        let mut ledger = Registry::open(&self.root, true)?;
         if ledger.get(&terminal_id)?.is_some() {
             return Err(uncertain_start(
                 context.session_id,
@@ -259,7 +306,7 @@ impl Service {
                 "terminal identity was archived; never relaunch it",
             ));
         }
-        archive::recover(&self.root, &Registry::open(&self.root, true)?)?;
+        archive::recover(&self.root, &ledger)?;
         cleanup_staging(&self.root)?;
         match fs::symlink_metadata(&directory) {
             Ok(_) => {
@@ -272,32 +319,15 @@ impl Service {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err("cannot inspect terminal identity reservation".into()),
         }
-        let mut count = 0;
-        let mut live = 0;
-        for entry in fs::read_dir(&*self.root)
-            .map_err(|_| "cannot inspect terminal capacity")?
-            .take(128)
+        let (mut count, mut live) = self.capacity(&ledger)?;
+        if count >= MAX_RECORDS
+            && live < 8
+            && let Some(grace_ms) = self.retention_grace_ms
         {
-            let entry = entry.map_err(|_| "cannot inspect terminal capacity")?;
-            let id = entry.file_name().to_string_lossy().into_owned();
-            if id.len() != 64 {
-                continue;
-            }
-            count += 1;
-            if ledger.get(&id)?.is_some() {
-                continue;
-            }
-            // Missing/corrupt bootstrap records conservatively consume a slot.
-            match spool::offline(&entry.path(), 0, 1) {
-                Ok(o)
-                    if !matches!(
-                        o.snapshot.status,
-                        Status::Starting | Status::Running | Status::OutcomeUnknown
-                    ) => {}
-                _ => live += 1,
-            }
+            archive::retention::sweep(self, &mut ledger, now_ms(), grace_ms)?;
+            (count, live) = self.capacity(&ledger)?;
         }
-        if count >= 64 || live >= 8 {
+        if count >= MAX_RECORDS || live >= 8 {
             return Err(
                 "terminal registry capacity reached (64 records / 8 active or uncertain)".into(),
             );
