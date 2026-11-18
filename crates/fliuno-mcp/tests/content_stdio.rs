@@ -25,18 +25,23 @@ fn content_only_stdio_process_interoperates_in_host_and_isolated_modes() {
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 6);
         let mut private_directory = None;
-        for (label, arguments, field) in [
-            ("resources_list", json!({}), "resources"),
-            ("resources_templates", json!({}), "resourceTemplates"),
+        for (label, arguments, path) in [
+            ("resources_list", json!({}), "/resources"),
+            ("resources_templates", json!({}), "/resourceTemplates"),
             (
                 "resources_read",
                 json!({"uri":"fixture:environment"}),
-                "contents",
+                "/contents",
             ),
-            ("prompts_list", json!({}), "prompts"),
-            ("prompts_get", json!({"name":"draft"}), "messages"),
+            ("prompts_list", json!({}), "/prompts"),
+            ("prompts_get", json!({"name":"draft"}), "/messages"),
+            (
+                "complete",
+                json!({"ref":{"type":"ref/resource","uri":"fixture:report/{id}"},"argument":{"name":"id","value":""}}),
+                "/completion/values",
+            ),
         ] {
             let tool = tools
                 .iter()
@@ -60,7 +65,15 @@ fn content_only_stdio_process_interoperates_in_host_and_isolated_modes() {
                     &CancellationToken::new(),
                 )
                 .unwrap();
-            assert_eq!(result.output["result"][field].as_array().unwrap().len(), 1);
+            let values = result.output["result"]
+                .pointer(path)
+                .unwrap()
+                .as_array()
+                .unwrap();
+            assert_eq!(values.len(), 1);
+            if label == "complete" {
+                assert_eq!(values[0], "report-1");
+            }
             if label == "resources_read" {
                 let environment: Value = serde_json::from_str(
                     result.output["result"]["contents"][0]["text"]

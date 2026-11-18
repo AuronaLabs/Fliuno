@@ -5,11 +5,11 @@ use fliuno_protocol::{ToolCall, Workspace};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, DiscoverResult,
-        ErrorCode, GetPromptRequestParams, GetPromptResponse, ListPromptsResult,
-        ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-        ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities,
-        ServerConfig,
+        CallToolRequestParams, CallToolResponse, CallToolResult, CompleteRequestParams,
+        CompleteResult, CompletionInfo, ContentBlock, DiscoverResult, ErrorCode,
+        GetPromptRequestParams, GetPromptResponse, ListPromptsResult, ListResourceTemplatesResult,
+        ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+        ReadResourceRequestParams, ReadResourceResponse, ServerCapabilities, ServerConfig,
     },
     service::RequestContext,
     transport::streamable_http_server::{
@@ -30,6 +30,7 @@ impl ServerHandler for SdkPeer {
                 .enable_tools()
                 .enable_resources()
                 .enable_prompts()
+                .enable_completions()
                 .build(),
         )
     }
@@ -115,6 +116,18 @@ impl ServerHandler for SdkPeer {
         .unwrap()
         .into())
     }
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        assert_eq!(request.r#ref, rmcp::model::Reference::for_prompt("draft"));
+        assert_eq!(request.argument.name, "topic");
+        assert_eq!(request.argument.value, "SD");
+        Ok(CompleteResult::new(
+            CompletionInfo::with_all_values(vec!["SDK_TOPIC".into()]).unwrap(),
+        ))
+    }
 }
 
 #[test]
@@ -175,12 +188,21 @@ fn official_http_server_interoperates_in_both_lifecycles_and_response_formats() 
                 )
                 .unwrap();
             assert_eq!(result.output["content"][0]["text"], "官方 SDK 互操作");
-            for (label, arguments, field) in [
-                ("resources_list", json!({}), "resources"),
-                ("resources_templates", json!({}), "resourceTemplates"),
-                ("resources_read", json!({"uri":"fixture:guide"}), "contents"),
-                ("prompts_list", json!({}), "prompts"),
-                ("prompts_get", json!({"name":"draft"}), "messages"),
+            for (label, arguments, path) in [
+                ("resources_list", json!({}), "/resources"),
+                ("resources_templates", json!({}), "/resourceTemplates"),
+                (
+                    "resources_read",
+                    json!({"uri":"fixture:guide"}),
+                    "/contents",
+                ),
+                ("prompts_list", json!({}), "/prompts"),
+                ("prompts_get", json!({"name":"draft"}), "/messages"),
+                (
+                    "complete",
+                    json!({"ref":{"type":"ref/prompt","name":"draft"},"argument":{"name":"topic","value":"SD"}}),
+                    "/completion/values",
+                ),
             ] {
                 let tool = tools
                     .iter()
@@ -204,7 +226,15 @@ fn official_http_server_interoperates_in_both_lifecycles_and_response_formats() 
                         &CancellationToken::new(),
                     )
                     .unwrap();
-                assert_eq!(result.output["result"][field].as_array().unwrap().len(), 1);
+                let values = result.output["result"]
+                    .pointer(path)
+                    .unwrap()
+                    .as_array()
+                    .unwrap();
+                assert_eq!(values.len(), 1);
+                if label == "complete" {
+                    assert_eq!(values[0], "SDK_TOPIC");
+                }
                 assert_eq!(result.output["grantsPermissions"], false);
             }
             drop(tools);

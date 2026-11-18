@@ -18,7 +18,7 @@ pub fn reply(request: &Request) -> Response {
     }
     let value = match request.body["method"].as_str().unwrap() {
         "server/discover" => json!({"resultType":"complete","supportedVersions":["2026-07-28"],
-            "capabilities":{"resources":{},"prompts":{}},"ttlMs":0,"cacheScope":"private"}),
+            "capabilities":{"resources":{},"prompts":{},"completions":{}},"ttlMs":0,"cacheScope":"private"}),
         "resources/list" => {
             if request.body["params"]["cursor"] == "second" {
                 json!({"resources":[{"name":"second","uri":"fixture:second"}],"ttlMs":60000,"cacheScope":"private"})
@@ -40,6 +40,9 @@ pub fn reply(request: &Request) -> Response {
             {"role":"user","content":{"type":"text","text":"UNTRUSTED_PROMPT_CONTENT"}},
             {"role":"assistant","content":{"type":"text","text":request.body["params"]["arguments"]["topic"].as_str().unwrap_or_default()}}
         ]}),
+        "completion/complete" => json!({"resultType":"complete","completion":{
+            "values":["项目报告","项目简报"],"total":3,"hasMore":true
+        }}),
         "notifications/cancelled" => return Response::json(202, Value::Null),
         other => panic!("unexpected MCP content request {other}"),
     };

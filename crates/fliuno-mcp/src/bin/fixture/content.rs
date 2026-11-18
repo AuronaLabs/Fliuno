@@ -2,10 +2,10 @@
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
-        GetPromptRequestParams, GetPromptResponse, GetPromptResult, ListPromptsResult,
-        ListResourceTemplatesResult, ListResourcesResult, PaginatedRequestParams,
-        ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, ServerCapabilities,
-        ServerConfig,
+        CompleteRequestParams, CompleteResult, CompletionInfo, GetPromptRequestParams,
+        GetPromptResponse, GetPromptResult, ListPromptsResult, ListResourceTemplatesResult,
+        ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
+        ReadResourceResponse, ReadResourceResult, ServerCapabilities, ServerConfig,
     },
     service::RequestContext,
 };
@@ -18,6 +18,7 @@ impl ServerHandler for Fixture {
             ServerCapabilities::builder()
                 .enable_resources()
                 .enable_prompts()
+                .enable_completions()
                 .build(),
         )
     }
@@ -75,6 +76,20 @@ impl ServerHandler for Fixture {
             .unwrap()
             .into(),
         )
+    }
+    async fn complete(
+        &self,
+        request: CompleteRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<CompleteResult, ErrorData> {
+        assert_eq!(
+            request.r#ref,
+            rmcp::model::Reference::for_resource("fixture:report/{id}")
+        );
+        assert_eq!(request.argument.name, "id");
+        Ok(CompleteResult::new(
+            CompletionInfo::with_all_values(vec!["report-1".into()]).unwrap(),
+        ))
     }
 }
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {

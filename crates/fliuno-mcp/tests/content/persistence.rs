@@ -51,7 +51,7 @@ fn approve(kernel: &mut Kernel, task: &Task, decision: ApprovalDecision) -> Task
 }
 
 #[test]
-fn content_consent_is_source_bound_denial_sends_nothing_and_roles_stay_in_tool_data() {
+fn content_consent_is_source_bound_and_results_stay_in_tool_data() {
     for (label, method, arguments) in [
         (
             "resources_read",
@@ -62,6 +62,11 @@ fn content_consent_is_source_bound_denial_sends_nothing_and_roles_stay_in_tool_d
             "prompts_get",
             "prompts/get",
             json!({"name":"draft","arguments":{"topic":"工作成果"}}),
+        ),
+        (
+            "complete",
+            "completion/complete",
+            json!({"ref":{"type":"ref/prompt","name":"draft"},"argument":{"name":"topic","value":"项目"}}),
         ),
     ] {
         let first = Fixture::start(content::reply);
@@ -119,6 +124,12 @@ fn content_consent_is_source_bound_denial_sends_nothing_and_roles_stay_in_tool_d
             assert_eq!(
                 output["result"]["messages"][1]["content"]["text"],
                 "工作成果"
+            );
+        }
+        if label == "complete" {
+            assert_eq!(
+                output["result"]["completion"]["values"],
+                json!(["项目报告", "项目简报"])
             );
         }
         let original_events =

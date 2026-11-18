@@ -94,7 +94,8 @@
    - [ ] 真实外部 Agent 互操作、认证/扩展/tenancy；随后考虑 AG-UI 事件投影。
 6. [x] MCP Streamable HTTP 工具通道、JSON/SSE、显式生命周期及现代/旧版官方 SDK 互操作矩阵。
    - [x] MCP 资源/模板/提示按能力注册、逐次审批的单页列举/读取/获取、原始内容封装、注册绑定和 stdio/HTTP 官方 SDK 契约。
-   - [ ] OAuth 发现/授权/刷新、资源变更订阅/补全、server-to-client 交互和 MRTR/Tasks 持久继续。
+   - [x] MCP 提示与资源模板参数补全，按能力注册并逐次审批。官方 SDK HTTP/stdio 互操作与 SQLite 恢复测试覆盖结果边界和重启不重放。
+   - [ ] OAuth 发现/授权/刷新、资源变更订阅、server-to-client 交互和 MRTR/Tasks 持久继续。
    - [ ] 旧版独立 HTTP+SSE transport、真实外部服务验收及断线后的受控恢复。
 7. Tauri 仅作为客户端接入，复用相同协议和内核测试。
 

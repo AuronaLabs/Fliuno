@@ -30,10 +30,10 @@ struct Prompt {
 pub(super) fn valid_cursor(cursor: &str) -> bool {
     !cursor.is_empty() && cursor.len() <= 4096 && !cursor.chars().any(char::is_control)
 }
-fn valid_name(name: &str) -> bool {
+pub(super) fn valid_name(name: &str) -> bool {
     !name.is_empty() && name.len() <= 256 && !name.chars().any(char::is_control)
 }
-fn valid_uri(uri: &str) -> bool {
+pub(super) fn valid_uri(uri: &str) -> bool {
     let Some((scheme, _)) = uri.split_once(':') else {
         return false;
     };
@@ -71,6 +71,7 @@ impl Kind {
                         "additionalProperties":{"type":"string","maxLength":8192}}
                 }),
             ),
+            Self::Complete => return super::completion::schema(),
         };
         json!({"type":"object","additionalProperties":false,"required":required,"properties":properties})
     }
@@ -114,13 +115,7 @@ impl Kind {
             }
             Self::Get => {
                 let args: Prompt = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
-                if !valid_name(&args.name)
-                    || args.arguments.len() > 32
-                    || args
-                        .arguments
-                        .iter()
-                        .any(|(key, value)| !valid_name(key) || value.len() > 8192)
-                {
+                if !valid_name(&args.name) || !valid_arguments(&args.arguments) {
                     return Err(invalid());
                 }
                 let arguments = args
@@ -132,6 +127,14 @@ impl Kind {
                     GetPromptRequestParams::new(args.name).with_arguments(arguments),
                 ))
             }
+            Self::Complete => return super::completion::request(value).ok_or_else(invalid),
         })
     }
+}
+
+pub(super) fn valid_arguments(arguments: &BTreeMap<String, String>) -> bool {
+    arguments.len() <= 32
+        && arguments
+            .iter()
+            .all(|(key, value)| valid_name(key) && value.len() <= 8192)
 }

@@ -1,6 +1,6 @@
 # MCP 资源与提示
 
-主机照常通过 `--mcp-config` 注册固定的 stdio 或 Streamable HTTP 服务。握手声明 `resources` 时注册资源列表、模板列表与读取；声明 `prompts` 时注册提示列表与获取。没有 `tools` 能力的服务不会被发送 `tools/list`。连接时不枚举资源或提示，不把它们自动加入上下文。
+主机照常通过 `--mcp-config` 注册固定的 stdio 或 Streamable HTTP 服务。握手声明 `resources` 时注册资源列表、模板列表与读取。声明 `prompts` 时注册提示列表与获取。声明 `completions` 时注册参数补全。没有 `tools` 能力的服务不会被发送 `tools/list`。连接时不枚举资源或提示，不把它们自动加入上下文。
 
 以下名称的 `<id>` 来自主机配置。每次调用均为 `External` 工具效果，先持久审批和开始事件，再发出请求。服务的只读声明不跳过审批。
 
@@ -11,6 +11,11 @@
 | `mcp_<id>_resources_read` | `resources/read` | `{uri:string}` |
 | `mcp_<id>_prompts_list` | `prompts/list` | `{cursor?:string}` |
 | `mcp_<id>_prompts_get` | `prompts/get` | `{name:string,arguments?:{key:string}}` |
+| `mcp_<id>_complete` | `completion/complete` | `{ref,argument:{name,value},context?:{arguments}}` |
+
+补全的 `ref` 可以是 `{"type":"ref/prompt","name":"draft"}` 或 `{"type":"ref/resource","uri":"fixture:report/{id}"}`。`argument.value` 是已输入的前缀，可为空字符串。`context.arguments` 是可选的已知参数值，遵循提示参数的字符串与字节预算。
+
+补全返回 `result.completion.values` 中的最多 100 项建议，并保留服务返回的 `total` 和 `hasMore`。取用这些建议来读取资源或获取提示时，需要分别提出调用并获得审批。
 
 ## 返回数据与权限
 
@@ -36,7 +41,7 @@
 
 每个内容工具的注册摘要包含已冻结的服务注册身份、方法和公开契约。端点、原生程序、参数、环境、凭据或伴随文件配置改变后，同名别名的旧待批调用不能授权新服务；更换 URI 或提示参数也需要新的调用审批。资源和提示内容不是注册时固定的快照，服务在不同获批调用之间可以返回不同内容。协议元数据也不构成内容发布者认证。
 
-已开始的外部请求遵循普通未知结果规则，重启不重放。已完成的结果、事件和任务快照保存在 SQLite，重启读取不再发送请求。通用契约见[注册身份](authority.md)与[MCP 传输](mcp.md)。资源更新订阅、目录资源、提示参数补全、OAuth 和 MRTR/Tasks 持久继续仍未实现。
+已开始的外部请求遵循普通未知结果规则，重启不重放。已完成的结果、事件和任务快照保存在 SQLite，重启读取不再发送请求。通用契约见[注册身份](authority.md)与[MCP 传输](mcp.md)。资源更新订阅、目录资源、OAuth 和 MRTR/Tasks 持久继续仍未实现。
 
 ## 验证
 
@@ -47,7 +52,7 @@ python examples/mcp_content_demo.py --deny
 python examples/mcp_content_demo.py --switch-source
 ```
 
-HTTP wire 测试验证无工具服务、按需分页、主机文件/HTTP URI 不解引用、编码二进制保留、输入覆盖/预算、缓存提示不隐藏请求或失败、输出预算、MRTR、取消/超时和跨方法排队取消。SQLite 测试覆盖拒绝、换端点的旧审批失效、角色保留为工具数据，以及重启不重放。官方 SDK HTTP 服务在现代 discover / 旧版 initialize 与 JSON/SSE 四种组合中验证五类内容操作；独立 SDK stdio fixture 在 Windows TrustedHost/AppContainer 实际运行。Linux 同类探针接入 CI，当前主机交叉检查不代替运行。
+HTTP wire 测试验证无工具服务、按需分页、主机文件/HTTP URI 不解引用、编码二进制保留、输入覆盖/预算、缓存提示不隐藏请求或失败、输出预算、MRTR、取消/超时和跨方法排队取消。SQLite 测试覆盖拒绝、换端点的旧审批失效、角色保留为工具数据，以及重启不重放。官方 SDK HTTP 服务在现代 discover / 旧版 initialize 与 JSON/SSE 四种组合中验证资源、提示和补全。独立 SDK stdio fixture 在 Windows TrustedHost/AppContainer 实际运行。Linux 同类探针接入 CI，当前主机交叉检查不代替运行。
 
 演示使用真实 app-server、SQLite 与确定性的本机 HTTP 模型，依次审批分页、模板、资源、提示列表和提示获取；拒绝分支不读取内容，切换来源分支拒绝旧审批且不再请求模型，新任务可完成。全部流程重启核对最终快照。
 

@@ -7,6 +7,8 @@ use fliuno_core::{CancellationToken, Tool, ToolContext, ToolError, ToolOutput};
 use fliuno_protocol::{ToolCall, Workspace};
 use serde_json::{Value, json};
 use wire::{Fixture, Response};
+#[path = "content/completion.rs"]
+mod completion;
 #[path = "content/persistence.rs"]
 mod persistence;
 
