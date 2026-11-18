@@ -4,7 +4,7 @@ use fliuno_app_server::RpcServer;
 use fliuno_core::Kernel;
 use serde_json::json;
 use std::{
-    io::{self, BufRead, Write},
+    io::{self, BufRead, BufWriter, Write},
     path::PathBuf,
     thread,
 };
@@ -136,7 +136,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     thread::Builder::new()
         .name("fliuno-stdio-reader".into())
         .spawn(move || read_input_frames(input_tx))?;
-    let mut stdout = io::stdout().lock();
+    // Coalesce serde's small writes while keeping the flush after each frame.
+    let mut stdout = BufWriter::with_capacity(64 * 1024, io::stdout().lock());
     let mut last_event_sequence = 0;
     let mut event_rx = event_rx;
     let mut progress_rx = progress_rx;
