@@ -2,7 +2,7 @@
 
 面向工作任务与交付物的 Rust Agent 内核。桌面壳（预计 Tauri）、CLI 和其他客户端通过独立的应用协议接入，内核不依赖 UI 框架。
 
-目前发布 **0.0.1 初始开发版**。默认运行可离线验证的 demo provider；真实模型必须显式配置。MCP 与命令执行都由主机显式注册；Windows 提供私有目录 AppContainer，Linux 提供 Landlock/seccomp scratch 隔离，并在 cgroup v2 可委派时使用内核级整树回收。必需隔离能力缺失时拒绝启动。
+目前处于 **0.0.2 开发阶段**，`0.0.1` 是已推送的初始开发基线。默认运行可离线验证的 demo provider；真实模型必须显式配置。MCP 与命令执行都由主机显式注册；Windows 提供私有目录 AppContainer，Linux 提供 Landlock/seccomp scratch 隔离，并在 cgroup v2 可委派时使用内核级整树回收。必需隔离能力缺失时拒绝启动。
 
 持久审批和排队 Agent 任务绑定[注册摘要](docs/authority.md)：重启后更换同名 MCP/Agent 的端点、参数、环境、凭据或 Schema，旧授权不能用于新配置。隔离进程的原生程序与伴随文件均在暂存时核验实际复制内容。
 
