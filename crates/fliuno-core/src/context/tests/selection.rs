@@ -2,6 +2,90 @@
 //! drops a requested record to fit. It retains the existing snapshot contract.
 use super::*;
 
+#[test]
+fn fit_recent_only_searches_a_bounded_window_of_complete_records() {
+    let (mut kernel, session) = setup();
+    let oldest = complete(&mut kernel, &session.id, "outside the window", "small");
+    let chosen = complete(&mut kernel, &session.id, "inside the window", "small");
+    let oversized = "large".repeat(250);
+    for _ in 0..MAX_CONTEXT_CANDIDATES - 1 {
+        complete(&mut kernel, &session.id, "bigger", &oversized);
+    }
+    let opts = ContextOptions {
+        max_turns: 2,
+        max_bytes: 1024,
+        selection: ContextSelection::FitRecent,
+        ..ContextOptions::default()
+    };
+    let snapshot = kernel.session_context(&session.id, opts.clone()).unwrap();
+    assert_eq!(snapshot.turns.len(), 1);
+    assert_eq!(snapshot.turns[0].task_id, chosen.id);
+    assert_eq!(snapshot.omitted_turns, u64::from(MAX_CONTEXT_CANDIDATES));
+    assert!(serde_json::to_vec(&snapshot).unwrap().len() <= 1024);
+    assert!(
+        kernel
+            .session_context(
+                &session.id,
+                ContextOptions {
+                    task_ids: Some(vec![oldest.id]),
+                    ..opts.clone()
+                }
+            )
+            .is_err()
+    );
+    assert!(
+        kernel
+            .session_context(
+                &session.id,
+                ContextOptions {
+                    mode: ContextMode::Isolated,
+                    ..opts
+                }
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn fit_recent_can_skip_a_record_that_exceeds_the_remaining_budget() {
+    let (mut kernel, session) = setup();
+    let old = complete(&mut kernel, &session.id, "old", "short");
+    complete(&mut kernel, &session.id, "middle", &"x".repeat(850));
+    let new = complete(&mut kernel, &session.id, "new", &"\\你好".repeat(33));
+    let opts = ContextOptions {
+        max_bytes: 1024,
+        selection: ContextSelection::FitRecent,
+        ..ContextOptions::default()
+    };
+    let snapshot = kernel.session_context(&session.id, opts.clone()).unwrap();
+    let ids: Vec<_> = snapshot
+        .turns
+        .iter()
+        .map(|turn| turn.task_id.as_str())
+        .collect();
+    assert_eq!(ids, [&old.id, &new.id]);
+    assert_eq!(snapshot.omitted_turns, 1);
+    assert!(serde_json::to_vec(&snapshot).unwrap().len() <= opts.max_bytes as usize);
+    let contiguous = kernel
+        .session_context(
+            &session.id,
+            ContextOptions {
+                selection: ContextSelection::Recent,
+                ..opts
+            },
+        )
+        .unwrap();
+    assert_eq!(contiguous.turns.len(), 1);
+    assert_eq!(contiguous.turns[0].task_id, new.id);
+    assert!(
+        !serde_json::to_value(contiguous.options)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("selection")
+    );
+}
+
 fn options(ids: &[&str]) -> ContextOptions {
     ContextOptions {
         task_ids: Some(ids.iter().map(|id| (*id).into()).collect()),
@@ -238,7 +322,7 @@ fn version_eight_upgrade_preserves_snapshots_and_selected_history_survives_disk_
             .db
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        12
+        13
     );
     let recovered = kernel.get_task(&old.id).unwrap();
     assert_eq!(

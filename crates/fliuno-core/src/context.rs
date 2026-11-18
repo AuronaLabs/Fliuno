@@ -4,6 +4,7 @@ use super::*;
 
 pub const MAX_CONTEXT_TURNS: u32 = 32;
 pub const MAX_CONTEXT_BYTES: u32 = 256 * 1024;
+pub const MAX_CONTEXT_CANDIDATES: u32 = 128;
 
 #[derive(Default)]
 struct JsonSize(usize);
@@ -45,6 +46,13 @@ pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
         {
             return Err(Error::Invalid("context taskIds require 1..maxTurns unique printable ASCII IDs of at most 128 bytes in session mode".into()));
         }
+    }
+    if options.selection == ContextSelection::FitRecent
+        && (options.mode != ContextMode::Session || options.task_ids.is_some())
+    {
+        return Err(Error::Invalid(
+            "context fit_recent requires session mode without taskIds".into(),
+        ));
     }
     Ok(())
 }
@@ -91,18 +99,21 @@ impl Kernel {
         let mut array_bytes = 0;
         let mut omitted = self.context_turn_count(session, through_sequence)?;
         let limit = snapshot.options.max_bytes as usize;
-        // Keep a contiguous suffix. Skipping an oversized newest turn and then
-        // including older work would silently present stale context as recent.
+        let selection = snapshot.options.selection;
+        let max_turns = snapshot.options.max_turns as usize;
         self.visit_context_candidates(session, through_sequence, &snapshot.options, |turn| {
+            let Some(turn) = turn else {
+                return Ok(selection == ContextSelection::FitRecent);
+            };
             let next_bytes = array_bytes + json_size(&turn)? + usize::from(array_bytes > 0);
             let remaining = omitted - 1;
             if envelope + next_bytes + remaining.max(1).ilog10() as usize > limit {
-                return Ok(false);
+                return Ok(selection == ContextSelection::FitRecent);
             }
             array_bytes = next_bytes;
             omitted = remaining;
             snapshot.turns.push(turn);
-            Ok(true)
+            Ok(snapshot.turns.len() < max_turns)
         })?;
         snapshot.turns.reverse();
         snapshot.omitted_turns = omitted;

@@ -20,8 +20,8 @@
 | `task/list` | `{sessionId,after?:0,limit?:100}` | Task ObjectPage |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `session/create` | `{workspaceId}` | Session |
-| `session/context` | `{sessionId,options?:{mode?,maxTurns?,maxBytes?,taskIds?}}` | TaskContext；预览当前历史选择 |
-| `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
+| `session/context` | `{sessionId,options?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | TaskContext；预览当前历史选择 |
+| `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/get` | `{taskId}` | Task |
 | `task/checkRemote` | `{taskId}` | `{checkId}`；后台只读核对，结果经事件返回，见 [A2A](a2a.md#显式核对远端状态) |
 | `task/continueRemote` | `{taskId,input,clientRequestId}` | 独立的本机 Task；后台复核后向原远端任务或上下文提交，见 [A2A](a2a.md#显式续接远端任务) |

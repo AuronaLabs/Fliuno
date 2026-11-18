@@ -134,6 +134,10 @@
               "minimum": 0,
               "default": 131072
             },
+            "selection": {
+              "description": "FitRecent may skip whole records within a bounded recent window.",
+              "$ref": "#/$defs/ContextSelection"
+            },
             "taskIds": {
               "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
               "type": [
@@ -152,6 +156,13 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextSelection": {
+          "type": "string",
+          "enum": [
+            "recent",
+            "fit_recent"
           ]
         }
       }
@@ -426,6 +437,10 @@
               "minimum": 0,
               "default": 131072
             },
+            "selection": {
+              "description": "FitRecent may skip whole records within a bounded recent window.",
+              "$ref": "#/$defs/ContextSelection"
+            },
             "taskIds": {
               "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
               "type": [
@@ -444,6 +459,13 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextSelection": {
+          "type": "string",
+          "enum": [
+            "recent",
+            "fit_recent"
           ]
         }
       }
@@ -1022,6 +1044,10 @@
               "minimum": 0,
               "default": 131072
             },
+            "selection": {
+              "description": "FitRecent may skip whole records within a bounded recent window.",
+              "$ref": "#/$defs/ContextSelection"
+            },
             "taskIds": {
               "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
               "type": [
@@ -1040,6 +1066,13 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextSelection": {
+          "type": "string",
+          "enum": [
+            "recent",
+            "fit_recent"
           ]
         },
         "ContextTurn": {
@@ -1560,6 +1593,10 @@
               "minimum": 0,
               "default": 131072
             },
+            "selection": {
+              "description": "FitRecent may skip whole records within a bounded recent window.",
+              "$ref": "#/$defs/ContextSelection"
+            },
             "taskIds": {
               "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
               "type": [
@@ -1578,6 +1615,13 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextSelection": {
+          "type": "string",
+          "enum": [
+            "recent",
+            "fit_recent"
           ]
         },
         "ContextTurn": {

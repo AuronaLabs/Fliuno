@@ -13,6 +13,20 @@ pub enum ContextMode {
     Isolated,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextSelection {
+    #[default]
+    Recent,
+    FitRecent,
+}
+
+impl ContextSelection {
+    fn is_recent(&self) -> bool {
+        *self == Self::Recent
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextOptions {
@@ -22,6 +36,9 @@ pub struct ContextOptions {
     pub max_turns: u32,
     #[serde(default = "default_bytes")]
     pub max_bytes: u32,
+    /// FitRecent may skip whole records within a bounded recent window.
+    #[serde(default, skip_serializing_if = "ContextSelection::is_recent")]
+    pub selection: ContextSelection,
     /// Explicit completed tasks from this session; None keeps recent history.
     /// The kernel sorts IDs for stable request identity, then orders records by
     /// their completion sequence. Selected records are never silently omitted.
@@ -42,6 +59,7 @@ impl Default for ContextOptions {
             mode: ContextMode::Session,
             max_turns: default_turns(),
             max_bytes: default_bytes(),
+            selection: ContextSelection::Recent,
             task_ids: None,
         }
     }

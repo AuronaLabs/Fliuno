@@ -95,3 +95,55 @@ fn context_preview_snapshot_and_idempotency_survive_restart() {
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn fit_recent_skips_large_turns_and_keeps_the_selection_across_restart() {
+    let root = std::env::temp_dir().join(format!(
+        "fliuno-fit-context-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let small = approve_report(&mut peer, &session, "small report", "small");
+    approve_report(&mut peer, &session, &"超大".repeat(2048), "large");
+    let contiguous = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"options":{"maxBytes":2048}}),
+    );
+    assert_eq!(contiguous["turns"], json!([]));
+    let opts = json!({"selection":"fit_recent","maxBytes":2048});
+    let preview = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"], "options":opts}),
+    );
+    assert_eq!(preview["turns"][0]["taskId"], small["id"]);
+    assert_eq!(preview["omittedTurns"], 1);
+    let request = json!({"sessionId":session["id"],"input":"follow up","clientRequestId":"fit","context":opts});
+    let follow = peer.call("task/start", request.clone());
+    assert_eq!(follow["context"], preview);
+    peer.wait_for_status(follow["id"].as_str().unwrap(), "waiting_approval");
+    approve_report(&mut peer, &session, "latest small report", "latest");
+    drop(peer);
+    let mut peer = Peer::start(&db);
+    let retry = peer.call("task/start", request.clone());
+    assert_eq!(retry["id"], follow["id"]);
+    assert_eq!(retry["context"], preview);
+    let mut different = request;
+    different["context"]["selection"] = json!("recent");
+    assert_eq!(
+        peer.request("task/start", different)["error"]["code"],
+        -32009
+    );
+    drop(peer);
+    for entry in fs::read_dir(&root).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    fs::remove_dir(root).unwrap();
+}

@@ -53,6 +53,12 @@
 
 内核将选项中的 ID 按字典顺序规范化，以稳定幂等请求身份；实际 `turns` 仍按完成事件正序排列，输入列表顺序不能重排历史。`omittedTurns` 统计该会话已完成但未选中的全部记录。指定记录的完整快照超出 `maxBytes` 时整体拒绝，不静默删除任何指定项；失败的创建不保存任务、事件或幂等键。省略 `taskIds` 保持默认的最近连续后缀选择。
 
+### 按字节预算选择近期记录
+
+客户端可以用 `contextFitRecent` 和 `maxContextCandidates` 发现该能力。在 `session/context.options` 或 `task/start.context` 中传入 `"selection":"fit_recent"` 后，内核从最新记录向前检查最多 128 条已完成记录。每条记录要能完整放入剩余字节预算才会入选。入选数达到 `maxTurns` 时停止，最终按完成顺序返回；`omittedTurns` 统计所有未入选的记录。
+
+该策略仅用于 `mode=session` 且未指定 `taskIds` 的任务。默认策略 `recent` 保留完整的近期连续后缀。任务创建时冻结所用策略及结果。SQLite v13 支持读取带新策略的快照，升级仅更新数据库版本号。
+
 ## 冻结与幂等
 
 任务创建时先选择历史，再将快照、任务、初始事件与幂等键一并提交。后续任务并发完成不会修改它，显式恢复、审批继续和服务重启也沿用原快照。预览是当前读取结果，不预留输入；预览之后可能有任务完成，因此提交时以返回的 `Task.context` 为准。
@@ -105,7 +111,7 @@ $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 
 ## 持久化与迁移
 
-历史索引在数据库 v5 引入，当前数据库版本为 v10。`storage/context` 的 `session_turns` 表保存完成记录投影，以 `(session_id,sequence)` 建索引；`task_id` 唯一，sequence 外键指向真实完成事件。投影与 TaskCompleted 及任务最终状态在同一事务提交，失败一起回滚；不会发布未提交的完成通知。
+历史索引在数据库 v5 引入。`storage/context` 的 `session_turns` 表保存完成记录投影，以 `(session_id,sequence)` 建索引；`task_id` 唯一，sequence 外键指向真实完成事件。投影与 TaskCompleted 及任务最终状态在同一事务提交，失败一起回滚；不会发布未提交的完成通知。
 
 从 v4 及更早数据库升级时，迁移在事务中逐条回填已知完成的历史，不修改旧事件或任务输入。旧 `Task.context` 缺失时解码为 null；恢复旧任务仍没有新历史。旧幂等请求在未显式指定 context 时继续返回原任务，显式要求上下文选项则冲突。新任务可使用回填记录。
 

@@ -66,7 +66,7 @@ impl Kernel {
         lock: Option<File>,
     ) -> Result<Self> {
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 12 {
+        if version > 13 {
             return Err(Error::Conflict(
                 "database schema is newer than this binary".into(),
             ));
@@ -145,6 +145,10 @@ impl Kernel {
                 CREATE INDEX IF NOT EXISTS tasks_running ON tasks(running) WHERE running=1;
                 PRAGMA user_version=12; COMMIT;",
             )?;
+        }
+        if version < 13 {
+            // Older readers cannot decode the opt-in selection in frozen input.
+            db.pragma_update(None, "user_version", 13)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

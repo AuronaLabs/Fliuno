@@ -134,20 +134,24 @@ impl Kernel {
         session: &str,
         through: u64,
         options: &ContextOptions,
-        mut visit: impl FnMut(ContextTurn) -> Result<bool>,
+        mut visit: impl FnMut(Option<ContextTurn>) -> Result<bool>,
     ) -> Result<()> {
         let through = validate_event_cursor(through)?;
+        let candidates = match options.selection {
+            ContextSelection::Recent => options.max_turns,
+            ContextSelection::FitRecent => crate::MAX_CONTEXT_CANDIDATES,
+        };
         let mut statement = self.db.prepare(
             "SELECT CASE WHEN length(CAST(data AS BLOB))<=?3 THEN data END FROM session_turns
             WHERE session_id=?1 AND sequence<=?2 ORDER BY sequence DESC LIMIT ?4",
         )?;
         let rows = statement.query_map(
-            params![session, through, options.max_bytes, options.max_turns],
+            params![session, through, options.max_bytes, candidates],
             |row| row.get::<_, Option<String>>(0),
         )?;
         for row in rows {
-            let Some(data) = row? else { break };
-            if !visit(serde_json::from_str(&data)?)? {
+            let turn = row?.as_deref().map(serde_json::from_str).transpose()?;
+            if !visit(turn)? {
                 break;
             }
         }
