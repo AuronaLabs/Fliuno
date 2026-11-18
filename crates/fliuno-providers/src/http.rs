@@ -66,6 +66,7 @@ fn encode_request(
 
 pub(crate) struct Http {
     client: Client,
+    base: Url,
     endpoint: Url,
     count_endpoint: Url,
     count_fields: &'static [&'static str],
@@ -114,6 +115,7 @@ impl Http {
             .map_err(|_| "cannot initialize provider runtime")?;
         Ok(Self {
             client,
+            base,
             endpoint,
             count_endpoint,
             count_fields,
@@ -133,6 +135,35 @@ impl Http {
 
     pub fn configured_budget(&self) -> Option<fliuno_protocol::ModelBudget> {
         self.context_budget.map(ModelContextBudget::describe)
+    }
+
+    pub fn model_metadata(&self, model: &str) -> Result<Value, String> {
+        let mut endpoint = self.base.clone();
+        endpoint
+            .path_segments_mut()
+            .map_err(|_| "invalid provider metadata URL")?
+            .pop_if_empty()
+            .push("models")
+            .push(model);
+        let cancellation = CancellationToken::new();
+        self.runtime
+            .block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    let response = self
+                        .client
+                        .get(endpoint)
+                        .header(reqwest::header::ACCEPT, "application/json")
+                        .send()
+                        .await
+                        .map_err(|_| "provider metadata transport failed")?;
+                    Self::read_json(response, &cancellation, 64 * 1024)
+                        .await
+                        .map_err(|_| "provider metadata response was unsuccessful or invalid")
+                })
+                .await
+            })
+            .map_err(|_| "provider metadata request timed out")?
+            .map_err(str::to_owned)
     }
 
     fn prepare_generation(
@@ -218,6 +249,14 @@ impl Http {
                 ))?
             }
         };
+        Self::read_json(response, cancellation, limit).await
+    }
+
+    async fn read_json(
+        mut response: reqwest::Response,
+        cancellation: &CancellationToken,
+        limit: u64,
+    ) -> Result<Value, ModelError> {
         let status = response.status();
         // Do not persist remote error bodies: they may echo credentials or prompts.
         if !status.is_success() {
@@ -229,7 +268,6 @@ impl Http {
         {
             return Err("provider response exceeds its size limit".into());
         }
-        let mut response = response;
         let mut bytes = Vec::new();
         loop {
             let chunk = tokio::select! {

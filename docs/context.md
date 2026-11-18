@@ -107,7 +107,11 @@ $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 
 预检适用于每轮请求及流式模式。超额时当前生成步骤以已知未发送失败；此前已完成的工具操作仍保留。可在新任务用较小的 `maxBytes`、显式 `taskIds` 或 `isolated` 缩小历史。
 
-`initialize.capabilities.modelBudget` 返回当前宿主配置下的 `windowTokens`、`maxInputTokens`、`maxOutputTokens` 和 `countMode`。计数模式为 `json_bytes_estimate` 或 `provider`。未配置预检时返回 `null`。握手直接读取本机配置，供应商模型窗口仍由宿主填写。
+`initialize.capabilities.modelBudget` 返回当前的 `windowTokens`、`maxInputTokens`、`maxOutputTokens`、`countMode` 和 `source`。计数模式为 `json_bytes_estimate` 或 `provider`，来源为 `configured` 或 `provider_metadata`。未配置预检时返回 `null`。
+
+Anthropic 可以设置 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider`，并继续填写 `FLIUNO_MAX_OUTPUT_TOKENS`。app-server 启动时用现有凭据向配置端点请求一次 `GET /v1/models/{model_id}`，限时 5 秒、最多 64 KiB。内核以返回的 `max_input_tokens` 为窗口，再预留宿主配置的输出 token，并核对该输出值是否超过返回的 `max_tokens`。若配置的是别名，则用返回的模型 ID 进行本次进程的计数与生成。探测失败时启动终止，SQLite 尚未打开。
+
+窗口来源和输入计数可独立配置。Anthropic 的窗口探测可配合任一计数模式，OpenAI 使用数字窗口配置。
 
 ## 持久化与迁移
 

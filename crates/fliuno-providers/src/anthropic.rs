@@ -9,6 +9,7 @@ use fliuno_core::{
 use fliuno_protocol::{Message, Task, ToolCall};
 use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
+mod metadata;
 mod stream;
 
 pub struct AnthropicProvider {

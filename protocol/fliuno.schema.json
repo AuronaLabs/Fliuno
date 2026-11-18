@@ -3935,6 +3935,9 @@
         },
         "countMode": {
           "$ref": "#/$defs/ModelInputCountMode"
+        },
+        "source": {
+          "$ref": "#/$defs/ModelBudgetSource"
         }
       },
       "additionalProperties": false,
@@ -3942,7 +3945,8 @@
         "windowTokens",
         "maxInputTokens",
         "maxOutputTokens",
-        "countMode"
+        "countMode",
+        "source"
       ],
       "$defs": {
         "ModelInputCountMode": {
@@ -3950,6 +3954,13 @@
           "enum": [
             "json_bytes_estimate",
             "provider"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
           ]
         }
       }

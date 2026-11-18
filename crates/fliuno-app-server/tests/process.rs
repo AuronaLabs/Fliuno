@@ -20,6 +20,8 @@ mod context;
 #[cfg(feature = "test-fixtures")]
 #[path = "process/execution.rs"]
 mod execution;
+#[path = "process/model_budget.rs"]
+mod model_budget;
 #[cfg(feature = "test-fixtures")]
 #[path = "process/terminal.rs"]
 mod terminal;
@@ -113,29 +115,7 @@ impl Peer {
                 .arg(config)
                 .env("FLIUNO_TEST_A2A_TOKEN", "fixture-a2a-private");
         }
-        let mut child = command.spawn().unwrap();
-        let input = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let (output_tx, output) = mpsc::channel();
-        let reader = thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
-                let Ok(value) = serde_json::from_str(&line) else {
-                    break;
-                };
-                if output_tx.send(value).is_err() {
-                    break;
-                }
-            }
-        });
-        let mut peer = Self {
-            child,
-            input,
-            output,
-            reader: Some(reader),
-            id: 0,
-            notifications: Vec::new(),
-        };
+        let mut peer = Self::from_child(command.spawn().unwrap());
         let init = peer.call(
             "initialize",
             json!({"protocolVersion":"0.1","clientName":"process-test"}),
@@ -175,6 +155,30 @@ impl Peer {
             terminal.is_some()
         );
         peer
+    }
+    fn from_child(mut child: Child) -> Self {
+        let input = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let (output_tx, output) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                let Ok(value) = serde_json::from_str(&line) else {
+                    break;
+                };
+                if output_tx.send(value).is_err() {
+                    break;
+                }
+            }
+        });
+        Self {
+            child,
+            input,
+            output,
+            reader: Some(reader),
+            id: 0,
+            notifications: Vec::new(),
+        }
     }
     fn request(&mut self, method: &str, params: Value) -> Value {
         self.id += 1;
@@ -675,7 +679,8 @@ fn configured_model_budget_is_reported_without_contacting_the_provider() {
         assert_eq!(
             init["result"]["capabilities"]["modelBudget"],
             json!({
-                "windowTokens":32768,"maxInputTokens":30720,"maxOutputTokens":2048,"countMode":reported
+                "windowTokens":32768,"maxInputTokens":30720,"maxOutputTokens":2048,
+                "countMode":reported,"source":"configured"
             })
         );
     }
