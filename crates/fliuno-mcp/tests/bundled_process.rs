@@ -4,18 +4,25 @@ use fliuno_core::{CancellationToken, Kernel, ModelDecision, ModelProvider, Model
 use fliuno_protocol::{ApprovalDecision, Message, Task, TaskStatus, ToolCall};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{fs, net::TcpListener, path::PathBuf};
+use std::{
+    fs,
+    net::TcpListener,
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {
+        static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
-            "fliuno-mcp-bundle-{}-{}",
+            "fliuno-mcp-bundle-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
         ));
         fs::create_dir(&root).unwrap();
         fs::write(root.join("private.txt"), "host bytes").unwrap();
