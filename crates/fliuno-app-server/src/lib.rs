@@ -240,43 +240,47 @@ impl RpcServer {
                 .iter()
                 .any(|spec| matches!(spec.effect, fliuno_core::ToolEffect::ProcessExecution));
             self.initialized = true;
-            return Ok(
-                json!({"protocolVersion":PROTOCOL_VERSION, "serverName":"fliuno-app-server",
-                "serverVersion":env!("CARGO_PKG_VERSION"), "capabilities":{
-                    "eventReplay":true, "approvals":true, "artifacts":true,
-                    "artifactSummaries":true,
-                    "registrationAuthority":true,
-                    "eventNotifications":true, "globalEventReplay":true,
-                    "eventReplayTargetBytes":fliuno_core::MAX_EVENT_TARGET_BYTES,
-                    "eventResubscribe":true,
-                    "provider":self.provider_name, "liveModels":self.provider_name != "demo",
-                    "externalTools":external_tools, "backgroundTasks":true,
-                    "externalAgents":!self.kernel()?.agent_specs().is_empty(),
-                    "remoteTaskChecks":self.kernel()?.remote_task_check_supported(),
-                    "remoteTaskContinuation":self.kernel()?.remote_continuation_supported(),
-                    "sessionContext":true,
-                    "taskSummaries":true,
-                    "contextTaskSelection":true,
-                    "contextFitRecent":true,
-                    "processExecution":process_execution,
-                    "modelProgressNotifications":self.kernel()?.model_progress_supported(),
-                    "modelProgressResubscribe":self.kernel()?.model_progress_supported(),
-                    "modelBudget":self.kernel()?.configured_model_budget(),
-                    "terminalSessions":self.terminals.is_some(),
-                    "terminalOutputSubscriptions":self.terminals.is_some(),
-                    "terminalOutputTail":self.terminals.is_some(),
-                    "terminalArchiving":self.terminals.is_some(),
-                    "terminalBatchArchiving":self.terminals.is_some(),
-                    "maxTerminalArchiveBatch":MAX_TERMINAL_ARCHIVE_BATCH,
-                    "maxTerminalSubscriptions":terminal_subscriptions::MAX_SUBSCRIPTIONS,
-                    "maxContextTurns":fliuno_core::MAX_CONTEXT_TURNS,
-                    "maxContextCandidates":fliuno_core::MAX_CONTEXT_CANDIDATES,
-                    "maxContextBytes":fliuno_core::MAX_CONTEXT_BYTES,
-                    "taskCancellation":true,
-                    "concurrentExecution":scheduler::WORKER_COUNT > 1,
-                    "maxConcurrentExecutions":scheduler::WORKER_COUNT
-                }}),
-            );
+            let capabilities = json!({
+                "eventReplay":true, "approvals":true, "artifacts":true,
+                "artifactSummaries":true,
+                "registrationAuthority":true,
+                "eventNotifications":true, "globalEventReplay":true,
+                "eventReplayTargetBytes":fliuno_core::MAX_EVENT_TARGET_BYTES,
+                "eventResubscribe":true,
+                "provider":self.provider_name, "liveModels":self.provider_name != "demo",
+                "externalTools":external_tools, "backgroundTasks":true,
+                "externalAgents":!self.kernel()?.agent_specs().is_empty(),
+                "remoteTaskChecks":self.kernel()?.remote_task_check_supported(),
+                "remoteTaskContinuation":self.kernel()?.remote_continuation_supported(),
+                "sessionContext":true,
+                "sessionTitles":true,
+                "taskSummaries":true,
+                "contextTaskSelection":true,
+                "contextFitRecent":true,
+                "processExecution":process_execution,
+                "modelProgressNotifications":self.kernel()?.model_progress_supported(),
+                "modelProgressResubscribe":self.kernel()?.model_progress_supported(),
+                "modelBudget":self.kernel()?.configured_model_budget(),
+                "terminalSessions":self.terminals.is_some(),
+                "terminalOutputSubscriptions":self.terminals.is_some(),
+                "terminalOutputTail":self.terminals.is_some(),
+                "terminalArchiving":self.terminals.is_some(),
+                "terminalBatchArchiving":self.terminals.is_some(),
+                "maxTerminalArchiveBatch":MAX_TERMINAL_ARCHIVE_BATCH,
+                "maxTerminalSubscriptions":terminal_subscriptions::MAX_SUBSCRIPTIONS,
+                "maxContextTurns":fliuno_core::MAX_CONTEXT_TURNS,
+                "maxContextCandidates":fliuno_core::MAX_CONTEXT_CANDIDATES,
+                "maxContextBytes":fliuno_core::MAX_CONTEXT_BYTES,
+                "taskCancellation":true,
+                "concurrentExecution":scheduler::WORKER_COUNT > 1,
+                "maxConcurrentExecutions":scheduler::WORKER_COUNT
+            });
+            return Ok(json!({
+                "protocolVersion": PROTOCOL_VERSION,
+                "serverName": "fliuno-app-server",
+                "serverVersion": env!("CARGO_PKG_VERSION"),
+                "capabilities": capabilities,
+            }));
         }
         if !self.initialized {
             return Err(RpcError {
@@ -393,7 +397,18 @@ impl RpcServer {
             }
             "session/create" => {
                 let p: SessionCreateParams = decode(params)?;
-                json!(self.kernel()?.create_session(&p.workspace_id)?)
+                json!(
+                    self.kernel()?
+                        .create_session_with_title(&p.workspace_id, p.title.as_deref())?
+                )
+            }
+            "session/get" => {
+                let p: SessionIdParams = decode(params)?;
+                json!(self.kernel()?.get_session(&p.session_id)?)
+            }
+            "session/rename" => {
+                let p: SessionRenameParams = decode(params)?;
+                json!(self.kernel()?.rename_session(&p.session_id, &p.title)?)
             }
             "session/context" => {
                 let p: SessionContextParams = decode(params)?;

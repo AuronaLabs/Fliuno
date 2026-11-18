@@ -24,6 +24,8 @@ mod event_stream;
 mod execution;
 #[path = "process/model_budget.rs"]
 mod model_budget;
+#[path = "process/sessions.rs"]
+mod sessions;
 #[cfg(feature = "test-fixtures")]
 #[path = "process/terminal.rs"]
 mod terminal;
@@ -123,6 +125,7 @@ impl Peer {
             json!({"protocolVersion":"0.1","clientName":"process-test"}),
         );
         assert_eq!(init["capabilities"]["sessionContext"], true);
+        assert_eq!(init["capabilities"]["sessionTitles"], true);
         assert_eq!(init["capabilities"]["contextTaskSelection"], true);
         assert_eq!(init["capabilities"]["contextFitRecent"], true);
         assert_eq!(init["capabilities"]["maxContextCandidates"], 128);

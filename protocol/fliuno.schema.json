@@ -60,11 +60,54 @@
       "properties": {
         "workspaceId": {
           "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 120,
+          "default": null
         }
       },
       "additionalProperties": false,
       "required": [
         "workspaceId"
+      ]
+    },
+    "session/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionIdParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "session/rename": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionRenameParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "title"
       ]
     },
     "session/list": {
@@ -841,6 +884,14 @@
         },
         "workspaceId": {
           "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 120
         }
       },
       "additionalProperties": false,

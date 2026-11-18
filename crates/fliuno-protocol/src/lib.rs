@@ -1,6 +1,8 @@
 //! Fliuno application protocol and persisted domain values. No runtime dependencies.
 mod context;
 pub use context::*;
+mod session;
+pub use session::*;
 mod terminal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,13 +16,6 @@ pub const PROTOCOL_VERSION: &str = "0.1";
 pub struct Workspace {
     pub id: String,
     pub root: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Session {
-    pub id: String,
-    pub workspace_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -513,12 +508,6 @@ pub struct WorkspaceOpenParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SessionCreateParams {
-    pub workspace_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskStartParams {
     pub session_id: String,
     pub input: String,
@@ -651,6 +640,8 @@ pub fn schema_bundle() -> Value {
             "workspace/open": schemars::schema_for!(WorkspaceOpenParams),
             "workspace/list": schemars::schema_for!(ListParams),
             "session/create": schemars::schema_for!(SessionCreateParams),
+            "session/get": schemars::schema_for!(SessionIdParams),
+            "session/rename": schemars::schema_for!(SessionRenameParams),
             "session/list": schemars::schema_for!(SessionListParams),
             "session/context": schemars::schema_for!(SessionContextParams),
             "terminal/list": schemars::schema_for!(TerminalListParams),

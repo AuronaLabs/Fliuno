@@ -2,6 +2,7 @@
 mod artifacts;
 mod context;
 mod replay;
+mod sessions;
 use super::*;
 pub use replay::MAX_EVENT_TARGET_BYTES;
 use rusqlite::{OptionalExtension, params};
@@ -83,7 +84,7 @@ impl Kernel {
         lock: Option<File>,
     ) -> Result<Self> {
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 14 {
+        if version > 15 {
             return Err(Error::Conflict(
                 "database schema is newer than this binary".into(),
             ));
@@ -170,6 +171,10 @@ impl Kernel {
         if version < 14 {
             context::migrate_turn_stats(&mut db)?;
         }
+        if version < 15 {
+            // Named session snapshots add a field older readers cannot decode.
+            db.pragma_update(None, "user_version", 15)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         let mut kernel = Self {
@@ -218,30 +223,6 @@ impl Kernel {
             ],
         )?;
         Ok(workspace)
-    }
-
-    pub fn create_session(&mut self, workspace_id: &str) -> Result<Session> {
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
-            [workspace_id],
-            |r| r.get(0),
-        )?;
-        if !exists {
-            return Err(Error::NotFound("workspace".into()));
-        }
-        let session = Session {
-            id: new_id("session"),
-            workspace_id: workspace_id.into(),
-        };
-        self.db.execute(
-            "INSERT INTO sessions VALUES(?1,?2,?3)",
-            params![
-                session.id,
-                session.workspace_id,
-                serde_json::to_string(&session)?
-            ],
-        )?;
-        Ok(session)
     }
 
     pub fn get_task(&self, id: &str) -> Result<Task> {
