@@ -296,6 +296,7 @@ impl RpcServer {
             });
             capabilities["eventBySequence"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
+            capabilities["contextAtSequence"] = json!(true);
             capabilities["taskSummaryById"] = json!(true);
             capabilities["pendingApprovalInbox"] = json!(true);
             capabilities["pendingApprovalDetails"] = json!(true);
@@ -450,7 +451,11 @@ impl RpcServer {
             }
             "session/context" => {
                 let p: SessionContextParams = decode(params)?;
-                json!(self.kernel()?.session_context(&p.session_id, p.options)?)
+                json!(self.kernel()?.session_context_through(
+                    &p.session_id,
+                    p.options,
+                    p.through_sequence,
+                )?)
             }
             "task/start" => {
                 let p: TaskStartParams = decode(params)?;

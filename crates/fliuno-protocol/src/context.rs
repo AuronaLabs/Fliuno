@@ -131,6 +131,9 @@ pub struct TaskContext {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionContextParams {
     pub session_id: String,
+    /// Include completions at or before this global event sequence.
+    #[serde(default)]
+    pub through_sequence: Option<u64>,
     #[serde(default)]
     pub options: ContextOptions,
 }

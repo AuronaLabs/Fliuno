@@ -53,9 +53,25 @@ pub(crate) fn normalize_options(mut options: ContextOptions) -> Result<ContextOp
 impl Kernel {
     /// Preview the same deterministic selection captured by task creation.
     pub fn session_context(&self, session: &str, options: ContextOptions) -> Result<TaskContext> {
+        self.session_context_through(session, options, None)
+    }
+
+    /// Reconstruct a preview at a committed point in the event log.
+    pub fn session_context_through(
+        &self,
+        session: &str,
+        options: ContextOptions,
+        through: Option<u64>,
+    ) -> Result<TaskContext> {
         self.require_session(session)?;
         let options = normalize_options(options)?;
-        let through_sequence = self.event_watermark()?;
+        let watermark = self.event_watermark()?;
+        let through_sequence = through.unwrap_or(watermark);
+        if through_sequence > watermark {
+            return Err(Error::Invalid(
+                "throughSequence exceeds the current event sequence".into(),
+            ));
+        }
         let mut snapshot = TaskContext {
             options,
             through_sequence,

@@ -179,6 +179,16 @@
         "sessionId": {
           "type": "string"
         },
+        "throughSequence": {
+          "description": "Include completions at or before this global event sequence.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
         "options": {
           "$ref": "#/$defs/ContextOptions",
           "default": {

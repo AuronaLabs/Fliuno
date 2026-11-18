@@ -40,7 +40,7 @@ fn context_preview_snapshot_and_idempotency_survive_restart() {
     );
     assert_eq!(follow["context"], preview);
     peer.wait_for_status(follow["id"].as_str().unwrap(), "waiting_approval");
-    approve_report(&mut peer, &session, "后来完成的任务", "later");
+    let later = approve_report(&mut peer, &session, "后来完成的任务", "later");
     assert_eq!(
         peer.call("task/get", json!({"taskId":follow["id"]}))["context"],
         preview
@@ -65,6 +65,28 @@ fn context_preview_snapshot_and_idempotency_survive_restart() {
     drop(peer);
 
     let mut peer = Peer::start(&db);
+    let history = json!({"sessionId":session["id"],"throughSequence":preview["throughSequence"]});
+    assert_eq!(peer.call("session/context", history.clone()), preview);
+    let mut selected = history;
+    selected["options"] = json!({"taskIds":[later["id"]]});
+    assert_eq!(
+        peer.request("session/context", selected)["error"]["code"],
+        -32602
+    );
+    let empty = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"throughSequence":0}),
+    );
+    assert_eq!(empty["throughSequence"], 0);
+    assert_eq!(empty["omittedTurns"], 0);
+    assert_eq!(empty["turns"], json!([]));
+    assert_eq!(
+        peer.request(
+            "session/context",
+            json!({"sessionId":session["id"],"throughSequence":u64::MAX})
+        )["error"]["code"],
+        -32602
+    );
     let retry = peer.call("task/start", json!({"sessionId":session["id"],"input":"follow up","clientRequestId":"follow","context":{}}));
     assert_eq!(retry["id"], follow["id"]);
     assert_eq!(retry["context"], preview);
