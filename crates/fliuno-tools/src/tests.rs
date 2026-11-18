@@ -871,6 +871,9 @@ fn symlinks_cannot_escape_the_workspace() {
     assert!(link.output["bytes"].is_null());
     call.arguments["path"] = json!("escape/secret");
     assert!(stat.execute(&context, &call, &token).is_err());
+    let hash = hash::Hash;
+    call.name = hash.spec().name;
+    assert!(hash.execute(&context, &call, &token).is_err());
     let read = ToolCall {
         id: "r".into(),
         name: "workspace_read_text".into(),

@@ -183,6 +183,16 @@ fn fifo_without_a_writer_is_rejected_by_read_patch_and_write_review_without_hang
             workspace: &workspace,
         };
         let token = CancellationToken::new();
+        let hash = crate::hash::Hash;
+        let hash_call = ToolCall {
+            id: "hash".into(),
+            name: hash.spec().name,
+            arguments: json!({"path":"fifo"}),
+        };
+        assert!(matches!(
+            hash.execute(&context, &hash_call, &token),
+            Err(ToolError::Failed(_))
+        ));
         for operation in [
             Operation::Read,
             Operation::ReadBinary,
@@ -251,4 +261,92 @@ fn fifo_without_a_writer_is_rejected_by_read_patch_and_write_review_without_hang
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+use crate::{
+    Kernel, Tool, ToolCall, ToolContext, ToolSpec,
+    hash::{BUDGET, Hash},
+    json, register,
+};
+use fliuno_core::{ModelDecision, ModelProvider, ModelTurn};
+use fliuno_protocol::{ApprovalDecision, Message, Task, TaskStatus};
+
+struct HashProvider;
+
+impl ModelProvider for HashProvider {
+    fn next(
+        &self,
+        task: &Task,
+        _: &[ToolSpec],
+        _: &CancellationToken,
+    ) -> Result<ModelTurn, String> {
+        if task
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::ToolResult { .. }))
+        {
+            return Ok(ModelDecision::Complete("hash checked".into()).into());
+        }
+        Ok(ModelDecision::Call(ToolCall {
+            id: "hash".into(),
+            name: "workspace_sha256".into(),
+            arguments: json!({"path":"asset.bin"}),
+        })
+        .into())
+    }
+}
+
+#[test]
+fn hash_returns_only_metadata_after_approval_and_rejects_oversized_files() {
+    let dir = Directory::new();
+    let target = dir.0.join("asset.bin");
+    std::fs::write(&target, (0..=255_u8).collect::<Vec<_>>().repeat(4096)).unwrap();
+    let mut kernel = Kernel::in_memory(Box::new(HashProvider)).unwrap();
+    register(&mut kernel).unwrap();
+    let workspace = kernel.open_workspace(dir.0.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let approved_hash = |kernel: &mut Kernel, decision| {
+        let waiting = kernel.start_task(&session.id, "check the file").unwrap();
+        assert_eq!(waiting.status, TaskStatus::WaitingApproval);
+        let approval = waiting.pending_approval.unwrap();
+        assert_eq!(approval.call.name, "workspace_sha256");
+        kernel
+            .respond_approval(&waiting.id, &approval.id, decision)
+            .unwrap()
+    };
+    let denied = approved_hash(&mut kernel, ApprovalDecision::Deny);
+    assert_eq!(denied.status, TaskStatus::Failed);
+    assert!(
+        !denied
+            .messages
+            .iter()
+            .any(|message| matches!(message, Message::ToolResult { .. }))
+    );
+    let done = approved_hash(&mut kernel, ApprovalDecision::AllowOnce);
+    assert_eq!(done.status, TaskStatus::Completed);
+    assert!(done.messages.iter().any(|message| matches!(message, Message::ToolResult { output, .. } if *output == json!({
+        "path":"asset.bin", "bytes":1048576, "sha256":"fbbab289f7f94b25736c58be46a994c441fd02552cc6022352e3d86d2fab7c83"
+    }))));
+    assert!(kernel.list_artifacts(&done.id).unwrap().is_empty());
+
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&target)
+        .unwrap()
+        .set_len(BUDGET.0 + 1)
+        .unwrap();
+    let context = ToolContext {
+        workspace: &workspace,
+        session_id: &session.id,
+        task_id: &done.id,
+    };
+    let call = ToolCall {
+        id: "hash".into(),
+        name: "workspace_sha256".into(),
+        arguments: json!({"path":"asset.bin"}),
+    };
+    assert!(matches!(
+        Hash.execute(&context, &call, &CancellationToken::new()),
+        Err(ToolError::Failed(message)) if message == BUDGET.1
+    ));
 }

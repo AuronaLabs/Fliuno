@@ -22,6 +22,18 @@ pub(crate) fn read(
     file: &mut File,
     cancellation: &CancellationToken,
 ) -> Result<Vec<u8>, ToolError> {
+    require_regular_file(file, READ_BUDGET, cancellation)?;
+    read_bounded(file, cancellation)
+}
+
+pub(super) type ReadBudget = (u64, &'static str);
+const READ_BUDGET: ReadBudget = (READ_LIMIT, "file exceeds 256 KiB");
+
+pub(super) fn require_regular_file(
+    file: &File,
+    (limit, too_large): ReadBudget,
+    cancellation: &CancellationToken,
+) -> Result<(), ToolError> {
     if cancellation.is_cancelled() {
         return Err("tool cancelled before file read".into());
     }
@@ -29,15 +41,28 @@ pub(crate) fn read(
     if !metadata.is_file() {
         return Err("path is not a regular file".into());
     }
-    if metadata.len() > READ_LIMIT {
-        return Err("file exceeds 256 KiB".into());
+    if metadata.len() > limit {
+        return Err(too_large.into());
     }
-    read_bounded(file, cancellation)
+    Ok(())
 }
 
 fn read_bounded(reader: impl Read, cancellation: &CancellationToken) -> Result<Vec<u8>, ToolError> {
-    let mut reader = reader.take(READ_LIMIT + 1);
     let mut bytes = Vec::new();
+    read_chunks(reader, READ_BUDGET, cancellation, |chunk| {
+        bytes.extend_from_slice(chunk)
+    })?;
+    Ok(bytes)
+}
+
+pub(super) fn read_chunks(
+    reader: impl Read,
+    (limit, too_large): ReadBudget,
+    cancellation: &CancellationToken,
+    mut consume: impl FnMut(&[u8]),
+) -> Result<u64, ToolError> {
+    let mut reader = reader.take(limit + 1);
+    let mut bytes = 0;
     let mut chunk = [0; 16 * 1024];
     loop {
         if cancellation.is_cancelled() {
@@ -55,10 +80,11 @@ fn read_bounded(reader: impl Read, cancellation: &CancellationToken) -> Result<V
         if count == 0 {
             return Ok(bytes);
         }
-        if bytes.len() + count > READ_LIMIT as usize {
-            return Err("file exceeds 256 KiB".into());
+        bytes += count as u64;
+        if bytes > limit {
+            return Err(too_large.into());
         }
-        bytes.extend_from_slice(&chunk[..count]);
+        consume(&chunk[..count]);
     }
 }
 
