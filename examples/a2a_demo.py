@@ -12,9 +12,10 @@ import time
 from rpc_client import LocalKernel, build_server
 
 
-def fixture(cancel):
+def fixture(cancel, streaming):
     class Handler(BaseHTTPRequestHandler):
         methods = []
+        cancel_requested = threading.Event()
 
         def log_message(self, *_args):
             pass
@@ -28,10 +29,24 @@ def fixture(cancel):
             self.end_headers()
             self.wfile.write(body)
 
+        def reply_event(self, request_id, result):
+            envelope = {"jsonrpc": "2.0", "id": request_id, "result": result}
+            body = json.dumps(envelope, ensure_ascii=False).encode("utf-8")
+            self.wfile.write(b"data: " + body + b"\n\n")
+            self.wfile.flush()
+
+        def start_stream(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
         def do_GET(self):
             assert self.path == "/.well-known/agent-card.json"
             self.reply({"supportedInterfaces": [{"url": f"http://{self.headers['Host']}/rpc",
-                        "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}], "capabilities": {}})
+                        "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}],
+                        "capabilities": {"streaming": streaming}})
 
         def do_POST(self):
             assert self.path == "/rpc" and self.headers["A2A-Version"] == "1.0"
@@ -43,6 +58,38 @@ def fixture(cancel):
                 assert request["params"]["message"]["role"] == "ROLE_USER"
                 assert request["params"]["configuration"]["returnImmediately"]
                 result = {"task": task}
+            elif method == "SendStreamingMessage":
+                assert streaming
+                assert request["params"]["message"]["role"] == "ROLE_USER"
+                assert request["params"]["configuration"]["returnImmediately"]
+                self.start_stream()
+                self.reply_event(request["id"], {"task": task})
+                if cancel:
+                    if self.cancel_requested.wait(8):
+                        self.reply_event(request["id"], {"statusUpdate": {
+                            "taskId": task["id"], "contextId": task["contextId"],
+                            "status": {"state": "TASK_STATE_CANCELED"}}})
+                    return
+                time.sleep(0.03)
+                self.reply_event(request["id"], {"artifactUpdate": {
+                    "taskId": task["id"], "contextId": task["contextId"],
+                    "artifact": {"artifactId": "report", "name": "report.json",
+                                  "parts": [{"text": "\u8fd9\u662f\u672c\u673a A2A fixture "}]},
+                    "append": False, "lastChunk": False}})
+                time.sleep(0.03)
+                self.reply_event(request["id"], {"artifactUpdate": {
+                    "taskId": task["id"], "contextId": task["contextId"],
+                    "artifact": {"artifactId": "report", "name": "report.json",
+                                  "parts": [{"text": "\u751f\u6210\u7684\u62a5\u544a\u3002"},
+                                            {"data": {"rows": 3, "source": "local fixture"}},
+                                            {"raw": "aGk=", "filename": "hi.txt", "mediaType": "text/plain"},
+                                            {"url": f"http://{self.headers['Host']}/must-not-fetch"}]},
+                    "append": True, "lastChunk": True}})
+                time.sleep(0.03)
+                self.reply_event(request["id"], {"statusUpdate": {
+                    "taskId": task["id"], "contextId": task["contextId"],
+                    "status": {"state": "TASK_STATE_COMPLETED"}}})
+                return
             elif method == "GetTask":
                 assert request["params"]["id"] == "demo-task"
                 if not cancel:
@@ -56,6 +103,8 @@ def fixture(cancel):
                 result = task
             elif method == "CancelTask":
                 assert request["params"]["id"] == "demo-task"
+                if streaming:
+                    self.cancel_requested.set()
                 task["status"]["state"] = "TASK_STATE_CANCELED"
                 result = task
             else:
@@ -72,9 +121,10 @@ def fixture(cancel):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cancel", action="store_true", help="Cancel after observing the remote identity")
+    parser.add_argument("--streaming", action="store_true", help="Use A2A 1.0 SSE instead of polling")
     args = parser.parse_args()
     executable = build_server()
-    server, thread, handler = fixture(args.cancel)
+    server, thread, handler = fixture(args.cancel, args.streaming)
     base = f"http://127.0.0.1:{server.server_port}"
     try:
         with tempfile.TemporaryDirectory(prefix="fliuno-a2a-demo-") as directory:
@@ -82,7 +132,8 @@ def main():
             config = directory / "a2a.json"
             config.write_text(json.dumps({"agents": [{"id": "demo", "endpoint": base + "/rpc",
                 "agentCardUrl": base + "/.well-known/agent-card.json", "pollIntervalMs": 50,
-                "requestTimeoutMs": 3000, "taskTimeoutMs": 10000}]}), encoding="utf-8")
+                "requestTimeoutMs": 3000, "taskTimeoutMs": 10000,
+                "streaming": args.streaming}]}), encoding="utf-8")
             environment = dict(os.environ, FLIUNO_PROVIDER="demo")
             with LocalKernel(executable, ["--db", directory / "kernel.db", "--a2a-config", config], environment) as kernel:
                 kernel.call("initialize", {"protocolVersion": "0.1", "clientName": "a2a-demo"})
@@ -108,7 +159,14 @@ def main():
                     time.sleep(0.01)
                     done = kernel.call("task/get", {"taskId": task["id"]})
                 assert done["agentRun"]["finished"] and not done["agentRun"]["outcomeUnknown"]
-                assert handler.methods.count("SendMessage") == 1
+                submission = "SendStreamingMessage" if args.streaming else "SendMessage"
+                assert handler.methods.count(submission) == 1
+                assert handler.methods.count("SendMessage") + handler.methods.count("SendStreamingMessage") == 1
+                if args.streaming:
+                    assert "GetTask" not in handler.methods
+                elif not args.cancel:
+                    assert "GetTask" in handler.methods
+                assert handler.methods.count("CancelTask") == (1 if args.cancel else 0)
                 artifacts = kernel.call("artifacts/list", {"taskId": task["id"]})
                 assert len(artifacts) == (0 if args.cancel else 1)
                 print("Result:", done["status"])

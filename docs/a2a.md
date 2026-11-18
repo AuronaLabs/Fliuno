@@ -84,6 +84,8 @@ cargo test -p fliuno-a2a -p fliuno-agents -p fliuno-core --all-features --locked
 cargo test -p fliuno-app-server --all-features --locked a2a
 python examples/a2a_demo.py
 python examples/a2a_demo.py --cancel
+python examples/a2a_demo.py --streaming
+python examples/a2a_demo.py --streaming --cancel
 ```
 
 测试覆盖真实 loopback HTTP wire、标准头与方法、响应关联、Part oneof / ProtoJSON bytes、卡片接口与扩展拒绝、重定向隔离、响应预算、超时，以及真实 app-server 的 SQLite 重启、幂等、产物、上下文、失败/暂停与取消证据。远端任务证据在 v7 引入，旧 Agent 记录的新增字段默认空；v8 增加排队任务的注册绑定，当前 v9 增加[显式上下文选择](context.md)，不改写原远程证据。
@@ -91,6 +93,7 @@ python examples/a2a_demo.py --cancel
 `Task.backendAuthority` 在创建时冻结全部 A2A 配置及实际 bearer token 的摘要。相同 Agent ID 更换端点、凭据、卡片地址或执行预算，重启后旧排队任务不能启动；幂等提交仍返回原任务，不刷新摘要。该检查不认证远端代码，也不允许重发结果未知的提交，详见[注册身份](authority.md)。
 
 这些是独立契约 fixture 与本机进程验收。当前未完成官方 A2A SDK 或真实外部 Agent 的互操作验收；上游 Rust 仓库克隆因网络失败，未将其作为已运行的测试依据。
+离线演示覆盖轮询和 SSE 的成功/取消闭环，并验证分块产物组装及流式模式不会回退轮询。
 
 2026-11-18 本机 Windows 最终全工作区回归：204 passed、0 failed、0 ignored，41 个测试目标；fmt、所有目标/feature 的 Clippy、Schema 一致性、两个离线演示与 Linux 目标交叉 Clippy 通过。交叉检查不能代替 Linux 内核探针的实际运行。
 

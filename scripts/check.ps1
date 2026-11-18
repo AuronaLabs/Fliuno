@@ -45,6 +45,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'A2A demo failed' }
     python examples/a2a_demo.py --cancel
     if ($LASTEXITCODE -ne 0) { throw 'A2A cancellation demo failed' }
+    python examples/a2a_demo.py --streaming
+    if ($LASTEXITCODE -ne 0) { throw 'A2A streaming demo failed' }
+    python examples/a2a_demo.py --streaming --cancel
+    if ($LASTEXITCODE -ne 0) { throw 'A2A streaming cancellation demo failed' }
     if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
         python examples/bundle_demo.py --runtime python
         if ($LASTEXITCODE -ne 0) { throw 'Python companion demo failed' }
