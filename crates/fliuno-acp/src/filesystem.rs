@@ -27,13 +27,13 @@ impl HostRequest {
                 if r.line == Some(0) || r.limit == Some(0) {
                     return false;
                 }
-                (&r.path, serde_json::to_vec(r).map(|v| v.len()))
+                (&r.path, crate::json_size::json_size(r))
             }
             Self::Write(r) => {
                 if r.content.len() > MAX_TEXT_BYTES {
                     return false;
                 }
-                (&r.path, serde_json::to_vec(r).map(|v| v.len()))
+                (&r.path, crate::json_size::json_size(r))
             }
         };
         path.is_absolute()

@@ -142,9 +142,8 @@ impl Shared {
 
     pub fn update(&self, notification: SessionNotification) -> Result<()> {
         self.check()?;
-        let size = serde_json::to_vec(&notification)
-            .map_err(|_| Error::Protocol("cannot encode session update"))?
-            .len();
+        let size = crate::json_size::json_size(&notification)
+            .map_err(|_| Error::Protocol("cannot encode session update"))?;
         if size > MAX_EVENT_BYTES {
             self.fail(Error::Protocol("session update exceeds 256 KiB"));
             return Err(self.failure());

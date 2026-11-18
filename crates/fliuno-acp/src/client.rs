@@ -379,9 +379,8 @@ impl Client {
         let request = PromptRequest::new(session_id.clone(), blocks);
         // Reserve space for the JSON-RPC envelope. Escaped control characters
         // can make wire bytes much larger than the UTF-8 text budgets above.
-        if serde_json::to_vec(&request)
+        if crate::json_size::json_size(&request)
             .map_err(|_| Error::InvalidInput("invalid prompt"))?
-            .len()
             > 1024 * 1024 - 1024
         {
             return Err(Error::InvalidInput(

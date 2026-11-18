@@ -12,6 +12,7 @@ test-fixtures = ["agent-client-protocol/stdio"]
 agent-client-protocol = { version = "5.3", default-features = false }
 fliuno-sandbox = { path = "../fliuno-sandbox", features = ["async-io"] }
 futures = "0.3"
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "fs"] }

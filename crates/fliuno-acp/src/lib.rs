@@ -7,6 +7,7 @@
 mod client;
 mod config;
 mod filesystem;
+mod json_size;
 mod permissions;
 mod state;
 mod transport;

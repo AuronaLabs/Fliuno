@@ -63,7 +63,7 @@ pub(crate) fn prepare(shared: Arc<Shared>, request: RequestPermissionRequest) ->
     if shared.check().is_err()
         || request.options.len() > 16
         || request.options.is_empty()
-        || serde_json::to_vec(&request).map_or(true, |v| v.len() > MAX_EVENT_BYTES)
+        || crate::json_size::json_size(&request).map_or(true, |bytes| bytes > MAX_EVENT_BYTES)
     {
         return None;
     }
