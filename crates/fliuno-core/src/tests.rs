@@ -199,6 +199,32 @@ fn recovery_interrupts_running_tasks_without_reexecuting_tools() {
     assert!(kernel.resume_task(&task.id).is_err());
 }
 
+#[test]
+fn recovery_processes_large_backlogs_across_bounded_pages() {
+    let (mut kernel, session) = setup();
+    let mut task_ids = Vec::new();
+    for index in 0..130 {
+        let task = kernel
+            .create_task_with_key(&session.id, &format!("queued {index}"), None)
+            .unwrap()
+            .0;
+        let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&task.id).unwrap()
+        else {
+            panic!("expected a prepared model attempt");
+        };
+        task_ids.push(task.id);
+    }
+
+    kernel.interrupt_running_tasks().unwrap();
+
+    for task_id in task_ids {
+        let task = kernel.get_task(&task_id).unwrap();
+        assert_eq!(task.status, TaskStatus::Interrupted);
+        assert!(task.model_outcome_unknown);
+        assert_eq!(task.model_steps, 1);
+    }
+}
+
 struct FlakyModel(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 impl ModelProvider for FlakyModel {
     fn next(

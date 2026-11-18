@@ -11,6 +11,8 @@ use std::{
     path::Path,
 };
 
+const RECOVERY_BATCH_SIZE: i64 = 64;
+
 impl Kernel {
     pub(crate) fn workspace_for_task(&self, task_id: &str) -> Result<Workspace> {
         let data: String = self.db.query_row("SELECT workspaces.data FROM workspaces JOIN sessions ON sessions.workspace_id=workspaces.id JOIN tasks ON tasks.session_id=sessions.id WHERE tasks.id=?1", [task_id], |r| r.get(0))?;
@@ -344,42 +346,55 @@ impl Kernel {
 
     /// Stop scheduling after shutdown or restart without replaying any operation.
     pub fn interrupt_running_tasks(&mut self) -> Result<()> {
-        let tasks: Vec<Task> = {
-            let mut stmt = self.db.prepare("SELECT data FROM tasks WHERE running=1")?;
-            decode_rows(stmt.query_map([], |r| r.get::<_, String>(0))?)?
-        };
-        for mut task in tasks {
-            let mut events = Vec::new();
-            if task.status != TaskStatus::Cancelled {
-                task.status = TaskStatus::Interrupted;
-                events.push(EventKind::TaskInterrupted);
+        let mut after = 0_i64;
+        loop {
+            let rows: Vec<(i64, String)> = {
+                let mut stmt = self.db.prepare_cached(
+                    "SELECT rowid,data FROM tasks WHERE running=1 AND rowid>?1 ORDER BY rowid LIMIT ?2",
+                )?;
+                stmt.query_map(params![after, RECOVERY_BATCH_SIZE], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?
+                .collect::<std::result::Result<_, _>>()?
+            };
+            if rows.is_empty() {
+                break;
             }
-            if let Some(run) = &mut task.agent_run {
-                agent_tools::close_host_tools(run);
-                run.finished = true;
-                if task
-                    .remote_continuation
-                    .as_ref()
-                    .is_some_and(|c| !c.submission_started)
-                {
-                    run.outcome_unknown = false;
+            for (rowid, data) in rows {
+                after = rowid;
+                let mut task: Task = serde_json::from_str(&data)?;
+                let mut events = Vec::new();
+                if task.status != TaskStatus::Cancelled {
+                    task.status = TaskStatus::Interrupted;
+                    events.push(EventKind::TaskInterrupted);
                 }
-                events.extend(agent::close_approvals(run));
-                events.push(EventKind::AgentFinished {
-                    run_id: run.id.clone(),
-                    stop_reason: run.stop_reason,
-                    outcome_unknown: run.outcome_unknown,
-                });
+                if let Some(run) = &mut task.agent_run {
+                    agent_tools::close_host_tools(run);
+                    run.finished = true;
+                    if task
+                        .remote_continuation
+                        .as_ref()
+                        .is_some_and(|c| !c.submission_started)
+                    {
+                        run.outcome_unknown = false;
+                    }
+                    events.extend(agent::close_approvals(run));
+                    events.push(EventKind::AgentFinished {
+                        run_id: run.id.clone(),
+                        stop_reason: run.stop_reason,
+                        outcome_unknown: run.outcome_unknown,
+                    });
+                }
+                if let Some(control) = self.agent_controls.remove(&task.id) {
+                    control.cancellation.cancel();
+                }
+                if task.model_outcome_unknown {
+                    events.push(EventKind::ModelOutcomeUnknown {
+                        step: task.model_steps,
+                    });
+                }
+                self.commit(&task, &events, &[])?;
             }
-            if let Some(control) = self.agent_controls.remove(&task.id) {
-                control.cancellation.cancel();
-            }
-            if task.model_outcome_unknown {
-                events.push(EventKind::ModelOutcomeUnknown {
-                    step: task.model_steps,
-                });
-            }
-            self.commit(&task, &events, &[])?;
         }
         Ok(())
     }
