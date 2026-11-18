@@ -14,6 +14,7 @@ fn update(id: SessionId, text: &str) -> SessionNotification {
 }
 
 fn agent(cwd: PathBuf, ack: Arc<Notify>, advertised: bool) -> impl ConnectTo<acp::Client> {
+    let resume_cwd = cwd.clone();
     Agent
         .v1()
         .on_receive_request(
@@ -24,7 +25,8 @@ fn agent(cwd: PathBuf, ack: Arc<Notify>, advertised: bool) -> impl ConnectTo<acp
                             .load_session(advertised)
                             .session_capabilities(
                                 SessionCapabilities::new()
-                                    .close(advertised.then(SessionCloseCapabilities::new)),
+                                    .close(advertised.then(SessionCloseCapabilities::new))
+                                    .resume(advertised.then(SessionResumeCapabilities::new)),
                             ),
                     ),
                 )
@@ -67,6 +69,24 @@ fn agent(cwd: PathBuf, ack: Arc<Notify>, advertised: bool) -> impl ConnectTo<acp
                     assert_eq!(permission.outcome, RequestPermissionOutcome::Cancelled);
                     responder.respond(LoadSessionResponse::new())
                 })
+            },
+            acp::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: ResumeSessionRequest, responder, cx| {
+                assert_eq!(request.cwd, resume_cwd);
+                assert!(request.mcp_servers.is_empty());
+                assert!(request.additional_directories.is_empty());
+                assert!(request.system_prompt.is_none());
+                match request.session_id.0.as_ref() {
+                    "unexpected-replay" => {
+                        cx.send_notification(update(request.session_id, "old message"))?;
+                    }
+                    "resume-timeout" => {}
+                    _ => panic!("unexpected resume target"),
+                }
+                std::future::pending::<()>().await;
+                responder.respond(ResumeSessionResponse::new())
             },
             acp::on_receive_request!(),
         )
@@ -173,6 +193,11 @@ async fn wrong_session_history_closes_the_peer_and_no_capability_sends_nothing()
         client.load_session(&id, &cwd).await.unwrap_err(),
         Error::Unsupported("session/load")
     );
+    assert!(!client.supports_session_resuming());
+    assert_eq!(
+        client.resume_session(&id, &cwd).await.unwrap_err(),
+        Error::Unsupported("session/resume")
+    );
     assert!(!client.is_closed());
     client.close().await;
 }
@@ -238,4 +263,46 @@ async fn uncertain_close_retires_the_connection() {
         Error::OutcomeUnknown
     );
     client.close().await;
+}
+
+#[tokio::test]
+async fn resume_rejects_unsolicited_replay_and_retires_uncertain_connections() {
+    let cwd = std::env::current_dir().unwrap();
+    for (id, timeout, expected) in [
+        (
+            "unexpected-replay",
+            Duration::from_secs(2),
+            Error::Protocol("update for unknown session"),
+        ),
+        (
+            "resume-timeout",
+            Duration::from_millis(250),
+            Error::OutcomeUnknown,
+        ),
+    ] {
+        let (client, mut events) = Client::connect(
+            agent(cwd.clone(), Arc::new(Notify::new()), true),
+            ClientOptions {
+                request_timeout: timeout,
+                ..ClientOptions::default()
+            },
+        )
+        .await
+        .unwrap();
+        let id = SessionId::new(id);
+        assert_eq!(
+            client.resume_session(&id, &cwd).await.unwrap_err(),
+            expected
+        );
+        assert!(client.is_closed());
+        assert!(events.recv().await.is_none());
+        assert_eq!(
+            client
+                .prompt_text(&id, "closed", &CancellationToken::new())
+                .await
+                .unwrap_err(),
+            expected
+        );
+        client.close().await;
+    }
 }

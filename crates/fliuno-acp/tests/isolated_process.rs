@@ -158,6 +158,25 @@ async fn actual_acp_stdio_isolates_agent_tools_and_stops_process_on_timeout() {
     assert_eq!(page.sessions.len(), 1);
     assert_eq!(page.sessions[0].session_id, session);
 
+    assert!(isolated.supports_session_resuming());
+    assert!(matches!(
+        isolated.resume_session(&saved, &root).await,
+        Err(Error::InvalidInput(_))
+    ));
+    isolated.resume_session(&saved, &private).await.unwrap();
+    assert_eq!(
+        isolated.resume_session(&saved, &private).await.unwrap_err(),
+        Error::Busy
+    );
+    isolated
+        .prompt_text(&saved, "resumed", &CancellationToken::new())
+        .await
+        .unwrap();
+    // The first update belongs to this prompt. Resume does not replay history.
+    assert_eq!(update(&mut events).await, "\u{4f60}\u{597d}\u{ff0c}");
+    assert_eq!(update(&mut events).await, "resumed");
+    isolated.close_session(&saved).await.unwrap();
+
     assert_eq!(
         isolated
             .prompt_text(&session, "hang", &CancellationToken::new())

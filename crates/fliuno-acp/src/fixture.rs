@@ -32,6 +32,7 @@ pub fn agent() -> impl ConnectTo<Client> {
     let listed_directories = Arc::clone(&directories);
     let loaded_directories = Arc::clone(&directories);
     let closed_directories = Arc::clone(&directories);
+    let resumed_directories = Arc::clone(&directories);
     Agent.v1()
         .on_receive_request(
             async |request: InitializeRequest, responder, _cx| {
@@ -40,7 +41,8 @@ pub fn agent() -> impl ConnectTo<Client> {
                 assert!(!request.client_capabilities.terminal);
                 responder.respond(InitializeResponse::new(request.protocol_version).agent_capabilities(
                     AgentCapabilities::new().load_session(true).session_capabilities(
-                        SessionCapabilities::new().list(SessionListCapabilities::new()).close(SessionCloseCapabilities::new()),
+                        SessionCapabilities::new().list(SessionListCapabilities::new())
+                            .close(SessionCloseCapabilities::new()).resume(SessionResumeCapabilities::new()),
                     ),
                 ))
             },
@@ -80,6 +82,18 @@ pub fn agent() -> impl ConnectTo<Client> {
                 loaded_directories.lock().unwrap().insert(request.session_id.clone(), request.cwd);
                 cx.send_notification(update(&request.session_id, "saved history"))?;
                 responder.respond(LoadSessionResponse::new())
+            },
+            acp::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: ResumeSessionRequest, responder, _cx| {
+                if request.session_id.0.as_ref() != "fixture_saved" || !request.mcp_servers.is_empty()
+                    || !request.additional_directories.is_empty() || request.system_prompt.is_some()
+                {
+                    return responder.respond_with_error(acp::Error::invalid_params());
+                }
+                resumed_directories.lock().unwrap().insert(request.session_id, request.cwd);
+                responder.respond(ResumeSessionResponse::new())
             },
             acp::on_receive_request!(),
         )

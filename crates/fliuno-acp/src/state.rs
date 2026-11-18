@@ -77,6 +77,8 @@ pub(crate) enum Opening {
         updates: usize,
         bytes: usize,
     },
+    // Resume restores context on the peer without replaying session updates.
+    Resume(SessionId),
 }
 
 impl Opening {
@@ -225,7 +227,7 @@ impl OpenGuard {
         }
         if state.opening.is_some()
             || state.sessions.len() >= MAX_SESSIONS
-            || matches!(&opening, Opening::Load { id, .. } if state.sessions.contains_key(id))
+            || matches!(&opening, Opening::Load { id, .. } | Opening::Resume(id) if state.sessions.contains_key(id))
         {
             return Err(Error::Busy);
         }
@@ -248,7 +250,7 @@ impl OpenGuard {
         }
         let early = match state.opening.take() {
             Some(Opening::New(early)) if early.iter().all(|n| &n.session_id == session_id) => early,
-            Some(Opening::Load { id, .. }) if &id == session_id => Vec::new(),
+            Some(Opening::Load { id, .. } | Opening::Resume(id)) if &id == session_id => Vec::new(),
             _ => {
                 return Err(self.shared.fail_locked(
                     &mut state,

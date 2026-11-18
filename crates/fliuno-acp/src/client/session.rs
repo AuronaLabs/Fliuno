@@ -57,6 +57,45 @@ impl Client {
         Ok(response)
     }
 
+    pub fn supports_session_resuming(&self) -> bool {
+        self.initialized()
+            .agent_capabilities
+            .session_capabilities
+            .resume
+            .is_some()
+    }
+
+    /// Reconnect to an explicit session without replaying its transcript or
+    /// activating additional roots or MCP servers. The session becomes usable
+    /// only after the peer acknowledges the request.
+    pub async fn resume_session(
+        &self,
+        session_id: &SessionId,
+        cwd: impl AsRef<Path>,
+    ) -> Result<ResumeSessionResponse> {
+        let shared = &self.inner.shared;
+        shared.check()?;
+        if !self.supports_session_resuming() {
+            return Err(Error::Unsupported("session/resume"));
+        }
+        if !valid_session_id(session_id) {
+            return Err(Error::InvalidInput("invalid session ID"));
+        }
+        let cwd = self.checked_session_directory(cwd.as_ref())?;
+        let opening = OpenGuard::begin(shared, Opening::Resume(session_id.clone()))?;
+        let response = tokio::select! {
+            biased;
+            _ = shared.stop.cancelled() => return Err(shared.failure()),
+            response = tokio::time::timeout(
+                shared.options.request_timeout,
+                self.inner.connection.send_request(ResumeSessionRequest::new(session_id.clone(), cwd)).block_task(),
+            ) => response.map_err(|_| Error::OutcomeUnknown)?
+                .map_err(|error| Error::Remote(error.code.value()))?,
+        };
+        opening.finish(session_id)?;
+        Ok(response)
+    }
+
     pub fn supports_session_closing(&self) -> bool {
         self.initialized()
             .agent_capabilities

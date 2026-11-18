@@ -11,6 +11,7 @@
 | `Client::connect_isolated` | 通过 `fliuno-sandbox` 在 Windows AppContainer 或 Linux Landlock/seccomp 中启动单个程序，驱动持有隔离进程和 stdio；不支持的平台拒绝启动 |
 | `initialized` | 查看协商结果、Agent 能力和身份；只接受协议版本 1 |
 | `new_session` | 创建独立会话；需要绝对且存在的 cwd；隔离模式仅接受规范化后位于私有根内的现存目录 |
+| `resume_session` | Agent 声明 `sessionCapabilities.resume` 时恢复已知 ID。确认后可发送新 prompt。沿用隔离 cwd 校验，无历史回放或附加根目录与 MCP 服务 |
 | `prompt_text` | 发送单轮文本，返回官方 `PromptResponse`；流式消息、思考、工具、计划等通过 `Events` 的类型化通知返回 |
 | `respond_permission` | 按本地 permission ID 和会话 ID 响应允许一次或拒绝；不能更换原始请求 |
 | `respond_host_request` | 按本地文件请求 ID 和会话 ID 返回匹配的读/写结果、拒绝或失败；不执行 IO |
