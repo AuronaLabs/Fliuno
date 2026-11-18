@@ -96,8 +96,9 @@ impl Spool {
             params![start as i64, bytes],
         )
         .map_err(|_| "cannot persist terminal output")?;
+        // Restrict the range by primary key before reading any BLOB lengths.
         tx.execute(
-            "DELETE FROM chunks WHERE offset+length(data)<=?1",
+            "DELETE FROM chunks WHERE offset<=?1 AND offset+length(data)<=?1",
             [s.start_offset as i64],
         )
         .map_err(|_| "cannot prune terminal output")?;
