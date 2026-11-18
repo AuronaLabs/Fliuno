@@ -289,6 +289,8 @@ impl AcpBackend {
                             if session_id != session { return Err(()); }
                             broker.closed(id, observer)?;
                         }
+                        // This runner opens a fresh session for each task.
+                        Event::SessionHistory(_) => return Err(()),
                         Event::Update(update) => {
                             if update.session_id != session { return Err(()); }
                             let text = match &update.update {

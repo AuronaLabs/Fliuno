@@ -125,6 +125,27 @@ async fn actual_acp_stdio_isolates_agent_tools_and_stops_process_on_timeout() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "private");
     assert!(private.join("probe.txt").is_file());
 
+    let saved = SessionId::new("fixture_saved");
+    assert!(matches!(
+        isolated.load_session(&saved, &root).await,
+        Err(Error::InvalidInput(_))
+    ));
+    isolated.load_session(&saved, &private).await.unwrap();
+    let Some(Event::SessionHistory(history)) =
+        tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .unwrap()
+    else {
+        panic!("expected saved session history from the isolated process");
+    };
+    assert_eq!(history.session_id, saved);
+    isolated
+        .prompt_text(&saved, "loaded", &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(update(&mut events).await, "\u{4f60}\u{597d}\u{ff0c}");
+    assert_eq!(update(&mut events).await, "loaded");
+
     assert_eq!(
         isolated
             .prompt_text(&session, "hang", &CancellationToken::new())

@@ -1,13 +1,15 @@
 use crate::{CancellationToken, ClientOptions, Error, Result, schema::*};
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 use tokio::sync::{mpsc, oneshot};
 
 pub(crate) const MAX_EVENT_BYTES: usize = 256 * 1024;
 const MAX_EARLY_UPDATES: usize = 16;
-pub(crate) const MAX_SESSIONS: usize = 64;
+const MAX_SESSIONS: usize = 64;
+const MAX_HISTORY_UPDATES: usize = 1024;
+const MAX_HISTORY_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_PERMISSIONS: usize = 16;
 
 /// Only per-request choices are supported. Persistent grants are never inferred.
@@ -21,6 +23,9 @@ pub enum PermissionDecision {
 #[derive(Debug)]
 pub enum Event {
     Update(Box<SessionNotification>),
+    /// Provisional replay from `session/load`. Audience code should commit it
+    /// to its transcript only when that operation succeeds.
+    SessionHistory(Box<SessionNotification>),
     PermissionRequested {
         id: String,
         request: Box<RequestPermissionRequest>,
@@ -56,12 +61,35 @@ pub(crate) struct PendingPermission {
 #[derive(Default)]
 pub(crate) struct State {
     pub sessions: HashMap<SessionId, Session>,
-    // ACP permits notifications before session/new's response. Only one open is
-    // in flight; buffer a small bounded set until the returned ID is validated.
-    pub opening: Option<Vec<SessionNotification>>,
+    opening: Option<Opening>,
     pub pending: BTreeMap<String, PendingPermission>,
     pub host_pending: BTreeMap<String, crate::filesystem::PendingHostRequest>,
     pub failure: Option<Error>,
+}
+
+pub(crate) enum Opening {
+    // Buffer updates until the ID chosen by the peer can be checked.
+    New(Vec<SessionNotification>),
+    // The caller already selected the ID, so its history can be streamed.
+    Load {
+        id: SessionId,
+        updates: usize,
+        bytes: usize,
+    },
+}
+
+impl Opening {
+    pub(crate) fn load(id: SessionId) -> Self {
+        Self::Load {
+            id,
+            updates: 0,
+            bytes: 0,
+        }
+    }
+}
+
+pub(crate) fn valid_session_id(id: &SessionId) -> bool {
+    !id.0.is_empty() && id.0.len() <= 256
 }
 
 pub(crate) struct Shared {
@@ -74,11 +102,15 @@ pub(crate) struct Shared {
 
 impl Shared {
     pub fn fail(&self, error: Error) {
-        let mut state = self.state.lock().unwrap();
-        state.failure.get_or_insert(error);
+        self.fail_locked(&mut self.state.lock().unwrap(), error);
+    }
+
+    fn fail_locked(&self, state: &mut State, error: Error) -> Error {
+        let failure = state.failure.get_or_insert(error).clone();
         state.pending.clear();
         state.host_pending.clear();
         self.stop.cancel();
+        failure
     }
 
     pub fn check(&self) -> Result<()> {
@@ -107,29 +139,41 @@ impl Shared {
 
     pub fn update(&self, notification: SessionNotification) -> Result<()> {
         self.check()?;
-        if serde_json::to_vec(&notification)
+        let size = serde_json::to_vec(&notification)
             .map_err(|_| Error::Protocol("cannot encode session update"))?
-            .len()
-            > MAX_EVENT_BYTES
-        {
+            .len();
+        if size > MAX_EVENT_BYTES {
             self.fail(Error::Protocol("session update exceeds 256 KiB"));
             return Err(self.failure());
         }
-        {
-            let mut state = self.state.lock().unwrap();
-            if !state.sessions.contains_key(&notification.session_id) {
-                if let Some(early) = &mut state.opening
-                    && early.len() < MAX_EARLY_UPDATES
+        let mut state = self.state.lock().unwrap();
+        if state.sessions.contains_key(&notification.session_id) {
+            drop(state);
+            return self.emit(Event::Update(Box::new(notification)));
+        }
+        let error = match &mut state.opening {
+            Some(Opening::New(early)) if early.len() < MAX_EARLY_UPDATES => {
+                early.push(notification);
+                return Ok(());
+            }
+            Some(Opening::Load { id, updates, bytes }) if *id == notification.session_id => {
+                *updates += 1;
+                *bytes += size;
+                if *updates > MAX_HISTORY_UPDATES || *bytes > MAX_HISTORY_BYTES {
+                    Error::Protocol("session load history exceeds budget")
+                } else if self
+                    .events
+                    .try_send(Event::SessionHistory(Box::new(notification)))
+                    .is_err()
                 {
-                    early.push(notification);
+                    Error::EventOverflow
+                } else {
                     return Ok(());
                 }
-                drop(state);
-                self.fail(Error::Protocol("update for unknown session"));
-                return Err(self.failure());
             }
-        }
-        self.emit(Event::Update(Box::new(notification)))
+            _ => Error::Protocol("update for unknown session"),
+        };
+        Err(self.fail_locked(&mut state, error))
     }
 
     pub fn cancel_permissions(&self, session_id: &SessionId) {
@@ -168,14 +212,74 @@ impl Drop for PromptGuard {
 }
 
 pub(crate) struct OpenGuard {
-    pub shared: std::sync::Arc<Shared>,
-    pub finished: bool,
+    shared: Arc<Shared>,
+    finished: bool,
 }
+
+impl OpenGuard {
+    pub(crate) fn begin(shared: &Arc<Shared>, opening: Opening) -> Result<Self> {
+        let mut state = shared.state.lock().unwrap();
+        if shared.stop.is_cancelled() {
+            return Err(state.failure.clone().unwrap_or(Error::Closed));
+        }
+        if state.opening.is_some()
+            || state.sessions.len() >= MAX_SESSIONS
+            || matches!(&opening, Opening::Load { id, .. } if state.sessions.contains_key(id))
+        {
+            return Err(Error::Busy);
+        }
+        state.opening = Some(opening);
+        Ok(Self {
+            shared: Arc::clone(shared),
+            finished: false,
+        })
+    }
+
+    pub(crate) fn finish(mut self, session_id: &SessionId) -> Result<()> {
+        let mut state = self.shared.state.lock().unwrap();
+        if self.shared.stop.is_cancelled() {
+            return Err(state.failure.clone().unwrap_or(Error::Closed));
+        }
+        if !valid_session_id(session_id) || state.sessions.contains_key(session_id) {
+            return Err(self
+                .shared
+                .fail_locked(&mut state, Error::Protocol("invalid or reused session ID")));
+        }
+        let early = match state.opening.take() {
+            Some(Opening::New(early)) if early.iter().all(|n| &n.session_id == session_id) => early,
+            Some(Opening::Load { id, .. }) if &id == session_id => Vec::new(),
+            _ => {
+                return Err(self.shared.fail_locked(
+                    &mut state,
+                    Error::Protocol("early update for wrong session"),
+                ));
+            }
+        };
+        state
+            .sessions
+            .insert(session_id.clone(), Session { active: None });
+        // Flush before later notifications can observe the new session entry.
+        for notification in early {
+            if self
+                .shared
+                .events
+                .try_send(Event::Update(Box::new(notification)))
+                .is_err()
+            {
+                return Err(self.shared.fail_locked(&mut state, Error::EventOverflow));
+            }
+        }
+        self.finished = true;
+        Ok(())
+    }
+}
+
 impl Drop for OpenGuard {
     fn drop(&mut self) {
         if !self.finished {
-            self.shared.state.lock().unwrap().opening = None;
-            self.shared.fail(Error::OutcomeUnknown);
+            let mut state = self.shared.state.lock().unwrap();
+            state.opening = None;
+            self.shared.fail_locked(&mut state, Error::OutcomeUnknown);
         }
     }
 }

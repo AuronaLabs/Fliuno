@@ -30,6 +30,7 @@ pub fn agent() -> impl ConnectTo<Client> {
     let directories = Arc::new(Mutex::new(HashMap::new()));
     let prompt_directories = Arc::clone(&directories);
     let listed_directories = Arc::clone(&directories);
+    let loaded_directories = Arc::clone(&directories);
     Agent.v1()
         .on_receive_request(
             async |request: InitializeRequest, responder, _cx| {
@@ -37,7 +38,7 @@ pub fn agent() -> impl ConnectTo<Client> {
                 assert_eq!(request.client_capabilities.fs.read_text_file, request.client_capabilities.fs.write_text_file);
                 assert!(!request.client_capabilities.terminal);
                 responder.respond(InitializeResponse::new(request.protocol_version).agent_capabilities(
-                    AgentCapabilities::new().session_capabilities(
+                    AgentCapabilities::new().load_session(true).session_capabilities(
                         SessionCapabilities::new().list(SessionListCapabilities::new()),
                     ),
                 ))
@@ -65,6 +66,19 @@ pub fn agent() -> impl ConnectTo<Client> {
                     .collect();
                 sessions.sort_unstable_by(|a, b| a.session_id.0.cmp(&b.session_id.0));
                 responder.respond(ListSessionsResponse::new(sessions))
+            },
+            acp::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: LoadSessionRequest, responder, cx| {
+                if request.session_id.0.as_ref() != "fixture_saved" || !request.mcp_servers.is_empty()
+                    || !request.additional_directories.is_empty()
+                {
+                    return responder.respond_with_error(acp::Error::invalid_params());
+                }
+                loaded_directories.lock().unwrap().insert(request.session_id.clone(), request.cwd);
+                cx.send_notification(update(&request.session_id, "saved history"))?;
+                responder.respond(LoadSessionResponse::new())
             },
             acp::on_receive_request!(),
         )

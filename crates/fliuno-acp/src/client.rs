@@ -2,7 +2,7 @@ use crate::{
     CancellationToken, ClientOptions, Error, Event, HostRequest, HostResponse, PermissionDecision,
     Result, filesystem, permissions,
     schema::*,
-    state::{MAX_SESSIONS, OpenGuard, PromptGuard, Session, Shared, State},
+    state::{OpenGuard, Opening, PromptGuard, Shared, State, valid_session_id},
     transport,
 };
 use agent_client_protocol::{
@@ -12,6 +12,7 @@ use std::{path::Path, path::PathBuf, sync::Arc, sync::Mutex};
 use tokio::sync::{mpsc, oneshot};
 
 mod catalog;
+mod session;
 
 /// Cloneable handle. Dropping its last owner stops the driver and owned process.
 #[derive(Clone)]
@@ -336,74 +337,6 @@ impl Client {
 
     pub fn failure(&self) -> Option<Error> {
         self.is_closed().then(|| self.inner.shared.failure())
-    }
-
-    /// Opening is serialized, capped at 64 sessions and never retried implicitly.
-    /// Isolated agents can only receive their own private working directory.
-    pub async fn new_session(&self, cwd: impl AsRef<Path>) -> Result<NewSessionResponse> {
-        let shared = &self.inner.shared;
-        shared.check()?;
-        let cwd = cwd.as_ref();
-        if !cwd.is_absolute() || !cwd.is_dir() {
-            return Err(Error::InvalidInput(
-                "cwd must be an absolute existing directory",
-            ));
-        }
-        self.validate_private_cwd(cwd)?;
-        {
-            let mut state = shared.state.lock().unwrap();
-            if state.opening.is_some() || state.sessions.len() >= MAX_SESSIONS {
-                return Err(Error::Busy);
-            }
-            state.opening = Some(Vec::new());
-        }
-        let mut guard = OpenGuard {
-            shared: Arc::clone(shared),
-            finished: false,
-        };
-        let response = tokio::select! {
-            _ = shared.stop.cancelled() => return Err(shared.failure()),
-            response = tokio::time::timeout(
-                shared.options.request_timeout,
-                self.inner.connection.send_request(NewSessionRequest::new(cwd)).block_task(),
-            ) => response.map_err(|_| Error::OutcomeUnknown)?
-                .map_err(|error| Error::Remote(error.code.value()))?,
-        };
-        {
-            let mut state = shared.state.lock().unwrap();
-            if response.session_id.0.is_empty()
-                || response.session_id.0.len() > 256
-                || state.sessions.contains_key(&response.session_id)
-            {
-                drop(state);
-                shared.fail(Error::Protocol("invalid or reused session ID"));
-                return Err(shared.failure());
-            }
-            let early = state.opening.take().unwrap_or_default();
-            if early.iter().any(|n| n.session_id != response.session_id) {
-                drop(state);
-                shared.fail(Error::Protocol("early update for wrong session"));
-                return Err(shared.failure());
-            }
-            state
-                .sessions
-                .insert(response.session_id.clone(), Session { active: None });
-            // Flush while holding the same lock used by notification dispatch,
-            // preserving order across session registration and live updates.
-            for notification in early {
-                if shared
-                    .events
-                    .try_send(Event::Update(Box::new(notification)))
-                    .is_err()
-                {
-                    drop(state);
-                    shared.fail(Error::EventOverflow);
-                    return Err(Error::EventOverflow);
-                }
-            }
-        }
-        guard.finished = true;
-        Ok(response)
     }
 
     /// One active text turn per session, at most eight concurrent turns per

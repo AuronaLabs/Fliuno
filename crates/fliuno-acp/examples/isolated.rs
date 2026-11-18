@@ -39,6 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             biased;
             event = events.recv() => match event {
                 Some(Event::Update(update)) => println!("{}", serde_json::to_string(&update)?),
+                Some(Event::SessionHistory(_)) => break Err(fliuno_acp::Error::Protocol("unexpected history for new session")),
                 Some(Event::PermissionRequested {id, request, ..}) => {
                     // This example has no approval UI. Deny rather than inventing
                     // consent; a desktop client would show the request to a user.
