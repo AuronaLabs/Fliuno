@@ -338,3 +338,83 @@ fn session_replay_scopes_the_global_cursor_across_upgrade_and_restart() {
     }
     fs::remove_dir(root).unwrap();
 }
+
+#[test]
+fn workspace_replay_preserves_the_global_watermark_after_migration() {
+    let temp = std::env::temp_dir().canonicalize().unwrap();
+    let root = temp.join(format!("fliuno-workspace-replay-{}", uuid::Uuid::new_v4()));
+    let foreign_root = root.join("other");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&foreign_root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let foreign = peer.call("workspace/open", json!({"root":foreign_root}));
+    let first = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let second = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let foreign_session = peer.call("session/create", json!({"workspaceId":foreign["id"]}));
+    let start = |peer: &mut Peer, session: &Value| {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":"Replay fixture"}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval");
+        task["id"].clone()
+    };
+    let first_task = start(&mut peer, &first);
+    let foreign_task = start(&mut peer, &foreign_session);
+    let second_task = start(&mut peer, &second);
+    let global = peer.call("events/listAll", json!({}));
+    let through = global["nextAfter"].as_u64().unwrap();
+    let expected: Vec<_> = global["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["taskId"] != foreign_task)
+        .cloned()
+        .collect();
+    assert!(expected.iter().any(|e| e["taskId"] == first_task));
+    assert!(expected.iter().any(|e| e["taskId"] == second_task));
+    drop(peer);
+    rusqlite::Connection::open(&db).unwrap().execute_batch(
+        "DROP TRIGGER workspace_event_index_insert; DROP TABLE workspace_event_index; PRAGMA user_version=26;",
+    ).unwrap();
+    let mut peer = Peer::start(&db);
+    let newer = start(&mut peer, &second);
+    let mut after = 0;
+    let mut actual = Vec::new();
+    loop {
+        let page = peer.call("events/listWorkspace", json!({
+            "workspaceId":workspace["id"], "through":through, "after":after, "limit":2, "targetBytes":1024
+        }));
+        let events = page["events"].as_array().unwrap();
+        assert!((1..=2).contains(&events.len()));
+        let cursor = page["nextAfter"].as_u64().unwrap();
+        assert!(cursor > after && cursor <= through);
+        after = cursor;
+        actual.extend(events.iter().cloned());
+        if page["hasMore"] == false {
+            break;
+        }
+    }
+    assert_eq!(actual, expected);
+    drop(peer);
+    let mut peer = Peer::start(&db);
+    let tail = peer.call(
+        "events/listWorkspace",
+        json!({"workspaceId":workspace["id"],"after":through}),
+    );
+    assert_eq!(
+        tail["events"],
+        peer.call("events/list", json!({"taskId":newer}))["events"]
+    );
+    assert_eq!(tail["hasMore"], false);
+    assert_eq!(
+        peer.request("events/listWorkspace", json!({"workspaceId":"absent"}))["error"]["code"],
+        -32004
+    );
+    drop(peer);
+    let root = root.canonicalize().unwrap();
+    assert_eq!(root.parent(), Some(temp.as_path()));
+    fs::remove_dir_all(root).unwrap();
+}

@@ -699,6 +699,20 @@ pub struct EventsListSessionParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EventsListWorkspaceParams {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub after: u64,
+    #[serde(default)]
+    pub through: Option<u64>,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    #[serde(default)]
+    pub target_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventsSetScopeParams {
     /// Omit or pass null to receive events from all sessions.
     #[serde(default)]

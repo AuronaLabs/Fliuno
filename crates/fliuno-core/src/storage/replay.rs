@@ -1,4 +1,4 @@
-//! Ordered, durable event replay by task, session, or global cursor.
+//! Ordered, durable event replay by task, session, workspace, or global cursor.
 use super::*;
 
 pub const MAX_EVENT_TARGET_BYTES: u32 = 8 * 1024 * 1024;
@@ -23,6 +23,30 @@ pub(super) fn migrate_session_index(db: &mut Connection) -> Result<()> {
             VALUES((SELECT session_id FROM tasks WHERE id=NEW.task_id),NEW.sequence);
         END;
         PRAGMA user_version=16;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub(super) fn migrate_workspace_index(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS workspace_event_index(
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            sequence INTEGER NOT NULL REFERENCES events(sequence),
+            PRIMARY KEY(workspace_id,sequence)
+        ) WITHOUT ROWID;
+        INSERT INTO workspace_event_index(workspace_id,sequence)
+        SELECT s.workspace_id,e.sequence FROM session_event_index e
+        JOIN sessions s ON s.id=e.session_id WHERE true
+        ON CONFLICT(workspace_id,sequence) DO NOTHING;
+        CREATE TRIGGER IF NOT EXISTS workspace_event_index_insert AFTER INSERT ON events
+        BEGIN
+            INSERT INTO workspace_event_index(workspace_id,sequence)
+            SELECT s.workspace_id,NEW.sequence FROM tasks t
+            JOIN sessions s ON s.id=t.session_id WHERE t.id=NEW.task_id;
+        END;
+        PRAGMA user_version=27;",
     )?;
     tx.commit()?;
     Ok(())
@@ -117,6 +141,35 @@ impl Kernel {
              ORDER BY scoped.sequence LIMIT ?4",
             params![
                 session_id,
+                validate_event_cursor(after)?,
+                through
+                    .map(validate_event_cursor)
+                    .transpose()?
+                    .unwrap_or(i64::MAX),
+                validate_event_limit(limit)?
+            ],
+            after,
+            limit,
+            target_bytes,
+        )
+    }
+
+    pub fn list_workspace_events_through(
+        &self,
+        workspace_id: &str,
+        after: u64,
+        through: Option<u64>,
+        limit: u32,
+        target_bytes: Option<u32>,
+    ) -> Result<EventsPage> {
+        self.require_workspace(workspace_id)?;
+        self.query_event_page(
+            "SELECT events.sequence,events.task_id,events.data
+             FROM workspace_event_index AS scoped JOIN events USING(sequence)
+             WHERE scoped.workspace_id=?1 AND scoped.sequence>?2 AND scoped.sequence<=?3
+             ORDER BY scoped.sequence LIMIT ?4",
+            params![
+                workspace_id,
                 validate_event_cursor(after)?,
                 through
                     .map(validate_event_cursor)

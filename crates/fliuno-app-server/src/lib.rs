@@ -322,6 +322,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["workspaceEventReplay"] = json!(true);
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
@@ -634,6 +635,16 @@ impl RpcServer {
                 let p: EventsListSessionParams = decode(params)?;
                 json!(self.kernel()?.list_session_events_through(
                     &p.session_id,
+                    p.after,
+                    p.through,
+                    p.limit,
+                    p.target_bytes
+                )?)
+            }
+            "events/listWorkspace" => {
+                let p: EventsListWorkspaceParams = decode(params)?;
+                json!(self.kernel()?.list_workspace_events_through(
+                    &p.workspace_id,
                     p.after,
                     p.through,
                     p.limit,
