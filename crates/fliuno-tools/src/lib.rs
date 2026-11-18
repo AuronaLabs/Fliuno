@@ -1,5 +1,6 @@
 //! Built-in workspace tools. Directory capabilities enforce the root during IO;
 //! lexical checks alone are insufficient against symlinks and path races.
+mod directory_page;
 mod file_io;
 mod workspace;
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -73,7 +74,7 @@ impl WorkspaceTool {
 
 pub fn register(kernel: &mut Kernel) -> fliuno_core::Result<()> {
     let write_lock = Arc::new(Mutex::new(()));
-    let tools = [
+    let mut tools: Vec<Box<dyn Tool>> = [
         Operation::List,
         Operation::Read,
         Operation::ReadBinary,
@@ -86,6 +87,7 @@ pub fn register(kernel: &mut Kernel) -> fliuno_core::Result<()> {
         Box::new(WorkspaceTool::new(operation, Arc::clone(&write_lock))) as Box<dyn Tool>
     })
     .collect();
+    tools.push(Box::new(directory_page::ListPage));
     kernel.register_tools(tools)
 }
 

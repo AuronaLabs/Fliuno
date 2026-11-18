@@ -94,6 +94,179 @@ fn full_text_proposals_create_nothing_before_execution_and_reject_changed_bases(
 }
 
 #[test]
+fn directory_pages_keep_order_and_cursors_beyond_the_legacy_entry_limit() {
+    let root = std::env::temp_dir().join(format!(
+        "fliuno-directory-page-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let directory = root.join("entries");
+    fs::create_dir_all(&directory).unwrap();
+    let names: Vec<_> = (0..305).map(|i| format!("报告-{i:03}.txt")).collect();
+    for name in names.iter().rev() {
+        fs::write(directory.join(name), []).unwrap();
+    }
+    fs::create_dir(directory.join("最后")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        fs::write(directory.join(std::ffi::OsString::from_vec(vec![0xff])), []).unwrap();
+    }
+    let workspace = Workspace {
+        id: "workspace".into(),
+        root: root.to_str().unwrap().into(),
+    };
+    let context = ToolContext {
+        session_id: "session",
+        task_id: "task",
+        workspace: &workspace,
+    };
+    let tool = directory_page::ListPage;
+    for invalid in [
+        json!({"path":"../outside"}),
+        json!({"path":"entries","after":"nested/file"}),
+        json!({"path":"entries","limit":257}),
+    ] {
+        assert!(tool.validate(&invalid).is_err());
+    }
+    let cancel = CancellationToken::new();
+    let mut found = Vec::new();
+    let mut after: Option<String> = None;
+    for expected_size in [127, 127, 52] {
+        let arguments = json!({"path":"entries","after":after,"limit":127});
+        let call = ToolCall {
+            id: "directory-page".into(),
+            name: tool.spec().name,
+            arguments,
+        };
+        let page = tool.execute(&context, &call, &cancel).unwrap().output;
+        assert_eq!(page["omittedNames"], usize::from(cfg!(unix)));
+        let entries = page["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), expected_size);
+        let last = &entries.last().unwrap()["name"];
+        if expected_size == 127 {
+            assert_eq!(page["hasMore"], true);
+            assert_eq!(page["nextAfter"], *last);
+        } else {
+            assert_eq!(page["hasMore"], false);
+            assert!(page["nextAfter"].is_null());
+            assert_eq!(entries.last().unwrap()["kind"], "directory");
+        }
+        after = page["nextAfter"].as_str().map(str::to_owned);
+        found.extend(
+            entries
+                .iter()
+                .map(|entry| entry["name"].as_str().unwrap().to_owned()),
+        );
+    }
+    let mut expected = names;
+    expected.push("最后".into());
+    assert_eq!(found, expected);
+    cancel.cancel();
+    let cancelled = ToolCall {
+        id: "cancelled".into(),
+        name: tool.spec().name,
+        arguments: json!({"path":"entries"}),
+    };
+    assert!(tool.execute(&context, &cancelled, &cancel).is_err());
+    for entry in fs::read_dir(&directory).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            fs::remove_dir(entry.path()).unwrap();
+        } else {
+            fs::remove_file(entry.path()).unwrap();
+        }
+    }
+    fs::remove_dir(directory).unwrap();
+    fs::remove_dir(root).unwrap();
+}
+
+struct DirectoryPageProvider;
+
+impl fliuno_core::ModelProvider for DirectoryPageProvider {
+    fn next(
+        &self,
+        task: &fliuno_protocol::Task,
+        _tools: &[ToolSpec],
+        _cancellation: &CancellationToken,
+    ) -> Result<fliuno_core::ModelTurn, String> {
+        use fliuno_protocol::Message;
+        let last_page = task
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::ToolResult { output, .. } => Some(output),
+                _ => None,
+            });
+        let after = last_page.and_then(|output| output["nextAfter"].as_str());
+        if last_page.is_some() && after.is_none() {
+            return Ok(fliuno_core::ModelDecision::Complete("listed the directory".into()).into());
+        }
+        Ok(fliuno_core::ModelDecision::Call(ToolCall {
+            id: format!("page-{}", task.model_steps),
+            name: "workspace_list_page".into(),
+            arguments: json!({"path":".","after":after,"limit":1}),
+        })
+        .into())
+    }
+}
+
+#[test]
+fn each_directory_page_requires_a_separate_approval() {
+    use fliuno_protocol::{ApprovalDecision, Message, TaskStatus};
+    let root = std::env::temp_dir().join(format!(
+        "fliuno-page-approval-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&root).unwrap();
+    for name in ["a.txt", "b.txt"] {
+        fs::write(root.join(name), []).unwrap();
+    }
+    let mut kernel = Kernel::in_memory(Box::new(DirectoryPageProvider)).unwrap();
+    register(&mut kernel).unwrap();
+    let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let task = kernel.start_task(&session.id, "inspect directory").unwrap();
+    let first = task.pending_approval.as_ref().unwrap();
+    assert_eq!(first.call.name, "workspace_list_page");
+    assert!(
+        task.messages
+            .iter()
+            .all(|message| !matches!(message, Message::ToolResult { .. }))
+    );
+    let waiting = kernel
+        .respond_approval(&task.id, &first.id, ApprovalDecision::AllowOnce)
+        .unwrap();
+    let second = waiting.pending_approval.as_ref().unwrap();
+    assert_ne!(second.id, first.id);
+    assert_eq!(second.call.arguments["after"], "a.txt");
+    let complete = kernel
+        .respond_approval(&task.id, &second.id, ApprovalDecision::AllowOnce)
+        .unwrap();
+    assert_eq!(complete.status, TaskStatus::Completed);
+    let names: Vec<_> = complete
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::ToolResult { output, .. } => output["entries"][0]["name"].as_str(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, ["a.txt", "b.txt"]);
+    for name in names {
+        fs::remove_file(root.join(name)).unwrap();
+    }
+    fs::remove_dir(root).unwrap();
+}
+
+#[test]
 fn ranged_reads_preserve_line_endings_and_hash_the_full_file() {
     let root = std::env::temp_dir().join(format!(
         "fliuno-read-range-{}-{}",
