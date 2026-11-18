@@ -54,6 +54,39 @@ impl Kernel {
         })
     }
 
+    /// Return one byte range and the immutable content length. Reading the
+    /// BLOB projection preserves NULs and UTF-8 characters split by a cursor.
+    pub fn read_artifact_chunk(
+        &self,
+        task_id: &str,
+        artifact_id: &str,
+        after: u64,
+        limit: u32,
+    ) -> Result<(u64, Vec<u8>)> {
+        let offset = i64::try_from(after)
+            .map_err(|_| Error::Invalid("artifact offset must fit i64".into()))?;
+        if !(1..=MAX_ARTIFACT_READ_BYTES).contains(&limit) {
+            return Err(Error::Invalid(format!(
+                "artifact read limit must be 1..{MAX_ARTIFACT_READ_BYTES}"
+            )));
+        }
+        let mut statement = self.db.prepare_cached(
+            "SELECT length(body),substr(body,?3+1,?4)
+             FROM (SELECT CAST(json_extract(data,'$.content') AS BLOB) AS body
+                   FROM artifacts WHERE task_id=?1 AND id=?2)",
+        )?;
+        let (length, data): (i64, Vec<u8>) = statement
+            .query_row(params![task_id, artifact_id, offset, limit], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .optional()?
+            .ok_or_else(|| Error::NotFound("artifact".into()))?;
+        if offset > length {
+            return Err(Error::Invalid("artifact offset is past the end".into()));
+        }
+        Ok((length as u64, data))
+    }
+
     pub fn get_artifact(&self, task_id: &str, artifact_id: &str) -> Result<Artifact> {
         let data = self
             .db

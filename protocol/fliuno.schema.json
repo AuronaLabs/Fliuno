@@ -898,6 +898,37 @@
         "artifactId"
       ]
     },
+    "artifacts/read": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactReadParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "artifactId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 65536,
+          "default": 32768
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "artifactId"
+      ]
+    },
     "tools/list": {
       "type": "object",
       "properties": {},
@@ -3324,6 +3355,38 @@
         "title",
         "mediaType",
         "content"
+      ]
+    },
+    "ArtifactChunk": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactChunk",
+      "type": "object",
+      "properties": {
+        "offset": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "nextOffset": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "contentBytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "dataBase64": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "offset",
+        "nextOffset",
+        "contentBytes",
+        "dataBase64"
       ]
     },
     "ArtifactSummariesPage": {

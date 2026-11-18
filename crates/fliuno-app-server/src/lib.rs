@@ -2,6 +2,7 @@
 mod scheduler;
 mod terminal_subscriptions;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use fliuno_core::{ApprovalOutcome, Error, EventReceiver, Kernel, ProgressReceiver};
 use fliuno_protocol::*;
 use scheduler::TaskScheduler;
@@ -255,7 +256,7 @@ impl RpcServer {
                 .iter()
                 .any(|spec| matches!(spec.effect, fliuno_core::ToolEffect::ProcessExecution));
             self.initialized = true;
-            let capabilities = json!({
+            let mut capabilities = json!({
                 "eventReplay":true, "approvals":true, "artifacts":true,
                 "artifactSummaries":true,
                 "registrationAuthority":true,
@@ -293,6 +294,8 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["artifactByteReads"] = json!(true);
+            capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
             return Ok(json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "serverName": "fliuno-app-server",
@@ -593,6 +596,21 @@ impl RpcServer {
                     self.kernel()?
                         .list_artifact_summaries(&p.task_id, p.after, p.limit)?
                 )
+            }
+            "artifacts/read" => {
+                let p: ArtifactReadParams = decode(params)?;
+                let (content_bytes, bytes) = self.kernel()?.read_artifact_chunk(
+                    &p.task_id,
+                    &p.artifact_id,
+                    p.after,
+                    p.limit,
+                )?;
+                json!(ArtifactChunk {
+                    offset: p.after,
+                    next_offset: p.after + bytes.len() as u64,
+                    content_bytes,
+                    data_base64: STANDARD.encode(bytes),
+                })
             }
             "artifacts/get" => {
                 let p: ArtifactGetParams = decode(params)?;

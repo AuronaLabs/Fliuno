@@ -15,6 +15,8 @@ use std::{
 
 #[path = "process/a2a.rs"]
 mod a2a;
+#[path = "process/artifacts.rs"]
+mod artifacts;
 #[path = "process/context.rs"]
 mod context;
 #[path = "process/event_stream.rs"]
@@ -132,6 +134,8 @@ impl Peer {
         assert_eq!(init["capabilities"]["maxContextCandidates"], 128);
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
+        assert_eq!(init["capabilities"]["artifactByteReads"], true);
+        assert_eq!(init["capabilities"]["maxArtifactReadBytes"], 65_536);
         assert_eq!(init["capabilities"]["eventResubscribe"], true);
         assert_eq!(init["capabilities"]["sessionEventReplay"], true);
         assert_eq!(
