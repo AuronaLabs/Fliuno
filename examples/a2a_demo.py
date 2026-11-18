@@ -1,0 +1,127 @@
+"""Run the real kernel against a local A2A 1.0 fixture, with no external API."""
+import argparse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import threading
+import time
+
+from rpc_client import LocalKernel, build_server
+
+
+def fixture(cancel):
+    class Handler(BaseHTTPRequestHandler):
+        methods = []
+
+        def log_message(self, *_args):
+            pass
+
+        def reply(self, value):
+            body = json.dumps(value, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            assert self.path == "/.well-known/agent-card.json"
+            self.reply({"supportedInterfaces": [{"url": f"http://{self.headers['Host']}/rpc",
+                        "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}], "capabilities": {}})
+
+        def do_POST(self):
+            assert self.path == "/rpc" and self.headers["A2A-Version"] == "1.0"
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            method = request["method"]
+            Handler.methods.append(method)
+            task = {"id": "demo-task", "contextId": "demo-context", "status": {"state": "TASK_STATE_WORKING"}}
+            if method == "SendMessage":
+                assert request["params"]["message"]["role"] == "ROLE_USER"
+                assert request["params"]["configuration"]["returnImmediately"]
+                result = {"task": task}
+            elif method == "GetTask":
+                assert request["params"]["id"] == "demo-task"
+                if not cancel:
+                    task["status"]["state"] = "TASK_STATE_COMPLETED"
+                    task["artifacts"] = [{"artifactId": "report", "name": "report.json", "parts": [
+                        {"text": "这是本机 A2A fixture 生成的报告。"},
+                        {"data": {"rows": 3, "source": "local fixture"}},
+                        {"raw": "aGk=", "filename": "hi.txt", "mediaType": "text/plain"},
+                        {"url": f"http://{self.headers['Host']}/must-not-fetch"},
+                    ]}]
+                result = task
+            elif method == "CancelTask":
+                assert request["params"]["id"] == "demo-task"
+                task["status"]["state"] = "TASK_STATE_CANCELED"
+                result = task
+            else:
+                raise AssertionError(method)
+            self.reply({"jsonrpc": "2.0", "id": request["id"], "result": result})
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, Handler
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cancel", action="store_true", help="Cancel after observing the remote identity")
+    args = parser.parse_args()
+    executable = build_server()
+    server, thread, handler = fixture(args.cancel)
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        with tempfile.TemporaryDirectory(prefix="fliuno-a2a-demo-") as directory:
+            directory = Path(directory)
+            config = directory / "a2a.json"
+            config.write_text(json.dumps({"agents": [{"id": "demo", "endpoint": base + "/rpc",
+                "agentCardUrl": base + "/.well-known/agent-card.json", "pollIntervalMs": 50,
+                "requestTimeoutMs": 3000, "taskTimeoutMs": 10000}]}), encoding="utf-8")
+            environment = dict(os.environ, FLIUNO_PROVIDER="demo")
+            with LocalKernel(executable, ["--db", directory / "kernel.db", "--a2a-config", config], environment) as kernel:
+                kernel.call("initialize", {"protocolVersion": "0.1", "clientName": "a2a-demo"})
+                workspace = kernel.call("workspace/open", {"root": str(directory)})
+                session = kernel.call("session/create", {"workspaceId": workspace["id"]})
+                task = kernel.call("task/start", {"sessionId": session["id"], "input": "生成报告",
+                    "clientRequestId": "once", "backend": {"type": "external_agent", "agentId": "demo"}})
+                if args.cancel:
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        observed = kernel.call("task/get", {"taskId": task["id"]})
+                        if observed.get("agentRun", {}).get("remoteTask"):
+                            break
+                        time.sleep(0.01)
+                    else:
+                        raise TimeoutError("remote identity was not observed")
+                    kernel.call("task/cancel", {"taskId": task["id"]})
+                done = kernel.wait(task["id"], "cancelled" if args.cancel else "completed")
+                # Local cancellation returns immediately. Wait for the bounded
+                # remote acknowledgement rather than printing intent as proof.
+                deadline = time.monotonic() + 5
+                while not done["agentRun"]["finished"] and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                    done = kernel.call("task/get", {"taskId": task["id"]})
+                assert done["agentRun"]["finished"] and not done["agentRun"]["outcomeUnknown"]
+                assert handler.methods.count("SendMessage") == 1
+                artifacts = kernel.call("artifacts/list", {"taskId": task["id"]})
+                assert len(artifacts) == (0 if args.cancel else 1)
+                print("Result:", done["status"])
+                print("Remote task:", json.dumps(done["agentRun"]["remoteTask"], ensure_ascii=False))
+                print("Methods:", " -> ".join(handler.methods))
+                for artifact in artifacts:
+                    print("Artifact:", artifact["title"], artifact["content"])
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    main()

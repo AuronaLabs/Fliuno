@@ -1,0 +1,176 @@
+# 原生命令执行证据
+
+`fliuno-exec` 管理一次获批前台命令的原生启动、stdin、stdout/stderr 和进程所有权。它与模型、协议传输、SQLite 状态机分开；任务层持久保存报告，不从日志文本猜测退出原因。跨轮次 PTY 使用独立服务，不复用这套短命令生命周期。
+
+## 预算和停止顺序
+
+`timeoutMs` 从调用原生启动前开始计算，包含 AppContainer profile 准备、暂存和进程创建。隔离启动由阻塞 worker 执行，执行器等待它交回进程所有权；原生启动返回前不能由此 deadline 抢占。如果返回时已取消或预算已用完，执行器先释放从未轮询的输入 future，再请求终止，随后并发收集输出和根进程退出状态。
+
+运行中的取消、超时或输出/退出观察错误也会请求停止。若输入仍待完成，停止时立即丢弃输入 future，避免继续排队写入。隔离路径与 Windows 受信任宿主路径均使用 reactor 管道，Unix 受信任宿主保留 Tokio 的原生进程管道。报告对所有已轮询后中止的输入保留保守的 `stdinAborted`，不把丢弃 future 等同于 OS 管道句柄已经关闭或全部 pending IO 已完成取消。
+
+根进程自然退出也会请求回收其后代，并完成输入和双输出的收尾。清理阶段有独立的 2 秒预算；超时则报告 `termination=cleanup_failed`，保留最初停止原因。`elapsedMs` 包含启动和清理，不是仅衡量子进程 main 函数的耗时。
+
+该 2 秒是异步排空预算，不能抢占同步的原生 terminate 或 Drop。Windows sandbox 的 kill 另有最多 5 秒根进程等待，底层 OS/文件清理也可能延迟；本接口不承诺 `timeoutMs+2000` 的绝对返回上限。
+
+## 报告字段
+
+以下 `evidence` 对象随正常 `tool_completed` 结果或 `tool_outcome_unknown.output` 一起持久化。旧事件不回填，新字段不改变既有任务或审批身份，也不需要数据库迁移。
+
+| 字段 | 含义 |
+| --- | --- |
+| `launchMs` | 原生 spawn 返回时的累计毫秒数，是总预算的一部分。 |
+| `stopCause` | 首次请求停止的原因：`root_exited`、`deadline`、`cancelled`、`io_error`；后续清理失败不会覆盖它。 |
+| `stopRequestSucceeded` | 原生终止请求是否被接受；不是所有后代已经退出的单独证明。 |
+| `rootReaped` | 实际观察到了根进程退出状态。 |
+| `stdinClosed` | 本地输入 writer 已释放且没有已知未完成的后台写入；不能推断子进程已读取。 |
+| `stdinSkipped` | 停止前未轮询过输入，输入 writer 已直接释放。 |
+| `stdinAborted` | 已轮询过的输入 future 在停止时被丢弃；后台写入可能仍待完成，不据此声明 `stdinClosed`。 |
+| `stdoutClosed` / `stderrClosed` | 相应读取观察到了 EOF 或 BrokenPipe；其他读取错误不会设为 true。 |
+| `cleanupExpired` | 清理排空预算已耗尽。 |
+| `faults` | 按 operation 去重、最多 6 项的 IO 诊断。 |
+
+每项 fault 只保存 `operation`、Rust `ErrorKind` 的固定名称 `kind` 和可选数值 `osCode`。operation 为 `stdin_write`、`stdin_shutdown`、`stdout_read`、`stderr_read`、`poll_exit` 或 `terminate`。不保存 `io::Error` 的显示文本，避免系统或库错误将主机路径、参数、环境值带进任务记录。
+
+`stdinComplete=true` 要求 `write_all` 和 `shutdown` 都成功，随后释放本地 writer。不能仅靠 `write_all` 成功或忽略 shutdown 错误。即使两者成功，也只证明数据已交付给管道；OS 缓冲可容纳尚未被程序读取的输入。
+
+原隔离路径的 `tokio::fs::File` 会先把 write 接收到中间缓冲，shutdown 才等待 flush；现已改为 `fliuno-sandbox::spawn_async` 统一提供 reactor 管道。Windows 使用私有单实例 named pipe，只有父端开启 overlapped IO、子端保持同步；Linux 使用 Tokio 的非阻塞 `unix::pipe`。Windows Mio 仍可能在 WriteFile 提交时接受数据，而 Tokio named pipe 的默认 flush 不等待它完成。独立 writer 因此等待写就绪并提交零字节探测，取出上一笔写入的完成错误；shutdown 之后才关闭写端。每次提交的数据最多 64 KiB，不使用要求 reader 消费才能返回的 `FlushFileBuffers`。
+
+MCP、ACP 与前台命令复用这套管道；MCP/ACP stderr 用异步任务持续丢弃，在生命周期结束时 abort，不再 join 阻塞 reader。同步 `spawn` 与持久 PTY bootstrap 保持原有接口，reactor 实现只在 `async-io` feature 中启用。Windows 受信任宿主命令和 MCP 通过 `spawn_host_async` 使用同一 reactor，保留显式 cwd/环境和完整 OS 用户权限；它的 Job 只负责生命周期，不附加隔离模式的内存/PID 默认限额。原生启动/终止仍是同步操作，因此这里不承诺所有宿主调用的严格墙钟上限。
+
+stdin 写入或关闭失败并不自动等于根进程结果未知：若根进程和双输出均正常收尾，返回已知 `exited` 结果，但 `success=false`、`stdinComplete=false`，并记录失败阶段。输出读取、退出观察、终止或清理不完整则保留未知结果，不自动重跑。
+
+根进程已回收且 Unix TrustedHost 的 `killpg` 返回 ESRCH 时，记录停止请求失败但允许已知收尾，因为目标进程组已经不存在。其他终止错误一律保留清理失败，不能只凭根进程退出便掩盖 Job/cgroup 回收失败。
+
+`spawn_async` 错误带有独立的启动/worker/管道注册阶段。前台执行器将原生启动失败保留为已知失败；启动 worker 丢失或启动后的管道注册失败进入未知结果，不能把未拿到管道当作程序从未运行的证据。
+
+## 工程验证（2026-11-18）
+
+- 单元测试使用一个接受全部 write 但拒绝 shutdown 的 writer，检查失败阶段、本地释放和诊断不泄露私有错误文本。
+- 生命周期驱动以受控时钟和独立进程观察接口验证：启动交回时已超时/取消绝不轮询 stdin；清理超时保留取消原因；自然退出后的挂起输入在清理结束时报告中止；根退出不掩盖其他 terminate 失败。这些测试验证调度和报告，不能代替原生隔离行为探针。
+- 真实管道测试启动当前 Rust 测试程序并等待其退出，再用 file-backed async writer 写入已无 reader 的管道；观察 shutdown 阶段的 BrokenPipe，验证缓冲接受不等于交付成功。
+- 原生异步管道探针完成约 416 KiB UTF-8 输入往返和 EOF；reader 已退出及 Windows 已提交写入后被强杀都必须返回 BrokenPipe。取消探针保持不读取 stdin 的隔离子进程存活，在读写均挂起后丢弃端点，要求宿主 runtime 在 3 秒内退出，再清理子进程，避免用对端退出掩盖阻塞 IO 泄漏。
+- 集成测试覆盖 literal argv、UTF-8 stdin、独立 stdout/stderr、超量输出、二进制、非零退出、deadline、取消、后代回收与审批身份；Windows 真实运行 TrustedHost 和 AppContainer。
+- 子孙回收另外运行一个 60 秒存活的真实 descendant，以 30 秒总预算确认 `descendant-ready`、其原生 PID 和 deadline 清理后的不运行状态，避免 200 ms 短超时在程序尚未创建子孙时误算回收成功。自然退出用正常启动预算；独立 200/500 ms deadline 探针保留。
+- 并发测试由父线程准备后统一释放各 worker，在 Windows/Linux 上同时运行两个隔离模式各自的 echo/flood，共四个命令；检查输入身份、输出尾部、错误流、回收和诊断各自独立。worker 只等待父线程的有界消息，不使用可能因准备失败而死锁的多方 barrier。
+- 真实 app-server 进程测试通过 stdio RPC 检查 deadline 证据，关闭后从 SQLite 重启，要求相同事件原样保留且拒绝恢复重放。
+
+首次 A2A 全量验收中有两项原生命令测试偶发进入未知结果。本轮增强诊断后复现：AppContainer flood 的 `launchMs=8348`、echo 的 `launchMs=8945`，两者均为 `termination=timed_out`、`stopCause=deadline`，超过成功路径 fixture 原先的 5000 ms 总预算。这定位了观察到的失败机制；未查明造成 OS 启动延迟的具体环境原因。成功路径测试改用 30000 ms，独立 200/500 ms 的超时测试保留。
+
+复现记录在 `target/verification/native-input-evidence.log`；后续聚焦与并发记录分别为 `native-evidence-focused.log` 和 `native-evidence-concurrent.log`。Linux 源码和同类探针保留在 CI；当前 Windows 主机的 Linux 交叉编译不能代替 Linux 运行验收。
+
+共享 reactor 管道的原生探针与 MCP/ACP/exec 契约测试记录在 `target/verification/async-stdio-native.log` 和 `async-stdio-contracts.log`。
+
+后续全量并发验收另暴露一个独立缺陷：AppContainer echo 的根退出码为 0、stdin 已完成、双流数据完整，回收也成功，但两条流在 2 秒清理预算内均无 EOF（`native-descendants-verified.log`）。它不是启动超时。确定性测试先创建隔离管道，再从同一宿主启动无关的长命 `std::Command`，释放原子端后稳定复现 EOF 不到，确认可继承子端被另一条启动链路带走。
+
+Windows 管道现全部在宿主创建为不可继承；只有始终挂起的短命中转进程持有三个可继承副本。`PARENT_PROCESS` 选择该句柄表，`HANDLE_LIST` 限定三个子端。中转使用创建时原子分配的 kill-on-close Job，实际子进程在恢复前验证已离开中转 Job；普通 sandbox workload 的资源 Job 也通过 `JOB_LIST` 随创建分配。同步隔离、reactor 隔离和持久 service bootstrap 共用这一边界，不依赖其他库配合全局 spawn 锁。实现与平台限制见 [沙箱边界](sandbox.md)。
+
+回归测试保持无关进程存活，只释放中转和原子端，要求双流在原有 2 秒预算内 EOF；另硬杀中转创建者，要求中转的原生观察句柄在 5 秒内报告退出。修复后的原生记录为 `inheritance-native.log` 和 `inheritance-exec.log`；全工作区记录为 `inheritance-workspace.log`。实际结果以测试退出状态为准。
+
+本轮工作区全量实际通过 220 项（0 失败、0 忽略）；随后新增的外层 Job 保留探针也通过，相关 Windows 单元测试共 5 项通过（`inheritance-nested-jobs.log`）。该探针在独立 fixture 中先加入禁止 breakaway 的外层 Job，再启动真实 AppContainer，直接查询 workload 仍属于原外层 Job，避免把临时 Job 的脱离行为扩大为宿主约束的绕过。fmt、全目标/全 feature Clippy、协议 Schema 核对、12 个离线演示和 Linux 交叉 Clippy 均通过；最后两项日志分别为 `inheritance-demos.log`、`inheritance-linux-clippy.log`。Linux 行为仍未在本机运行。
+
+随后完成 Windows TrustedHost reactor 接入和 native launcher / Job owner 模块化，普通 host 与 AppContainer 均运行相同四项异步 IO 探针。该版本工作区全量实际通过 **221 项，0 失败、0 忽略**（`host-reactor-workspace.log`）；真实进程测试包含 MCP host/隔离契约、exec 四路并发/后代回收，以及 app-server 审批、重启、PTY、ACP/A2A 闭环。全目标/全 feature Clippy 与独立 sandbox 无默认 feature Clippy 均通过，后者也纳入 Windows/Linux CI。Linux 交叉 Clippy 记录为 `host-reactor-linux-clippy.log`；fmt、Schema 和 12 项离线演示记录为 `host-reactor-demos.log`。这些证据不等同于 Linux 运行验收或真实付费模型互操作。
+
+切换共享管道后的首轮全量测试在 MCP 隔离初始化触发原 fixture 的 5 秒 deadline（`async-stdio-workspace.log`）；聚焦测试中同例曾通过，未取得该次超时的独立启动阶段计时，因此不能断言其具体耗时全部来自原生启动。该例改用生产默认的 30 秒初始化/调用预算，延迟调用改为 60 秒，继续验证真实超时关闭和后续调用拒绝，而不移除超时验收。
+
+实现依据包括锁定的 Tokio 源码 `tokio-1.54.1/src/fs/file.rs` 中 `AsyncWrite::poll_shutdown` 对 flush 的委托，以及 Microsoft 的管道读写语义：
+
+- https://docs.rs/tokio/latest/tokio/fs/index.html
+- https://learn.microsoft.com/windows/win32/ipc/anonymous-pipe-operations
+- https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-writefile
+- https://docs.rs/tokio/1.54.1/tokio/net/unix/pipe/index.html
+- https://docs.rs/tokio/1.54.1/tokio/net/windows/named_pipe/struct.NamedPipeServer.html
+- https://docs.rs/mio/1.2.5/src/mio/sys/windows/named_pipe.rs.html
+- https://learn.microsoft.com/windows/win32/ipc/synchronous-and-overlapped-input-and-output
+- https://learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute
+- https://learn.microsoft.com/windows/win32/procthread/inheritance
+- https://learn.microsoft.com/windows/win32/procthread/nested-jobs
+
+## 伴随资源清单验收（2026-11-18）
+
+该版本 Windows 全工作区实际通过 **231 项，0 失败、0 忽略**。`scripts/check.ps1` 完整退出成功，包含 fmt、全工作区/独立 sandbox Clippy、Schema 一致性和 **18 个离线演示**，记录为 `target/verification/bundle-full-native.log`。Linux 目标的全工作区、全部 target、全部 feature Clippy 也退出成功（`bundle-linux-clippy.log`）；它发现并修正了 Linux 有界复制新增 `Read::take` 的 import/unused-mut 问题，仍不代表 Linux 行为已运行。
+
+新增探针验证清单路径/大小写/父子冲突、源与复制内容变化、单文件/合计/数量预算、exec 和 MCP 的 SQLite 待批恢复身份，以及官方 ACP SDK Agent 读取独立副本。真实 Node 24.22.1 / CPython 3.12.10 在 AppContainer 中加载多文件 MCP，允许/拒绝/篡改三分支均通过；数据、文件/TCP/secret 正反对照和工具调用次数由演示断言核验。早期 exec 测试误读 `stdout.text` 已改为协议实际字段 `stdout.data`；MCP 资源测试使用旧默认工具列表首项的问题也已修正为明确选择 MCP 工具。失败与修正不能用编译通过替代真实运行验收。
+
+真实 Node 的默认入口 realpath 在容器内失败，通过显式 runtime 参数解决；Python 的相邻 DLL、标准库 ZIP 和 `._pth` 通过固定清单提供。具体依赖及摘要范围见[伴随文件边界](runtime-bundles.md)。该阶段尚缺完整注册绑定，后续实现见[注册身份](authority.md)；本节历史验收不包含后续代码、真实付费模型、外部商业 Agent 或 Linux 内核运行。
+
+## 注册身份绑定验收（2026-11-18）
+
+此阶段 Windows 全工作区实际通过 **247 项，0 失败、0 忽略，45 个测试目标**。`scripts/check.ps1` 完整退出成功，包含 fmt、全工作区/独立 sandbox Clippy、Schema 一致性与 **18 个离线演示**，记录为 `target/verification/authority-final-native.log`。该数字独立于上一阶段的 231 项基线。
+
+新增真实 SQLite 重启测试验证同名工具的 Schema 变化、MCP HTTP 同别名的端点/Schema 变化、空清单 stdio 同别名的参数变化，旧审批均不执行，新审批只调用一次。注册测试验证实际环境/凭据冻结与轮换后的摘要变化；Windows 缺失 SystemRoot 时拒绝注册，避免启动阶段补入新的宿主值。原生 executable pin 探针验证复制字节与摘要不符时拒绝创建进程。
+
+ACP/A2A 排队任务保存创建时的摘要，配置变化和旧 v7 无绑定记录不能启动。真实 app-server 调度测试还验证注册失配必须保存 `task_failed`，不只打印错误留下运行中任务；新配置的新任务仍可完成，失败快照重启后保持一致。初版缺失注册测试误走已有的恢复拒绝路径，已改为直接验证启动准备阶段，修正后的六项 core authority 测试和全量检查均通过。数据库 v8 迁移与自定义 trait 摘要边界见[注册身份](authority.md)。
+
+Linux 全工作区、全部 target、全部 feature 的 cross-Clippy 已退出成功（`authority-linux-clippy.log`），修正了共享 program 模块重构后遗留的 Linux 导入。当前主机没有可运行的 WSL 发行版，未执行 Linux 内核行为探针；本阶段也未使用真实付费模型或商业 Agent。
+
+## 终端批量归档验收（2026-11-18）
+
+加入批量归档后，Windows `scripts/check.ps1` 完整退出成功：**252 项测试，0 失败、0 忽略，45 个测试目标**，以及 fmt、两种 Clippy、Schema 一致性和 **18 个离线演示**。全量日志为 `target/verification/archive-batch-full-native.log`，新增四项 SQLite/文件系统契约及一项真实 PTY/RPC 契约也有独立的 `archive-batch-contracts.log` / `archive-batch-process.log`。
+
+测试验证全列表非法/重复/容量预检不删除第一项输出；混合结果保持请求顺序；其他会话、仍持锁的监督进程和不存在的 ID 各自拒绝；未知文件只阻止清理，不撤销已提交身份。真实 SQLite reader 阻塞 COMMIT 时返回 `outcome_unknown` 并保留 spool/endpoint；单项插入失败不会撤销先前项或跳过后续项。真实原生 PTY 对照证明正在运行的进程未被隐式杀死，显式 release 后可重试归档，重启仍保留原归档快照和创建身份。
+
+## 宿主配置读取验收（2026-11-18）
+
+五类 JSON 配置统一有界读取后，Windows `scripts/check.ps1` 完整退出成功：**257 项测试，0 失败、0 忽略，46 个测试目标**，以及 fmt、两种 Clippy、Schema 一致性和 **18 个离线演示**。全量记录为 `target/verification/startup-full-native.log`；Linux 全工作区、全部 target、全部 feature cross-Clippy 退出成功，记录为 `startup-linux-clippy.log`，不代表 Linux 行为已运行。
+
+新增测试验证增长中的输入流仍最多读取 1 MiB + 1 字节、恰好上限的 JSON 可读取，以及 IO/解析诊断不回显字段、值或配置路径。真实 CLI 分别拒绝 MCP/ACP/A2A/exec/terminal 的超额与损坏配置，且不创建数据库；后续 ACP JSON 无效时，前面的 loopback MCP fixture 没有收到连接请求。所有 JSON 反序列化先于外部初始化，跨 adapter 的语义验证仍不是一个事务。配置边界见[宿主配置](host-configuration.md)。
+
+## Skills 资源与来源绑定验收（2026-11-18）
+
+此阶段 Windows `scripts/check.ps1` 完整退出成功：**263 项测试，0 失败、0 忽略，46 个测试目标**，以及 fmt、全工作区/独立 sandbox Clippy、Schema 一致性和 **21 个离线演示**。全量记录为 `target/verification/skills-resources-full-native.log`。Linux 全工作区、全部 target、全部 feature cross-Clippy 同样退出成功，记录为 `skills-resources-linux-clippy.log`；Unix 链接/FIFO 行为仍待实际 runner。
+
+Skills 的八项原生测试包含真实目录联接不能跳到同库其他技能、中文文本/摘要、UTF-8/容量/目录扫描边界、取消、参数覆盖拒绝，以及 SQLite 重启切换来源使旧资源审批失败。工具名冲突测试检查整个注册表前后相同，避免遗漏内核默认工具。Unix 专用测试还覆盖最终文件链接、FIFO 和替换后的 SKILL.md，但不计入 Windows 的通过数量。
+
+三条新增演示均启动真实 app-server 和本机确定性 HTTP 模型：正常逐步披露、拒绝资源读取、待批时重启切换 Skills 目录。切换来源拒绝旧调用且模型请求数不增长，新任务可完成；全部分支的脚本都只作为文本返回，未执行。脚本和证据边界见[Skills 文档](skills.md)，独立日志为 `skills-resources-demo.log` / `skills-resources-deny.log` / `skills-resources-switch.log`。
+
+## MCP 资源、提示与完成状态验收（2026-11-18）
+
+最终 Windows `scripts/check.ps1` 完整退出成功：**272 项测试，0 失败、0 忽略，48 个测试目标**，以及 fmt、全工作区/独立 sandbox Clippy、Schema 一致性和 **24 个离线演示**。最终日志为 `target/verification/mcp-content-final-native.log`。Linux 全工作区、全部 target、全部 feature cross-Clippy 退出成功，记录为 `mcp-content-linux-clippy.log`；当前主机没有实际运行 Linux 隔离探针。
+
+新增八项 HTTP/SQLite 契约验证资源服务不接收 tools/list、单页审批、opaque URI 不触发宿主文件或独立 HTTP 读取、二进制 blob 保留、覆盖参数/预算拒绝、服务 cache hints 不隐藏第二次请求或失败、集合/游标/wire 大小限制、未知结果不续交互、取消/超时和跨方法排队取消。真实 SQLite 重启同时覆盖资源和提示：拒绝不发请求、换端点旧审批失效、新授权完成、提示角色只在 ToolResult 内，以及事件和最终快照原样保留。
+
+官方 Rust SDK HTTP 服务在 discover/initialize 与 JSON/SSE 四种组合内各执行五类内容方法。另一项独立 SDK stdio 进程测试分别运行 Windows TrustedHost/AppContainer，核对真实进程身份、容器状态、私有 cwd 与关闭后的目录回收。三条新增 app-server 演示依次审批分页、模板、读取、提示列表与获取，分别验收允许、拒绝和待批时重启换端点；最终重启查询不重放。聚焦记录为 `mcp-content-contracts.log`、`mcp-content-stdio.log` 和 `mcp-content-demo.log` / `mcp-content-deny.log` / `mcp-content-switch.log`。
+
+首轮全量虽已通过相同的 272 项与 24 个演示（`mcp-content-full-native.log`），随后复核 SDK untagged 结果又发现部分内容与非完成 resultType 组合可能被当作完成，实际反例记录在 `mcp-result-type-reproduction.log`。修正后显式核验工具发现、工具调用及五类内容结果，拒绝 input_required/task/未知扩展，即使附带最终形状；MCP 工具摘要域更新为 v2。增强测试包含这些组合和原旧版缺省字段兼容，聚焦记录为 `mcp-result-type-contracts.log`，最终全量日志对应修正后的代码。最初一个断言过度要求固定错误类别，已改为检查结果未知、不泄露状态、不重放和共享连接关闭等实际契约。
+
+边界和预算见[MCP 内容通道](mcp-content.md)。本阶段没有使用真实付费模型、外部商业 MCP 服务或远程 CI 运行结果；本机 fixture、官方 SDK 双端互操作与平台原生测试分别记录，不能相互替代。
+
+## Skills 二进制资源验收（2026-11-18）
+
+Windows `scripts/check.ps1` 完整退出成功：**274 项测试，0 失败、0 忽略，48 个测试目标**，包含 fmt、两种 Clippy、Schema 一致性和 **24 个离线演示**，记录为 `target/verification/skills-binary-full-native.log`。Linux 全工作区/全部 target/全部 feature cross-Clippy 同样退出成功（`skills-binary-linux-clippy.log`），不代表 Linux 行为验收。
+
+Skills 的十项原生测试新增显式 base64 读取：覆盖全部 256 种字节、恰好 256 KiB 和超额一字节、空文件、编码错误、UTF-8 模式不静默降级、目录链接拒绝、普通审批前无读取结果、拒绝不返回数据、重启继续同一待批调用，以及最终持久快照与不自动创建产物。摘要和长度针对原始字节，编码后的数据实际还原比对。编译依赖只新增已锁定的 base64 0.22.1 引用。
+
+三条既有 Skills app-server 演示已扩展到二进制资源，并分别实际运行正常/拒绝/换来源分支（`skills-binary-demo.log`、`skills-binary-deny.log`、`skills-binary-switch.log`）。正常与新来源任务通过逐次审批读取原始字节，模型 fixture 实际核验 base64 还原、长度和 SHA-256；脚本 marker 在所有分支均不存在。工具输入契约改变后旧待批读取需重新授权，文档见[Skills](skills.md)。
+
+## 显式历史任务选择验收（2026-11-18）
+
+Windows `scripts/check.ps1` 完整退出成功：**278 项测试，0 失败、0 忽略，48 个测试目标**，包含 fmt、两种 Clippy、Schema 一致性和 **24 个离线演示**，记录为 `target/verification/context-selection-full-native.log`。Linux 全工作区、全部 target、全部 feature cross-Clippy 同样退出成功（`context-selection-linux-clippy.log`），不代表 Linux 行为已运行。
+
+新增四项 core 契约验证显式选择跳过超大最新任务、完成事件顺序、ID 集合换序后的幂等、快照冻结、非法/跨会话/未完成 ID 拒绝，以及完整序列化快照和原始投影的容量限制。选择失败不保存任务/事件、不占用幂等键；指定记录不会为了预算被静默删除。真实磁盘 v8 到 v9 升级保留旧快照形状，重启后返回原选择。聚焦记录为 `context-selection-contracts.log`；首次测试编译曾使用不受 rusqlite 支持的 u64 COUNT 目标，已改为 SQLite 对应的 i64 后运行通过。
+
+增强后的既有上下文演示启动真实 app-server 和确定性 loopback 模型，检查实际 HTTP 请求精确包含指定任务及产物身份，排除最新超大记录；RPC 对跨会话/等待审批/重复/空/超额选择的拒绝不增长任务、事件或模型请求。服务重启后交换 ID 输入顺序仍返回相同任务和冻结快照，不重放模型请求。独立记录为 `context-selection-demo.log`。数据库 v9 只为新冻结输入提升版本号；未使用真实付费模型或远程 CI 结果。
+
+## 工作区文件读取加固验收（2026-11-18）
+
+Windows `scripts/check.ps1` 完整退出成功：**282 项测试，0 失败、0 忽略，48 个测试目标**，包含 fmt、两种 Clippy、Schema 一致性和 **24 个离线演示**，记录为 `target/verification/workspace-file-io-full-native.log`。Linux 全工作区/全部 target/全部 feature cross-Clippy 退出成功（`workspace-file-io-linux-clippy.log`）；单独的 tools Linux 契约编译记录为 `workspace-file-io-linux-contracts.log`。
+
+新增的独立 `tools/file_io` 统一文本读取、补丁基线和全文写入预览的实际字节预算与取消检查。Windows 新增四项测试：恰好 256 KiB/空输入、无限增长 reader 最多消费一额外字节、开始前/返回数据后/EOF 时取消、中断重试与部分读取后的 IO 错误，以及真实文件的容量/按行/摘要/预览边界。tools 原生聚焦共 12 项通过（`workspace-file-io-contracts.log`），最后一个错误探针随后增强为先返回部分数据再失败，最终全量包含增强版本。
+
+Unix 新增独立测试子进程，实际创建没有写端的 FIFO，核验只读/读写打开、工具读取、补丁、全文替换和写入预览均拒绝；父进程在 5 秒后会杀死阻塞探针，防止回归挂住 runner。该测试已交叉编译，但当前 Windows 主机没有运行它，不能计入原生通过数量。实现核对了锁定的 `cap-fs-ext 4.0.3` / `cap-primitives 4.0.3` 非阻塞选项，以及直接读取的 Linux man-pages `open(2)` 说明（HTTP 200 与摘录记录为 `workspace-file-io-research.json`）。O_NONBLOCK 对普通文件不构成硬 deadline；路径、写入基线与结果未知规则见[架构](architecture.md)和[协议](protocol.md)。
+
+## 工具组注册与工作区二进制读取验收（2026-11-18）
+
+Windows `scripts/check.ps1` 完整退出成功：**288 项测试，0 失败、0 忽略，48 条 Cargo 测试结果汇总**，通过 fmt、全 workspace Clippy、独立 sandbox Clippy、Schema 一致性和 **24 个离线演示**。最终记录为 `target/verification/workspace-binary-full-native.log`。Linux 全 workspace、all-targets、all-features cross-Clippy 同样通过，记录为 `target/verification/workspace-binary-linux-clippy.log`；它只证明 Linux 目标编译和静态检查通过，不代表 Linux 原生行为已运行。
+
+core 的 `register_tools` 先暂存并校验整组工具的名称、摘要和与已有注册的冲突，再一次发布；若校验失败，已存在的注册保持不变。本轮接入工作区、Skills、MCP、ACP/Agent、exec 与 terminal 适配器。注册契约记录为 `target/verification/registry-contracts.log`，整组回归包含在最终全量日志中。
+
+工作区新增 `workspace_read_bytes`，每次读取都需要审批，最多返回 256 KiB 原始字节及 base64、原始长度和 SHA-256；不会解码、执行或创建产物。15 项聚焦测试覆盖空文件、全部字节值、精确上限与超限、拒绝不返回数据，以及 SQLite 重启后继续原待批调用，记录为 `target/verification/workspace-binary-contracts.log`。Unix FIFO 探针已交叉编译，但没有在 Linux runner 上原生执行。
+
+## 模型请求状态与大小边界验收（2026-11-18）
+
+模型 provider 错误明确区分本地请求构造失败、发送前取消和可能已经发出的请求。OpenAI/Anthropic 的续接校验失败和超限请求体落为已知 `failed`；发送开始后发生取消、传输、状态或响应解析错误仍落为 `interrupted` / outcome unknown，并保留显式重试同意。旧版自定义 provider 的字符串错误继续按未知结果处理，避免低报风险。
+
+两个 HTTP 适配器在网络 dispatch 前以有界 JSON 序列化器限制请求体为 8 MiB，精确上限接受、超出一字节已知拒绝；此限制只界定序列化的传输体大小，不估算 token 或模型窗口。core 测试覆盖真实 `start_task` 的已知失败/取消状态；provider 测试覆盖精确边界、预发送错误与取消不建连接，以及不完整 SSE 保留未知结果。
+
+变更后的 Windows `scripts/check.ps1` 完整退出成功：**292 项测试，0 失败、0 忽略，48 条 Cargo 测试结果汇总**，通过 fmt、全 workspace Clippy、独立 sandbox Clippy、Schema 一致性及 **24 个离线演示**。记录为 `target/verification/model-request-budget-full-native.log`。Linux 全 workspace、all-targets、all-features cross-Clippy 退出成功，记录为 `target/verification/model-request-budget-linux-clippy.log`；它不代表 Linux 原生行为已运行。

@@ -1,0 +1,47 @@
+[package]
+name = "fliuno-app-server"
+default-run = "fliuno-app-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+test-fixtures = ["dep:fliuno-acp", "fliuno-acp/test-fixtures", "fliuno-exec/test-fixtures", "fliuno-terminal/test-fixtures"]
+
+[dependencies]
+fliuno-core.workspace = true
+fliuno-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+crossbeam-channel.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+fliuno-providers = { path = "../fliuno-providers" }
+fliuno-mcp = { path = "../fliuno-mcp" }
+fliuno-tools = { path = "../fliuno-tools" }
+fliuno-skills = { path = "../fliuno-skills" }
+fliuno-agents = { path = "../fliuno-agents" }
+fliuno-exec = { path = "../fliuno-exec" }
+fliuno-terminal = { path = "../fliuno-terminal" }
+fliuno-acp = { path = "../fliuno-acp", optional = true }
+
+[[bin]]
+name = "fliuno-app-exec-fixture"
+path = "src/bin/exec_fixture.rs"
+required-features = ["test-fixtures"]
+test = false
+
+[[bin]]
+name = "fliuno-app-acp-fixture"
+path = "src/bin/acp_fixture.rs"
+required-features = ["test-fixtures"]
+test = false
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+base64 = "0.22"
+rusqlite.workspace = true
+fliuno-sandbox = { path = "../fliuno-sandbox" }

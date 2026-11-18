@@ -1,0 +1,4291 @@
+{
+  "protocolVersion": "0.1",
+  "methods": {
+    "initialize": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "InitializeParams",
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "clientName"
+      ]
+    },
+    "workspace/open": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceOpenParams",
+      "type": "object",
+      "properties": {
+        "root": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "root"
+      ]
+    },
+    "workspace/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ListParams",
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false
+    },
+    "session/create": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionCreateParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "session/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionListParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "session/context": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionContextParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "options": {
+          "$ref": "#/$defs/ContextOptions",
+          "default": {
+            "mode": "session",
+            "maxTurns": 16,
+            "maxBytes": 131072
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ],
+      "$defs": {
+        "ContextOptions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/ContextMode",
+              "default": "session"
+            },
+            "maxTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 16
+            },
+            "maxBytes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 131072
+            },
+            "taskIds": {
+              "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContextMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "isolated"
+          ]
+        }
+      }
+    },
+    "terminal/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalListParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "terminal/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalGetParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "terminalId"
+      ]
+    },
+    "terminal/output": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalOutputParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 32768
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "terminalId"
+      ]
+    },
+    "terminal/subscribe": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalOutputParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 32768
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "terminalId"
+      ]
+    },
+    "terminal/unsubscribe": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalUnsubscribeParams",
+      "type": "object",
+      "properties": {
+        "subscriptionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "subscriptionId"
+      ]
+    },
+    "terminal/archive": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalGetParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "terminalId"
+      ]
+    },
+    "terminal/archiveBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalArchiveBatchParams",
+      "description": "Explicit host-client selection. Validate the complete list before effects;\na batch does not infer retention policy or terminate live supervisors.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "terminalIds"
+      ]
+    },
+    "terminal/archives": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalArchivesParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "task/start": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskStartParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "backend": {
+          "$ref": "#/$defs/TaskBackend",
+          "default": {
+            "type": "model"
+          }
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContextOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "input"
+      ],
+      "$defs": {
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
+          ]
+        },
+        "ContextOptions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/ContextMode",
+              "default": "session"
+            },
+            "maxTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 16
+            },
+            "maxBytes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 131072
+            },
+            "taskIds": {
+              "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContextMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "isolated"
+          ]
+        }
+      }
+    },
+    "task/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskListParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "task/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "task/cancel": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "task/resume": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskResumeParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "retryUncertainModelStep": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "approval/respond": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalRespondParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecision"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "approvalId",
+        "decision"
+      ],
+      "$defs": {
+        "ApprovalDecision": {
+          "type": "string",
+          "enum": [
+            "allow_once",
+            "deny"
+          ]
+        }
+      }
+    },
+    "events/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "EventsListParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "events/listAll": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "EventsListAllParams",
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false
+    },
+    "artifacts/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "tools/list": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "agents/list": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  "types": {
+    "Workspace": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Workspace",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "root": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "root"
+      ]
+    },
+    "Session": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Session",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "workspaceId"
+      ]
+    },
+    "Task": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Task",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "context": {
+          "description": "None for pre-context snapshots; legacy retries retain their original input.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pendingApproval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Approval"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inFlightTool": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCall"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "modelOutcomeUnknown": {
+          "description": "A restart/timeout can leave the model request result and billing unknown.",
+          "type": "boolean",
+          "default": false
+        },
+        "output": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelSteps": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "backend": {
+          "$ref": "#/$defs/TaskBackend",
+          "default": {
+            "type": "model"
+          }
+        },
+        "backendAuthority": {
+          "description": "Host registration captured at creation for a queued external-agent task.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "agentRun": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentRun"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sessionId",
+        "status",
+        "messages",
+        "modelSteps"
+      ],
+      "$defs": {
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "Message": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "user"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "tool_call"
+                },
+                "call": {
+                  "$ref": "#/$defs/ToolCall"
+                }
+              },
+              "required": [
+                "role",
+                "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "tool_result"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "required": [
+                "role",
+                "callId",
+                "output"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "assistant"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "role",
+                "text"
+              ]
+            },
+            {
+              "description": "Opaque output needed to replay provider reasoning/tool-use blocks exactly.",
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "provider_replay"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "data": true
+              },
+              "required": [
+                "role",
+                "provider",
+                "data"
+              ]
+            }
+          ]
+        },
+        "ToolCall": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "arguments"
+          ]
+        },
+        "TaskContext": {
+          "type": "object",
+          "properties": {
+            "options": {
+              "$ref": "#/$defs/ContextOptions"
+            },
+            "throughSequence": {
+              "description": "Global event cursor at capture time, not a live session attachment.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "turns": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextTurn"
+              }
+            },
+            "omittedTurns": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "options",
+            "throughSequence",
+            "turns",
+            "omittedTurns"
+          ]
+        },
+        "ContextOptions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/ContextMode",
+              "default": "session"
+            },
+            "maxTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 16
+            },
+            "maxBytes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 131072
+            },
+            "taskIds": {
+              "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContextMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "isolated"
+          ]
+        },
+        "ContextTurn": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "backend": {
+              "$ref": "#/$defs/TaskBackend"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextMessage"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextArtifact"
+              }
+            },
+            "hostTools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentHostTool"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence",
+            "backend",
+            "messages",
+            "artifacts",
+            "hostTools"
+          ]
+        },
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
+          ]
+        },
+        "ContextMessage": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "user"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "assistant"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "tool_call"
+                },
+                "call": {
+                  "$ref": "#/$defs/ToolCall"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "tool_result"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "callId",
+                "output"
+              ]
+            }
+          ]
+        },
+        "ContextArtifact": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "mediaType"
+          ]
+        },
+        "AgentHostTool": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "status": {
+              "$ref": "#/$defs/AgentHostToolStatus"
+            },
+            "output": true,
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "call",
+            "status"
+          ]
+        },
+        "AgentHostToolStatus": {
+          "type": "string",
+          "enum": [
+            "awaiting_approval",
+            "approved",
+            "running",
+            "succeeded",
+            "denied",
+            "failed",
+            "outcome_unknown",
+            "closed"
+          ]
+        },
+        "Approval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "authority": {
+              "description": "Absent in legacy snapshots, which cannot authorize a new execution.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "call"
+          ]
+        },
+        "AgentRun": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "finished": {
+              "type": "boolean"
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "outcomeUnknown": {
+              "type": "boolean"
+            },
+            "stopReason": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AgentStopReason"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "updateCount": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "recordedBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "permissionCount": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "pendingApprovals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentApproval"
+              }
+            },
+            "hostTools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentHostTool"
+              },
+              "default": []
+            },
+            "remoteTask": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AgentRemoteTask"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentArtifactLink"
+              },
+              "default": []
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "finished",
+            "outcomeUnknown",
+            "text",
+            "updateCount",
+            "recordedBytes",
+            "permissionCount",
+            "pendingApprovals"
+          ]
+        },
+        "AgentStopReason": {
+          "type": "string",
+          "enum": [
+            "end_turn",
+            "refusal",
+            "max_tokens",
+            "max_turn_requests",
+            "cancelled",
+            "failed",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        },
+        "AgentApproval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "permissionId": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/AgentApprovalSource",
+              "default": "agent_permission"
+            },
+            "request": {
+              "description": "Untrusted, read-only peer context. Never interpreted as host authority."
+            },
+            "allowOnceAvailable": {
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "runId",
+            "permissionId",
+            "request",
+            "allowOnceAvailable",
+            "expiresAtUnixMs"
+          ]
+        },
+        "AgentApprovalSource": {
+          "type": "string",
+          "enum": [
+            "agent_permission",
+            "host_tool"
+          ]
+        },
+        "AgentRemoteTask": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "contextId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "state"
+          ]
+        },
+        "AgentTaskState": {
+          "description": "Neutral remote execution evidence, separate from the local task lifecycle.",
+          "type": "string",
+          "enum": [
+            "submitted",
+            "working",
+            "completed",
+            "failed",
+            "cancelled",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        },
+        "AgentArtifactLink": {
+          "type": "object",
+          "properties": {
+            "sourceId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sourceId",
+            "artifactId"
+          ]
+        }
+      }
+    },
+    "TaskContext": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskContext",
+      "type": "object",
+      "properties": {
+        "options": {
+          "$ref": "#/$defs/ContextOptions"
+        },
+        "throughSequence": {
+          "description": "Global event cursor at capture time, not a live session attachment.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "turns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextTurn"
+          }
+        },
+        "omittedTurns": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "options",
+        "throughSequence",
+        "turns",
+        "omittedTurns"
+      ],
+      "$defs": {
+        "ContextOptions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/ContextMode",
+              "default": "session"
+            },
+            "maxTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 16
+            },
+            "maxBytes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 131072
+            },
+            "taskIds": {
+              "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContextMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "isolated"
+          ]
+        },
+        "ContextTurn": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "backend": {
+              "$ref": "#/$defs/TaskBackend"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextMessage"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextArtifact"
+              }
+            },
+            "hostTools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentHostTool"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence",
+            "backend",
+            "messages",
+            "artifacts",
+            "hostTools"
+          ]
+        },
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
+          ]
+        },
+        "ContextMessage": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "user"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "assistant"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "tool_call"
+                },
+                "call": {
+                  "$ref": "#/$defs/ToolCall"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "tool_result"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "callId",
+                "output"
+              ]
+            }
+          ]
+        },
+        "ToolCall": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "arguments"
+          ]
+        },
+        "ContextArtifact": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "mediaType"
+          ]
+        },
+        "AgentHostTool": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "status": {
+              "$ref": "#/$defs/AgentHostToolStatus"
+            },
+            "output": true,
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "call",
+            "status"
+          ]
+        },
+        "AgentHostToolStatus": {
+          "type": "string",
+          "enum": [
+            "awaiting_approval",
+            "approved",
+            "running",
+            "succeeded",
+            "denied",
+            "failed",
+            "outcome_unknown",
+            "closed"
+          ]
+        }
+      }
+    },
+    "AgentSpec": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentSpec",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "isolation": {
+          "type": "string"
+        },
+        "workspaceAccess": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "protocol",
+        "isolation"
+      ]
+    },
+    "TerminalSnapshot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalSnapshot",
+      "type": "object",
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "presetId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TerminalStatus"
+        },
+        "startupError": {
+          "description": "Bounded, host-authored startup diagnostic; never child stderr or argv.\nOlder records without this field remain readable.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "supervisorConnected": {
+          "description": "True only when this response was received from the live supervisor.\nOffline reads never infer liveness from a saved PID or lock filename.",
+          "type": "boolean"
+        },
+        "rows": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "cols": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "signal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startOffset": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "endOffset": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "inputBytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "outputClosed": {
+          "description": "Root exit does not imply that every byte of PTY output was drained.",
+          "type": "boolean"
+        },
+        "expiresAtUnixMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "archivedAtUnixMs": {
+          "description": "A durable tombstone replaces this terminal's output and operation log.\nThe original ID remains permanently reserved. Older spools omit it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "terminalId",
+        "sessionId",
+        "presetId",
+        "status",
+        "supervisorConnected",
+        "rows",
+        "cols",
+        "startOffset",
+        "endOffset",
+        "inputBytes",
+        "outputClosed",
+        "expiresAtUnixMs"
+      ],
+      "$defs": {
+        "TerminalStatus": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "starting",
+                "running",
+                "exited",
+                "killed",
+                "expired",
+                "outcome_unknown",
+                "released"
+              ]
+            },
+            {
+              "description": "Startup was refused before a PTY child could be launched.",
+              "type": "string",
+              "const": "failed"
+            }
+          ]
+        }
+      }
+    },
+    "TerminalOutput": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalOutput",
+      "type": "object",
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/TerminalSnapshot"
+        },
+        "from": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "next": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "gap": {
+          "type": "boolean"
+        },
+        "dataBase64": {
+          "description": "PTY bytes include escape sequences and may cut across UTF-8 boundaries.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "from",
+        "next",
+        "gap",
+        "dataBase64"
+      ],
+      "$defs": {
+        "TerminalSnapshot": {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "presetId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TerminalStatus"
+            },
+            "startupError": {
+              "description": "Bounded, host-authored startup diagnostic; never child stderr or argv.\nOlder records without this field remain readable.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "supervisorConnected": {
+              "description": "True only when this response was received from the live supervisor.\nOffline reads never infer liveness from a saved PID or lock filename.",
+              "type": "boolean"
+            },
+            "rows": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "cols": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "signal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "endOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "inputBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputClosed": {
+              "description": "Root exit does not imply that every byte of PTY output was drained.",
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "archivedAtUnixMs": {
+              "description": "A durable tombstone replaces this terminal's output and operation log.\nThe original ID remains permanently reserved. Older spools omit it.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0,
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "terminalId",
+            "sessionId",
+            "presetId",
+            "status",
+            "supervisorConnected",
+            "rows",
+            "cols",
+            "startOffset",
+            "endOffset",
+            "inputBytes",
+            "outputClosed",
+            "expiresAtUnixMs"
+          ]
+        },
+        "TerminalStatus": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "starting",
+                "running",
+                "exited",
+                "killed",
+                "expired",
+                "outcome_unknown",
+                "released"
+              ]
+            },
+            {
+              "description": "Startup was refused before a PTY child could be launched.",
+              "type": "string",
+              "const": "failed"
+            }
+          ]
+        }
+      }
+    },
+    "TerminalSubscription": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalSubscription",
+      "type": "object",
+      "properties": {
+        "subscriptionId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "subscriptionId",
+        "sessionId",
+        "terminalId",
+        "after"
+      ]
+    },
+    "TerminalOutputNotification": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalOutputNotification",
+      "type": "object",
+      "properties": {
+        "subscriptionId": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/TerminalOutput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "subscriptionId",
+        "output"
+      ],
+      "$defs": {
+        "TerminalOutput": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/TerminalSnapshot"
+            },
+            "from": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "next": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "gap": {
+              "type": "boolean"
+            },
+            "dataBase64": {
+              "description": "PTY bytes include escape sequences and may cut across UTF-8 boundaries.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "snapshot",
+            "from",
+            "next",
+            "gap",
+            "dataBase64"
+          ]
+        },
+        "TerminalSnapshot": {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "presetId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TerminalStatus"
+            },
+            "startupError": {
+              "description": "Bounded, host-authored startup diagnostic; never child stderr or argv.\nOlder records without this field remain readable.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "supervisorConnected": {
+              "description": "True only when this response was received from the live supervisor.\nOffline reads never infer liveness from a saved PID or lock filename.",
+              "type": "boolean"
+            },
+            "rows": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "cols": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "signal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "endOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "inputBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputClosed": {
+              "description": "Root exit does not imply that every byte of PTY output was drained.",
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "archivedAtUnixMs": {
+              "description": "A durable tombstone replaces this terminal's output and operation log.\nThe original ID remains permanently reserved. Older spools omit it.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0,
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "terminalId",
+            "sessionId",
+            "presetId",
+            "status",
+            "supervisorConnected",
+            "rows",
+            "cols",
+            "startOffset",
+            "endOffset",
+            "inputBytes",
+            "outputClosed",
+            "expiresAtUnixMs"
+          ]
+        },
+        "TerminalStatus": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "starting",
+                "running",
+                "exited",
+                "killed",
+                "expired",
+                "outcome_unknown",
+                "released"
+              ]
+            },
+            {
+              "description": "Startup was refused before a PTY child could be launched.",
+              "type": "string",
+              "const": "failed"
+            }
+          ]
+        }
+      }
+    },
+    "TerminalSubscriptionEnded": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalSubscriptionEnded",
+      "type": "object",
+      "properties": {
+        "subscriptionId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "terminalId": {
+          "type": "string"
+        },
+        "after": {
+          "description": "Last byte cursor emitted on this connection, including retention gaps.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "reason": {
+          "$ref": "#/$defs/TerminalSubscriptionEndReason"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "subscriptionId",
+        "sessionId",
+        "terminalId",
+        "after",
+        "reason"
+      ],
+      "$defs": {
+        "TerminalSubscriptionEndReason": {
+          "type": "string",
+          "enum": [
+            "closed",
+            "supervisor_unavailable",
+            "overflow",
+            "failed",
+            "archived"
+          ]
+        }
+      }
+    },
+    "TerminalArchive": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalArchive",
+      "type": "object",
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/TerminalSnapshot"
+        },
+        "cleanupPending": {
+          "description": "The tombstone is committed even when a file is temporarily still open.\nRetry archive to complete bounded cleanup; never recreate the terminal.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "cleanupPending"
+      ],
+      "$defs": {
+        "TerminalSnapshot": {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "presetId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TerminalStatus"
+            },
+            "startupError": {
+              "description": "Bounded, host-authored startup diagnostic; never child stderr or argv.\nOlder records without this field remain readable.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "supervisorConnected": {
+              "description": "True only when this response was received from the live supervisor.\nOffline reads never infer liveness from a saved PID or lock filename.",
+              "type": "boolean"
+            },
+            "rows": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "cols": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "signal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "endOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "inputBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputClosed": {
+              "description": "Root exit does not imply that every byte of PTY output was drained.",
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "archivedAtUnixMs": {
+              "description": "A durable tombstone replaces this terminal's output and operation log.\nThe original ID remains permanently reserved. Older spools omit it.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0,
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "terminalId",
+            "sessionId",
+            "presetId",
+            "status",
+            "supervisorConnected",
+            "rows",
+            "cols",
+            "startOffset",
+            "endOffset",
+            "inputBytes",
+            "outputClosed",
+            "expiresAtUnixMs"
+          ]
+        },
+        "TerminalStatus": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "starting",
+                "running",
+                "exited",
+                "killed",
+                "expired",
+                "outcome_unknown",
+                "released"
+              ]
+            },
+            {
+              "description": "Startup was refused before a PTY child could be launched.",
+              "type": "string",
+              "const": "failed"
+            }
+          ]
+        }
+      }
+    },
+    "TerminalArchiveBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerminalArchiveBatch",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "Results follow request order. Each archive commits independently.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TerminalArchiveBatchItem"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "$defs": {
+        "TerminalArchiveBatchItem": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "archived"
+                },
+                "terminalId": {
+                  "type": "string"
+                },
+                "archive": {
+                  "$ref": "#/$defs/TerminalArchive"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "terminalId",
+                "archive"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "failed"
+                },
+                "terminalId": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "terminalId",
+                "message"
+              ]
+            },
+            {
+              "description": "Inspect this ID through terminal/get or terminal/archives. A lost commit\nresponse must not be reported as a known failure or an empty archive.",
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "outcome_unknown"
+                },
+                "terminalId": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "terminalId",
+                "message"
+              ]
+            }
+          ]
+        },
+        "TerminalArchive": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/TerminalSnapshot"
+            },
+            "cleanupPending": {
+              "description": "The tombstone is committed even when a file is temporarily still open.\nRetry archive to complete bounded cleanup; never recreate the terminal.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "snapshot",
+            "cleanupPending"
+          ]
+        },
+        "TerminalSnapshot": {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "presetId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TerminalStatus"
+            },
+            "startupError": {
+              "description": "Bounded, host-authored startup diagnostic; never child stderr or argv.\nOlder records without this field remain readable.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "supervisorConnected": {
+              "description": "True only when this response was received from the live supervisor.\nOffline reads never infer liveness from a saved PID or lock filename.",
+              "type": "boolean"
+            },
+            "rows": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "cols": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "signal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "endOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "inputBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputClosed": {
+              "description": "Root exit does not imply that every byte of PTY output was drained.",
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "archivedAtUnixMs": {
+              "description": "A durable tombstone replaces this terminal's output and operation log.\nThe original ID remains permanently reserved. Older spools omit it.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0,
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "terminalId",
+            "sessionId",
+            "presetId",
+            "status",
+            "supervisorConnected",
+            "rows",
+            "cols",
+            "startOffset",
+            "endOffset",
+            "inputBytes",
+            "outputClosed",
+            "expiresAtUnixMs"
+          ]
+        },
+        "TerminalStatus": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "starting",
+                "running",
+                "exited",
+                "killed",
+                "expired",
+                "outcome_unknown",
+                "released"
+              ]
+            },
+            {
+              "description": "Startup was refused before a PTY child could be launched.",
+              "type": "string",
+              "const": "failed"
+            }
+          ]
+        }
+      }
+    },
+    "TerminalArchivesPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ObjectPage",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TerminalArchive"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextAfter",
+        "hasMore"
+      ],
+      "$defs": {
+        "TerminalArchive": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/TerminalSnapshot"
+            },
+            "cleanupPending": {
+              "description": "The tombstone is committed even when a file is temporarily still open.\nRetry archive to complete bounded cleanup; never recreate the terminal.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "snapshot",
+            "cleanupPending"
+          ]
+        },
+        "TerminalSnapshot": {
+          "type": "object",
+          "properties": {
+            "terminalId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "presetId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TerminalStatus"
+            },
+            "startupError": {
+              "description": "Bounded, host-authored startup diagnostic; never child stderr or argv.\nOlder records without this field remain readable.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "supervisorConnected": {
+              "description": "True only when this response was received from the live supervisor.\nOffline reads never infer liveness from a saved PID or lock filename.",
+              "type": "boolean"
+            },
+            "rows": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "cols": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "exitCode": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "signal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "endOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "inputBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputClosed": {
+              "description": "Root exit does not imply that every byte of PTY output was drained.",
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "archivedAtUnixMs": {
+              "description": "A durable tombstone replaces this terminal's output and operation log.\nThe original ID remains permanently reserved. Older spools omit it.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0,
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "terminalId",
+            "sessionId",
+            "presetId",
+            "status",
+            "supervisorConnected",
+            "rows",
+            "cols",
+            "startOffset",
+            "endOffset",
+            "inputBytes",
+            "outputClosed",
+            "expiresAtUnixMs"
+          ]
+        },
+        "TerminalStatus": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "starting",
+                "running",
+                "exited",
+                "killed",
+                "expired",
+                "outcome_unknown",
+                "released"
+              ]
+            },
+            {
+              "description": "Startup was refused before a PTY child could be launched.",
+              "type": "string",
+              "const": "failed"
+            }
+          ]
+        }
+      }
+    },
+    "Artifact": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Artifact",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "mediaType": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "taskId",
+        "title",
+        "mediaType",
+        "content"
+      ]
+    },
+    "Event": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Event",
+      "type": "object",
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "taskId": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/EventKind"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "taskId",
+        "data"
+      ],
+      "$defs": {
+        "EventKind": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_started"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_started"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "agentId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_session_opened"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_update"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "update": true
+              },
+              "required": [
+                "type",
+                "runId",
+                "update"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_remote_task_updated"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "task": {
+                  "$ref": "#/$defs/AgentRemoteTask"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "task"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_requested"
+                },
+                "approval": {
+                  "$ref": "#/$defs/AgentApproval"
+                }
+              },
+              "required": [
+                "type",
+                "approval"
+              ]
+            },
+            {
+              "description": "Durable intent; delivery to the peer is not guaranteed after a crash.",
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_resolved"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "decision": {
+                  "$ref": "#/$defs/ApprovalDecision"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "approvalId",
+                "decision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_closed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "approvalId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "approvalId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_finished"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "stopReason": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AgentStopReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "outcomeUnknown": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "outcomeUnknown"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_requested"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "operation": {
+                  "$ref": "#/$defs/AgentHostTool"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "operation"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_started"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "requestId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_completed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                },
+                "status": {
+                  "$ref": "#/$defs/AgentHostToolStatus"
+                },
+                "output": true,
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "requestId",
+                "status"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_started"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "approval_requested"
+                },
+                "approval": {
+                  "$ref": "#/$defs/Approval"
+                }
+              },
+              "required": [
+                "type",
+                "approval"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "approval_resolved"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "decision": {
+                  "$ref": "#/$defs/ApprovalDecision"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "decision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_completed"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "required": [
+                "type",
+                "callId",
+                "output"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_started"
+                },
+                "call": {
+                  "$ref": "#/$defs/ToolCall"
+                }
+              },
+              "required": [
+                "type",
+                "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_outcome_unknown"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "required": [
+                "type",
+                "callId",
+                "message"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "artifact_created"
+                },
+                "artifactId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "artifactId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_completed"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_cancelled"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_failed"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_interrupted"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_outcome_unknown"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_resumed"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          ]
+        },
+        "AgentRemoteTask": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "contextId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "state"
+          ]
+        },
+        "AgentTaskState": {
+          "description": "Neutral remote execution evidence, separate from the local task lifecycle.",
+          "type": "string",
+          "enum": [
+            "submitted",
+            "working",
+            "completed",
+            "failed",
+            "cancelled",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        },
+        "AgentApproval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "permissionId": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/AgentApprovalSource",
+              "default": "agent_permission"
+            },
+            "request": {
+              "description": "Untrusted, read-only peer context. Never interpreted as host authority."
+            },
+            "allowOnceAvailable": {
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "runId",
+            "permissionId",
+            "request",
+            "allowOnceAvailable",
+            "expiresAtUnixMs"
+          ]
+        },
+        "AgentApprovalSource": {
+          "type": "string",
+          "enum": [
+            "agent_permission",
+            "host_tool"
+          ]
+        },
+        "ApprovalDecision": {
+          "type": "string",
+          "enum": [
+            "allow_once",
+            "deny"
+          ]
+        },
+        "AgentStopReason": {
+          "type": "string",
+          "enum": [
+            "end_turn",
+            "refusal",
+            "max_tokens",
+            "max_turn_requests",
+            "cancelled",
+            "failed",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        },
+        "AgentHostTool": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "status": {
+              "$ref": "#/$defs/AgentHostToolStatus"
+            },
+            "output": true,
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "call",
+            "status"
+          ]
+        },
+        "ToolCall": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "arguments"
+          ]
+        },
+        "AgentHostToolStatus": {
+          "type": "string",
+          "enum": [
+            "awaiting_approval",
+            "approved",
+            "running",
+            "succeeded",
+            "denied",
+            "failed",
+            "outcome_unknown",
+            "closed"
+          ]
+        },
+        "Approval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "authority": {
+              "description": "Absent in legacy snapshots, which cannot authorize a new execution.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "call"
+          ]
+        }
+      }
+    },
+    "ModelProgress": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProgress",
+      "description": "Volatile model text preview. It is not stored in the durable event log.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "text_delta"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "taskId",
+            "step",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "reset"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "taskId",
+            "step"
+          ]
+        }
+      ]
+    },
+    "EventsPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "EventsPage",
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Event"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "events",
+        "nextAfter",
+        "hasMore"
+      ],
+      "$defs": {
+        "Event": {
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/EventKind"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sequence",
+            "taskId",
+            "data"
+          ]
+        },
+        "EventKind": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_started"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_started"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "agentId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_session_opened"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_update"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "update": true
+              },
+              "required": [
+                "type",
+                "runId",
+                "update"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_remote_task_updated"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "task": {
+                  "$ref": "#/$defs/AgentRemoteTask"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "task"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_requested"
+                },
+                "approval": {
+                  "$ref": "#/$defs/AgentApproval"
+                }
+              },
+              "required": [
+                "type",
+                "approval"
+              ]
+            },
+            {
+              "description": "Durable intent; delivery to the peer is not guaranteed after a crash.",
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_resolved"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "decision": {
+                  "$ref": "#/$defs/ApprovalDecision"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "approvalId",
+                "decision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_closed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "approvalId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "approvalId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_finished"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "stopReason": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AgentStopReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "outcomeUnknown": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "outcomeUnknown"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_requested"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "operation": {
+                  "$ref": "#/$defs/AgentHostTool"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "operation"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_started"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "requestId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_completed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                },
+                "status": {
+                  "$ref": "#/$defs/AgentHostToolStatus"
+                },
+                "output": true,
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "requestId",
+                "status"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_started"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "approval_requested"
+                },
+                "approval": {
+                  "$ref": "#/$defs/Approval"
+                }
+              },
+              "required": [
+                "type",
+                "approval"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "approval_resolved"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "decision": {
+                  "$ref": "#/$defs/ApprovalDecision"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "decision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_completed"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "required": [
+                "type",
+                "callId",
+                "output"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_started"
+                },
+                "call": {
+                  "$ref": "#/$defs/ToolCall"
+                }
+              },
+              "required": [
+                "type",
+                "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_outcome_unknown"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "required": [
+                "type",
+                "callId",
+                "message"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "artifact_created"
+                },
+                "artifactId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "artifactId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_completed"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_cancelled"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_failed"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_interrupted"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_outcome_unknown"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_resumed"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          ]
+        },
+        "AgentRemoteTask": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "contextId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "state"
+          ]
+        },
+        "AgentTaskState": {
+          "description": "Neutral remote execution evidence, separate from the local task lifecycle.",
+          "type": "string",
+          "enum": [
+            "submitted",
+            "working",
+            "completed",
+            "failed",
+            "cancelled",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        },
+        "AgentApproval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "permissionId": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/AgentApprovalSource",
+              "default": "agent_permission"
+            },
+            "request": {
+              "description": "Untrusted, read-only peer context. Never interpreted as host authority."
+            },
+            "allowOnceAvailable": {
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "runId",
+            "permissionId",
+            "request",
+            "allowOnceAvailable",
+            "expiresAtUnixMs"
+          ]
+        },
+        "AgentApprovalSource": {
+          "type": "string",
+          "enum": [
+            "agent_permission",
+            "host_tool"
+          ]
+        },
+        "ApprovalDecision": {
+          "type": "string",
+          "enum": [
+            "allow_once",
+            "deny"
+          ]
+        },
+        "AgentStopReason": {
+          "type": "string",
+          "enum": [
+            "end_turn",
+            "refusal",
+            "max_tokens",
+            "max_turn_requests",
+            "cancelled",
+            "failed",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        },
+        "AgentHostTool": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "status": {
+              "$ref": "#/$defs/AgentHostToolStatus"
+            },
+            "output": true,
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "call",
+            "status"
+          ]
+        },
+        "ToolCall": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "arguments"
+          ]
+        },
+        "AgentHostToolStatus": {
+          "type": "string",
+          "enum": [
+            "awaiting_approval",
+            "approved",
+            "running",
+            "succeeded",
+            "denied",
+            "failed",
+            "outcome_unknown",
+            "closed"
+          ]
+        },
+        "Approval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "authority": {
+              "description": "Absent in legacy snapshots, which cannot authorize a new execution.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "call"
+          ]
+        }
+      }
+    }
+  }
+}

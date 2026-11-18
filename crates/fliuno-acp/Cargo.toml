@@ -1,0 +1,32 @@
+[package]
+name = "fliuno-acp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+test-fixtures = ["agent-client-protocol/stdio"]
+
+[dependencies]
+agent-client-protocol = { version = "5.3", default-features = false }
+fliuno-sandbox = { path = "../fliuno-sandbox", features = ["async-io"] }
+futures = "0.3"
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "io-util", "fs"] }
+tokio-util = { version = "0.7", features = ["rt", "codec"] }
+uuid.workspace = true
+
+[dev-dependencies]
+sha2 = "0.10"
+tokio = { version = "1", features = ["process"] }
+
+[[bin]]
+name = "fliuno-acp-fixture"
+path = "src/bin/fixture.rs"
+required-features = ["test-fixtures"]
+test = false
+
+[lints]
+workspace = true

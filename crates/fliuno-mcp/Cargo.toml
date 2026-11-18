@@ -1,0 +1,38 @@
+[package]
+name = "fliuno-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+test-fixtures = ["rmcp/server", "rmcp/transport-io"]
+
+[dependencies]
+fliuno-core.workspace = true
+fliuno-protocol.workspace = true
+fliuno-sandbox = { path = "../fliuno-sandbox", features = ["async-io"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+rmcp = { version = "3.11", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+reqwest.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process", "fs", "sync"] }
+jsonschema = { version = "0.61", default-features = false }
+
+
+[target.'cfg(unix)'.dependencies]
+process-wrap = { version = "10", default-features = false, features = ["tokio1", "kill-on-drop", "process-group"] }
+
+[dev-dependencies]
+rmcp = { version = "3.11", default-features = false, features = ["server", "transport-streamable-http-server"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+
+[[bin]]
+name = "fliuno-mcp-fixture"
+path = "src/bin/fixture.rs"
+required-features = ["test-fixtures"]
+test = false
+
+[lints]
+workspace = true
