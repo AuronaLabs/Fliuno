@@ -1,11 +1,15 @@
 //! Maps bounded remote A2A tasks to the neutral core. URLs, credentials and
 //! deadlines are host-owned; cards/messages never confer local tool authority.
-use fliuno_a2a::{Client, Message, Options, SendResponse, StreamEvent, Task, TaskState};
+use fliuno_a2a::{
+    Client, Message, MessageTarget, Options, SendResponse, StreamEvent, Task, TaskState,
+};
 use fliuno_core::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
     CancellationToken, IncomingAgentArtifact, Kernel,
 };
-use fliuno_protocol::{AgentRemoteTask, AgentSpec, AgentStopReason, AgentTaskState};
+use fliuno_protocol::{
+    AgentRemoteTask, AgentSpec, AgentStopReason, AgentTaskState, RemoteContinuation,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -155,6 +159,9 @@ impl AgentBackend for A2aBackend {
     fn supports_remote_task_check(&self) -> bool {
         true
     }
+    fn supports_remote_continuation(&self) -> bool {
+        true
+    }
     fn check_remote_task(
         &self,
         expected: &AgentRemoteTask,
@@ -191,7 +198,7 @@ impl AgentBackend for A2aBackend {
             .enable_all()
             .build()
         else {
-            return AgentOutcome::unknown();
+            return before_submission_failure(request.remote_continuation.as_ref());
         };
         runtime
             .block_on(self.run(request, observer, cancellation))
@@ -203,6 +210,40 @@ fn known(reason: AgentStopReason) -> AgentOutcome {
         stop_reason: Some(reason),
         outcome_unknown: false,
     }
+}
+fn before_submission_failure(continuation: Option<&RemoteContinuation>) -> AgentOutcome {
+    if continuation.is_some() {
+        known(AgentStopReason::RemotePreflightFailed)
+    } else {
+        AgentOutcome::unknown()
+    }
+}
+
+fn verify_initial_task(continuation: Option<&RemoteContinuation>, task: &Task) -> Result<(), ()> {
+    if let Some(continuation) = continuation {
+        let expected = &continuation.expected;
+        let same_task = task.id == expected.id;
+        if task.context_id != expected.context_id
+            || same_task != (expected.state == AgentTaskState::InputRequired)
+        {
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
+fn verify_initial_message(
+    continuation: Option<&RemoteContinuation>,
+    message: &Message,
+) -> Result<(), ()> {
+    if let Some(continuation) = continuation
+        && (continuation.expected.state != AgentTaskState::Completed
+            || message.context_id != continuation.expected.context_id
+            || message.task_id.is_some())
+    {
+        return Err(());
+    }
+    Ok(())
 }
 fn stop_reason(state: TaskState) -> Option<AgentStopReason> {
     match state {
@@ -418,32 +459,77 @@ impl A2aBackend {
         // Each worker owns its runtime and connection pool. Reusing a client
         // after dropping that runtime could leave pooled sockets on a dead IO
         // reactor and turn the next one-shot submission into a transport loss.
-        let client = Client::new(self.options.clone()).map_err(|_| ())?;
+        let continuation = request.remote_continuation.as_ref();
+        let Ok(client) = Client::new(self.options.clone()) else {
+            return Ok(before_submission_failure(continuation));
+        };
         let deadline = Instant::now() + self.task_timeout;
         let history = fliuno_core::context_prompt(request.context.as_ref()).map_err(|_| ())?;
-        if let Some(card) = &self.card {
+        if self.card.is_some() || continuation.is_some() {
             tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => return Ok(known(AgentStopReason::Cancelled)),
-                _ = sleep_until(deadline) => return Err(()),
+                _ = sleep_until(deadline) => return Ok(before_submission_failure(continuation)),
                 result = async {
-                    if self.streaming {
-                        client.check_card_streaming(card).await
-                    } else {
-                        client.check_card(card).await
+                    if let Some(card) = &self.card {
+                        if self.streaming {
+                            client.check_card_streaming(card).await.map_err(|_| ())?;
+                        } else {
+                            client.check_card(card).await.map_err(|_| ())?;
+                        }
                     }
-                } => result.map_err(|_| ())?,
+                    if let Some(continuation) = continuation {
+                        let current = client.get_task(&continuation.expected.id).await.map_err(|_| ())?;
+                        if remote_task(&current)? != continuation.expected {
+                            return Err(());
+                        }
+                    }
+                    Ok(())
+                } => if result.is_err() { return Ok(before_submission_failure(continuation)); },
             }
         }
+        let target = if let Some(continuation) = continuation {
+            let expected = &continuation.expected;
+            let Some(context_id) = expected.context_id.as_deref() else {
+                return Ok(before_submission_failure(
+                    request.remote_continuation.as_ref(),
+                ));
+            };
+            if cancellation.is_cancelled() {
+                return Ok(known(AgentStopReason::Cancelled));
+            }
+            if Instant::now() >= deadline
+                || observer
+                    .observe(AgentObservation::RemoteContinuationSending)
+                    .is_err()
+            {
+                return Ok(before_submission_failure(
+                    request.remote_continuation.as_ref(),
+                ));
+            }
+            Some(MessageTarget {
+                context_id,
+                task_id: (expected.state == AgentTaskState::InputRequired)
+                    .then_some(expected.id.as_str()),
+            })
+        } else {
+            None
+        };
         if self.streaming {
+            let events = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Err(()),
+                _ = sleep_until(deadline) => return Err(()),
+                result = client.send_text_streaming_to(&request.run_id, &request.input, history.as_deref(), target) => result.map_err(|_| ())?,
+            };
             return self
                 .run_stream(
                     &client,
-                    request,
+                    events,
                     observer,
                     cancellation,
                     deadline,
-                    history.as_deref(),
+                    continuation,
                 )
                 .await;
         }
@@ -453,14 +539,18 @@ impl A2aBackend {
             biased;
             _ = cancellation.cancelled() => return Err(()),
             _ = sleep_until(deadline) => return Err(()),
-            result = client.send_text(&request.run_id, &request.input, history.as_deref()) => result.map_err(|error| {
+            result = client.send_text_to(&request.run_id, &request.input, history.as_deref(), target) => result.map_err(|error| {
                 eprintln!("fliuno: A2A submission failed: {error}");
             })?,
         };
         let mut task = match response {
-            SendResponse::Message(message) => return record_message(observer, message),
+            SendResponse::Message(message) => {
+                verify_initial_message(continuation, &message)?;
+                return record_message(observer, message);
+            }
             SendResponse::Task(task) => task,
         };
+        verify_initial_task(continuation, &task)?;
         record_task(observer, &task)?;
         let mut polls = 0;
         loop {
@@ -513,18 +603,12 @@ impl A2aBackend {
     async fn run_stream(
         &self,
         client: &Client,
-        request: &AgentRequest,
+        mut events: mpsc::Receiver<fliuno_a2a::Result<StreamEvent>>,
         observer: &dyn AgentObserver,
         cancellation: &CancellationToken,
         deadline: Instant,
-        history: Option<&str>,
+        continuation: Option<&RemoteContinuation>,
     ) -> Result<AgentOutcome, ()> {
-        let mut events = tokio::select! {
-            biased;
-            _ = cancellation.cancelled() => return Err(()),
-            _ = sleep_until(deadline) => return Err(()),
-            result = client.send_text_streaming(&request.run_id, &request.input, history) => result.map_err(|_| ())?,
-        };
         let mut task: Option<Task> = None;
         let mut artifacts = BTreeMap::new();
         let mut status_event_recorded = false;
@@ -557,6 +641,7 @@ impl A2aBackend {
                     if task.is_some() {
                         return Err(());
                     }
+                    verify_initial_task(continuation, &initial)?;
                     let settled = initial.state.is_settled();
                     for raw in &initial.artifacts {
                         let id = raw["artifactId"].as_str().ok_or(())?.to_owned();
@@ -595,6 +680,7 @@ impl A2aBackend {
                     if task.is_some() {
                         return Err(());
                     }
+                    verify_initial_message(continuation, &message)?;
                     return record_message(observer, message);
                 }
                 StreamEvent::StatusUpdate {

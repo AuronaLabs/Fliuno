@@ -9,6 +9,9 @@ use std::sync::{
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
+#[path = "a2a/continuation.rs"]
+mod continuation;
+
 struct Directory {
     root: PathBuf,
     db: PathBuf,

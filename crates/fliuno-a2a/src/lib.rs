@@ -3,7 +3,7 @@
 //! Every mutating request is one-shot; callers own cancellation and recovery.
 mod client;
 mod wire;
-pub use client::{Client, Options, validate_endpoint};
+pub use client::{Client, MessageTarget, Options, validate_endpoint};
 pub use wire::{Message, SendResponse, StreamEvent, Task, TaskState};
 
 #[derive(Debug, thiserror::Error)]

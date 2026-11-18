@@ -65,7 +65,7 @@ impl Kernel {
         lock: Option<File>,
     ) -> Result<Self> {
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 10 {
+        if version > 11 {
             return Err(Error::Conflict(
                 "database schema is newer than this binary".into(),
             ));
@@ -123,6 +123,16 @@ impl Kernel {
         if version < 10 {
             // Older readers do not understand the remote-check event variant.
             db.pragma_update(None, "user_version", 10)?;
+        }
+        if version < 11 {
+            db.execute_batch(
+                "BEGIN IMMEDIATE;
+                CREATE TABLE IF NOT EXISTS remote_continuation_claims(
+                    source_task_id TEXT PRIMARY KEY REFERENCES tasks(id),
+                    attempt_task_id TEXT NOT NULL REFERENCES tasks(id)
+                );
+                PRAGMA user_version=11; COMMIT;",
+            )?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
@@ -287,8 +297,26 @@ impl Kernel {
         key: Option<&str>,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
+        let running = task.status == TaskStatus::Running
+            || task.agent_run.as_ref().is_some_and(|run| !run.finished);
         tx.execute("INSERT INTO tasks VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET running=excluded.running,data=excluded.data",
-            params![task.id, task.session_id, task.status == TaskStatus::Running || task.agent_run.as_ref().is_some_and(|run| !run.finished), serde_json::to_string(task)?])?;
+            params![task.id, task.session_id, running, serde_json::to_string(task)?])?;
+        if let Some(continuation) = &task.remote_continuation
+            && continuation.expected.state == AgentTaskState::InputRequired
+        {
+            if key.is_some() {
+                let inserted = tx.execute("INSERT INTO remote_continuation_claims VALUES(?1,?2) ON CONFLICT(source_task_id) DO NOTHING",
+                    params![continuation.source_task_id, task.id])?;
+                if inserted == 0 {
+                    return Err(Error::Conflict(
+                        "this paused turn already has a continuation".into(),
+                    ));
+                }
+            } else if !running && !continuation.submission_started {
+                tx.execute("DELETE FROM remote_continuation_claims WHERE source_task_id=?1 AND attempt_task_id=?2",
+                    params![continuation.source_task_id, task.id])?;
+            }
+        }
         if let Some(key) = key {
             tx.execute(
                 "INSERT INTO task_requests VALUES(?1,?2,?3)",
@@ -359,6 +387,13 @@ impl Kernel {
             if let Some(run) = &mut task.agent_run {
                 agent_tools::close_host_tools(run);
                 run.finished = true;
+                if task
+                    .remote_continuation
+                    .as_ref()
+                    .is_some_and(|c| !c.submission_started)
+                {
+                    run.outcome_unknown = false;
+                }
                 events.extend(agent::close_approvals(run));
                 events.push(EventKind::AgentFinished {
                     run_id: run.id.clone(),

@@ -24,6 +24,7 @@
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/get` | `{taskId}` | Task |
 | `task/checkRemote` | `{taskId}` | `{checkId}`；后台只读核对，结果经事件返回，见 [A2A](a2a.md#显式核对远端状态) |
+| `task/continueRemote` | `{taskId,input,clientRequestId}` | 独立的本机 Task；后台复核后向原远端任务或上下文提交，见 [A2A](a2a.md#显式续接远端任务) |
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |
 | `task/resume` | `{taskId,retryUncertainModelStep?:false}` | Task；恢复后排队；外部未知结果不能重试；模型结果不确定时须显式传 true |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |

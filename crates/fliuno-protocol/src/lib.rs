@@ -149,6 +149,7 @@ pub enum AgentStopReason {
     Rejected,
     InputRequired,
     AuthRequired,
+    RemotePreflightFailed,
 }
 
 /// Neutral remote execution evidence, separate from the local task lifecycle.
@@ -179,6 +180,15 @@ pub struct AgentRemoteTask {
     pub id: String,
     pub context_id: Option<String>,
     pub state: AgentTaskState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteContinuation {
+    pub source_task_id: String,
+    pub expected: AgentRemoteTask,
+    /// True once the adapter has permission to send, even if it has no reply.
+    pub submission_started: bool,
 }
 
 /// A point-in-time check, separate from the original run's recorded outcome.
@@ -277,6 +287,8 @@ pub struct Task {
     pub backend_authority: Option<String>,
     #[serde(default)]
     pub agent_run: Option<AgentRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_continuation: Option<RemoteContinuation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -312,6 +324,9 @@ pub enum EventKind {
     AgentRemoteTaskUpdated {
         run_id: String,
         task: AgentRemoteTask,
+    },
+    AgentRemoteContinuationSending {
+        run_id: String,
     },
     AgentRemoteTaskChecked {
         run_id: String,
@@ -451,6 +466,14 @@ pub struct TaskStartParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskContinueRemoteParams {
+    pub task_id: String,
+    pub input: String,
+    pub client_request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ListParams {
     #[serde(default)]
     pub after: u64,
@@ -559,6 +582,7 @@ pub fn schema_bundle() -> Value {
             "terminal/archiveBatch": schemars::schema_for!(TerminalArchiveBatchParams),
             "terminal/archives": schemars::schema_for!(TerminalArchivesParams),
             "task/start": schemars::schema_for!(TaskStartParams),
+            "task/continueRemote": schemars::schema_for!(TaskContinueRemoteParams),
             "task/list": schemars::schema_for!(TaskListParams),
             "task/get": schemars::schema_for!(TaskIdParams),
             "task/checkRemote": schemars::schema_for!(TaskIdParams),

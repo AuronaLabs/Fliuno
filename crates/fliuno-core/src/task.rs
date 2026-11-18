@@ -47,19 +47,11 @@ impl Kernel {
         backend: TaskBackend,
         context_options: Option<ContextOptions>,
     ) -> Result<(Task, bool)> {
-        if input.trim().is_empty() || input.len() > 262_144 {
-            return Err(Error::Invalid(
-                "input must contain 1..262144 UTF-8 bytes".into(),
-            ));
-        }
+        validate_input(input)?;
         self.require_session(session_id)?;
         let options = context::normalize_options(context_options.clone().unwrap_or_default())?;
         if let Some(key) = key {
-            if key.is_empty() || key.len() > 128 || !key.bytes().all(|b| b.is_ascii_graphic()) {
-                return Err(Error::Invalid(
-                    "clientRequestId must be 1..128 printable ASCII bytes".into(),
-                ));
-            }
+            validate_key(key)?;
             if let Some(task) = self.find_task_request(session_id, key)? {
                 let same_input =
                     matches!(task.messages.first(),Some(Message::User{text}) if text==input);
@@ -69,7 +61,11 @@ impl Kernel {
                     .map_or(context_options.is_none(), |context| {
                         context.options == options
                     });
-                return if same_input && task.backend == backend && same_context {
+                return if same_input
+                    && task.backend == backend
+                    && same_context
+                    && task.remote_continuation.is_none()
+                {
                     Ok((task, false))
                 } else {
                     Err(Error::Conflict(
@@ -102,6 +98,7 @@ impl Kernel {
             backend,
             backend_authority,
             agent_run: None,
+            remote_continuation: None,
         };
         self.commit_with_request(&task, &[EventKind::TaskStarted], &[], key)?;
         Ok((task, true))
@@ -375,6 +372,24 @@ impl Kernel {
         )?;
         Ok(task)
     }
+}
+
+pub(crate) fn validate_input(input: &str) -> Result<()> {
+    if input.trim().is_empty() || input.len() > 262_144 {
+        return Err(Error::Invalid(
+            "input must contain 1..262144 UTF-8 bytes".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_key(key: &str) -> Result<()> {
+    if key.is_empty() || key.len() > 128 || !key.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(Error::Invalid(
+            "clientRequestId must be 1..128 printable ASCII bytes".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub enum PreparedModelStep {

@@ -22,6 +22,39 @@ pub struct Options {
     pub max_response_bytes: usize,
 }
 
+#[derive(Clone, Copy)]
+pub struct MessageTarget<'a> {
+    pub context_id: &'a str,
+    pub task_id: Option<&'a str>,
+}
+
+fn text_params(
+    message_id: &str,
+    text: &str,
+    history: Option<&str>,
+    target: Option<MessageTarget<'_>>,
+) -> Result<Value> {
+    if !valid_id(message_id)
+        || target
+            .is_some_and(|t| !valid_id(t.context_id) || t.task_id.is_some_and(|id| !valid_id(id)))
+    {
+        return Err(Error::Config);
+    }
+    let mut parts = Vec::new();
+    if let Some(history) = history {
+        parts.push(json!({"text":history}));
+    }
+    parts.push(json!({"text":text}));
+    let mut message = json!({"messageId":message_id,"role":"ROLE_USER","parts":parts});
+    if let Some(target) = target {
+        message["contextId"] = json!(target.context_id);
+        if let Some(task_id) = target.task_id {
+            message["taskId"] = json!(task_id);
+        }
+    }
+    Ok(json!({"message":message,"configuration":{"returnImmediately":true,"historyLength":0}}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,21 +240,20 @@ impl Client {
         text: &str,
         history: Option<&str>,
     ) -> Result<SendResponse> {
-        if !valid_id(message_id) {
-            return Err(Error::Config);
-        }
-        let mut parts = Vec::new();
-        if let Some(history) = history {
-            parts.push(json!({"text":history}));
-        }
-        parts.push(json!({"text":text}));
+        self.send_text_to(message_id, text, history, None).await
+    }
+
+    pub async fn send_text_to(
+        &self,
+        message_id: &str,
+        text: &str,
+        history: Option<&str>,
+        target: Option<MessageTarget<'_>>,
+    ) -> Result<SendResponse> {
         SendResponse::parse(
             self.rpc(
                 "SendMessage",
-                json!({
-                    "message":{"messageId":message_id,"role":"ROLE_USER","parts":parts},
-                    "configuration":{"returnImmediately":true,"historyLength":0}
-                }),
+                text_params(message_id, text, history, target)?,
             )
             .await?,
         )
@@ -235,23 +267,23 @@ impl Client {
         text: &str,
         history: Option<&str>,
     ) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
-        if !valid_id(message_id) {
-            return Err(Error::Config);
-        }
+        self.send_text_streaming_to(message_id, text, history, None)
+            .await
+    }
+
+    pub async fn send_text_streaming_to(
+        &self,
+        message_id: &str,
+        text: &str,
+        history: Option<&str>,
+        target: Option<MessageTarget<'_>>,
+    ) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-        let mut parts = Vec::new();
-        if let Some(history) = history {
-            parts.push(json!({"text":history}));
-        }
-        parts.push(json!({"text":text}));
         let bytes = serde_json::to_vec(&json!({
             "jsonrpc":"2.0",
             "id":id,
             "method":"SendStreamingMessage",
-            "params":{
-                "message":{"messageId":message_id,"role":"ROLE_USER","parts":parts},
-                "configuration":{"returnImmediately":true,"historyLength":0}
-            }
+            "params":text_params(message_id, text, history, target)?
         }))
         .map_err(|_| Error::Protocol)?;
         if bytes.len() > 1024 * 1024 {

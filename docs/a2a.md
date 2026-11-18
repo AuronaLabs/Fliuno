@@ -70,6 +70,17 @@ cargo run -p fliuno-app-server -- --a2a-config C:/absolute/path/to/agents.json
 
 核对只追加状态证据，不改写原 `agentRun`、`outcomeUnknown`、本机任务状态或产物；也不取消或继续远端任务。若 app-server 在结果写入前退出，受理的核对可能没有结果事件，重启后不会自动恢复。客户端可显式发起新的只读核对。
 
+## 显式续接远端任务
+
+`initialize.capabilities.remoteTaskContinuation` 为 true 时，可调用 `task/continueRemote`，提交来源本机 `taskId`、`input` 和必填 `clientRequestId`。来源必须有已结束、结果已知的 A2A 运行，保存有上下文 ID，且宿主注册保持一致。续接建立独立的本机任务，不改写来源，也不附带本机会话历史。
+
+- `input_required`：请求带原 `taskId` 和 `contextId`，响应须属于同一远端任务。同一暂停轮次只允许一个在途或可能已经发送的续接。
+- `completed`：只带原 `contextId`，接受同上下文的新 Task 或未绑定任务的直接 Message。每个不同幂等键都是显式的新一轮。
+
+两种模式都用新的持久运行 ID 作为消息 ID。后台先用 `GetTask` 对照原身份和状态，再记录 `agent_remote_continuation_sending` 并允许发送。该读取是发送前验证，不能锁定远端状态。首次响应身份通过验证后才会记录状态、导入产物或发起远端取消。终态产物保存为当前轮的独立快照，即使源 artifact ID 曾出现也不会覆盖之前的本地产物。
+
+预检拒绝的运行结束原因为 `remote_preflight_failed`。发送标记前停止可用新键显式尝试；标记后断流或重启按可能已发送处理。原键永远只返回原尝试，`task/resume` 不重发外部 Agent。数据库 v11 在同一事务保存续接任务、幂等键和暂停轮次占位。
+
 ## 产物保存
 
 最终 Task 快照中的产物一次性导入：源 `artifactId` 与新生成的本地 Artifact ID 分开保存到 `agentRun.artifacts`，产物、链接、预算及 `artifact_created` 事件在同一事务提交。重复源 ID、重复导入、数量/字节超限会拒绝。运行可能在导入后、完成前中断；已提交的产物保留供检查，任务不会因此被自动标记完成。

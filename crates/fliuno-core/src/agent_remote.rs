@@ -4,6 +4,7 @@ use super::*;
 use std::collections::BTreeSet;
 
 mod check;
+mod continuation;
 pub use check::{CompletedRemoteTaskCheck, PreparedRemoteTaskCheck};
 
 pub struct IncomingAgentArtifact {

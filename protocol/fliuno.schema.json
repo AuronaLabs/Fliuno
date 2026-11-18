@@ -448,6 +448,28 @@
         }
       }
     },
+    "task/continueRemote": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskContinueRemoteParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "input",
+        "clientRequestId"
+      ]
+    },
     "task/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskListParams",
@@ -766,6 +788,16 @@
             }
           ],
           "default": null
+        },
+        "remoteContinuation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RemoteContinuation"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -1307,7 +1339,8 @@
             "failed",
             "rejected",
             "input_required",
-            "auth_required"
+            "auth_required",
+            "remote_preflight_failed"
           ]
         },
         "AgentApproval": {
@@ -1405,6 +1438,27 @@
           "required": [
             "sourceId",
             "artifactId"
+          ]
+        },
+        "RemoteContinuation": {
+          "type": "object",
+          "properties": {
+            "sourceTaskId": {
+              "type": "string"
+            },
+            "expected": {
+              "$ref": "#/$defs/AgentRemoteTask"
+            },
+            "submissionStarted": {
+              "description": "True once the adapter has permission to send, even if it has no reply.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sourceTaskId",
+            "expected",
+            "submissionStarted"
           ]
         }
       }
@@ -2994,6 +3048,22 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "agent_remote_continuation_sending"
+                },
+                "runId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "agent_remote_task_checked"
                 },
                 "runId": {
@@ -3548,7 +3618,8 @@
             "failed",
             "rejected",
             "input_required",
-            "auth_required"
+            "auth_required",
+            "remote_preflight_failed"
           ]
         },
         "AgentHostTool": {
@@ -3840,6 +3911,22 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "agent_remote_continuation_sending"
+                },
+                "runId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "agent_remote_task_checked"
                 },
                 "runId": {
@@ -4394,7 +4481,8 @@
             "failed",
             "rejected",
             "input_required",
-            "auth_required"
+            "auth_required",
+            "remote_preflight_failed"
           ]
         },
         "AgentHostTool": {

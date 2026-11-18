@@ -20,6 +20,7 @@ pub struct AgentRequest {
     pub input: String,
     pub context: Option<TaskContext>,
     pub workspace: Workspace,
+    pub remote_continuation: Option<RemoteContinuation>,
 }
 
 pub enum AgentCommand {
@@ -34,6 +35,7 @@ pub enum AgentCommand {
 }
 
 pub enum AgentObservation {
+    RemoteContinuationSending,
     RemoteTask(AgentRemoteTask),
     Artifacts(Vec<IncomingAgentArtifact>),
     SessionOpened(String),
@@ -85,6 +87,9 @@ pub trait AgentBackend: Send + Sync {
         authority_digest("agent.contract.v1", &serde_json::json!(self.spec()))
     }
     fn supports_remote_task_check(&self) -> bool {
+        false
+    }
+    fn supports_remote_continuation(&self) -> bool {
         false
     }
     /// Read the current remote task using the frozen host registration. This
@@ -249,6 +254,7 @@ impl Kernel {
                 input,
                 context: task.context,
                 workspace,
+                remote_continuation: task.remote_continuation,
             },
             backend,
             commands,
@@ -264,6 +270,9 @@ impl Kernel {
         // Remote cancellation evidence may arrive after local cancellation.
         // Keep it separate from ordinary text/tool observations, which stop.
         let observation = match observation {
+            AgentObservation::RemoteContinuationSending => {
+                return self.mark_remote_continuation_sending(task_id, run_id);
+            }
             AgentObservation::RemoteTask(remote) => {
                 return self.observe_remote_task(task_id, run_id, remote);
             }
@@ -287,7 +296,9 @@ impl Kernel {
                 Error::Conflict("observation belongs to an inactive agent run".into())
             })?;
         let event = match observation {
-            AgentObservation::RemoteTask(_) | AgentObservation::Artifacts(_) => unreachable!(),
+            AgentObservation::RemoteContinuationSending
+            | AgentObservation::RemoteTask(_)
+            | AgentObservation::Artifacts(_) => unreachable!(),
             AgentObservation::SessionOpened(session_id) => {
                 if run.session_id.is_some() || session_id.is_empty() || session_id.len() > 256 {
                     return Err(Error::Conflict("invalid or duplicate agent session".into()));
@@ -490,7 +501,11 @@ impl Kernel {
                         TaskStatus::Completed
                     }
                     Some(AgentStopReason::Cancelled) => TaskStatus::Cancelled,
-                    Some(AgentStopReason::Failed | AgentStopReason::Rejected) => TaskStatus::Failed,
+                    Some(
+                        AgentStopReason::Failed
+                        | AgentStopReason::Rejected
+                        | AgentStopReason::RemotePreflightFailed,
+                    ) => TaskStatus::Failed,
                     _ => TaskStatus::Interrupted,
                 }
             };

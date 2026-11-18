@@ -232,6 +232,7 @@ impl RpcServer {
                     "externalTools":external_tools, "backgroundTasks":true,
                     "externalAgents":!self.kernel()?.agent_specs().is_empty(),
                     "remoteTaskChecks":self.kernel()?.remote_task_check_supported(),
+                    "remoteTaskContinuation":self.kernel()?.remote_continuation_supported(),
                     "sessionContext":true,
                     "contextTaskSelection":true,
                     "processExecution":process_execution,
@@ -374,6 +375,19 @@ impl RpcServer {
             "task/get" => {
                 let p: TaskIdParams = decode(params)?;
                 json!(self.kernel()?.get_task(&p.task_id)?)
+            }
+            "task/continueRemote" => {
+                let p: TaskContinueRemoteParams = decode(params)?;
+                let (task, created) = self.kernel()?.create_remote_continuation(
+                    &p.task_id,
+                    &p.input,
+                    &p.client_request_id,
+                )?;
+                json!(if created {
+                    self.schedule_or_fail(task)?
+                } else {
+                    task
+                })
             }
             "task/checkRemote" => {
                 let p: TaskIdParams = decode(params)?;
