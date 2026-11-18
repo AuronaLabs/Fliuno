@@ -62,6 +62,7 @@ pub(crate) struct PendingPermission {
 pub(crate) struct State {
     pub sessions: HashMap<SessionId, Session>,
     opening: Option<Opening>,
+    pub closing: Option<SessionId>,
     pub pending: BTreeMap<String, PendingPermission>,
     pub host_pending: BTreeMap<String, crate::filesystem::PendingHostRequest>,
     pub failure: Option<Error>,
@@ -279,6 +280,51 @@ impl Drop for OpenGuard {
         if !self.finished {
             let mut state = self.shared.state.lock().unwrap();
             state.opening = None;
+            self.shared.fail_locked(&mut state, Error::OutcomeUnknown);
+        }
+    }
+}
+
+/// A close may already have been applied if its acknowledgement was lost.
+pub(crate) struct CloseGuard {
+    shared: Arc<Shared>,
+    finished: bool,
+}
+
+impl CloseGuard {
+    pub(crate) fn begin(shared: &Arc<Shared>, session_id: &SessionId) -> Result<Self> {
+        let mut state = shared.state.lock().unwrap();
+        if shared.stop.is_cancelled() {
+            return Err(state.failure.clone().unwrap_or(Error::Closed));
+        }
+        let session = state.sessions.get(session_id).ok_or(Error::NotFound)?;
+        if state.closing.is_some() || session.active.is_some() {
+            return Err(Error::Busy);
+        }
+        state.closing = Some(session_id.clone());
+        Ok(Self {
+            shared: Arc::clone(shared),
+            finished: false,
+        })
+    }
+
+    pub(crate) fn finish(mut self) -> Result<()> {
+        let mut state = self.shared.state.lock().unwrap();
+        if self.shared.stop.is_cancelled() {
+            return Err(state.failure.clone().unwrap_or(Error::Closed));
+        }
+        let id = state.closing.take().expect("close guard owns session");
+        state.sessions.remove(&id);
+        self.finished = true;
+        Ok(())
+    }
+}
+
+impl Drop for CloseGuard {
+    fn drop(&mut self) {
+        if !self.finished {
+            let mut state = self.shared.state.lock().unwrap();
+            state.closing = None;
             self.shared.fail_locked(&mut state, Error::OutcomeUnknown);
         }
     }

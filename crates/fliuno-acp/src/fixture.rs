@@ -31,6 +31,7 @@ pub fn agent() -> impl ConnectTo<Client> {
     let prompt_directories = Arc::clone(&directories);
     let listed_directories = Arc::clone(&directories);
     let loaded_directories = Arc::clone(&directories);
+    let closed_directories = Arc::clone(&directories);
     Agent.v1()
         .on_receive_request(
             async |request: InitializeRequest, responder, _cx| {
@@ -39,7 +40,7 @@ pub fn agent() -> impl ConnectTo<Client> {
                 assert!(!request.client_capabilities.terminal);
                 responder.respond(InitializeResponse::new(request.protocol_version).agent_capabilities(
                     AgentCapabilities::new().load_session(true).session_capabilities(
-                        SessionCapabilities::new().list(SessionListCapabilities::new()),
+                        SessionCapabilities::new().list(SessionListCapabilities::new()).close(SessionCloseCapabilities::new()),
                     ),
                 ))
             },
@@ -79,6 +80,15 @@ pub fn agent() -> impl ConnectTo<Client> {
                 loaded_directories.lock().unwrap().insert(request.session_id.clone(), request.cwd);
                 cx.send_notification(update(&request.session_id, "saved history"))?;
                 responder.respond(LoadSessionResponse::new())
+            },
+            acp::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: CloseSessionRequest, responder, _cx| {
+                if closed_directories.lock().unwrap().remove(&request.session_id).is_none() {
+                    return responder.respond_with_error(acp::Error::invalid_params());
+                }
+                responder.respond(CloseSessionResponse::new())
             },
             acp::on_receive_request!(),
         )

@@ -118,6 +118,15 @@ async fn permissions_bind_to_session_expire_and_choose_kind_instead_of_label_or_
         }
     });
     let (id, actual_session) = permission(&mut events).await;
+    assert_eq!(
+        client.close_session(&session).await.unwrap_err(),
+        Error::Busy
+    );
+    client.close_session(&other).await.unwrap();
+    assert_eq!(
+        client.close_session(&other).await.unwrap_err(),
+        Error::NotFound
+    );
     assert_eq!(actual_session, session);
     assert_eq!(
         client.respond_permission(&other, &id, PermissionDecision::AllowOnce),

@@ -1,5 +1,6 @@
 //! Open a new or existing ACP session on an already negotiated connection.
 use super::*;
+use crate::state::CloseGuard;
 
 impl Client {
     /// Opening is serialized and never retried implicitly.
@@ -53,6 +54,36 @@ impl Client {
                 .map_err(|error| Error::Remote(error.code.value()))?,
         };
         opening.finish(session_id)?;
+        Ok(response)
+    }
+
+    pub fn supports_session_closing(&self) -> bool {
+        self.initialized()
+            .agent_capabilities
+            .session_capabilities
+            .close
+            .is_some()
+    }
+
+    /// Release an idle session on the peer. Each session keeps its local slot
+    /// until acknowledgement. An uncertain close shuts down the connection.
+    pub async fn close_session(&self, session_id: &SessionId) -> Result<CloseSessionResponse> {
+        let shared = &self.inner.shared;
+        shared.check()?;
+        if !self.supports_session_closing() {
+            return Err(Error::Unsupported("session/close"));
+        }
+        let closing = CloseGuard::begin(shared, session_id)?;
+        let response = tokio::select! {
+            biased;
+            _ = shared.stop.cancelled() => return Err(shared.failure()),
+            response = tokio::time::timeout(
+                shared.options.request_timeout,
+                self.inner.connection.send_request(CloseSessionRequest::new(session_id.clone())).block_task(),
+            ) => response.map_err(|_| Error::OutcomeUnknown)?
+                .map_err(|error| Error::Remote(error.code.value()))?,
+        };
+        closing.finish()?;
         Ok(response)
     }
 

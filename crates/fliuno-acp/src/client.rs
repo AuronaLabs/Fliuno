@@ -403,6 +403,9 @@ impl Client {
             {
                 return Err(Error::Busy);
             }
+            if state.closing.as_ref() == Some(session_id) {
+                return Err(Error::Busy);
+            }
             let session = state.sessions.get_mut(session_id).ok_or(Error::NotFound)?;
             if session.active.is_some() {
                 return Err(Error::Busy);

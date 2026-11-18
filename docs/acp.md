@@ -84,6 +84,8 @@ cargo run -p fliuno-acp --example isolated -- E:/Projects/Fliuno/target/debug/fl
 
 声明 `loadSession` 的 Agent 支持宿主在当前 ACP 连接中显式调用 `Client::load_session(id, cwd)`。调用方同时消费 `Event::SessionHistory`，并在加载成功后接收这些历史。历史最多 1024 条、合计 16 MiB，沿用每条 256 KiB 和有界事件队列。加载结束前，目标 ID 不能接收新 prompt，也不能触发宿主文件操作或权限请求。加载成功后，宿主可以为该 ID 发起新一轮 prompt。隔离进程继续使用私有工作目录。
 
+声明 `sessionCapabilities.close` 的 Agent 支持宿主用 `Client::close_session(id)` 释放空闲会话。执行中的会话先通过原有取消流程处理。远端确认后，客户端释放会话名额。关闭结果未知时结束当前连接，避免在远端可能已经释放的会话上继续发送 prompt。
+
 新任务可通过 Fliuno 的冻结 Task.context 延续同会话已完成工作，模型与 ACP 共用中性历史索引。有历史时 `prompt_text_with_context` 在当前输入前单独发送一个 TextContent JSON 数据块；没有历史或选择 isolated 时只发当前输入。历史不包含旧审批、供应商签名或递归 context，不重用 ACP 进程/会话；新的宿主文件操作仍逐次审批。这条 app-server 路径仍为每项任务创建 ACP 会话，具体选择和字节预算见 [上下文设计](context.md)。
 
 流式通知先写入 `agent_update` 事件；文本消息另外汇总到 `agentRun.text`。计划、思考、工具更新等保持原始只读 JSON，仅文本消息进入最终输出。权限记录位于 `agentRun.pendingApprovals`，最多同时 16 项，各有独立审批 ID、运行 ID、连接内 permission ID、原始请求、单次允许选项可用性和到期时间。客户端显示请求后使用既有 `approval/respond` 的 `allow_once` 或 `deny`，不能提交替换参数。拒绝交回 Agent，不直接判定任务失败。

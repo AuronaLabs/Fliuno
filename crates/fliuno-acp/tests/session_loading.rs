@@ -19,8 +19,14 @@ fn agent(cwd: PathBuf, ack: Arc<Notify>, advertised: bool) -> impl ConnectTo<acp
         .on_receive_request(
             async move |request: InitializeRequest, responder, _cx| {
                 responder.respond(
-                    InitializeResponse::new(request.protocol_version)
-                        .agent_capabilities(AgentCapabilities::new().load_session(advertised)),
+                    InitializeResponse::new(request.protocol_version).agent_capabilities(
+                        AgentCapabilities::new()
+                            .load_session(advertised)
+                            .session_capabilities(
+                                SessionCapabilities::new()
+                                    .close(advertised.then(SessionCloseCapabilities::new)),
+                            ),
+                    ),
                 )
             },
             acp::on_receive_request!(),
@@ -61,6 +67,13 @@ fn agent(cwd: PathBuf, ack: Arc<Notify>, advertised: bool) -> impl ConnectTo<acp
                     assert_eq!(permission.outcome, RequestPermissionOutcome::Cancelled);
                     responder.respond(LoadSessionResponse::new())
                 })
+            },
+            acp::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: CloseSessionRequest, _responder, _cx| {
+                assert_eq!(request.session_id, SessionId::new("slow-close"));
+                std::future::pending::<Result<(), acp::Error>>().await
             },
             acp::on_receive_request!(),
         )
@@ -188,5 +201,41 @@ async fn an_unconsumed_replay_fails_instead_of_exceeding_the_event_queue() {
     };
     assert_eq!(update.session_id, id);
     assert!(events.recv().await.is_none());
+    client.close().await;
+}
+
+#[tokio::test]
+async fn uncertain_close_retires_the_connection() {
+    let cwd = std::env::current_dir().unwrap();
+    let ack = Arc::new(Notify::new());
+    ack.notify_one();
+    let (client, mut events) = Client::connect(
+        agent(cwd.clone(), ack, true),
+        ClientOptions {
+            request_timeout: Duration::from_millis(250),
+            ..ClientOptions::default()
+        },
+    )
+    .await
+    .unwrap();
+    let id = SessionId::new("slow-close");
+    client.load_session(&id, &cwd).await.unwrap();
+    assert!(matches!(
+        events.recv().await,
+        Some(Event::SessionHistory(_))
+    ));
+    assert_eq!(
+        client.close_session(&id).await.unwrap_err(),
+        Error::OutcomeUnknown
+    );
+    assert!(client.is_closed());
+    assert_eq!(client.failure(), Some(Error::OutcomeUnknown));
+    assert_eq!(
+        client
+            .prompt_text(&id, "closed", &CancellationToken::new())
+            .await
+            .unwrap_err(),
+        Error::OutcomeUnknown
+    );
     client.close().await;
 }

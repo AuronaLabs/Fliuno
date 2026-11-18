@@ -145,6 +145,18 @@ async fn actual_acp_stdio_isolates_agent_tools_and_stops_process_on_timeout() {
         .unwrap();
     assert_eq!(update(&mut events).await, "\u{4f60}\u{597d}\u{ff0c}");
     assert_eq!(update(&mut events).await, "loaded");
+    assert!(isolated.supports_session_closing());
+    isolated.close_session(&saved).await.unwrap();
+    assert_eq!(
+        isolated
+            .prompt_text(&saved, "closed", &CancellationToken::new())
+            .await
+            .unwrap_err(),
+        Error::NotFound
+    );
+    let page = isolated.list_sessions(None, None).await.unwrap();
+    assert_eq!(page.sessions.len(), 1);
+    assert_eq!(page.sessions[0].session_id, session);
 
     assert_eq!(
         isolated
