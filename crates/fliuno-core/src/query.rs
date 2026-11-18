@@ -110,6 +110,39 @@ impl Kernel {
         )
     }
 
+    /// Page compact snapshots across all sessions in a workspace. The
+    /// cursor is the same creation position used by the session catalog.
+    pub fn list_workspace_task_summaries(
+        &self,
+        workspace: &str,
+        after: u64,
+        limit: u32,
+        status: Option<TaskStatus>,
+    ) -> Result<ObjectPage<TaskSummary>> {
+        self.require_workspace(workspace)?;
+        if let Some(status) = status {
+            let (cursor, fetch) = page_range(after, limit)?;
+            return self.query_object_page(
+                "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+                 JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
+                 WHERE scoped.workspace_id=?1 AND scoped.status=?2 AND scoped.task_row>?3
+                 ORDER BY scoped.task_row LIMIT ?4",
+                params![workspace, status.as_str(), cursor, fetch],
+                after,
+                limit,
+            );
+        }
+        self.object_page(
+            "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+             JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
+             WHERE scoped.workspace_id=?1 AND scoped.task_row>?2
+             ORDER BY scoped.task_row LIMIT ?3",
+            Some(workspace),
+            after,
+            limit,
+        )
+    }
+
     fn object_page<T: DeserializeOwned>(
         &self,
         sql: &str,

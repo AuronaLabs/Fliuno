@@ -134,6 +134,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["sessionTitles"], true);
         assert_eq!(init["capabilities"]["taskSummaryById"], true);
         assert_eq!(init["capabilities"]["taskSummaryStatusFilter"], true);
+        assert_eq!(init["capabilities"]["workspaceTaskSummaries"], true);
         assert_eq!(init["capabilities"]["sessionArchiving"], true);
         assert_eq!(init["capabilities"]["sessionCreateIdempotency"], true);
         assert_eq!(init["capabilities"]["contextTaskSelection"], true);

@@ -718,6 +718,56 @@
         }
       }
     },
+    "task/listWorkspaceSummaries": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceTaskSummaryListParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ],
+      "$defs": {
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        }
+      }
+    },
     "task/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskIdParams",

@@ -13,7 +13,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 23;
+pub(crate) const SCHEMA_VERSION: u32 = 24;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 impl Kernel {
@@ -213,6 +213,9 @@ impl Kernel {
         }
         if version < 23 {
             task_summaries::migrate_status_index(&mut db)?;
+        }
+        if version < 24 {
+            task_summaries::migrate_workspace_scope(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

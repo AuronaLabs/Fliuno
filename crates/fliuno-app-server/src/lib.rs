@@ -328,6 +328,7 @@ impl RpcServer {
             capabilities["contextAtSequence"] = json!(true);
             capabilities["taskSummaryById"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
+            capabilities["workspaceTaskSummaries"] = json!(true);
             capabilities["pendingApprovalInbox"] = json!(true);
             capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
@@ -453,6 +454,15 @@ impl RpcServer {
                 let p: TaskSummaryListParams = decode(params)?;
                 json!(self.kernel()?.list_task_summaries_filtered(
                     &p.session_id,
+                    p.after,
+                    p.limit,
+                    p.status
+                )?)
+            }
+            "task/listWorkspaceSummaries" => {
+                let p: WorkspaceTaskSummaryListParams = decode(params)?;
+                json!(self.kernel()?.list_workspace_task_summaries(
+                    &p.workspace_id,
                     p.after,
                     p.limit,
                     p.status

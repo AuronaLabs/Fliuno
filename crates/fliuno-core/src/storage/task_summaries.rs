@@ -67,6 +67,41 @@ pub(super) fn migrate_status_index(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+/// Workspace membership is immutable for a task. Index it once with the
+/// existing creation cursor, then keep using the same status update trigger.
+pub(super) fn migrate_workspace_scope(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    let has_workspace: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('task_summary_status')
+         WHERE name='workspace_id')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_workspace {
+        tx.execute_batch("ALTER TABLE task_summary_status ADD COLUMN workspace_id TEXT REFERENCES workspaces(id);")?;
+    }
+    tx.execute_batch(
+        "UPDATE task_summary_status AS scoped
+         SET workspace_id=(SELECT workspace_id FROM sessions WHERE id=scoped.session_id)
+         WHERE workspace_id IS NULL;
+         CREATE INDEX IF NOT EXISTS task_summary_workspace_cursor
+            ON task_summary_status(workspace_id,task_row);
+         CREATE INDEX IF NOT EXISTS task_summary_workspace_status_cursor
+            ON task_summary_status(workspace_id,status,task_row);
+         DROP TRIGGER task_summary_status_insert;
+         CREATE TRIGGER task_summary_status_insert AFTER INSERT ON task_summaries
+         BEGIN
+            INSERT INTO task_summary_status(task_id,session_id,task_row,status,workspace_id)
+            SELECT t.id,t.session_id,t.rowid,json_extract(NEW.data,'$.status'),s.workspace_id
+                FROM tasks t JOIN sessions s ON s.id=t.session_id WHERE t.id=NEW.task_id
+            ON CONFLICT(task_id) DO UPDATE SET status=excluded.status,workspace_id=excluded.workspace_id;
+         END;
+         PRAGMA user_version=24;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
     let input_preview = match task.messages.first() {
         // SQLite substr() used to stop at the first NUL. Preserve that preview
