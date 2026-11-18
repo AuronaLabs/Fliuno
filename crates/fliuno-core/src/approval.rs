@@ -202,7 +202,7 @@ impl Kernel {
             && let Err(ToolError::OutcomeUnknownWithOutput { message, output }) = &response
         {
             let message: String = message.chars().take(1024).collect();
-            let output = if serde_json::to_vec(output)?.len() <= 1024 * 1024 {
+            let output = if json_size(output)? <= 1024 * 1024 {
                 Some(output.clone())
             } else {
                 None
@@ -268,7 +268,7 @@ impl Kernel {
         // A failed/oversized report still leaves the operation uncertain; never
         // clear its durable identity merely because optional evidence was lost.
         let output = match output {
-            Some(output) if serde_json::to_vec(&output)?.len() <= 1024 * 1024 => Some(output),
+            Some(output) if json_size(&output)? <= 1024 * 1024 => Some(output),
             _ => None,
         };
         let message: String = message.chars().take(1024).collect();

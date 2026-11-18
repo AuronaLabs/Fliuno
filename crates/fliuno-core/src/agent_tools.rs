@@ -92,7 +92,7 @@ impl Kernel {
                 expires_at_unix_ms,
             } => {
                 let request = serde_json::json!({"call":call,"preview":preview});
-                let bytes = serde_json::to_vec(&request)?.len();
+                let bytes = json_size(&request)?;
                 let now = now_ms()?;
                 if request_id.is_empty()
                     || request_id.len() > 256
@@ -171,7 +171,7 @@ impl Kernel {
                     })?;
                 match result {
                     Ok(output) => {
-                        let bytes = serde_json::to_vec(&output.output)?.len();
+                        let bytes = json_size(&output.output)?;
                         if !output.artifacts.is_empty()
                             || bytes > MAX_OUTPUT_BYTES
                             || run.recorded_bytes + bytes as u64 > MAX_RECORDED_BYTES
@@ -197,7 +197,7 @@ impl Kernel {
                         let message = error.to_string();
                         operation.error = Some(message.chars().take(1024).collect());
                         if let ToolError::OutcomeUnknownWithOutput { output, .. } = error {
-                            let bytes = serde_json::to_vec(&output)?.len();
+                            let bytes = json_size(&output)?;
                             if bytes <= MAX_OUTPUT_BYTES
                                 && run.recorded_bytes + bytes as u64 <= MAX_RECORDED_BYTES
                             {

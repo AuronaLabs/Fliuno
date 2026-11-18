@@ -313,7 +313,7 @@ impl Kernel {
                 }
             }
             AgentObservation::Update { update, text } => {
-                let bytes = serde_json::to_vec(&update)?.len();
+                let bytes = json_size(&update)?;
                 let text_bytes = text.as_ref().map_or(0, String::len);
                 if bytes > MAX_UPDATE_BYTES
                     || run.update_count >= MAX_UPDATES
@@ -338,7 +338,7 @@ impl Kernel {
                 allow_once_available,
                 expires_at_unix_ms,
             } => {
-                let bytes = serde_json::to_vec(&request)?.len();
+                let bytes = json_size(&request)?;
                 let now = now_ms()?;
                 if permission_id.is_empty()
                     || permission_id.len() > 256

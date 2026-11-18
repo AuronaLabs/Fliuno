@@ -53,7 +53,7 @@ impl Kernel {
                 return Ok(());
             }
         }
-        let bytes = serde_json::to_vec(&remote)?.len() as u64;
+        let bytes = json_size(&remote)? as u64;
         if run.update_count >= 4096 || run.recorded_bytes + bytes > agent::MAX_RECORDED_BYTES {
             return Err(Error::Conflict(
                 "remote task evidence budget exceeded".into(),
@@ -125,7 +125,7 @@ impl Kernel {
                 source_id: source.source_id,
                 artifact_id: artifact.id.clone(),
             });
-            bytes += serde_json::to_vec(&artifact)?.len() as u64;
+            bytes += json_size(&artifact)? as u64;
             artifacts.push(artifact);
         }
         if run.recorded_bytes + bytes > agent::MAX_RECORDED_BYTES {
