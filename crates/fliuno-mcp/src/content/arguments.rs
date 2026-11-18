@@ -78,7 +78,7 @@ impl Kind {
 
     pub(super) fn request(self, value: &Value) -> Result<ClientRequest, String> {
         let invalid = || "invalid MCP content arguments or argument budget".to_owned();
-        if value.to_string().len() > 65_536 {
+        if fliuno_core::json_size(value).map_err(|_| invalid())? > 65_536 {
             return Err(invalid());
         }
         Ok(match self {

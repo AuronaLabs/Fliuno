@@ -41,36 +41,42 @@ fn median(mut samples: Vec<u128>) -> u128 {
     samples[SAMPLES / 2]
 }
 
-fn compare(value: &Value, iterations: usize) -> (u128, u128) {
-    let mut streamed = Vec::with_capacity(SAMPLES);
-    let mut buffered = Vec::with_capacity(SAMPLES);
+fn compare(value: &Value, iterations: usize) -> (u128, u128, u128) {
+    let mut samples: [Vec<u128>; 3] = std::array::from_fn(|_| Vec::with_capacity(SAMPLES));
+    let operations: [fn(&Value) -> usize; 3] = [
+        |value| json_size::json_size(value).unwrap(),
+        |value| serde_json::to_vec(value).unwrap().len(),
+        |value| value.to_string().len(),
+    ];
     for _ in 0..32 {
-        black_box(json_size::json_size(black_box(value)).unwrap());
-        black_box(serde_json::to_vec(black_box(value)).unwrap().len());
-    }
-
-    for sample in 0..SAMPLES {
-        let stream = || json_size::json_size(black_box(value)).unwrap();
-        let buffer = || serde_json::to_vec(black_box(value)).unwrap().len();
-        if sample % 2 == 0 {
-            streamed.push(elapsed_ns_per_op(stream, iterations));
-            buffered.push(elapsed_ns_per_op(buffer, iterations));
-        } else {
-            buffered.push(elapsed_ns_per_op(buffer, iterations));
-            streamed.push(elapsed_ns_per_op(stream, iterations));
+        for operation in operations {
+            black_box(operation(black_box(value)));
         }
     }
-    (median(streamed), median(buffered))
+    for sample in 0..SAMPLES {
+        for index in 0..operations.len() {
+            let index = (sample + index) % operations.len();
+            let operation = operations[index];
+            samples[index].push(elapsed_ns_per_op(
+                || operation(black_box(value)),
+                iterations,
+            ));
+        }
+    }
+    let [streamed, buffered, display] = samples.map(median);
+    (streamed, buffered, display)
 }
 
 fn run_case(label: &str, value: &Value, iterations: usize) -> Result<()> {
     let expected = serde_json::to_vec(value)?.len();
     assert_eq!(json_size::json_size(value)?, expected);
+    assert_eq!(value.to_string().len(), expected);
 
-    let (streamed, buffered) = compare(value, iterations);
-    let ratio = buffered as f64 / streamed as f64;
+    let (streamed, buffered, display) = compare(value, iterations);
+    let buffer_ratio = buffered as f64 / streamed as f64;
+    let display_ratio = display as f64 / streamed as f64;
     println!(
-        "{label}: bytes={expected} iterations={iterations} stream_ns/op={streamed} buffered_ns/op={buffered} buffered/stream={ratio:.3}"
+        "{label}: bytes={expected} iterations={iterations} stream_ns/op={streamed} buffered_ns/op={buffered} display_ns/op={display} buffered/stream={buffer_ratio:.3} display/stream={display_ratio:.3}"
     );
     Ok(())
 }
@@ -83,5 +89,6 @@ fn main() -> Result<()> {
     );
     run_case("small", &payload(24), 10_000)?;
     run_case("large", &payload(2_048), 500)?;
+    run_case("near-mcp-limit", &payload(19_000), 60)?;
     Ok(())
 }

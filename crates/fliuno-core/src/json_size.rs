@@ -15,7 +15,8 @@ impl std::io::Write for JsonSize {
     }
 }
 
-pub(crate) fn json_size(value: &impl serde::Serialize) -> Result<usize> {
+/// Return the UTF-8 length of the compact serde_json representation.
+pub fn json_size(value: &impl serde::Serialize) -> Result<usize> {
     let mut size = JsonSize::default();
     serde_json::to_writer(&mut size, value)?;
     Ok(size.0)

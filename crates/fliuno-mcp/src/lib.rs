@@ -135,7 +135,7 @@ fn wrap_tools(
             || tool.name.chars().any(char::is_control)
             || tool.name.len() > 256
             || description.len() > 4096
-            || schema.to_string().len() > 65_536
+            || fliuno_core::json_size(&schema).map_err(|_| "invalid MCP tool schema")? > 65_536
         {
             return Err(
                 "MCP tool name, description or schema exceeds its configured size limit".into(),
@@ -260,7 +260,7 @@ impl Tool for McpTool {
             })
         })?;
         let output = serde_json::to_value(response).map_err(|_| "cannot encode MCP output")?;
-        if output.to_string().len() > 1024 * 1024 {
+        if fliuno_core::json_size(&output).map_err(|_| "cannot encode MCP output")? > 1024 * 1024 {
             return Err(ToolError::OutcomeUnknown("MCP output exceeds 1 MiB".into()));
         }
         // A protocol success carrying isError=true is still a known tool result.

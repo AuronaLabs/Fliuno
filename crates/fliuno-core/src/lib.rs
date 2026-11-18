@@ -9,7 +9,7 @@ mod context;
 mod error;
 mod events;
 mod json_size;
-use json_size::json_size;
+pub use json_size::json_size;
 mod policy;
 mod provider;
 mod query;

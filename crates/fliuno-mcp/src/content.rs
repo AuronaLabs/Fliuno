@@ -211,7 +211,10 @@ impl Tool for ContentTool {
         }
         let output = json!({"serverId":self.server,"method":kind.method(),
             "result":result,"grantsPermissions":false});
-        if output.to_string().len() > 1024 * 1024 {
+        if fliuno_core::json_size(&output)
+            .map_err(|_| ToolError::OutcomeUnknown("cannot encode MCP content result".into()))?
+            > 1024 * 1024
+        {
             return Err(ToolError::OutcomeUnknown(
                 "MCP content output exceeds 1 MiB".into(),
             ));

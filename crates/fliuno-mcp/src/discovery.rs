@@ -17,9 +17,7 @@ pub(crate) async fn tools(
         if !crate::host::is_complete(&page.result_type) {
             return Err("MCP discovery returned an unsupported result type".into());
         }
-        bytes += serde_json::to_vec(&page)
-            .map_err(|_| "cannot encode MCP discovery page")?
-            .len();
+        bytes += fliuno_core::json_size(&page).map_err(|_| "cannot encode MCP discovery page")?;
         if tools.len() + page.tools.len() > 256 || bytes > 4 * 1024 * 1024 {
             return Err("MCP discovery exceeds 256 tools or 4 MiB".into());
         }
