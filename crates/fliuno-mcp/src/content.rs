@@ -3,12 +3,13 @@
 use crate::{Host, Tool, ToolContext, ToolError, ToolOutput, ToolSpec};
 use fliuno_core::{CancellationToken, ToolEffect};
 use fliuno_protocol::ToolCall;
-use rmcp::model::{ClientRequest, ServerCapabilities, ServerResult};
+use rmcp::model::{ClientRequest, ProtocolVersion, ServerPeerInfo, ServerResult};
 use serde_json::{Value, json};
 use std::sync::Arc;
 mod arguments;
 mod completion;
 mod skills;
+mod watch;
 
 #[derive(Clone, Copy)]
 enum Kind {
@@ -125,11 +126,8 @@ impl Kind {
     }
 }
 
-pub(crate) fn tools(
-    host: Arc<Host>,
-    server: &str,
-    capabilities: &ServerCapabilities,
-) -> Vec<Box<dyn Tool>> {
+pub(crate) fn tools(host: Arc<Host>, server: &str, peer: &ServerPeerInfo) -> Vec<Box<dyn Tool>> {
+    let capabilities = &peer.capabilities;
     let mut kinds = Vec::new();
     if capabilities.resources.is_some() {
         kinds.extend([Kind::Resources, Kind::Templates, Kind::Read]);
@@ -146,7 +144,7 @@ pub(crate) fn tools(
             kinds.push(Kind::ResourceDirectory);
         }
     }
-    kinds
+    let mut tools: Vec<_> = kinds
         .into_iter()
         .map(|kind| {
             Box::new(ContentTool {
@@ -155,7 +153,27 @@ pub(crate) fn tools(
                 kind,
             }) as Box<dyn Tool>
         })
-        .collect()
+        .collect();
+    if peer.protocol_version >= ProtocolVersion::V_2026_07_28
+        && capabilities
+            .resources
+            .as_ref()
+            .is_some_and(|r| r.subscribe == Some(true))
+    {
+        tools.push(Box::new(watch::ResourceWatch::new(host, server)));
+    }
+    tools
+}
+
+fn authority(host: &Host, spec: &ToolSpec, method: &str) -> String {
+    fliuno_core::authority_digest(
+        "mcp.content.v1",
+        &json!({
+            "host":host.authority,"method":method,
+            "name":spec.name,"description":spec.description,"inputSchema":spec.input_schema,
+            "effect":spec.effect,
+        }),
+    )
 }
 
 struct ContentTool {
@@ -165,15 +183,7 @@ struct ContentTool {
 }
 impl Tool for ContentTool {
     fn authority(&self) -> String {
-        let spec = self.spec();
-        fliuno_core::authority_digest(
-            "mcp.content.v1",
-            &json!({
-                "host":self.host.authority,"method":self.kind.method(),
-                "name":spec.name,"description":spec.description,"inputSchema":spec.input_schema,
-                "effect":spec.effect,
-            }),
-        )
+        authority(&self.host, &self.spec(), self.kind.method())
     }
     fn spec(&self) -> ToolSpec {
         ToolSpec {

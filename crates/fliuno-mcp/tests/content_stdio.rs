@@ -20,12 +20,38 @@ fn content_only_stdio_process_interoperates_in_host_and_isolated_modes() {
         let tools = fliuno_mcp::connect(
             serde_json::from_value(json!({
                 "id":"content","command":executable,"args":["--content"],"isolation":isolation,
-                "cwd":if isolated {None} else {Some(&root)},"timeoutMs":30000
+                "lifecycle":"discover", "cwd":if isolated {None} else {Some(&root)},"timeoutMs":30000
             }))
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
+        let watch = tools
+            .iter()
+            .find(|tool| tool.spec().name == "mcp_content_resources_watch")
+            .unwrap();
+        let result = watch
+            .execute(
+                &ToolContext {
+                    session_id: "session",
+                    task_id: "task",
+                    workspace: &Workspace {
+                        id: "w".into(),
+                        root: root.display().to_string(),
+                    },
+                },
+                &ToolCall {
+                    id: "watch".into(),
+                    name: watch.spec().name,
+                    arguments: json!({"uri":"fixture:environment","waitMs":1000}),
+                },
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(
+            result.output["result"],
+            json!({"uri":"fixture:environment","status":"updated"})
+        );
         let mut private_directory = None;
         for (label, arguments, path) in [
             ("resources_list", json!({}), "/resources"),

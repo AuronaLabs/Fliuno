@@ -25,14 +25,18 @@ struct SdkPeer {
 }
 impl ServerHandler for SdkPeer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .enable_resources()
-                .enable_prompts()
-                .enable_completions()
-                .build(),
-        )
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .enable_prompts()
+            .enable_completions();
+        // A legacy peer can advertise subscribe without speaking subscriptions/listen.
+        let capabilities = if self.legacy {
+            capabilities.enable_resources_subscribe().build()
+        } else {
+            capabilities.build()
+        };
+        ServerConfig::new(capabilities)
     }
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         if self.legacy {
@@ -169,6 +173,11 @@ fn official_http_server_interoperates_in_both_lifecycles_and_response_formats() 
             .unwrap();
             let tools = fliuno_mcp::connect_server(config)
                 .unwrap_or_else(|error| panic!("legacy={legacy}, json={json_response}: {error}"));
+            assert!(
+                !tools
+                    .iter()
+                    .any(|tool| tool.spec().name == "mcp_sdk_resources_watch")
+            );
             let result = tools[0]
                 .execute(
                     &ToolContext {

@@ -5,9 +5,11 @@ use rmcp::{
         CompleteRequestParams, CompleteResult, CompletionInfo, GetPromptRequestParams,
         GetPromptResponse, GetPromptResult, ListPromptsResult, ListResourceTemplatesResult,
         ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
-        ReadResourceResponse, ReadResourceResult, ServerCapabilities, ServerConfig,
+        ReadResourceResponse, ReadResourceResult, ResourceUpdatedNotification,
+        ResourceUpdatedNotificationParam, ServerCapabilities, ServerConfig, ServerNotification,
+        SubscriptionFilter,
     },
-    service::RequestContext,
+    service::{RequestContext, SubscriptionContext},
 };
 use serde_json::json;
 
@@ -17,10 +19,33 @@ impl ServerHandler for Fixture {
         ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_resources()
+                .enable_resources_subscribe()
                 .enable_prompts()
                 .enable_completions()
                 .build(),
         )
+    }
+    fn accepted_subscription_filter(
+        &self,
+        requested: &SubscriptionFilter,
+    ) -> Option<SubscriptionFilter> {
+        Some(requested.clone())
+    }
+    async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
+        let uris = context.accepted().resource_subscriptions.as_deref();
+        if uris.is_some_and(|uris| uris == ["fixture:environment"]) {
+            context
+                .sink()
+                .send(ServerNotification::ResourceUpdatedNotification(
+                    ResourceUpdatedNotification::new(ResourceUpdatedNotificationParam::new(
+                        "fixture:environment",
+                    )),
+                ))
+                .await
+                .map_err(|_| ErrorData::internal_error("watch delivery failed", None))?;
+        }
+        context.cancelled().await;
+        Ok(())
     }
     async fn list_resources(
         &self,

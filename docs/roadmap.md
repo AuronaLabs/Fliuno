@@ -47,6 +47,7 @@
 - [x] 模型接口、离线 demo、OpenAI Responses / Anthropic Messages 适配器。
 - [x] OpenAI / Anthropic SSE 增量文本预览；易失进度通知与持久任务事件分离。
 - [x] MCP stdio 工具发现与调用、参数校验、未知副作用阻止重放。
+- [x] MCP 单次资源监听，按协商版本和能力注册，每次调用独立审批。官方 SDK 测试覆盖 HTTP SSE 和本机及 AppContainer stdio、取消、退出和连接复用。
 - [x] MCP Streamable HTTP，包含 JSON/SSE、SEP-2243 标准头、现代 discover / 旧版初始化矩阵、凭据隔离和未知结果恢复边界。
 - [x] 内置工作区文件能力、仅创建新文件的审批写入。
 - [x] Skills 目录发现、frontmatter 校验、渐进读取。

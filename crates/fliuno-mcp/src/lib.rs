@@ -99,24 +99,23 @@ pub fn connect_server(config: ServerConfig) -> Result<Vec<Box<dyn Tool>>, String
         runtime,
         timeout,
     });
-    let (tools, capabilities) = host.runtime.block_on(async {
+    let (tools, peer) = host.runtime.block_on(async {
         let service = host.service.lock().await;
-        let capabilities = service
+        let peer = service
             .peer_info()
             .ok_or("MCP handshake has no peer info")?
-            .capabilities
             .clone();
-        let tools = if capabilities.tools.is_some() {
+        let tools = if peer.capabilities.tools.is_some() {
             tokio::time::timeout(timeout, discovery::tools(&service))
                 .await
                 .map_err(|_| "MCP discovery timed out")??
         } else {
             Vec::new()
         };
-        Ok::<_, String>((tools, capabilities))
+        Ok::<_, String>((tools, peer))
     })?;
     let mut registered = wrap_tools(Arc::clone(&host), config.id(), tools, bundle.as_deref())?;
-    registered.extend(content::tools(host, config.id(), &capabilities));
+    registered.extend(content::tools(host, config.id(), &peer));
     Ok(registered)
 }
 

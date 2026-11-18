@@ -32,6 +32,14 @@
 
 `prompts/get` 返回的 `user` / `assistant` 角色位于 `Message::ToolResult` 的 JSON 内，不会转成任务消息、系统指令或额外授权。内容仍可能包含不可信指令，客户端应保留来源与工具结果边界。`grantsPermissions:false` 描述内核权限语义，不是对内容正确性的背书。
 
+## 单次资源监听
+
+协商版本至少为 `2026-07-28` 且服务声明 `resources.subscribe` 时，注册 `mcp_<id>_resources_watch({uri,waitMs})`。每次调用独立审批，监听一条 URI，等待时间为 1 毫秒到 5 秒且最多占配置超时的一半。排队、握手和关闭监听都计入整个调用的超时。
+
+结果只包含 `uri` 和 `status`。`updated` 表示收到更新，`elapsed` 表示等待期结束，`declined` 表示服务未接受该 URI，`ended` 表示服务正常结束监听。需要资源正文时，可另行审批 `resources_read`。监听结束后释放订阅。发出请求后取消、超时或连接异常会按现有未知结果规则关闭该 MCP 连接。
+
+互操作验证覆盖官方 SDK 的 HTTP SSE、Windows 本机 stdio 与 AppContainer stdio。旧版协议即使声明了 `resources.subscribe` 也不注册这个工具。
+
 ## 预算与请求生命周期
 
 每个列表调用只发送一页请求，最多 256 项；不自动追取 `nextCursor`，下一页需要另一次审批。请求和响应游标必须非空、至多 4096 UTF-8 字节且不含控制字符。返回重复游标不导致内核循环，服务是否推进分页由调用方审阅。
