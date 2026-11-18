@@ -80,5 +80,8 @@ fn a2a_endpoint_and_execution_budget_are_part_of_queued_authority() {
     cannot_rebind(config.clone(), endpoint, false);
     let mut budget = config.clone();
     budget["agents"][0]["taskTimeoutMs"] = json!(600000);
-    cannot_rebind(config, budget, false);
+    cannot_rebind(config.clone(), budget, false);
+    let mut transport = config.clone();
+    transport["agents"][0]["streaming"] = json!(true);
+    cannot_rebind(config, transport, false);
 }

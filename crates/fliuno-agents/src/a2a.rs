@@ -1,6 +1,6 @@
 //! Maps bounded remote A2A tasks to the neutral core. URLs, credentials and
 //! deadlines are host-owned; cards/messages never confer local tool authority.
-use fliuno_a2a::{Client, Options, SendResponse, Task, TaskState};
+use fliuno_a2a::{Client, Message, Options, SendResponse, StreamEvent, Task, TaskState};
 use fliuno_core::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
     CancellationToken, IncomingAgentArtifact, Kernel,
@@ -8,7 +8,10 @@ use fliuno_core::{
 use fliuno_protocol::{AgentRemoteTask, AgentSpec, AgentStopReason, AgentTaskState};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{collections::BTreeSet, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 use tokio::{
     sync::mpsc,
     time::{Instant, sleep, sleep_until, timeout},
@@ -37,6 +40,11 @@ pub struct A2aAgentConfig {
     pub poll_interval_ms: u64,
     #[serde(default = "response_bytes")]
     pub max_response_bytes: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub streaming: bool,
+}
+fn is_false(value: &bool) -> bool {
+    !value
 }
 fn request_ms() -> u64 {
     30_000
@@ -58,6 +66,7 @@ struct A2aBackend {
     card: Option<String>,
     task_timeout: Duration,
     poll_interval: Duration,
+    streaming: bool,
 }
 pub fn register_a2a_config(kernel: &mut Kernel, config: A2aConfig) -> Result<(), String> {
     let mut ids: BTreeSet<_> = kernel.agent_specs().into_iter().map(|s| s.id).collect();
@@ -120,6 +129,7 @@ pub fn register_a2a_config(kernel: &mut Kernel, config: A2aConfig) -> Result<(),
             card: config.agent_card_url,
             task_timeout: Duration::from_millis(config.task_timeout_ms),
             poll_interval: Duration::from_millis(config.poll_interval_ms),
+            streaming: config.streaming,
         });
     }
     // Validate the whole file before mutating the shared ACP/A2A registry.
@@ -197,6 +207,109 @@ fn record_task(observer: &dyn AgentObserver, task: &Task) -> Result<(), ()> {
         }))
         .map_err(|_| ())
 }
+fn record_message(observer: &dyn AgentObserver, message: Message) -> Result<AgentOutcome, ()> {
+    if let Some(context) = &message.context_id {
+        observer
+            .observe(AgentObservation::SessionOpened(context.clone()))
+            .map_err(|_| ())?;
+    }
+    observer
+        .observe(AgentObservation::Artifacts(vec![artifact(
+            message.id.clone(),
+            "A2A message".into(),
+            &message.raw,
+        )?]))
+        .map_err(|_| ())?;
+    observer
+        .observe(AgentObservation::Update {
+            update: json!({"type":"a2a_message","messageId":message.id}),
+            text: Some(message.text()),
+        })
+        .map_err(|_| ())?;
+    Ok(known(AgentStopReason::EndTurn))
+}
+
+#[derive(Clone)]
+struct StreamArtifact {
+    raw: Value,
+    complete: bool,
+}
+
+fn add_stream_artifact(
+    artifacts: &mut BTreeMap<String, StreamArtifact>,
+    artifact: Value,
+    append: bool,
+    last_chunk: Option<bool>,
+) -> Result<(), ()> {
+    let id = artifact["artifactId"].as_str().ok_or(())?.to_owned();
+    let complete = if append {
+        last_chunk.unwrap_or(false)
+    } else {
+        last_chunk.unwrap_or(true)
+    };
+    if append {
+        let current = artifacts.get_mut(&id).ok_or(())?;
+        if current.complete {
+            return Err(());
+        }
+        let new_parts = artifact["parts"].as_array().ok_or(())?;
+        current
+            .raw
+            .get_mut("parts")
+            .and_then(Value::as_array_mut)
+            .ok_or(())?
+            .extend(new_parts.iter().cloned());
+        for key in ["name", "description", "metadata"] {
+            if let Some(value) = artifact.get(key) {
+                current.raw[key] = value.clone();
+            }
+        }
+        current.complete = complete;
+    } else {
+        if !artifacts.contains_key(&id) && artifacts.len() >= 64 {
+            return Err(());
+        }
+        artifacts.insert(
+            id.clone(),
+            StreamArtifact {
+                raw: artifact,
+                complete,
+            },
+        );
+    }
+    let current = artifacts.get(&id).ok_or(())?;
+    if serde_json::to_vec(&current.raw).map_err(|_| ())?.len() > 262_144 {
+        return Err(());
+    }
+    Task::parse(json!({
+        "id":"stream-validation",
+        "status":{"state":"TASK_STATE_WORKING"},
+        "artifacts":[current.raw],
+    }))
+    .map_err(|_| ())?;
+    Ok(())
+}
+
+fn finish_stream_snapshot(
+    observer: &dyn AgentObserver,
+    mut task: Task,
+    artifacts: BTreeMap<String, StreamArtifact>,
+    status_event_recorded: bool,
+    status_text_recorded: bool,
+) -> Result<AgentOutcome, ()> {
+    if artifacts.values().any(|artifact| !artifact.complete) {
+        return Err(());
+    }
+    task.artifacts = artifacts
+        .into_values()
+        .map(|artifact| artifact.raw)
+        .collect();
+    if status_event_recorded {
+        task.status_message = None;
+    }
+    finish_snapshot_with_status_text(observer, task, status_text_recorded)
+}
+
 fn artifact(source_id: String, title: String, raw: &Value) -> Result<IncomingAgentArtifact, ()> {
     Ok(IncomingAgentArtifact {
         source_id,
@@ -206,11 +319,18 @@ fn artifact(source_id: String, title: String, raw: &Value) -> Result<IncomingAge
     })
 }
 fn finish_snapshot(observer: &dyn AgentObserver, task: Task) -> Result<AgentOutcome, ()> {
+    finish_snapshot_with_status_text(observer, task, false)
+}
+
+fn finish_snapshot_with_status_text(
+    observer: &dyn AgentObserver,
+    task: Task,
+    mut has_status_text: bool,
+) -> Result<AgentOutcome, ()> {
     let reason = stop_reason(task.state).ok_or(())?;
-    let mut has_status_text = false;
     if let Some(message) = task.status_message {
         let text = message.text();
-        has_status_text = !text.is_empty();
+        has_status_text |= !text.is_empty();
         observer
             .observe(AgentObservation::Update {
                 update: json!({"type":"a2a_status_message","message":message.raw}),
@@ -275,8 +395,26 @@ impl A2aBackend {
                 biased;
                 _ = cancellation.cancelled() => return Ok(known(AgentStopReason::Cancelled)),
                 _ = sleep_until(deadline) => return Err(()),
-                result = client.check_card(card) => result.map_err(|_| ())?,
+                result = async {
+                    if self.streaming {
+                        client.check_card_streaming(card).await
+                    } else {
+                        client.check_card(card).await
+                    }
+                } => result.map_err(|_| ())?,
             }
+        }
+        if self.streaming {
+            return self
+                .run_stream(
+                    &client,
+                    request,
+                    observer,
+                    cancellation,
+                    deadline,
+                    history.as_deref(),
+                )
+                .await;
         }
         // Persisted run ID doubles as a message identity for audit/correlation;
         // neither a timeout nor the same ID grants permission to resend it.
@@ -289,28 +427,7 @@ impl A2aBackend {
             })?,
         };
         let mut task = match response {
-            SendResponse::Message(message) => {
-                if let Some(context) = &message.context_id {
-                    observer
-                        .observe(AgentObservation::SessionOpened(context.clone()))
-                        .map_err(|_| ())?;
-                }
-                observer
-                    .observe(AgentObservation::Artifacts(vec![artifact(
-                        message.id.clone(),
-                        "A2A message".into(),
-                        &message.raw,
-                    )?]))
-                    .map_err(|_| ())?;
-                let text = message.text();
-                observer
-                    .observe(AgentObservation::Update {
-                        update: json!({"type":"a2a_message","messageId":message.id}),
-                        text: Some(text),
-                    })
-                    .map_err(|_| ())?;
-                return Ok(known(AgentStopReason::EndTurn));
-            }
+            SendResponse::Message(message) => return record_message(observer, message),
             SendResponse::Task(task) => task,
         };
         record_task(observer, &task)?;
@@ -353,11 +470,173 @@ impl A2aBackend {
             if !next.matches(&task) {
                 return Err(());
             }
+            if !task.state.allows_transition_to(next.state) {
+                return Err(());
+            }
             record_task(observer, &next)?;
             task = next;
             polls += 1;
         }
     }
+
+    async fn run_stream(
+        &self,
+        client: &Client,
+        request: &AgentRequest,
+        observer: &dyn AgentObserver,
+        cancellation: &CancellationToken,
+        deadline: Instant,
+        history: Option<&str>,
+    ) -> Result<AgentOutcome, ()> {
+        let mut events = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(()),
+            _ = sleep_until(deadline) => return Err(()),
+            result = client.send_text_streaming(&request.run_id, &request.input, history) => result.map_err(|_| ())?,
+        };
+        let mut task: Option<Task> = None;
+        let mut artifacts = BTreeMap::new();
+        let mut status_event_recorded = false;
+        let mut status_text_recorded = false;
+        loop {
+            let event = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => {
+                    let Some(current) = task.as_ref() else { return Err(()) };
+                    if current.state.is_terminal() {
+                        return finish_stream_snapshot(
+                            observer,
+                            current.clone(),
+                            artifacts,
+                            status_event_recorded,
+                            status_text_recorded,
+                        );
+                    }
+                    return self.cancel_remote(client, observer, current, true).await;
+                }
+                _ = sleep_until(deadline) => {
+                    let Some(current) = task.as_ref() else { return Err(()) };
+                    return self.cancel_remote(client, observer, current, false).await;
+                }
+                event = events.recv() => event,
+            };
+            let Some(event) = event else { return Err(()) };
+            match event.map_err(|_| ())? {
+                StreamEvent::Task(initial) => {
+                    if task.is_some() {
+                        return Err(());
+                    }
+                    let settled = initial.state.is_settled();
+                    for raw in &initial.artifacts {
+                        let id = raw["artifactId"].as_str().ok_or(())?.to_owned();
+                        artifacts.insert(
+                            id,
+                            StreamArtifact {
+                                raw: raw.clone(),
+                                complete: true,
+                            },
+                        );
+                    }
+                    record_task(observer, &initial)?;
+                    if let Some(message) = &initial.status_message {
+                        let text = message.text();
+                        status_text_recorded |= !text.is_empty();
+                        observer
+                            .observe(AgentObservation::Update {
+                                update: json!({"type":"a2a_status_message","message":message.raw}),
+                                text: Some(text),
+                            })
+                            .map_err(|_| ())?;
+                        status_event_recorded = true;
+                    }
+                    task = Some(initial);
+                    if settled {
+                        return finish_stream_snapshot(
+                            observer,
+                            task.take().ok_or(())?,
+                            artifacts,
+                            status_event_recorded,
+                            status_text_recorded,
+                        );
+                    }
+                }
+                StreamEvent::Message(message) => {
+                    if task.is_some() {
+                        return Err(());
+                    }
+                    return record_message(observer, message);
+                }
+                StreamEvent::StatusUpdate {
+                    task_id,
+                    context_id,
+                    state,
+                    message,
+                } => {
+                    let current = task.as_mut().ok_or(())?;
+                    if current.id != task_id
+                        || current.context_id != context_id
+                        || !current.state.allows_transition_to(state)
+                    {
+                        return Err(());
+                    }
+                    current.state = state;
+                    current.status_message = message.clone();
+                    record_task(observer, current)?;
+                    let text = message
+                        .as_ref()
+                        .map(Message::text)
+                        .filter(|text| !text.is_empty());
+                    status_text_recorded |= text.is_some();
+                    observer
+                        .observe(AgentObservation::Update {
+                            update: json!({
+                                "type":"a2a_status_update",
+                                "state":state,
+                                "message":message.as_ref().map(|message| &message.raw),
+                            }),
+                            text,
+                        })
+                        .map_err(|_| ())?;
+                    status_event_recorded = true;
+                    if state.is_settled() {
+                        return finish_stream_snapshot(
+                            observer,
+                            task.take().ok_or(())?,
+                            std::mem::take(&mut artifacts),
+                            status_event_recorded,
+                            status_text_recorded,
+                        );
+                    }
+                }
+                StreamEvent::ArtifactUpdate {
+                    task_id,
+                    context_id,
+                    artifact,
+                    append,
+                    last_chunk,
+                } => {
+                    let current = task.as_ref().ok_or(())?;
+                    if current.id != task_id || current.context_id != context_id {
+                        return Err(());
+                    }
+                    let artifact_id = artifact["artifactId"].as_str().ok_or(())?.to_owned();
+                    add_stream_artifact(&mut artifacts, artifact, append, last_chunk)?;
+                    observer
+                        .observe(AgentObservation::Update {
+                            update: json!({
+                                "type":"a2a_artifact_update",
+                                "artifactId":artifact_id,
+                                "append":append,
+                                "lastChunk":last_chunk,
+                            }),
+                            text: None,
+                        })
+                        .map_err(|_| ())?;
+                }
+            }
+        }
+    }
+
     async fn cancel_remote(
         &self,
         client: &Client,
@@ -379,6 +658,9 @@ impl A2aBackend {
         .map_err(|_| ())?
         .map_err(|_| ())?;
         if !task.matches(previous) {
+            return Err(());
+        }
+        if !previous.state.allows_transition_to(task.state) {
             return Err(());
         }
         record_task(observer, &task)?;

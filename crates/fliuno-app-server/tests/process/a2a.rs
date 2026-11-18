@@ -35,6 +35,12 @@ impl Directory {
         fs::write(&config, json!({"agents":[agent]}).to_string()).unwrap();
         Self { root, db, config }
     }
+    fn with_streaming(self) -> Self {
+        let mut config: Value = serde_json::from_slice(&fs::read(&self.config).unwrap()).unwrap();
+        config["agents"][0]["streaming"] = json!(true);
+        fs::write(&self.config, config.to_string()).unwrap();
+        self
+    }
     fn session(&self, peer: &mut Peer) -> String {
         let ws = peer.call("workspace/open", json!({"root":self.root}));
         peer.call("session/create", json!({"workspaceId":ws["id"]}))["id"]
@@ -198,6 +204,73 @@ fn task_polling_artifact_parts_history_idempotency_and_restart_are_durable() {
 }
 
 #[test]
+fn streaming_status_and_chunked_artifacts_are_persisted_without_polling() {
+    let wire = Fixture::start(|request| {
+        assert_eq!(request.body["method"], "SendStreamingMessage");
+        assert_eq!(request.headers["accept"], "text/event-stream");
+        let id = request.body["id"].as_str().unwrap();
+        let results = [
+            json!({"task":task("TASK_STATE_WORKING")}),
+            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","name":"report.txt","parts":[{"text":"stream "}]},"append":false,"lastChunk":false}}),
+            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","parts":[{"text":"result"}]},"append":true,"lastChunk":true}}),
+            json!({"statusUpdate":{"taskId":"remote-task","contextId":"remote-context","status":{"state":"TASK_STATE_COMPLETED","message":{"messageId":"stream-final","taskId":"remote-task","contextId":"remote-context","role":"ROLE_AGENT","parts":[{"text":"done"}]}}}}),
+        ];
+        let body: String = results
+            .into_iter()
+            .map(|result| {
+                format!(
+                    "data: {}\n\n",
+                    json!({"jsonrpc":"2.0","id":id,"result":result})
+                )
+            })
+            .collect();
+        Response::sse(body)
+    });
+    let directory = Directory::new(&wire, 10_000, false).with_streaming();
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let submitted = start(&mut peer, &session, "streaming");
+    let completed = wait_finished(&mut peer, &submitted["id"]);
+    assert_eq!(completed["status"], "completed");
+    assert_eq!(completed["output"], "done\nstream \nresult");
+    assert_eq!(
+        completed["agentRun"]["remoteTask"],
+        json!({"id":"remote-task","contextId":"remote-context","state":"completed"})
+    );
+    assert_eq!(completed["agentRun"]["outcomeUnknown"], false);
+    let stored = peer.call("artifacts/list", json!({"taskId":submitted["id"]}));
+    assert_eq!(stored.as_array().unwrap().len(), 1);
+    let raw: Value = serde_json::from_str(stored[0]["content"].as_str().unwrap()).unwrap();
+    assert_eq!(raw["artifactId"], "stream-report");
+    assert_eq!(raw["parts"], json!([{"text":"stream "},{"text":"result"}]));
+    let requests = wire.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].body["method"], "SendStreamingMessage");
+}
+
+#[test]
+fn incomplete_stream_is_unknown_and_is_never_replayed_or_polled() {
+    let wire = Fixture::start(|request| {
+        assert_eq!(request.body["method"], "SendStreamingMessage");
+        let id = request.body["id"].as_str().unwrap();
+        Response::sse(format!(
+            "data: {}\n\n",
+            json!({"jsonrpc":"2.0","id":id,"result":{"task":task("TASK_STATE_WORKING")}})
+        ))
+    });
+    let directory = Directory::new(&wire, 10_000, false).with_streaming();
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let submitted = start(&mut peer, &session, "stream-interrupted");
+    let interrupted = wait_finished(&mut peer, &submitted["id"]);
+    assert_eq!(interrupted["status"], "interrupted");
+    assert_eq!(interrupted["agentRun"]["outcomeUnknown"], true);
+    let requests = wire.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].body["method"], "SendStreamingMessage");
+}
+
+#[test]
 fn remote_failures_and_pauses_have_distinct_stop_reasons_and_no_false_success() {
     for (state, reason, local) in [
         ("TASK_STATE_FAILED", "failed", "failed"),
@@ -353,6 +426,39 @@ fn poll_identity_change_is_uncertain_and_never_imports_another_tasks_artifact() 
             .unwrap()
             .is_empty()
     );
+    assert_eq!(wire.requests().len(), 2);
+}
+
+#[test]
+fn poll_state_regression_is_uncertain_and_does_not_overwrite_remote_state() {
+    let polls = Arc::new(AtomicUsize::new(0));
+    let polled = polls.clone();
+    let wire = Fixture::start(
+        move |request| match request.body["method"].as_str().unwrap() {
+            "SendMessage" => response(request, json!({"task":task("TASK_STATE_WORKING")})),
+            "GetTask" => {
+                assert_eq!(
+                    polled.fetch_add(1, Ordering::SeqCst),
+                    0,
+                    "a regressed state must stop polling"
+                );
+                response(
+                    request,
+                    json!({"id":"remote-task","contextId":"remote-context","status":{"state":"TASK_STATE_SUBMITTED"}}),
+                )
+            }
+            other => panic!("unexpected A2A method {other}"),
+        },
+    );
+    let directory = Directory::new(&wire, 10_000, false);
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let submitted = start(&mut peer, &session, "poll-regression");
+    let interrupted = wait_finished(&mut peer, &submitted["id"]);
+    assert_eq!(interrupted["status"], "interrupted");
+    assert_eq!(interrupted["agentRun"]["outcomeUnknown"], true);
+    assert_eq!(interrupted["agentRun"]["remoteTask"]["state"], "working");
+    assert_eq!(polls.load(Ordering::SeqCst), 1);
     assert_eq!(wire.requests().len(), 2);
 }
 

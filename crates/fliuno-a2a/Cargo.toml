@@ -11,9 +11,7 @@ serde_json.workspace = true
 reqwest.workspace = true
 thiserror.workspace = true
 base64 = "0.22"
-
-[dev-dependencies]
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 [lints]
 workspace = true

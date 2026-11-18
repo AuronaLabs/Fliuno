@@ -2,7 +2,7 @@
 //! tests are independent fixtures, not official SDK interoperability claims.
 #[path = "../../fliuno-mcp/tests/support/http.rs"]
 mod http;
-use fliuno_a2a::{Client, Error, Options, SendResponse, Task, TaskState};
+use fliuno_a2a::{Client, Error, Options, SendResponse, StreamEvent, Task, TaskState};
 use http::{Fixture, Request, Response};
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -79,6 +79,105 @@ async fn v1_methods_envelope_headers_and_task_fields_match_stable_contract() {
             .is_terminal()
     );
     assert_eq!(peer.requests().len(), 3);
+}
+
+#[tokio::test]
+async fn streaming_submission_decodes_status_and_artifact_events_with_backpressure_contract() {
+    let peer = Fixture::start(|request| {
+        assert_eq!(request.body["method"], "SendStreamingMessage");
+        assert_eq!(request.headers["accept"], "text/event-stream");
+        assert_eq!(request.headers["a2a-version"], "1.0");
+        assert_eq!(request.headers["authorization"], "Bearer host-secret");
+        assert_eq!(
+            request.body["params"]["message"]["parts"],
+            json!([{"text":"history"},{"text":"do work"}])
+        );
+        let id = request.body["id"].as_str().unwrap();
+        let events = [
+            json!({"task":task("TASK_STATE_WORKING")}),
+            json!({"statusUpdate":{"taskId":"remote-task","contextId":"context","status":{"state":"TASK_STATE_WORKING"}}}),
+            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"context","artifact":{"artifactId":"report","name":"Report","parts":[{"text":"ready"}]},"append":false,"lastChunk":true}}),
+            json!({"statusUpdate":{"taskId":"remote-task","contextId":"context","status":{"state":"TASK_STATE_COMPLETED","message":{"messageId":"final","taskId":"remote-task","contextId":"context","role":"ROLE_AGENT","parts":[{"text":"done"}]}}}}),
+        ];
+        let body: String = events
+            .into_iter()
+            .map(|result| {
+                format!(
+                    "data: {}\r\n\r\n",
+                    json!({"jsonrpc":"2.0","id":id,"result":result})
+                )
+            })
+            .collect();
+        Response::sse(format!(": heartbeat\r\n\r\n{body}"))
+    });
+    let client = client(&peer);
+    let mut events = client
+        .send_text_streaming("attempt", "do work", Some("history"))
+        .await
+        .unwrap();
+    assert_eq!(events.max_capacity(), 16);
+    let mut received = Vec::new();
+    while let Some(event) = events.recv().await {
+        received.push(event.unwrap());
+    }
+    assert_eq!(received.len(), 4);
+    assert!(matches!(received[0], StreamEvent::Task(ref task) if task.id == "remote-task"));
+    assert!(
+        matches!(received[1], StreamEvent::StatusUpdate { ref task_id, state: TaskState::Working, .. } if task_id == "remote-task")
+    );
+    assert!(
+        matches!(received[2], StreamEvent::ArtifactUpdate { ref artifact, last_chunk: Some(true), .. } if artifact["artifactId"] == "report")
+    );
+    assert!(matches!(
+        received[3],
+        StreamEvent::StatusUpdate {
+            state: TaskState::Completed,
+            ..
+        }
+    ));
+    assert_eq!(peer.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn streaming_response_rejects_a_changed_remote_task_identity() {
+    let peer = Fixture::start(|request| {
+        let id = request.body["id"].as_str().unwrap();
+        let frames = [
+            json!({"task":task("TASK_STATE_WORKING")}),
+            json!({"artifactUpdate":{"taskId":"other-task","contextId":"context","artifact":{"artifactId":"x","parts":[{"text":"x"}]}}}),
+        ];
+        Response::sse(
+            frames
+                .into_iter()
+                .map(|result| {
+                    format!(
+                        "data: {}\n\n",
+                        json!({"jsonrpc":"2.0","id":id,"result":result})
+                    )
+                })
+                .collect(),
+        )
+    });
+    let mut events = client(&peer)
+        .send_text_streaming("attempt", "input", None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        events.recv().await.unwrap().unwrap(),
+        StreamEvent::Task(_)
+    ));
+    assert!(matches!(events.recv().await.unwrap(), Err(Error::Protocol)));
+}
+
+#[tokio::test]
+async fn streaming_response_enforces_the_total_byte_budget() {
+    let peer = Fixture::start(|_| Response::sse(format!(": {}\n\n", "x".repeat(1100))));
+    assert!(matches!(
+        client(&peer)
+            .send_text_streaming("attempt", "input", None)
+            .await,
+        Err(Error::Budget)
+    ));
 }
 
 #[tokio::test]
@@ -188,10 +287,10 @@ async fn redirect_does_not_forward_credentials_or_submit_to_a_second_endpoint() 
 
 #[tokio::test]
 async fn pinned_card_validates_version_interface_and_required_extensions() {
-    for mode in 0..4 {
+    for mode in 0..5 {
         let peer = Fixture::start(move |request| {
             assert_eq!(request.method, "GET");
-            let mut card = json!({"supportedInterfaces":[{"url":format!("http://{}/rpc",request.headers["host"]),"protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"capabilities":{}});
+            let mut card = json!({"supportedInterfaces":[{"url":format!("http://{}/rpc",request.headers["host"]),"protocolBinding":"JSONRPC","protocolVersion":"1.0"}],"capabilities":{"streaming":true}});
             match mode {
                 1 => card["supportedInterfaces"][0]["url"] = json!("https://untrusted.invalid/rpc"),
                 2 => card["supportedInterfaces"][0]["protocolVersion"] = json!("0.3"),
@@ -199,6 +298,7 @@ async fn pinned_card_validates_version_interface_and_required_extensions() {
                     card["capabilities"]["extensions"] =
                         json!([{"uri":"https://untrusted.invalid/ext","required":true}])
                 }
+                4 => card["capabilities"]["streaming"] = json!(false),
                 _ => (),
             }
             Response::json(200, card)
@@ -208,9 +308,16 @@ async fn pinned_card_validates_version_interface_and_required_extensions() {
                 .check_card(&peer.url("/.well-known/agent-card.json"))
                 .await
                 .is_ok(),
+            mode == 0 || mode == 4
+        );
+        assert_eq!(
+            client(&peer)
+                .check_card_streaming(&peer.url("/.well-known/agent-card.json"))
+                .await
+                .is_ok(),
             mode == 0
         );
-        assert_eq!(peer.requests().len(), 1);
+        assert_eq!(peer.requests().len(), 2);
     }
 }
 

@@ -4,7 +4,7 @@
 mod client;
 mod wire;
 pub use client::{Client, Options, validate_endpoint};
-pub use wire::{Message, SendResponse, Task, TaskState};
+pub use wire::{Message, SendResponse, StreamEvent, Task, TaskState};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

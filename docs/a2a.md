@@ -6,7 +6,9 @@ Fliuno 的 A2A 通道用于调用主机预先注册的远程 Agent。`fliuno-a2a
 
 本实现固定 [A2A v1.0.0 规范](https://a2a-protocol.org/v1.0.0/specification/) 的 JSON-RPC binding；请求发送 `A2A-Version: 1.0`。方法为 `SendMessage`、`GetTask`、`CancelTask`，使用 `ROLE_USER` / `ROLE_AGENT`、`TASK_STATE_*`、`text` / `data` / `raw` / `url` oneof。旧版 `message/send`、小写状态和 `kind/file` Part 不作为兼容协议接受。
 
-当前使用 `returnImmediately: true` 与有界 `GetTask` 轮询，不请求历史。支持 Task 和立即返回的 Message。SSE、gRPC、HTTP+JSON binding、push notification、扩展、tenancy、OAuth、认证卡片、签名验证、远程多轮继续尚未实现；不声明完整 A2A 一致性。卡片只是可选的主机固定接口校验，不能配置或切换 URL、凭据、tenant 和 binding。
+默认使用 `returnImmediately: true` 与有界 `GetTask` 轮询，不请求历史。配置 `streaming: true` 时改用 `SendStreamingMessage` 和 SSE，不执行轮询回退；如果配置了 Agent Card，卡片还必须声明 `capabilities.streaming: true`。流按 JSON-RPC envelope 校验，每次调用最多接收配置的 `maxResponseBytes`，消费队列容量为 16，客户端变慢时网络读取随之暂停。首个 Task 固定远端任务/上下文身份，后续状态和产物更新必须匹配；状态回退、错序、超预算、非终态断流均保留未知结果，不重发提交。TaskStatusUpdateEvent 按 A2A 1.0 的状态字段判定结束，不依赖非标准的 `final` 标志。ArtifactUpdate 的 append/lastChunk 会在内存中按 artifactId 有界组装，只有完整产物随终态入库。取消在获得 Task 身份后最多发送一次 CancelTask，并要求终态响应确认。
+
+支持 Task、立即返回的 Message 和可选 SSE 实时流。gRPC、HTTP+JSON binding、push notification、扩展、tenancy、OAuth、认证卡片、签名验证、远程多轮继续尚未实现；不声明完整 A2A 一致性。卡片只是可选的主机固定接口校验，不能配置或切换 URL、凭据、tenant 和 binding。
 
 ## 配置与调用
 
@@ -20,7 +22,8 @@ Fliuno 的 A2A 通道用于调用主机预先注册的远程 Agent。`fliuno-a2a
     "requestTimeoutMs": 30000,
     "taskTimeoutMs": 300000,
     "pollIntervalMs": 500,
-    "maxResponseBytes": 1048576
+    "maxResponseBytes": 1048576,
+    "streaming": true
   }]
 }
 ```

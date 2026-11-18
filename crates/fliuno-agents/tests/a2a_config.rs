@@ -64,10 +64,17 @@ impl AgentObserver for Observer {
     }
 }
 fn prepared(endpoint: String, token: &CancellationToken) -> PreparedAgentRun {
+    prepared_with_streaming(endpoint, token, false)
+}
+fn prepared_with_streaming(
+    endpoint: String,
+    token: &CancellationToken,
+    streaming: bool,
+) -> PreparedAgentRun {
     let mut kernel = Kernel::in_memory(Box::new(DemoProvider)).unwrap();
     register(
         &mut kernel,
-        json!({"agents":[{"id":"remote","endpoint":endpoint}]}),
+        json!({"agents":[{"id":"remote","endpoint":endpoint,"streaming":streaming}]}),
     )
     .unwrap();
     let ws = kernel
@@ -133,4 +140,36 @@ fn cancellation_racing_first_identity_observation_still_cancels_that_remote_task
     assert_eq!(outcome.stop_reason, Some(AgentStopReason::Cancelled));
     assert_eq!(observer.records.load(Ordering::SeqCst), 2);
     assert_eq!(peer.requests().len(), 2);
+}
+
+#[test]
+fn streaming_cancellation_uses_the_persisted_remote_identity_once() {
+    let peer = http::Fixture::start(|request| {
+        let id = request.body["id"].as_str().unwrap();
+        let result = match request.body["method"].as_str().unwrap() {
+            "SendStreamingMessage" => {
+                let frame = json!({"jsonrpc":"2.0","id":id,"result":{"task":{"id":"t","contextId":"c","status":{"state":"TASK_STATE_WORKING"}}}});
+                return http::Response::sse(format!("data: {frame}\n\n"));
+            }
+            "CancelTask" => {
+                json!({"id":"t","contextId":"c","status":{"state":"TASK_STATE_CANCELED"}})
+            }
+            other => panic!("unexpected operation {other}"),
+        };
+        http::Response::json(200, json!({"jsonrpc":"2.0","id":id,"result":result}))
+    });
+    let token = CancellationToken::new();
+    let observer = Observer {
+        reject: false,
+        cancellation: Some(token.clone()),
+        records: AtomicUsize::new(0),
+    };
+    let outcome =
+        prepared_with_streaming(peer.url("/rpc"), &token, true).execute(&observer, &token);
+    assert!(!outcome.outcome_unknown);
+    assert_eq!(outcome.stop_reason, Some(AgentStopReason::Cancelled));
+    let requests = peer.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].body["method"], "SendStreamingMessage");
+    assert_eq!(requests[1].body["method"], "CancelTask");
 }

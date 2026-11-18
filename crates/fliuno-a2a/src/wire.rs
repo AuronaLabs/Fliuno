@@ -41,6 +41,30 @@ impl TaskState {
     pub fn is_running(self) -> bool {
         matches!(self, Self::Submitted | Self::Working)
     }
+    pub fn is_settled(self) -> bool {
+        self.is_terminal() || matches!(self, Self::InputRequired | Self::AuthRequired)
+    }
+    pub fn allows_transition_to(self, next: Self) -> bool {
+        if self == next {
+            return self != Self::Unspecified;
+        }
+        if self.is_terminal() || self == Self::Unspecified {
+            return false;
+        }
+        if matches!(self, Self::InputRequired | Self::AuthRequired) {
+            return matches!(next, Self::Canceled | Self::Failed);
+        }
+        matches!(
+            next,
+            Self::Working
+                | Self::Completed
+                | Self::Failed
+                | Self::Canceled
+                | Self::InputRequired
+                | Self::Rejected
+                | Self::AuthRequired
+        )
+    }
 }
 
 pub fn valid_id(value: &str) -> bool {
@@ -225,5 +249,85 @@ impl SendResponse {
             (None, Some(message)) => Message::parse(message.clone()).map(Self::Message),
             _ => Err(Error::Protocol),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Task(Task),
+    Message(Message),
+    StatusUpdate {
+        task_id: String,
+        context_id: Option<String>,
+        state: TaskState,
+        message: Option<Message>,
+    },
+    ArtifactUpdate {
+        task_id: String,
+        context_id: Option<String>,
+        artifact: Value,
+        append: bool,
+        last_chunk: Option<bool>,
+    },
+}
+
+impl StreamEvent {
+    pub(crate) fn parse(raw: Value) -> Result<Self> {
+        let object = raw.as_object().ok_or(Error::Protocol)?;
+        let variants = ["task", "message", "statusUpdate", "artifactUpdate"];
+        let present = variants
+            .iter()
+            .filter(|key| object.contains_key(**key))
+            .count();
+        if present != 1 {
+            return Err(Error::Protocol);
+        }
+        if let Some(task) = object.get("task") {
+            return Task::parse(task.clone()).map(Self::Task);
+        }
+        if let Some(message) = object.get("message") {
+            return Message::parse(message.clone()).map(Self::Message);
+        }
+        if let Some(status) = object.get("statusUpdate") {
+            let task_id = required_id(status, "taskId")?;
+            let context_id = optional_id(status, "contextId")?;
+            let status_value = status.get("status").cloned().ok_or(Error::Protocol)?;
+            let task = Task::parse(serde_json::json!({
+                "id":task_id,
+                "contextId":context_id,
+                "status":status_value,
+            }))?;
+            return Ok(Self::StatusUpdate {
+                task_id: task.id,
+                context_id: task.context_id,
+                state: task.state,
+                message: task.status_message,
+            });
+        }
+        let update = object.get("artifactUpdate").ok_or(Error::Protocol)?;
+        let task_id = required_id(update, "taskId")?;
+        let context_id = optional_id(update, "contextId")?;
+        let artifact = update.get("artifact").cloned().ok_or(Error::Protocol)?;
+        Task::parse(serde_json::json!({
+            "id":task_id,
+            "contextId":context_id,
+            "status":{"state":"TASK_STATE_WORKING"},
+            "artifacts":[artifact],
+        }))?;
+        Ok(Self::ArtifactUpdate {
+            task_id,
+            context_id,
+            artifact,
+            append: optional_bool(update, "append")?.unwrap_or(false),
+            last_chunk: optional_bool(update, "lastChunk")?,
+        })
+    }
+}
+
+fn optional_bool(value: &Value, key: &str) -> Result<Option<bool>> {
+    match value.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        _ => Err(Error::Protocol),
     }
 }
