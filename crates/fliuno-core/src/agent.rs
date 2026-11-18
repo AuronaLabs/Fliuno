@@ -401,7 +401,16 @@ impl Kernel {
         approval_id: &str,
         decision: ApprovalDecision,
     ) -> Result<Task> {
-        let mut task = self.get_task(task_id)?;
+        let task = self.get_task(task_id)?;
+        self.respond_agent_approval_for_task(task, approval_id, decision)
+    }
+
+    pub(crate) fn respond_agent_approval_for_task(
+        &mut self,
+        mut task: Task,
+        approval_id: &str,
+        decision: ApprovalDecision,
+    ) -> Result<Task> {
         if task.status != TaskStatus::WaitingApproval {
             return Err(Error::Conflict(
                 "agent task is not waiting for approval".into(),
@@ -427,7 +436,7 @@ impl Kernel {
         }
         let control = self
             .agent_controls
-            .get(task_id)
+            .get(&task.id)
             .filter(|c| c.run_id == run.id && !c.cancellation.is_cancelled())
             .ok_or_else(|| Error::Conflict("agent connection is no longer available".into()))?;
         let sender = control.sender.clone();
@@ -456,7 +465,7 @@ impl Kernel {
             &[],
         )?;
         if sender.try_send(command).is_err() {
-            return self.finish_agent_run(task_id, &run_id, AgentOutcome::unknown());
+            return self.finish_agent_run(&task.id, &run_id, AgentOutcome::unknown());
         }
         Ok(task)
     }

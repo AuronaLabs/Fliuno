@@ -257,14 +257,13 @@ impl Kernel {
     }
 
     pub fn get_task(&self, id: &str) -> Result<Task> {
-        let data = self
+        let mut statement = self
             .db
-            .query_row("SELECT data FROM tasks WHERE id=?1", [id], |r| {
-                r.get::<_, String>(0)
-            })
-            .optional()?
-            .ok_or_else(|| Error::NotFound("task".into()))?;
-        Ok(serde_json::from_str(&data)?)
+            .prepare_cached("SELECT data FROM tasks WHERE id=?1")?;
+        let mut rows = statement.query([id])?;
+        let row = rows.next()?.ok_or_else(|| Error::NotFound("task".into()))?;
+        let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+        Ok(serde_json::from_str(data)?)
     }
 
     pub(crate) fn commit(

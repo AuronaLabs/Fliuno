@@ -521,21 +521,11 @@ impl RpcServer {
             }
             "approval/respond" => {
                 let p: ApprovalRespondParams = decode(params)?;
-                let is_agent = matches!(
-                    self.kernel()?.get_task(&p.task_id)?.backend,
-                    TaskBackend::ExternalAgent { .. }
-                );
-                if is_agent {
-                    return Ok(json!(self.kernel()?.respond_agent_approval(
-                        &p.task_id,
-                        &p.approval_id,
-                        p.decision
-                    )?));
-                }
-                match self
-                    .kernel()?
-                    .prepare_approval(&p.task_id, &p.approval_id, p.decision)?
-                {
+                match self.kernel()?.prepare_approval_response(
+                    &p.task_id,
+                    &p.approval_id,
+                    p.decision,
+                )? {
                     ApprovalOutcome::Finished(task) => json!(task),
                     ApprovalOutcome::Prepared { task, execution } => {
                         match self.scheduler.schedule_tool(execution) {

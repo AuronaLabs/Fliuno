@@ -79,7 +79,23 @@ impl Kernel {
         }
     }
 
-    /// Resolve an approval and persist an execution identity before returning
+    /// Dispatch one task snapshot to the matching approval handler.
+    pub fn prepare_approval_response(
+        &mut self,
+        task_id: &str,
+        approval_id: &str,
+        decision: ApprovalDecision,
+    ) -> Result<ApprovalOutcome> {
+        let task = self.get_task(task_id)?;
+        match task.backend {
+            TaskBackend::Model => self.prepare_model_approval(task, approval_id, decision),
+            TaskBackend::ExternalAgent { .. } => self
+                .respond_agent_approval_for_task(task, approval_id, decision)
+                .map(ApprovalOutcome::Finished),
+        }
+    }
+
+    /// Resolve a model approval and persist an execution identity before returning
     /// owned inputs to a scheduler. No tool code runs while the DB is locked.
     pub fn prepare_approval(
         &mut self,
@@ -87,7 +103,17 @@ impl Kernel {
         approval_id: &str,
         decision: ApprovalDecision,
     ) -> Result<ApprovalOutcome> {
-        let mut task = self.get_task(task_id)?;
+        let task = self.get_task(task_id)?;
+        self.prepare_model_approval(task, approval_id, decision)
+    }
+
+    fn prepare_model_approval(
+        &mut self,
+        mut task: Task,
+        approval_id: &str,
+        decision: ApprovalDecision,
+    ) -> Result<ApprovalOutcome> {
+        let task_id = task.id.as_str();
         if task.status != TaskStatus::WaitingApproval {
             return Err(Error::Conflict("task is not waiting for approval".into()));
         }
@@ -144,17 +170,14 @@ impl Kernel {
         task.status = TaskStatus::Running;
         task.in_flight_tool = Some(approval.call.clone());
         self.commit(&task, &[resolved], &[])?;
-        let session_id = task.session_id.clone();
-        Ok(ApprovalOutcome::Prepared {
-            task,
-            execution: Box::new(PreparedToolExecution {
-                task_id: task_id.into(),
-                session_id,
-                call: approval.call,
-                workspace,
-                tool,
-            }),
-        })
+        let execution = Box::new(PreparedToolExecution {
+            task_id: task.id.clone(),
+            session_id: task.session_id.clone(),
+            call: approval.call,
+            workspace,
+            tool,
+        });
+        Ok(ApprovalOutcome::Prepared { task, execution })
     }
 
     /// Recheck the task and policy immediately before any tool side effect.
