@@ -294,6 +294,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["eventBySequence"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
             capabilities["taskSummaryById"] = json!(true);
             capabilities["pendingApprovalInbox"] = json!(true);
@@ -543,6 +544,10 @@ impl RpcServer {
                         }
                     }
                 }
+            }
+            "events/get" => {
+                let p: EventGetParams = decode(params)?;
+                json!(self.kernel()?.get_event(p.sequence)?)
             }
             "events/list" => {
                 let p: EventsListParams = decode(params)?;

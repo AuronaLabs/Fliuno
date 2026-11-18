@@ -596,6 +596,13 @@ pub struct ApprovalRespondParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EventGetParams {
+    /// A positive global event sequence, as returned by replay or a live event.
+    pub sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventsListParams {
     pub task_id: String,
     #[serde(default)]

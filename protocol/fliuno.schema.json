@@ -842,6 +842,23 @@
         }
       }
     },
+    "events/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "EventGetParams",
+      "type": "object",
+      "properties": {
+        "sequence": {
+          "description": "A positive global event sequence, as returned by replay or a live event.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sequence"
+      ]
+    },
     "events/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsListParams",

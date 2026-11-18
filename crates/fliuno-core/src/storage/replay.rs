@@ -37,6 +37,20 @@ impl Kernel {
             })? as u64)
     }
 
+    pub fn get_event(&self, sequence: u64) -> Result<Event> {
+        if sequence == 0 {
+            return Err(Error::Invalid("event sequence must be positive".into()));
+        }
+        let mut statement = self
+            .db
+            .prepare_cached("SELECT sequence,task_id,data FROM events WHERE sequence=?1")?;
+        let mut rows = statement.query([validate_event_cursor(sequence)?])?;
+        let row = rows
+            .next()?
+            .ok_or_else(|| Error::NotFound("event".into()))?;
+        event_row(row)
+    }
+
     pub fn list_events(&self, task_id: &str, after: u64, limit: u32) -> Result<EventsPage> {
         self.list_events_with_target(task_id, after, limit, None)
     }
@@ -138,14 +152,7 @@ impl Kernel {
                 has_more = true;
                 break;
             }
-            let sequence = row.get::<_, i64>(0)? as u64;
-            let event = Event {
-                sequence,
-                task_id: row.get(1)?,
-                data: serde_json::from_str(
-                    row.get_ref(2)?.as_str().map_err(rusqlite::Error::from)?,
-                )?,
-            };
+            let event = event_row(row)?;
             if let Some(target) = target_bytes {
                 bytes += json_size(&event)? + usize::from(!events.is_empty());
                 if bytes > target as usize && !events.is_empty() {
@@ -154,8 +161,8 @@ impl Kernel {
                     break;
                 }
             }
+            next_after = event.sequence;
             events.push(event);
-            next_after = sequence;
         }
         Ok(EventsPage {
             events,
@@ -163,6 +170,15 @@ impl Kernel {
             has_more,
         })
     }
+}
+
+fn event_row(row: &rusqlite::Row<'_>) -> Result<Event> {
+    let data = row.get_ref(2)?.as_str().map_err(rusqlite::Error::from)?;
+    Ok(Event {
+        sequence: row.get::<_, i64>(0)? as u64,
+        task_id: row.get(1)?,
+        data: serde_json::from_str(data)?,
+    })
 }
 
 fn validate_event_limit(limit: u32) -> Result<u32> {

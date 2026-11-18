@@ -146,6 +146,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["maxArtifactReadBytes"], 65_536);
         assert_eq!(init["capabilities"]["eventResubscribe"], true);
         assert_eq!(init["capabilities"]["sessionEventReplay"], true);
+        assert_eq!(init["capabilities"]["eventBySequence"], true);
         assert_eq!(
             init["capabilities"]["eventReplayTargetBytes"],
             8 * 1024 * 1024

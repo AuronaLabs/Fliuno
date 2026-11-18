@@ -44,6 +44,7 @@ pub fn schema_bundle() -> Value {
         "approval/listPending" => schema::<ApprovalListParams>(),
         "approval/get" => schema::<ApprovalGetParams>(),
         "approval/respond" => schema::<ApprovalRespondParams>(),
+        "events/get" => schema::<EventGetParams>(),
         "events/list" => schema::<EventsListParams>(),
         "events/listAll" => schema::<EventsListAllParams>(),
         "events/listSession" => schema::<EventsListSessionParams>(),

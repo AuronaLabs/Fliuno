@@ -213,6 +213,17 @@ fn session_replay_scopes_the_global_cursor_across_upgrade_and_restart() {
         peer.call("events/list", json!({"taskId":newer}))["events"]
     );
     assert_eq!(tail["hasMore"], false);
+    let event = expected.last().unwrap();
+    assert_eq!(
+        peer.call("events/get", json!({"sequence":event["sequence"]})),
+        *event
+    );
+    for (sequence, code) in [(0, -32602), (u64::MAX, -32602), (i64::MAX as u64, -32004)] {
+        assert_eq!(
+            peer.request("events/get", json!({"sequence":sequence}))["error"]["code"],
+            code
+        );
+    }
     drop(peer);
     for entry in fs::read_dir(&root).unwrap() {
         fs::remove_file(entry.unwrap().path()).unwrap();
