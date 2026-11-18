@@ -100,6 +100,17 @@ fn paused_turn_is_claimed_once_and_completed_turn_starts_a_new_remote_task() {
                         assert_eq!(message["contextId"], "remote-context");
                         assert_eq!(message["parts"], json!([{"text":"quarterly numbers"}]));
                     }
+                    if streaming && n == 0 {
+                        let results = [
+                            json!({"task":task("TASK_STATE_WORKING")}),
+                            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context",
+                                "artifact":{"artifactId":"draft","parts":[{"text":"unfinished"}]},"lastChunk":false}}),
+                            json!({"statusUpdate":{"taskId":"remote-task","contextId":"remote-context",
+                                "status":{"state":"TASK_STATE_INPUT_REQUIRED"}}}),
+                        ];
+                        return Response::sse(results.iter().map(|result| format!("data: {}\n\n",
+                            json!({"jsonrpc":"2.0","id":request.body["id"],"result":result}))).collect());
+                    }
                     remote["artifacts"] =
                         json!([{"artifactId":"report","parts":[{"text":"summary"}]}]);
                     send_reply(request, remote, streaming)

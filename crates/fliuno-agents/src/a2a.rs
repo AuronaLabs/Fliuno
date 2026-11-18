@@ -369,13 +369,19 @@ fn finish_stream_snapshot(
     status_event_recorded: bool,
     status_text_recorded: bool,
 ) -> Result<AgentOutcome, ()> {
-    if artifacts.values().any(|artifact| !artifact.complete) {
-        return Err(());
+    if task.state.is_terminal() {
+        if artifacts.values().any(|artifact| !artifact.complete) {
+            return Err(());
+        }
+        task.artifacts = artifacts
+            .into_values()
+            .map(|artifact| artifact.raw)
+            .collect();
+    } else {
+        // A pause can interrupt an artifact mid-stream. Its content remains
+        // remote and must not hide the confirmed state or block continuation.
+        task.artifacts.clear();
     }
-    task.artifacts = artifacts
-        .into_values()
-        .map(|artifact| artifact.raw)
-        .collect();
     if status_event_recorded {
         task.status_message = None;
     }
