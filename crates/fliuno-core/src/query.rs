@@ -48,24 +48,11 @@ impl Kernel {
         limit: u32,
     ) -> Result<ObjectPage<TaskSummary>> {
         self.require_session(session)?;
-        // Extract a small page from the existing records without loading full
-        // histories, tool arguments or artifacts into Rust. The cursor is the
-        // same row position used for the full task list.
+        // Keep the row cursor shared with task/list and load only the summary.
         self.object_page(
-            r#"SELECT rowid,json_object(
-                'id',id,
-                'sessionId',session_id,
-                'status',json_extract(data,'$.status'),
-                'backend',json(COALESCE(json_extract(data,'$.backend'),'{"type":"model"}')),
-                'inputPreview',COALESCE(substr(json_extract(data,'$.messages[0].text'),1,160),''),
-                'pendingApprovalCount',
-                    CASE WHEN json_type(data,'$.pendingApproval')='object' THEN 1 ELSE 0 END
-                    + COALESCE(json_array_length(data,'$.agentRun.pendingApprovals'),0),
-                'modelOutcomeUnknown',json(CASE WHEN json_extract(data,'$.modelOutcomeUnknown')
-                    THEN 'true' ELSE 'false' END),
-                'agentOutcomeUnknown',json(CASE WHEN json_extract(data,'$.agentRun.outcomeUnknown')
-                    THEN 'true' ELSE 'false' END)
-             ) FROM tasks WHERE session_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3"#,
+            "SELECT tasks.rowid,summaries.data FROM tasks
+             JOIN task_summaries AS summaries ON summaries.task_id=tasks.id
+             WHERE tasks.session_id=?1 AND tasks.rowid>?2 ORDER BY tasks.rowid LIMIT ?3",
             Some(session),
             after,
             limit,

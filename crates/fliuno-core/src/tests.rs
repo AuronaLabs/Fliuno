@@ -690,6 +690,82 @@ fn lost_start_responses_are_safe_to_retry_with_the_same_key() {
 }
 
 #[test]
+fn task_summary_backfill_and_rollback_preserve_cursor_and_state() {
+    let (mut kernel, session) = setup();
+    let task = kernel
+        .start_task(&session.id, "报告\0ignore after nul")
+        .unwrap();
+    let approval = task.pending_approval.as_ref().unwrap();
+    let expected = kernel.list_task_summaries(&session.id, 0, 1).unwrap();
+    assert_eq!(expected.items[0].pending_approval_count, 1);
+    assert_eq!(expected.items[0].input_preview, "报告");
+    let full = kernel.list_tasks(&session.id, 0, 1).unwrap();
+    assert_eq!(full.next_after, expected.next_after);
+
+    kernel
+        .db
+        .execute_batch("DROP TABLE task_summaries; PRAGMA user_version=17;")
+        .unwrap();
+    let db = std::mem::replace(
+        &mut kernel.db,
+        rusqlite::Connection::open_in_memory().unwrap(),
+    );
+    drop(kernel);
+    let mut restored = Kernel::from_connection(db, Box::new(DemoProvider), None).unwrap();
+    let backfilled = restored.list_task_summaries(&session.id, 0, 1).unwrap();
+    assert_eq!(
+        serde_json::to_value(backfilled).unwrap(),
+        serde_json::to_value(&expected).unwrap()
+    );
+    let current = restored.list_tasks(&session.id, 0, 1).unwrap();
+    assert_eq!(
+        serde_json::to_value(current).unwrap(),
+        serde_json::to_value(full).unwrap()
+    );
+
+    let events = restored.list_events(&task.id, 0, 100).unwrap();
+    restored
+        .db
+        .execute_batch(
+            "CREATE TRIGGER reject_summary BEFORE UPDATE ON task_summaries
+         BEGIN SELECT RAISE(ABORT,'fixture'); END;",
+        )
+        .unwrap();
+    assert!(
+        restored
+            .respond_approval(&task.id, &approval.id, ApprovalDecision::Deny)
+            .is_err()
+    );
+    assert_eq!(
+        restored.get_task(&task.id).unwrap().status,
+        TaskStatus::WaitingApproval
+    );
+    assert_eq!(
+        restored.list_events(&task.id, 0, 100).unwrap().next_after,
+        events.next_after
+    );
+    assert_eq!(
+        restored
+            .list_task_summaries(&session.id, 0, 1)
+            .unwrap()
+            .items[0]
+            .pending_approval_count,
+        1
+    );
+    restored
+        .db
+        .execute_batch("DROP TRIGGER reject_summary")
+        .unwrap();
+    let updated = restored
+        .respond_approval(&task.id, &approval.id, ApprovalDecision::Deny)
+        .unwrap();
+    let summary = restored.list_task_summaries(&session.id, 0, 1).unwrap();
+    assert_eq!(summary.items[0].status, updated.status);
+    assert_eq!(summary.items[0].pending_approval_count, 0);
+    assert_eq!(summary.next_after, expected.next_after);
+}
+
+#[test]
 fn object_lists_are_scoped_and_paginated() {
     let (mut kernel, session) = setup();
     let workspace = kernel.list_workspaces(0, 100).unwrap().items.remove(0);

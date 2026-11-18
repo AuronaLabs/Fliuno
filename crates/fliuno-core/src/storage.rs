@@ -3,6 +3,7 @@ mod artifacts;
 mod context;
 mod replay;
 mod sessions;
+mod task_summaries;
 use super::*;
 pub use replay::MAX_EVENT_TARGET_BYTES;
 use rusqlite::{OptionalExtension, params};
@@ -84,7 +85,7 @@ impl Kernel {
         lock: Option<File>,
     ) -> Result<Self> {
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 17 {
+        if version > 18 {
             return Err(Error::Conflict(
                 "database schema is newer than this binary".into(),
             ));
@@ -181,6 +182,9 @@ impl Kernel {
         if version < 17 {
             sessions::migrate_requests(&mut db)?;
         }
+        if version < 18 {
+            task_summaries::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         let mut kernel = Self {
@@ -263,6 +267,7 @@ impl Kernel {
             || task.agent_run.as_ref().is_some_and(|run| !run.finished);
         tx.execute("INSERT INTO tasks VALUES(?1,?2,?3,?4) ON CONFLICT(id) DO UPDATE SET running=excluded.running,data=excluded.data",
             params![task.id, task.session_id, running, serde_json::to_string(task)?])?;
+        task_summaries::record(&tx, task)?;
         if let Some(continuation) = &task.remote_continuation
             && continuation.expected.state == AgentTaskState::InputRequired
         {
