@@ -132,8 +132,33 @@ fn waiting_approval_survives_restart_and_database_is_single_owner() {
     let session = kernel.create_session(&workspace.id).unwrap();
     let task = kernel.start_task(&session.id, "persisted").unwrap();
     let approval_id = task.pending_approval.unwrap().id;
+    let queued = kernel
+        .create_task_with_key(&session.id, "queued before migration", None)
+        .unwrap()
+        .0;
+    kernel
+        .db
+        .execute_batch(
+            "DROP INDEX tasks_session; DROP INDEX sessions_workspace;
+        DROP INDEX tasks_running; PRAGMA user_version=11;",
+        )
+        .unwrap();
     drop(kernel);
     let mut kernel = Kernel::open(&path, Box::new(DemoProvider)).unwrap();
+    assert_eq!(
+        kernel.get_task(&queued.id).unwrap().status,
+        TaskStatus::Interrupted
+    );
+    let page = kernel.list_tasks(&session.id, 0, 1).unwrap();
+    assert_eq!(page.items[0].id, task.id);
+    assert_eq!(
+        kernel
+            .list_tasks(&session.id, page.next_after, 1)
+            .unwrap()
+            .items[0]
+            .id,
+        queued.id
+    );
     assert_eq!(
         kernel.get_task(&task.id).unwrap().status,
         TaskStatus::WaitingApproval

@@ -66,7 +66,7 @@ impl Kernel {
         lock: Option<File>,
     ) -> Result<Self> {
         let version: u32 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if version > 11 {
+        if version > 12 {
             return Err(Error::Conflict(
                 "database schema is newer than this binary".into(),
             ));
@@ -133,6 +133,17 @@ impl Kernel {
                     attempt_task_id TEXT NOT NULL REFERENCES tasks(id)
                 );
                 PRAGMA user_version=11; COMMIT;",
+            )?;
+        }
+        if version < 12 {
+            // Rowid is the trailing key of each scope index. Recovery only
+            // indexes tasks that still have unfinished work.
+            db.execute_batch(
+                "BEGIN IMMEDIATE;
+                CREATE INDEX IF NOT EXISTS tasks_session ON tasks(session_id);
+                CREATE INDEX IF NOT EXISTS sessions_workspace ON sessions(workspace_id);
+                CREATE INDEX IF NOT EXISTS tasks_running ON tasks(running) WHERE running=1;
+                PRAGMA user_version=12; COMMIT;",
             )?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();

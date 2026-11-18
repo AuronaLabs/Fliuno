@@ -187,7 +187,7 @@ fn v7_approval_without_binding_remains_readable_but_cannot_authorize_execution()
             .db
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        11
+        12
     );
 }
 
