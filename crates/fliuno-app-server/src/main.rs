@@ -153,7 +153,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(response) = server.handle_line(&line) {
                         write_frame(&mut stdout, &response)?;
                     }
-                    if let Some(receiver) = server.take_pending_event_receiver() {
+                    if let Some((through_sequence, receiver)) = server.take_pending_event_subscription() {
+                        last_event_sequence = through_sequence;
                         let (new_rx, subscription) = receiver.into_parts();
                         event_rx = new_rx;
                         event_subscription = Some(subscription);

@@ -49,6 +49,13 @@ impl EventReceiver {
 struct EventSubscriber {
     sender: Sender<Event>,
     active: Weak<()>,
+    session_id: Option<String>,
+}
+
+impl EventSubscriber {
+    fn accepts(&self, session_id: &str) -> bool {
+        self.session_id.as_deref().is_none_or(|id| id == session_id)
+    }
 }
 
 #[derive(Clone)]
@@ -63,7 +70,7 @@ impl EventHub {
         }
     }
 
-    pub(crate) fn subscribe(&self) -> Result<EventReceiver> {
+    pub(crate) fn subscribe(&self, session_id: Option<&str>) -> Result<EventReceiver> {
         let mut subscribers = self
             .subscribers
             .lock()
@@ -79,6 +86,7 @@ impl EventHub {
         subscribers.push(EventSubscriber {
             sender,
             active: Arc::downgrade(&active),
+            session_id: session_id.map(str::to_owned),
         });
         Ok(EventReceiver {
             receiver,
@@ -86,7 +94,7 @@ impl EventHub {
         })
     }
 
-    pub(crate) fn publish(&self, events: Vec<Event>) {
+    pub(crate) fn publish(&self, session_id: &str, events: Vec<Event>) {
         if events.is_empty() {
             return;
         }
@@ -97,9 +105,10 @@ impl EventHub {
             // A stdio server normally has one subscriber. Move the committed
             // event directly into its queue, even for large tool payloads.
             if subscriber.active.strong_count() == 0
-                || events
-                    .into_iter()
-                    .any(|event| subscriber.sender.try_send(event).is_err())
+                || (subscriber.accepts(session_id)
+                    && events
+                        .into_iter()
+                        .any(|event| subscriber.sender.try_send(event).is_err()))
             {
                 subscribers.clear();
             }
@@ -108,6 +117,9 @@ impl EventHub {
         subscribers.retain(|subscriber| {
             if subscriber.active.strong_count() == 0 {
                 return false;
+            }
+            if !subscriber.accepts(session_id) {
+                return true;
             }
             for event in &events {
                 match subscriber.sender.try_send(event.clone()) {
@@ -223,7 +235,7 @@ mod tests {
     #[test]
     fn slow_subscriber_is_disconnected_without_blocking_event_commit() {
         let hub = EventHub::new();
-        let receiver = hub.subscribe().unwrap();
+        let receiver = hub.subscribe(None).unwrap();
         let events = (1..=SUBSCRIBER_CAPACITY + 1)
             .map(|sequence| Event {
                 sequence: sequence as u64,
@@ -232,7 +244,7 @@ mod tests {
             })
             .collect();
 
-        hub.publish(events);
+        hub.publish("session_test", events);
 
         for sequence in 1..=SUBSCRIBER_CAPACITY {
             assert_eq!(receiver.recv().unwrap().sequence, sequence as u64);
@@ -244,13 +256,13 @@ mod tests {
     fn dropped_subscribers_release_capacity_without_waiting_for_an_event() {
         let hub = EventHub::new();
         let mut receivers: Vec<_> = (0..MAX_SUBSCRIBERS)
-            .map(|_| hub.subscribe().unwrap())
+            .map(|_| hub.subscribe(None).unwrap())
             .collect();
 
         drop(receivers.pop());
 
-        let replacement = hub.subscribe().unwrap();
-        assert!(hub.subscribe().is_err());
+        let replacement = hub.subscribe(None).unwrap();
+        assert!(hub.subscribe(None).is_err());
         drop(replacement);
     }
 

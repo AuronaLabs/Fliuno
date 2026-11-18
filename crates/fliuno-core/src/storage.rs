@@ -340,21 +340,29 @@ impl Kernel {
             pending.push(persisted);
         }
         tx.commit()?;
-        self.events.publish(pending);
+        self.events.publish(&task.session_id, pending);
         Ok(())
     }
 
     /// Append evidence without rewriting a task snapshot or projecting a turn.
     pub(crate) fn append_task_event(&mut self, task_id: String, data: EventKind) -> Result<()> {
+        let session_id: String = self.db.query_row(
+            "SELECT session_id FROM tasks WHERE id=?1",
+            [&task_id],
+            |row| row.get(0),
+        )?;
         self.db.execute(
             "INSERT INTO events(task_id,data) VALUES(?1,?2)",
             params![task_id, serde_json::to_string(&data)?],
         )?;
-        self.events.publish(vec![Event {
-            sequence: self.db.last_insert_rowid() as u64,
-            task_id,
-            data,
-        }]);
+        self.events.publish(
+            &session_id,
+            vec![Event {
+                sequence: self.db.last_insert_rowid() as u64,
+                task_id,
+                data,
+            }],
+        );
         Ok(())
     }
 

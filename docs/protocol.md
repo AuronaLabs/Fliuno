@@ -39,6 +39,7 @@
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
 | `events/get` | `{sequence}` | 按全局序号读取一条持久事件 |
 | `events/listSession` | `{sessionId, after?:0, through?, limit?:100, targetBytes?}` | 单个会话的持久事件页，沿用全局序号 |
+| `events/setScope` | `{sessionId?}` | 将实时持久事件限定到一个会话或恢复全局范围，返回 `{throughSequence}` |
 | `events/resubscribe` | `{}` | 在队列溢出后恢复实时通知，返回 `{throughSequence}` |
 | `artifacts/list` | `{taskId}` | Artifact 数组 |
 | `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
@@ -167,7 +168,7 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 模型和工具调用期间数据库锁已释放，因此查询和取消可以继续处理。取消会立即将任务置为 `cancelled`，并通知当前 provider 或工具；provider HTTP 等待和 MCP 调用会响应取消，迟到结果会被忽略。取消不保证阻止供应商计费或撤销已发生的外部副作用。工具调用身份在执行前持久化，重启后结果未知的调用不能自动重试。stdin 关闭后停止启动排队步骤并取消当前执行，再把未完成任务置为 `interrupted`。
 
-支持 `sessionEventReplay` 的客户端可用 `events/listSession` 回放某一会话内各任务的持久事件。它沿用全局的 `sequence`，所以相邻记录的序号可能不连续。使用 `nextAfter` 翻页，并可传入包含式 `through` 固定回放上界。有固定上界时，最后一页即使没有事件，也代表该会话已回放到上界。实时通知继续共用全局事件订阅。
+支持 `sessionEventReplay` 的客户端可用 `events/listSession` 回放某一会话内各任务的持久事件。它沿用全局的 `sequence`，所以相邻记录的序号可能不连续。使用 `nextAfter` 翻页，并可传入包含式 `through` 固定回放上界。有固定上界时，最后一页即使没有事件，也代表该会话已回放到上界。实时通知默认采用全局事件订阅。
 
 实时 provider 可在模型响应完成前发送 `notifications/modelProgress`，参数为 `{progress}`。`progress` 是带 `type` 的联合类型：`text_delta` 包含 `taskId`、`step` 和文本片段，`reset` 清除该步骤尚未确认的预览。它不写入 SQLite、没有持久序号，且可能与 `notifications/event` 相对乱序。客户端应按 task/step 暂存增量；收到该步骤的审批请求或任务完成、失败、取消、中断等持久状态后，忽略迟到增量并以任务快照和持久事件为准。取消、错误、工具调用会清除预览。`initialize.capabilities.modelProgressNotifications` 表示当前 provider 是否支持此通知。慢订阅者被分离后会收到 `notifications/modelProgressGap`（参数为空）；预览不回放，客户端应清除预览并查询活动任务状态。如果 `capabilities.modelProgressResubscribe` 为 true，收到缺口通知后可用 `modelProgress/resubscribe({})` 在同一连接恢复，成功返回 `{subscribed:true}`。新订阅只接收注册之后开始的模型步骤。正在执行的步骤可通过持久事件或 `task/get` 查看结果。
 
@@ -177,7 +178,9 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 `initialize.capabilities.eventReplayTargetBytes` 表示两个回放方法支持的最大字节目标。客户端可设置 `targetBytes` 为 1024..8388608，按紧凑 JSON 的 `events` 数组大小分页。单个事件已超过目标时，该页完整返回该事件，游标仍会前进。
 
-支持 `eventResubscribe` 的连接收到 `notifications/eventGap` 后，可用 `events/resubscribe` 重新订阅。先暂存恢复后的实时通知，再从本地游标调用 `events/listAll`，传入返回的 `throughSequence` 作为包含式 `through`。回放结束后按序号处理暂存通知。服务在同一内核锁下采集水位并建立订阅，实时通知从该水位之后开始。若实时队列再次溢出，可重新建立订阅并从已保存游标补齐。订阅仍有效时重复调用返回 -32009。
+支持 `eventSubscriptionScope` 的 stdio 连接可请求 `events/setScope`。传入现有 `sessionId` 即可订阅该会话的持久事件。省略 `sessionId` 或传 `null` 恢复全局范围。请求成功时服务替换旧队列，并返回切换时的全局水位 `throughSequence`。在响应之后暂存新通知。按当前范围用 `events/listSession` 或 `events/listAll` 补齐至这个水位，再按序号处理暂存通知。队列中尚未发送的旧通知可从持久回放读取。实时模型预览和终端通知各自独立。批量请求依次执行，实时队列使用最后一次成功切换的范围。
+
+支持 `eventResubscribe` 的连接收到 `notifications/eventGap` 后，可用 `events/resubscribe` 重新订阅。先暂存恢复后的实时通知，再从本地游标调用当前范围对应的 `events/listAll` 或 `events/listSession`，传入返回的 `throughSequence` 作为包含式 `through`。回放结束后按序号处理暂存通知。服务在同一内核锁下采集水位并建立订阅，实时通知从该水位之后开始，沿用恢复前的范围。若实时队列再次溢出，可重新建立订阅并从已保存游标补齐。订阅仍有效时重复调用返回 -32009。
 
 ## 错误
 

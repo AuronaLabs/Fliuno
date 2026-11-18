@@ -666,6 +666,14 @@ pub struct EventsListSessionParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EventsSetScopeParams {
+    /// Omit or pass null to receive events from all sessions.
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventSubscription {
     /// Replay through this sequence. Live notifications cover later events.
     pub through_sequence: u64,

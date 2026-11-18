@@ -1011,6 +1011,22 @@
         "sessionId"
       ]
     },
+    "events/setScope": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "EventsSetScopeParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "description": "Omit or pass null to receive events from all sessions.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "events/resubscribe": {
       "type": "object",
       "properties": {},

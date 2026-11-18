@@ -48,6 +48,7 @@ pub fn schema_bundle() -> Value {
         "events/list" => schema::<EventsListParams>(),
         "events/listAll" => schema::<EventsListAllParams>(),
         "events/listSession" => schema::<EventsListSessionParams>(),
+        "events/setScope" => schema::<EventsSetScopeParams>(),
         "events/resubscribe" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         "modelProgress/resubscribe" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         "artifacts/list" => schema::<TaskIdParams>(),

@@ -81,7 +81,13 @@ impl Kernel {
     }
 
     pub fn subscribe_events(&self) -> Result<EventReceiver> {
-        self.events.subscribe()
+        self.events.subscribe(None)
+    }
+
+    /// Subscribe to committed events for one existing session.
+    pub fn subscribe_session_events(&self, session_id: &str) -> Result<EventReceiver> {
+        self.require_session(session_id)?;
+        self.events.subscribe(Some(session_id))
     }
 
     pub fn subscribe_model_progress(&self) -> Result<ProgressReceiver> {

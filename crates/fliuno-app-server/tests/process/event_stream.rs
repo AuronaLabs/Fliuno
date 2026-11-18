@@ -102,6 +102,114 @@ fn live_event_stream_can_resubscribe_and_catch_up_to_a_fixed_watermark() {
 }
 
 #[test]
+fn scoped_live_events_ignore_other_sessions_and_keep_the_scope_after_a_gap() {
+    fn submit_batch(peer: &mut Peer, session: &Value) {
+        let batch: Vec<_> = (0..72)
+            .map(|i| json!({"jsonrpc":"2.0","method":"task/start","params":{
+                "sessionId":session,"input":format!("batch task {i}"),"context":{"mode":"isolated"}
+            }}))
+            .collect();
+        writeln!(peer.input, "{}", json!(batch)).unwrap();
+        peer.input.flush().unwrap();
+    }
+    fn submit(peer: &mut Peer, session: &Value) -> String {
+        peer.call(
+            "task/start",
+            json!({"sessionId":session,"input":"marker","context":{"mode":"isolated"}}),
+        )["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    let root = std::env::temp_dir().join(format!("fliuno-scoped-events-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let mut peer = Peer::start(&root.join("kernel.db"));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let params = json!({"workspaceId":workspace["id"]});
+    let selected = peer.call("session/create", params.clone())["id"].clone();
+    let other = peer.call("session/create", params)["id"].clone();
+    let before = submit(&mut peer, &selected);
+    let baseline = peer.call("events/setScope", json!({"sessionId":selected}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    let before_event = peer.call("events/list", json!({"taskId":before,"limit":1}));
+    assert!(before_event["events"][0]["sequence"].as_u64().unwrap() <= baseline);
+    peer.notifications.clear();
+    assert_eq!(
+        peer.request("events/setScope", json!({"sessionId":"missing"}))["error"]["code"],
+        -32004
+    );
+
+    // Another session can commit more events than fit in the live queue.
+    // None of those events should count toward this subscriber's capacity.
+    submit_batch(&mut peer, &other);
+    let selected_task = submit(&mut peer, &selected);
+    let event = peer.wait_for_event(&selected_task, "task_started");
+    assert!(event["params"]["event"]["sequence"].as_u64().unwrap() > baseline);
+    let history = peer.call(
+        "events/listSession",
+        json!({"sessionId":other,"limit":1000}),
+    );
+    assert!(history["events"].as_array().unwrap().len() >= 72);
+    assert!(peer.notifications.iter().all(|frame| {
+        if frame["method"] == "notifications/event" {
+            let event = &frame["params"]["event"];
+            event["sequence"].as_u64().unwrap() > baseline
+                && (event["taskId"] == selected_task || event["taskId"] == before)
+        } else {
+            frame["method"] != "notifications/eventGap"
+        }
+    }));
+
+    submit_batch(&mut peer, &selected);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let gap_after = loop {
+        let frame = peer
+            .output
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap();
+        if frame["method"] == "notifications/eventGap" {
+            break frame["params"]["afterSequence"].as_u64().unwrap();
+        }
+    };
+    let through = peer.call("events/resubscribe", json!({}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    assert!(through > gap_after);
+    let backfill = peer.call(
+        "events/listSession",
+        json!({
+            "sessionId":selected,"after":gap_after,"through":through,"limit":1000
+        }),
+    );
+    assert!(!backfill["events"].as_array().unwrap().is_empty());
+    assert_eq!(backfill["hasMore"], false);
+    peer.notifications.clear();
+    let other_task = submit(&mut peer, &other);
+    let selected_task = submit(&mut peer, &selected);
+    let event = peer.wait_for_event(&selected_task, "task_started");
+    assert!(event["params"]["event"]["sequence"].as_u64().unwrap() > through);
+    assert!(
+        peer.notifications
+            .iter()
+            .all(|frame| frame["params"]["event"]["taskId"] != other_task)
+    );
+
+    let through = peer.call("events/setScope", json!({"sessionId":null}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    let other_task = submit(&mut peer, &other);
+    let event = peer.wait_for_event(&other_task, "task_started");
+    assert!(event["params"]["event"]["sequence"].as_u64().unwrap() > through);
+    drop(peer);
+    for entry in fs::read_dir(&root).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    fs::remove_dir(root).unwrap();
+}
+
+#[test]
 fn session_replay_scopes_the_global_cursor_across_upgrade_and_restart() {
     fn cancelled_task(peer: &mut Peer, session: &Value, input: &str) -> Value {
         let task = peer.call(

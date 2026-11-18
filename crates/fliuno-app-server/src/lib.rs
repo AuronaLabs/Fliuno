@@ -15,7 +15,8 @@ const MAX_BATCH_ITEMS: usize = 128;
 pub struct RpcServer {
     kernel: Arc<Mutex<Kernel>>,
     scheduler: TaskScheduler,
-    event_receiver: Option<EventReceiver>,
+    event_receiver: Option<(u64, EventReceiver)>,
+    event_scope: Option<String>,
     event_stream_gap: bool,
     progress_receiver: Option<ProgressReceiver>,
     progress_stream_gap: bool,
@@ -88,7 +89,8 @@ impl RpcServer {
         Self {
             kernel,
             scheduler,
-            event_receiver: Some(event_receiver),
+            event_receiver: Some((0, event_receiver)),
+            event_scope: None,
             event_stream_gap: false,
             progress_receiver: Some(progress_receiver),
             progress_stream_gap: false,
@@ -105,7 +107,33 @@ impl RpcServer {
     }
 
     pub fn take_pending_event_receiver(&mut self) -> Option<EventReceiver> {
+        self.take_pending_event_subscription()
+            .map(|(_, receiver)| receiver)
+    }
+
+    pub fn take_pending_event_subscription(&mut self) -> Option<(u64, EventReceiver)> {
         self.event_receiver.take()
+    }
+
+    fn replace_event_subscription(
+        &mut self,
+        session_id: Option<String>,
+    ) -> Result<EventSubscription, RpcError> {
+        let (through_sequence, receiver) = {
+            // Committing workers hold this lock. The watermark and
+            // subscription therefore cover adjacent event ranges.
+            let kernel = self.kernel()?;
+            let through_sequence = kernel.event_watermark()?;
+            let receiver = match &session_id {
+                Some(id) => kernel.subscribe_session_events(id)?,
+                None => kernel.subscribe_events()?,
+            };
+            (through_sequence, receiver)
+        };
+        self.event_receiver = Some((through_sequence, receiver));
+        self.event_scope = session_id;
+        self.event_stream_gap = false;
+        Ok(EventSubscription { through_sequence })
     }
 
     pub fn mark_event_stream_gap(&mut self) {
@@ -295,6 +323,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["eventBySequence"] = json!(true);
+            capabilities["eventSubscriptionScope"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
             capabilities["contextAtSequence"] = json!(true);
             capabilities["taskSummaryById"] = json!(true);
@@ -585,6 +614,10 @@ impl RpcServer {
                     p.target_bytes
                 )?)
             }
+            "events/setScope" => {
+                let p: EventsSetScopeParams = decode(params)?;
+                json!(self.replace_event_subscription(p.session_id)?)
+            }
             "events/resubscribe" => {
                 if params != json!({}) {
                     return Err(Error::Invalid("events/resubscribe takes no params".into()).into());
@@ -592,15 +625,7 @@ impl RpcServer {
                 if !self.event_stream_gap {
                     return Err(Error::Conflict("event stream is already subscribed".into()).into());
                 }
-                let (through_sequence, receiver) = {
-                    // Committing workers hold this lock. The watermark and
-                    // subscription therefore cover adjacent event ranges.
-                    let kernel = self.kernel()?;
-                    (kernel.event_watermark()?, kernel.subscribe_events()?)
-                };
-                self.event_receiver = Some(receiver);
-                self.event_stream_gap = false;
-                json!(EventSubscription { through_sequence })
+                json!(self.replace_event_subscription(self.event_scope.clone())?)
             }
             "modelProgress/resubscribe" => {
                 if params != json!({}) {
