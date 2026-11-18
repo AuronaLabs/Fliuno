@@ -33,6 +33,40 @@ pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+/// Keep a narrow index for seeking sparse statuses in creation order.
+pub(super) fn migrate_status_index(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS task_summary_status(
+            task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+            session_id TEXT NOT NULL,
+            task_row INTEGER NOT NULL,
+            status TEXT NOT NULL
+        ) WITHOUT ROWID;
+        CREATE INDEX IF NOT EXISTS task_summary_status_cursor
+            ON task_summary_status(session_id,status,task_row);
+        INSERT INTO task_summary_status(task_id,session_id,task_row,status)
+        SELECT t.id,t.session_id,t.rowid,json_extract(s.data,'$.status')
+            FROM task_summaries s JOIN tasks t ON t.id=s.task_id WHERE true
+        ON CONFLICT(task_id) DO UPDATE SET status=excluded.status;
+        CREATE TRIGGER IF NOT EXISTS task_summary_status_insert AFTER INSERT ON task_summaries
+        BEGIN
+            INSERT INTO task_summary_status(task_id,session_id,task_row,status)
+            SELECT id,session_id,rowid,json_extract(NEW.data,'$.status') FROM tasks WHERE id=NEW.task_id
+            ON CONFLICT(task_id) DO UPDATE SET status=excluded.status;
+        END;
+        CREATE TRIGGER IF NOT EXISTS task_summary_status_update AFTER UPDATE OF data ON task_summaries
+        WHEN json_extract(OLD.data,'$.status')<>json_extract(NEW.data,'$.status')
+        BEGIN
+            UPDATE task_summary_status SET status=json_extract(NEW.data,'$.status')
+                WHERE task_id=NEW.task_id;
+        END;
+        PRAGMA user_version=23;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
     let input_preview = match task.messages.first() {
         // SQLite substr() used to stop at the first NUL. Preserve that preview

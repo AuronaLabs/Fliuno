@@ -298,6 +298,7 @@ impl RpcServer {
             capabilities["contextConversationDetail"] = json!(true);
             capabilities["contextAtSequence"] = json!(true);
             capabilities["taskSummaryById"] = json!(true);
+            capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["pendingApprovalInbox"] = json!(true);
             capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
@@ -420,11 +421,13 @@ impl RpcServer {
                 json!(self.kernel()?.list_tasks(&p.session_id, p.after, p.limit)?)
             }
             "task/listSummaries" => {
-                let p: TaskListParams = decode(params)?;
-                json!(
-                    self.kernel()?
-                        .list_task_summaries(&p.session_id, p.after, p.limit)?
-                )
+                let p: TaskSummaryListParams = decode(params)?;
+                json!(self.kernel()?.list_task_summaries_filtered(
+                    &p.session_id,
+                    p.after,
+                    p.limit,
+                    p.status
+                )?)
             }
             "session/create" => {
                 let p: SessionCreateParams = decode(params)?;

@@ -76,7 +76,29 @@ impl Kernel {
         after: u64,
         limit: u32,
     ) -> Result<ObjectPage<TaskSummary>> {
+        self.list_task_summaries_filtered(session, after, limit, None)
+    }
+
+    pub fn list_task_summaries_filtered(
+        &self,
+        session: &str,
+        after: u64,
+        limit: u32,
+        status: Option<TaskStatus>,
+    ) -> Result<ObjectPage<TaskSummary>> {
         self.require_session(session)?;
+        if let Some(status) = status {
+            let (cursor, fetch) = page_range(after, limit)?;
+            return self.query_object_page(
+                "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+                 JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
+                 WHERE scoped.session_id=?1 AND scoped.status=?2 AND scoped.task_row>?3
+                 ORDER BY scoped.task_row LIMIT ?4",
+                params![session, status.as_str(), cursor, fetch],
+                after,
+                limit,
+            );
+        }
         // Keep the row cursor shared with task/list and load only the summary.
         self.object_page(
             "SELECT tasks.rowid,summaries.data FROM tasks
@@ -95,13 +117,19 @@ impl Kernel {
         after: u64,
         limit: u32,
     ) -> Result<ObjectPage<T>> {
-        if after > i64::MAX as u64 || !(1..=100).contains(&limit) {
-            return Err(Error::Invalid(
-                "after must fit i64 and object list limit must be 1..100".into(),
-            ));
-        }
+        let (cursor, fetch) = page_range(after, limit)?;
+        self.query_object_page(sql, params![scope, cursor, fetch], after, limit)
+    }
+
+    fn query_object_page<T: DeserializeOwned>(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        after: u64,
+        limit: u32,
+    ) -> Result<ObjectPage<T>> {
         let mut statement = self.db.prepare_cached(sql)?;
-        let mut rows = statement.query(params![scope, after as i64, limit + 1])?;
+        let mut rows = statement.query(params)?;
         let mut items = Vec::with_capacity(limit as usize);
         let mut next_after = after;
         let mut has_more = false;
@@ -120,4 +148,13 @@ impl Kernel {
             has_more,
         })
     }
+}
+
+fn page_range(after: u64, limit: u32) -> Result<(i64, u32)> {
+    if after > i64::MAX as u64 || !(1..=100).contains(&limit) {
+        return Err(Error::Invalid(
+            "after must fit i64 and object list limit must be 1..100".into(),
+        ));
+    }
+    Ok((after as i64, limit + 1))
 }

@@ -36,6 +36,17 @@ pub enum TaskStatus {
 }
 
 impl TaskStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::WaitingApproval => "waiting_approval",
+            Self::Interrupted => "interrupted",
+            Self::Completed => "completed",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+        }
+    }
+
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Completed | Self::Cancelled | Self::Failed)
     }
@@ -558,6 +569,18 @@ pub struct SessionListParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskListParams {
     pub session_id: String,
+    #[serde(default)]
+    pub after: u64,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskSummaryListParams {
+    pub session_id: String,
+    #[serde(default)]
+    pub status: Option<TaskStatus>,
     #[serde(default)]
     pub after: u64,
     #[serde(default = "default_limit")]

@@ -35,7 +35,7 @@ pub fn schema_bundle() -> Value {
         "task/start" => schema::<TaskStartParams>(),
         "task/continueRemote" => schema::<TaskContinueRemoteParams>(),
         "task/list" => schema::<TaskListParams>(),
-        "task/listSummaries" => schema::<TaskListParams>(),
+        "task/listSummaries" => schema::<TaskSummaryListParams>(),
         "task/get" => schema::<TaskIdParams>(),
         "task/getSummary" => schema::<TaskIdParams>(),
         "task/checkRemote" => schema::<TaskIdParams>(),

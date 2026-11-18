@@ -670,11 +670,22 @@
     },
     "task/listSummaries": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "title": "TaskListParams",
+      "title": "TaskSummaryListParams",
       "type": "object",
       "properties": {
         "sessionId": {
           "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "after": {
           "type": "integer",
@@ -692,7 +703,20 @@
       "additionalProperties": false,
       "required": [
         "sessionId"
-      ]
+      ],
+      "$defs": {
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        }
+      }
     },
     "task/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -30,6 +30,8 @@ mod execution;
 mod model_budget;
 #[path = "process/sessions.rs"]
 mod sessions;
+#[path = "process/task_status.rs"]
+mod task_status;
 #[cfg(feature = "test-fixtures")]
 #[path = "process/terminal.rs"]
 mod terminal;
@@ -131,6 +133,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["sessionContext"], true);
         assert_eq!(init["capabilities"]["sessionTitles"], true);
         assert_eq!(init["capabilities"]["taskSummaryById"], true);
+        assert_eq!(init["capabilities"]["taskSummaryStatusFilter"], true);
         assert_eq!(init["capabilities"]["sessionArchiving"], true);
         assert_eq!(init["capabilities"]["sessionCreateIdempotency"], true);
         assert_eq!(init["capabilities"]["contextTaskSelection"], true);
