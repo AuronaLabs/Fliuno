@@ -21,6 +21,7 @@
 | `task/listSummaries` | `{sessionId,status?,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,after?,limit?}` | 按创建顺序跨会话分页读取同一工作区的任务摘要 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
+| `workspace/get` | `{workspaceId}` | 按 ID 读取已保存的 Workspace。查看 `initialize.capabilities.workspaceById` |
 | `session/create` | `{workspaceId,title?,clientRequestId?}` | Session |
 | `session/get` | `{sessionId}` | 单个 Session |
 | `session/rename` | `{sessionId,title}` | 持久化标题并返回 Session |

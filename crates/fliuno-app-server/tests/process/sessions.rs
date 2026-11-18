@@ -2,6 +2,45 @@ use super::*;
 use fliuno_protocol::MAX_SESSION_TITLE_CHARS;
 
 #[test]
+fn workspace_lookup_recovers_the_saved_record_when_the_root_is_unavailable() {
+    let temp = std::env::temp_dir().canonicalize().unwrap();
+    let root = temp.join(format!("fliuno-workspace-get-{}", uuid::Uuid::new_v4()));
+    let project = root.join("project");
+    fs::create_dir_all(&project).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":project}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    drop(peer);
+    fs::remove_dir(&project).unwrap();
+
+    let mut peer = Peer::start(&db);
+    let saved_session = peer.call("session/get", json!({"sessionId":session["id"]}));
+    assert_eq!(
+        peer.call(
+            "workspace/get",
+            json!({"workspaceId":saved_session["workspaceId"]})
+        ),
+        workspace
+    );
+    assert_eq!(
+        peer.request("workspace/get", json!({"workspaceId":"absent"}))["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request("workspace/get", json!({"root":project}))["error"]["code"],
+        -32602
+    );
+    assert_eq!(
+        peer.call("workspace/list", json!({}))["items"],
+        json!([workspace])
+    );
+    drop(peer);
+    assert_eq!(root.canonicalize().unwrap().parent(), Some(temp.as_path()));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn titles_survive_upgrade_and_restart_without_changing_session_pagination() {
     let temp = std::env::temp_dir().canonicalize().unwrap();
     let root = temp.join(format!("fliuno-sessions-{}", uuid::Uuid::new_v4()));

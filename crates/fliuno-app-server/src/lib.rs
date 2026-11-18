@@ -339,6 +339,7 @@ impl RpcServer {
             capabilities["taskSummaryById"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["workspaceTaskSummaries"] = json!(true);
+            capabilities["workspaceById"] = json!(true);
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
             capabilities["pendingApprovalInbox"] = json!(true);
@@ -445,6 +446,10 @@ impl RpcServer {
             "workspace/open" => {
                 let p: WorkspaceOpenParams = decode(params)?;
                 json!(self.kernel()?.open_workspace(&p.root)?)
+            }
+            "workspace/get" => {
+                let p: WorkspaceIdParams = decode(params)?;
+                json!(self.kernel()?.get_workspace(&p.workspace_id)?)
             }
             "workspace/list" => {
                 let p: ListParams = decode(params)?;

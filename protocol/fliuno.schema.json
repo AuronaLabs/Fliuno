@@ -33,6 +33,20 @@
         "root"
       ]
     },
+    "workspace/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceIdParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
     "workspace/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ListParams",

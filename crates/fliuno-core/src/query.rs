@@ -4,6 +4,19 @@ use rusqlite::{OptionalExtension, params};
 use serde::de::DeserializeOwned;
 
 impl Kernel {
+    /// Read the saved workspace identity without accessing the host path.
+    pub fn get_workspace(&self, workspace_id: &str) -> Result<Workspace> {
+        let mut statement = self
+            .db
+            .prepare_cached("SELECT data FROM workspaces WHERE id=?1")?;
+        let mut rows = statement.query([workspace_id])?;
+        let row = rows
+            .next()?
+            .ok_or_else(|| Error::NotFound("workspace".into()))?;
+        let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+        Ok(serde_json::from_str(data)?)
+    }
+
     pub(crate) fn find_task_request(&self, session: &str, key: &str) -> Result<Option<Task>> {
         let data=self.db.query_row("SELECT tasks.data FROM tasks JOIN task_requests ON tasks.id=task_requests.task_id WHERE task_requests.session_id=?1 AND request_key=?2",params![session,key],|r|r.get::<_,String>(0)).optional()?;
         data.map(|data| serde_json::from_str(&data).map_err(Error::from))

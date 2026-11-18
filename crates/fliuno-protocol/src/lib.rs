@@ -538,6 +538,12 @@ pub struct WorkspaceOpenParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceIdParams {
+    pub workspace_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskStartParams {
     pub session_id: String,
     pub input: String,
