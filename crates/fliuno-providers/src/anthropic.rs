@@ -136,6 +136,10 @@ fn parse(response: Value) -> Result<ModelTurn, String> {
 }
 
 impl ModelProvider for AnthropicProvider {
+    fn configured_budget(&self) -> Option<fliuno_protocol::ModelBudget> {
+        self.http.configured_budget()
+    }
+
     fn supports_progress(&self) -> bool {
         true
     }

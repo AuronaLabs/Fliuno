@@ -1,5 +1,5 @@
 use crate::{ToolSpec, new_id};
-use fliuno_protocol::{Message, Task, ToolCall};
+use fliuno_protocol::{Message, ModelBudget, Task, ToolCall};
 use serde_json::json;
 
 pub use tokio_util::sync::CancellationToken;
@@ -75,6 +75,10 @@ impl From<ModelDecision> for ModelTurn {
 
 /// Providers receive normalized messages; provider wire formats stay in adapters.
 pub trait ModelProvider: Send + Sync {
+    fn configured_budget(&self) -> Option<ModelBudget> {
+        None
+    }
+
     fn supports_progress(&self) -> bool {
         false
     }

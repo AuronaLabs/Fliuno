@@ -101,6 +101,8 @@ $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 
 预检适用于每轮请求及流式模式。超额时当前生成步骤以已知未发送失败；此前已完成的工具操作仍保留。可在新任务用较小的 `maxBytes`、显式 `taskIds` 或 `isolated` 缩小历史。
 
+`initialize.capabilities.modelBudget` 返回当前宿主配置下的 `windowTokens`、`maxInputTokens`、`maxOutputTokens` 和 `countMode`。计数模式为 `json_bytes_estimate` 或 `provider`。未配置预检时返回 `null`。握手直接读取本机配置，供应商模型窗口仍由宿主填写。
+
 ## 持久化与迁移
 
 历史索引在数据库 v5 引入，当前数据库版本为 v10。`storage/context` 的 `session_turns` 表保存完成记录投影，以 `(session_id,sequence)` 建索引；`task_id` 唯一，sequence 外键指向真实完成事件。投影与 TaskCompleted 及任务最终状态在同一事务提交，失败一起回滚；不会发布未提交的完成通知。

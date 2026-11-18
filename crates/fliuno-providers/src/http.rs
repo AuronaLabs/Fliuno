@@ -131,6 +131,10 @@ impl Http {
         self.context_budget.map(|budget| budget.max_output_tokens)
     }
 
+    pub fn configured_budget(&self) -> Option<fliuno_protocol::ModelBudget> {
+        self.context_budget.map(ModelContextBudget::describe)
+    }
+
     fn prepare_generation(
         &self,
         body: &Value,

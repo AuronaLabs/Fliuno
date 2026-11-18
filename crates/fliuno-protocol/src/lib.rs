@@ -328,6 +328,23 @@ pub struct ArtifactGetParams {
     pub artifact_id: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelInputCountMode {
+    JsonBytesEstimate,
+    Provider,
+}
+
+/// Host configuration for each model request, independent of task history caps.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelBudget {
+    pub window_tokens: u32,
+    pub max_input_tokens: u32,
+    pub max_output_tokens: u32,
+    pub count_mode: ModelInputCountMode,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "type",
@@ -643,6 +660,7 @@ pub fn schema_bundle() -> Value {
             "ArtifactSummariesPage": schemars::schema_for!(ObjectPage<ArtifactSummary>),
             "Event": schemars::schema_for!(Event),
             "ModelProgress": schemars::schema_for!(ModelProgress),
+            "ModelBudget": schemars::schema_for!(ModelBudget),
             "EventsPage": schemars::schema_for!(EventsPage)
         }
     })

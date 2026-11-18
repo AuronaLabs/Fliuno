@@ -69,6 +69,10 @@ impl Kernel {
         self.provider.supports_progress()
     }
 
+    pub fn configured_model_budget(&self) -> Option<ModelBudget> {
+        self.provider.configured_budget()
+    }
+
     pub fn model_progress_publisher(&self) -> ProgressPublisher {
         ProgressPublisher::new(self.progress.clone())
     }

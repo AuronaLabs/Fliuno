@@ -144,6 +144,9 @@ impl Peer {
         assert_eq!(init["capabilities"]["contextTaskSelection"], true);
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
+        if base.is_none() {
+            assert!(init["capabilities"]["modelBudget"].is_null());
+        }
         assert_eq!(init["capabilities"]["remoteTaskChecks"], a2a.is_some());
         assert_eq!(
             init["capabilities"]["remoteTaskContinuation"],
@@ -617,6 +620,63 @@ fn schema_export_is_valid_json_and_needs_no_provider_configuration() {
     let schema: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(schema["protocolVersion"], "0.1");
     assert!(schema["methods"]["task/start"].is_object());
+}
+
+#[test]
+fn configured_model_budget_is_reported_without_contacting_the_provider() {
+    for (provider, mode, reported) in [
+        ("openai", "provider", "provider"),
+        ("anthropic", "local", "json_bytes_estimate"),
+    ] {
+        let root = std::env::temp_dir().join(format!(
+            "fliuno-model-budget-{}-{}-{provider}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        fs::create_dir(&root).unwrap();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
+            .arg("--db")
+            .arg(root.join("kernel.db"))
+            .env("FLIUNO_PROVIDER", provider)
+            .env("FLIUNO_MODEL", "fixture")
+            .env("FLIUNO_CONTEXT_WINDOW_TOKENS", "32768")
+            .env("FLIUNO_MAX_OUTPUT_TOKENS", "2048")
+            .env("FLIUNO_CONTEXT_COUNT_MODE", mode)
+            .env("OPENAI_BASE_URL", "http://127.0.0.1:1/")
+            .env("ANTHROPIC_BASE_URL", "http://127.0.0.1:1/")
+            .env("OPENAI_API_KEY", "fixture")
+            .env("ANTHROPIC_API_KEY", "fixture")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        writeln!(
+            child.stdin.take().unwrap(),
+            "{}",
+            json!({
+                "jsonrpc":"2.0","id":1,"method":"initialize",
+                "params":{"protocolVersion":"0.1","clientName":"budget-test"}
+            })
+        )
+        .unwrap();
+        let output = child.wait_with_output().unwrap();
+        // Only remove regular files created in this test's fresh directory.
+        for entry in fs::read_dir(&root).unwrap() {
+            fs::remove_file(entry.unwrap().path()).unwrap();
+        }
+        fs::remove_dir(root).unwrap();
+        assert!(output.status.success());
+        let init: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            init["result"]["capabilities"]["modelBudget"],
+            json!({
+                "windowTokens":32768,"maxInputTokens":30720,"maxOutputTokens":2048,"countMode":reported
+            })
+        );
+    }
 }
 
 #[test]

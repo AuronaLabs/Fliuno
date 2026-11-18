@@ -3868,6 +3868,48 @@
         }
       ]
     },
+    "ModelBudget": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelBudget",
+      "description": "Host configuration for each model request, independent of task history caps.",
+      "type": "object",
+      "properties": {
+        "windowTokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "maxInputTokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "countMode": {
+          "$ref": "#/$defs/ModelInputCountMode"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "windowTokens",
+        "maxInputTokens",
+        "maxOutputTokens",
+        "countMode"
+      ],
+      "$defs": {
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        }
+      }
+    },
     "EventsPage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsPage",

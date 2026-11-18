@@ -5,6 +5,7 @@ mod openai;
 
 pub use anthropic::AnthropicProvider;
 use fliuno_core::{DemoProvider, ModelProvider};
+use fliuno_protocol::{ModelBudget, ModelInputCountMode};
 pub use openai::OpenAiProvider;
 
 /// Opt-in guard with a host-selected context window and output reserve.
@@ -16,6 +17,19 @@ pub struct ModelContextBudget {
 }
 
 impl ModelContextBudget {
+    fn describe(self) -> ModelBudget {
+        ModelBudget {
+            window_tokens: self.input_allowance + self.max_output_tokens,
+            max_input_tokens: self.input_allowance,
+            max_output_tokens: self.max_output_tokens,
+            count_mode: if self.provider_count {
+                ModelInputCountMode::Provider
+            } else {
+                ModelInputCountMode::JsonBytesEstimate
+            },
+        }
+    }
+
     pub fn new(window_tokens: u32, max_output_tokens: u32) -> Result<Self, String> {
         if max_output_tokens < 16 || max_output_tokens >= window_tokens {
             return Err("model context budget needs an output limit of at least 16 and smaller than the context window".into());

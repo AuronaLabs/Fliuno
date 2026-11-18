@@ -238,6 +238,7 @@ impl RpcServer {
                     "contextTaskSelection":true,
                     "processExecution":process_execution,
                     "modelProgressNotifications":self.kernel()?.model_progress_supported(),
+                    "modelBudget":self.kernel()?.configured_model_budget(),
                     "terminalSessions":self.terminals.is_some(),
                     "terminalOutputSubscriptions":self.terminals.is_some(),
                     "terminalArchiving":self.terminals.is_some(),
