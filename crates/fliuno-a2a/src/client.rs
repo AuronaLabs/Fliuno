@@ -201,7 +201,7 @@ impl Client {
         }
         serde_json::from_slice(&bytes).map_err(|_| Error::Protocol)
     }
-    async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+    fn encode_rpc(&self, method: &str, params: Value) -> Result<(String, Vec<u8>)> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let bytes =
             serde_json::to_vec(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
@@ -209,6 +209,13 @@ impl Client {
         if bytes.len() > 1024 * 1024 {
             return Err(Error::Budget);
         }
+        Ok((id, bytes))
+    }
+    async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+        let (id, bytes) = self.encode_rpc(method, params)?;
+        self.post_json(id, bytes).await
+    }
+    async fn post_json(&self, id: String, bytes: Vec<u8>) -> Result<Value> {
         let response = self
             .http
             .post(self.endpoint.clone())
@@ -234,61 +241,58 @@ impl Client {
         }
         raw.get("result").cloned().ok_or(Error::Protocol)
     }
+    /// Validate and encode before the caller commits to a one-shot send.
+    pub fn prepare_text(
+        &self,
+        message_id: &str,
+        text: &str,
+        history: Option<&str>,
+        target: Option<MessageTarget<'_>>,
+        streaming: bool,
+    ) -> Result<PreparedMessage<'_>> {
+        let method = if streaming {
+            "SendStreamingMessage"
+        } else {
+            "SendMessage"
+        };
+        let (id, bytes) =
+            self.encode_rpc(method, text_params(message_id, text, history, target)?)?;
+        Ok(PreparedMessage {
+            client: self,
+            id,
+            bytes,
+            streaming,
+        })
+    }
+
     pub async fn send_text(
         &self,
         message_id: &str,
         text: &str,
         history: Option<&str>,
     ) -> Result<SendResponse> {
-        self.send_text_to(message_id, text, history, None).await
+        self.prepare_text(message_id, text, history, None, false)?
+            .send()
+            .await
     }
 
-    pub async fn send_text_to(
-        &self,
-        message_id: &str,
-        text: &str,
-        history: Option<&str>,
-        target: Option<MessageTarget<'_>>,
-    ) -> Result<SendResponse> {
-        SendResponse::parse(
-            self.rpc(
-                "SendMessage",
-                text_params(message_id, text, history, target)?,
-            )
-            .await?,
-        )
-    }
-
-    /// Starts one A2A streaming submission and returns a bounded event receiver.
-    /// The caller owns the overall task deadline and cancellation policy.
+    /// Starts a one-shot submission; caller owns the task deadline.
     pub async fn send_text_streaming(
         &self,
         message_id: &str,
         text: &str,
         history: Option<&str>,
     ) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
-        self.send_text_streaming_to(message_id, text, history, None)
+        self.prepare_text(message_id, text, history, None, true)?
+            .send_streaming()
             .await
     }
 
-    pub async fn send_text_streaming_to(
+    async fn post_stream(
         &self,
-        message_id: &str,
-        text: &str,
-        history: Option<&str>,
-        target: Option<MessageTarget<'_>>,
+        id: String,
+        bytes: Vec<u8>,
     ) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
-        let bytes = serde_json::to_vec(&json!({
-            "jsonrpc":"2.0",
-            "id":id,
-            "method":"SendStreamingMessage",
-            "params":text_params(message_id, text, history, target)?
-        }))
-        .map_err(|_| Error::Protocol)?;
-        if bytes.len() > 1024 * 1024 {
-            return Err(Error::Budget);
-        }
         let mut response = self
             .stream_http
             .post(self.endpoint.clone())
@@ -316,7 +320,6 @@ impl Client {
             return Err(Error::Budget);
         }
         let (sender, receiver) = mpsc::channel(STREAM_QUEUE_CAPACITY);
-        let id = id.clone();
         let limit = self.limit;
         tokio::spawn(async move {
             if let Err(error) = consume_stream(&mut response, &id, limit, sender.clone()).await {
@@ -396,6 +399,30 @@ impl Client {
             return Err(Error::Protocol);
         }
         Ok(())
+    }
+}
+
+/// Encoded request bound to its originating client and consumed by submission.
+pub struct PreparedMessage<'a> {
+    client: &'a Client,
+    id: String,
+    bytes: Vec<u8>,
+    streaming: bool,
+}
+
+impl PreparedMessage<'_> {
+    pub async fn send(self) -> Result<SendResponse> {
+        if self.streaming {
+            return Err(Error::Config);
+        }
+        SendResponse::parse(self.client.post_json(self.id, self.bytes).await?)
+    }
+
+    pub async fn send_streaming(self) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
+        if !self.streaming {
+            return Err(Error::Config);
+        }
+        self.client.post_stream(self.id, self.bytes).await
     }
 }
 

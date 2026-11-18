@@ -4,6 +4,39 @@ fn params(task_id: &Value, key: &str) -> Value {
     json!({"taskId":task_id,"clientRequestId":key,"input":"quarterly numbers"})
 }
 
+#[test]
+fn encoded_wire_budget_failure_keeps_the_pause_available() {
+    let wire = Fixture::start(|request| {
+        let mut remote = task("TASK_STATE_INPUT_REQUIRED");
+        remote["id"] = json!("t".repeat(256));
+        remote["contextId"] = json!("c".repeat(256));
+        match request.body["method"].as_str().unwrap() {
+            "SendMessage" => {
+                assert!(request.body["params"]["message"]["taskId"].is_null());
+                send_reply(request, remote, false)
+            }
+            "GetTask" => response(request, remote),
+            other => panic!("unexpected method {other}"),
+        }
+    });
+    let directory = Directory::new(&wire, 10_000, false);
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let source = start(&mut peer, &session, "source");
+    wait_finished(&mut peer, &source["id"]);
+    // Fits the local frame and input budget. Escaping the input plus the
+    // host-resolved A2A identities makes the encoded outgoing frame too large.
+    let mut too_large = params(&source["id"], "large");
+    too_large["input"] = json!(format!("a{}", "\0".repeat(174_680)));
+    let attempt = peer.call("task/continueRemote", too_large);
+    let attempt = wait_finished(&mut peer, &attempt["id"]);
+    assert_eq!(attempt["status"], "failed");
+    assert_eq!(attempt["agentRun"]["stopReason"], "remote_preflight_failed");
+    assert_eq!(attempt["agentRun"]["outcomeUnknown"], false);
+    assert_eq!(attempt["remoteContinuation"]["submissionStarted"], false);
+    assert_eq!(wire.requests().len(), 2);
+}
+
 fn send_reply(request: &Request, remote: Value, streaming: bool) -> Response {
     let result = json!({"task":remote});
     if streaming {

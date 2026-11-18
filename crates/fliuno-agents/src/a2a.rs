@@ -495,18 +495,6 @@ impl A2aBackend {
                     request.remote_continuation.as_ref(),
                 ));
             };
-            if cancellation.is_cancelled() {
-                return Ok(known(AgentStopReason::Cancelled));
-            }
-            if Instant::now() >= deadline
-                || observer
-                    .observe(AgentObservation::RemoteContinuationSending)
-                    .is_err()
-            {
-                return Ok(before_submission_failure(
-                    request.remote_continuation.as_ref(),
-                ));
-            }
             Some(MessageTarget {
                 context_id,
                 task_id: (expected.state == AgentTaskState::InputRequired)
@@ -515,12 +503,32 @@ impl A2aBackend {
         } else {
             None
         };
+        let Ok(submission) = client.prepare_text(
+            &request.run_id,
+            &request.input,
+            history.as_deref(),
+            target,
+            self.streaming,
+        ) else {
+            return Ok(before_submission_failure(continuation));
+        };
+        if cancellation.is_cancelled() {
+            return Ok(known(AgentStopReason::Cancelled));
+        }
+        if continuation.is_some()
+            && (Instant::now() >= deadline
+                || observer
+                    .observe(AgentObservation::RemoteContinuationSending)
+                    .is_err())
+        {
+            return Ok(before_submission_failure(continuation));
+        }
         if self.streaming {
             let events = tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => return Err(()),
                 _ = sleep_until(deadline) => return Err(()),
-                result = client.send_text_streaming_to(&request.run_id, &request.input, history.as_deref(), target) => result.map_err(|_| ())?,
+                result = submission.send_streaming() => result.map_err(|_| ())?,
             };
             return self
                 .run_stream(
@@ -539,7 +547,7 @@ impl A2aBackend {
             biased;
             _ = cancellation.cancelled() => return Err(()),
             _ = sleep_until(deadline) => return Err(()),
-            result = client.send_text_to(&request.run_id, &request.input, history.as_deref(), target) => result.map_err(|error| {
+            result = submission.send() => result.map_err(|error| {
                 eprintln!("fliuno: A2A submission failed: {error}");
             })?,
         };
