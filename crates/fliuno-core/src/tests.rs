@@ -225,6 +225,65 @@ fn recovery_processes_large_backlogs_across_bounded_pages() {
     }
 }
 
+#[test]
+fn recovery_resumes_after_a_mid_batch_storage_failure_without_duplicate_events() {
+    let (mut kernel, session) = setup();
+    let mut task_ids = Vec::new();
+    for index in 0..130 {
+        let task = kernel
+            .create_task_with_key(&session.id, &format!("faulted recovery {index}"), None)
+            .unwrap()
+            .0;
+        let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&task.id).unwrap()
+        else {
+            panic!("expected a prepared model attempt");
+        };
+        task_ids.push(task.id);
+    }
+
+    let failed_task = &task_ids[70];
+    kernel
+        .db
+        .execute_batch(&format!(
+            "CREATE TRIGGER fail_recovery BEFORE UPDATE OF data ON tasks
+             WHEN OLD.id='{failed_task}'
+             BEGIN SELECT RAISE(ABORT, 'injected recovery write failure'); END;"
+        ))
+        .unwrap();
+    assert!(kernel.interrupt_running_tasks().is_err());
+    kernel
+        .db
+        .execute_batch("DROP TRIGGER fail_recovery;")
+        .unwrap();
+
+    for (index, task_id) in task_ids.iter().enumerate() {
+        let task = kernel.get_task(task_id).unwrap();
+        let expected = if index < 70 {
+            TaskStatus::Interrupted
+        } else {
+            TaskStatus::Running
+        };
+        assert_eq!(task.status, expected);
+    }
+
+    kernel.interrupt_running_tasks().unwrap();
+
+    for task_id in task_ids {
+        let task = kernel.get_task(&task_id).unwrap();
+        assert_eq!(task.status, TaskStatus::Interrupted);
+        assert!(task.model_outcome_unknown);
+        assert_eq!(task.model_steps, 1);
+        let events = kernel.list_events(&task.id, 0, 100).unwrap().events;
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.data, EventKind::TaskInterrupted))
+                .count(),
+            1
+        );
+    }
+}
+
 struct FlakyModel(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 impl ModelProvider for FlakyModel {
     fn next(
