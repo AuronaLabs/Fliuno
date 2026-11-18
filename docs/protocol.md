@@ -63,7 +63,7 @@
 
 客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和正文的 UTF-8 字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。
 
-客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节后，再按 UTF-8 解码正文，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。
+客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节后，再按 UTF-8 解码正文，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。SQLite v21 将已有正文移到独立 BLOB 表，保留产物 ID、清单游标和字节偏移。升级在一个事务内完成，迁移中数据库需要空间写入新正文。
 
 `initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
 

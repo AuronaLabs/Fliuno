@@ -8,13 +8,12 @@ mod task_summaries;
 use super::*;
 pub use replay::MAX_EVENT_TARGET_BYTES;
 use rusqlite::{OptionalExtension, params};
-use serde::de::DeserializeOwned;
 use std::{
     fs::{self, OpenOptions},
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 20;
+pub(crate) const SCHEMA_VERSION: u32 = 21;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 impl Kernel {
@@ -206,6 +205,9 @@ impl Kernel {
         if version < 20 {
             approvals::migrate(&mut db)?;
         }
+        if version < 21 {
+            artifacts::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         let mut kernel = Self {
@@ -312,13 +314,7 @@ impl Kernel {
             )?;
         }
         for artifact in artifacts {
-            if artifact.task_id != task.id {
-                return Err(Error::Invalid("artifact belongs to another task".into()));
-            }
-            tx.execute(
-                "INSERT INTO artifacts VALUES(?1,?2,?3)",
-                params![artifact.id, task.id, serde_json::to_string(artifact)?],
-            )?;
+            artifacts::record(&tx, &task.id, artifact)?;
         }
         let mut pending = Vec::with_capacity(events.len());
         for event in events {
@@ -418,10 +414,4 @@ impl Kernel {
 
 fn validate_event_cursor(after: u64) -> Result<i64> {
     i64::try_from(after).map_err(|_| Error::Invalid("after must fit i64".into()))
-}
-
-fn decode_rows<T: DeserializeOwned>(
-    rows: impl Iterator<Item = rusqlite::Result<String>>,
-) -> Result<Vec<T>> {
-    rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
 }

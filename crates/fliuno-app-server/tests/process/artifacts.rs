@@ -2,7 +2,7 @@ use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 #[test]
-fn artifact_byte_reads_preserve_utf8_and_nuls_across_restart() {
+fn artifact_byte_reads_and_catalog_cursors_survive_v20_migration() {
     let root = std::env::temp_dir()
         .canonicalize()
         .unwrap()
@@ -39,9 +39,58 @@ fn artifact_byte_reads_preserve_utf8_and_nuls_across_restart() {
         .unwrap();
     assert_eq!(bytes, content.as_bytes()[..4]);
     assert!(std::str::from_utf8(&bytes).is_err());
+    let full = peer.call(
+        "artifacts/get",
+        json!({"taskId":task_id,"artifactId":artifact["id"]}),
+    );
+    assert_eq!(full["content"], content);
     drop(peer);
+    {
+        let legacy = rusqlite::Connection::open(&db).unwrap();
+        legacy
+            .execute(
+                "UPDATE artifacts SET data=?2 WHERE id=?1",
+                [artifact["id"].as_str().unwrap(), &full.to_string()],
+            )
+            .unwrap();
+        let empty = json!({"id":"empty-fixture","taskId":task_id,"title":"empty","mediaType":"text/plain","content":""});
+        legacy
+            .execute(
+                "INSERT INTO artifacts(id,task_id,data) VALUES('empty-fixture',?1,?2)",
+                [task_id, &empty.to_string()],
+            )
+            .unwrap();
+        legacy
+            .execute_batch("DROP TABLE artifact_bodies; PRAGMA user_version=20;")
+            .unwrap();
+    }
 
     let mut peer = Peer::start(&db);
+    let old_page = peer.call(
+        "artifacts/listSummaries",
+        json!({"taskId":task_id,"limit":1}),
+    );
+    assert_eq!(old_page["items"], summaries["items"]);
+    assert_eq!(old_page["nextAfter"], summaries["nextAfter"]);
+    assert_eq!(old_page["hasMore"], true);
+    let next = peer.call(
+        "artifacts/listSummaries",
+        json!({"taskId":task_id,"after":summaries["nextAfter"]}),
+    );
+    assert_eq!(next["items"][0]["id"], "empty-fixture");
+    assert_eq!(next["items"][0]["contentBytes"], 0);
+    assert_eq!(
+        peer.call(
+            "artifacts/read",
+            json!({"taskId":task_id,"artifactId":"empty-fixture"})
+        ),
+        json!({
+            "offset":0,"nextOffset":0,"contentBytes":0,"dataBase64":""
+        })
+    );
+    let restored = peer.call("artifacts/list", json!({"taskId":task_id}));
+    assert_eq!(restored[0], full);
+    assert_eq!(restored[1]["content"], "");
     let max_page = peer.call("artifacts/read", params(4, 65_536));
     assert_eq!(max_page["nextOffset"], 65_540);
     let default_page = peer.call(
