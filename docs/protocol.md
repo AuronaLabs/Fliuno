@@ -1,6 +1,6 @@
 # Fliuno Application Protocol 0.1
 
-[文档首页](README.md) · [运行与配置](setup.md) · [JSON Schema](../protocol/fliuno.schema.json)
+[文档中心](README.md) › [接入客户端](README.md#接入客户端) · [运行与配置](setup.md) · [JSON Schema](../protocol/fliuno.schema.json)
 
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 

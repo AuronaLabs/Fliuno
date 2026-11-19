@@ -1,6 +1,6 @@
 # 终端输出订阅与恢复
 
-[文档首页](README.md) · [终端配置](setup.md#跨轮次终端) · [应用协议](protocol.md#跨轮次终端)
+[文档中心](README.md) › [本机执行与隔离](README.md#本机执行与隔离) · [终端配置](setup.md#跨轮次终端) · [应用协议](protocol.md#跨轮次终端)
 
 `terminal/subscribe` 观察已有终端，不创建或控制进程，也不产生新的执行审批。必须先完成 `initialize`，并检查 `capabilities.terminalOutputSubscriptions`。订阅 ID 只属于当前 app-server 连接；工作会话和 terminal ID 仍由持久记录确定。它不构成远程用户认证。
 

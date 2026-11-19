@@ -1,6 +1,6 @@
 # 开发计划与验收
 
-[文档首页](README.md) · [更新记录](../CHANGELOG.md) · [验收与性能记录](execution-evidence.md)
+[文档中心](README.md) › [内核与开发](README.md#内核与开发) · [更新记录](../CHANGELOG.md) · [验收与性能记录](execution-evidence.md)
 
 [0.0.3 开发中](#003-开发中) · [0.0.2 已实现](#002) · [后续内核能力](#后续内核能力) · [测试层次](#不混淆的测试层次)
 

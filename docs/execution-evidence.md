@@ -1,6 +1,6 @@
 # 工程验收与性能记录
 
-[文档首页](README.md) · [检查与演示](setup.md#检查与演示) · [开发路线图](roadmap.md)
+[文档中心](README.md) › [内核与开发](README.md#内核与开发) · [检查与演示](setup.md#检查与演示) · [开发路线图](roadmap.md)
 
 `fliuno-exec` 管理一次获批前台命令的原生启动、stdin、stdout/stderr 和进程所有权。它与模型、协议传输、SQLite 状态机分开；任务层持久保存报告，不从日志文本猜测退出原因。跨轮次 PTY 使用独立服务，不复用这套短命令生命周期。
 

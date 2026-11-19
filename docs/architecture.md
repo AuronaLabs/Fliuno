@@ -1,6 +1,6 @@
 # 内核架构
 
-[文档首页](README.md) · [应用协议](protocol.md) · [运行与配置](setup.md)
+[文档中心](README.md) › [内核与开发](README.md#内核与开发) · [应用协议](protocol.md) · [运行与配置](setup.md)
 
 从模块依赖图了解客户端如何启动任务，再看任务如何暂停、恢复和提交结果。
 

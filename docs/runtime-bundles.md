@@ -1,6 +1,6 @@
 # 隔离程序的伴随文件
 
-[文档首页](README.md) · [沙箱](sandbox.md) · [宿主配置](host-configuration.md)
+[文档中心](README.md) › [本机执行与隔离](README.md#本机执行与隔离) · [沙箱](sandbox.md) · [宿主配置](host-configuration.md)
 
 `fliuno-sandbox::LaunchSpec.assets` 由宿主明确列举脚本、模块、DLL 和数据文件，在进程启动前复制到私有目录。exec 的 program、MCP 的 stdio server 和 ACP 的 agent 配置均支持同一个 `assets` 数组。省略时为空；`trusted_host` 不接受清单。该接口不从模型、RPC、Skills 文本或远端工具定义接收路径授权。
 

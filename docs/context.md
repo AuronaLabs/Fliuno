@@ -1,6 +1,6 @@
 # 跨任务会话上下文
 
-[文档首页](README.md) · [应用协议](protocol.md) · [模型配置](setup.md#真实模型)
+[文档中心](README.md) › [接入客户端](README.md#接入客户端) · [应用协议](protocol.md) · [模型配置](setup.md#真实模型)
 
 同一 `Session` 的后续任务默认接收此前已完成工作的有界历史。历史由 Fliuno 保存和选择，OpenAI、Anthropic 与 ACP 后端使用同一份中性记录。每个任务仍有自己的执行、审批和供应商续接状态。
 

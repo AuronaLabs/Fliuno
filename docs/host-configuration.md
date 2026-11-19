@@ -1,6 +1,6 @@
 # 启动配置读取
 
-[文档首页](README.md) · [运行与配置](setup.md) · [沙箱](sandbox.md)
+[文档中心](README.md) › [本机执行与隔离](README.md#本机执行与隔离) · [运行与配置](setup.md) · [沙箱](sandbox.md)
 
 `fliuno-app-server` 的 MCP、ACP、A2A、exec 和 terminal JSON 配置由宿主通过命令行指定，运行中不接受模型或 RPC 改写。这五类文件统一经过独立的 `configuration` 模块：
 

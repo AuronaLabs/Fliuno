@@ -1,6 +1,6 @@
 # 终端归档与身份保留
 
-[文档首页](README.md) · [终端订阅与恢复](terminal-subscriptions.md) · [应用协议](protocol.md#跨轮次终端)
+[文档中心](README.md) › [本机执行与隔离](README.md#本机执行与隔离) · [终端订阅与恢复](terminal-subscriptions.md) · [应用协议](protocol.md#跨轮次终端)
 
 终端输出和输入操作缓存可以回收，创建身份不能复用。Fliuno 将小型 tombstone 账本保存在状态根的 `archive.db`，与每个 terminal ID 的输出目录分开；Tauri 或其他客户端通过相同应用协议管理它，不接触 SQLite 路径、IPC 凭据或 PID。
 

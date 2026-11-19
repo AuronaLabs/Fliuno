@@ -1,6 +1,6 @@
 # AG-UI 接入
 
-[文档首页](README.md) · [应用协议](protocol.md#rust-调用方)
+[文档中心](README.md) › [接入客户端](README.md#接入客户端) · [应用协议](protocol.md#rust-调用方)
 
 宿主可以通过 Rust 客户端提交文本任务，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批可以由宿主通过应用协议处理，也可以挂载独立授权的审批入口。
 

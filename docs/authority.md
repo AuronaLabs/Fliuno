@@ -1,6 +1,6 @@
 # 注册身份与持久授权
 
-[文档首页](README.md) · [沙箱](sandbox.md) · [应用协议](protocol.md)
+[文档中心](README.md) › [本机执行与隔离](README.md#本机执行与隔离) · [沙箱](sandbox.md) · [应用协议](protocol.md)
 
 工具名称和 Agent ID 用于选择注册项。持久审批和排队任务另存注册摘要，执行前必须匹配当前注册；同名不会把旧授权转移到新配置。应用协议 `initialize.capabilities.registrationAuthority:true` 表示支持这项检查。
 

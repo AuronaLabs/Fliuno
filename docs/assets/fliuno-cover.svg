@@ -1,59 +1,73 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="360" viewBox="0 0 1120 360" role="img" aria-labelledby="title description">
-  <title id="title">Fliuno · Rust agent kernel</title>
-  <desc id="description">A local execution trace shows a task starting, an approval being granted, and an artifact being read.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="384" viewBox="0 0 1120 384" role="img" aria-labelledby="title desc">
+  <title id="title">Fliuno — Rust agent kernel</title>
+  <desc id="desc">A task begins, pauses for approval, and produces a locally saved artifact.</desc>
   <defs>
-    <clipPath id="frame"><rect width="1120" height="360" rx="24"/></clipPath>
-    <linearGradient id="background" x2="1" y2="1" gradientUnits="objectBoundingBox">
-      <stop stop-color="#101f1a"/>
-      <stop offset="1" stop-color="#132d25"/>
+    <linearGradient id="ink" x2="1" y2="1">
+      <stop stop-color="#14242d"/>
+      <stop offset="1" stop-color="#0e181e"/>
     </linearGradient>
-    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
-      <path d="M28 0H0v28" fill="none" stroke="#acddbf" stroke-opacity=".13"/>
+    <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#6f9a91" opacity=".34"/>
     </pattern>
+    <clipPath id="edge"><rect x="1" y="1" width="1118" height="382" rx="24"/></clipPath>
   </defs>
 
-  <g clip-path="url(#frame)">
-    <path d="M0 0h1120v360H0z" fill="url(#background)"/>
-    <path d="M504 0h616v360H504z" fill="url(#grid)"/>
-    <path d="M504 0v360" stroke="#426057"/>
-    <path d="M60 307h380" stroke="#426057"/>
-    <path d="M60 307h38" stroke="#d1f49e" stroke-width="2"/>
+  <g clip-path="url(#edge)">
+    <path fill="url(#ink)" d="M0 0h1120v384H0z"/>
+    <path fill="#172d35" d="M568 0h552v384H568z"/>
+    <path fill="url(#dots)" d="M568 0h552v384H568z"/>
+    <circle cx="1118" cy="380" r="180" fill="none" stroke="#43605f"/>
+    <circle cx="1118" cy="380" r="236" fill="none" stroke="#43605f"/>
+    <path d="M568 1v382" stroke="#44605e"/>
 
-    <g transform="translate(60 54)">
-      <rect width="48" height="48" rx="12" fill="#d1f49e"/>
-      <path d="M15 34V18a4 4 0 0 1 4-4h15M15 25h13" fill="none" stroke="#172820" stroke-width="4.5" stroke-linecap="round"/>
+    <g transform="translate(64 59)">
+      <rect width="54" height="54" rx="13" fill="#a6ebce"/>
+      <path d="M15 39V20l5-5h20M15 28h17" fill="none" stroke="#112127" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="39" cy="28" r="2.6" fill="#112127"/>
     </g>
     <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">
-      <text x="125" y="84" fill="#d1f49e" font-size="18" letter-spacing="3">LOCAL WORK</text>
-      <text x="64" y="251" fill="#cce1d5" font-size="24" letter-spacing="3">RUST AGENT KERNEL</text>
-      <text x="60" y="331" fill="#adc6b9" font-size="14" letter-spacing="1.5">TASKS  /  APPROVALS  /  ARTIFACTS</text>
+      <text x="136" y="92" fill="#a6ebce" font-size="19" letter-spacing="2.8">LOCAL AGENT RUNTIME</text>
+      <text x="66" y="257" fill="#f6ebd8" font-size="26">Rust kernel for agent work</text>
+      <path d="M65 293h438" stroke="#44605e"/>
+      <path d="M65 293h46" stroke="#a6ebce" stroke-width="3"/>
+      <text x="66" y="327" fill="#a4bebb" font-size="17">PERSISTENT TASKS · JSON-RPC OVER STDIO</text>
     </g>
-    <text x="52" y="210" fill="#f4f8f2" font-family="'Segoe UI', system-ui, sans-serif" font-size="126" font-weight="700" letter-spacing="-4">Fliuno</text>
+    <text x="55" y="214" fill="#f6ebd8" font-family="system-ui, 'Segoe UI', sans-serif" font-size="120" font-weight="760" letter-spacing="-5">Fliuno</text>
 
-    <g transform="translate(550 52)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">
-      <rect width="514" height="256" rx="15" fill="#101d19" stroke="#58776b"/>
-      <path d="M0 48h514M18 116h478m-478 64h478" stroke="#385249"/>
-      <text x="22" y="30" fill="#b9d1c6" font-size="15" letter-spacing="1.7">EXECUTION TRACE</text>
-      <text x="492" y="30" fill="#b9d1c6" font-size="15" text-anchor="end">JSON-RPC / STDIO</text>
-
-      <path d="M32 84v128" stroke="#58776b" stroke-width="2"/>
-      <circle cx="32" cy="84" r="7" fill="#a8ccff" stroke="#101d19" stroke-width="3"/>
-      <rect x="25" y="141" width="14" height="14" rx="2" transform="rotate(45 32 148)" fill="#ffdb91" stroke="#101d19" stroke-width="3"/>
-      <circle cx="32" cy="212" r="7" fill="#d1f49e" stroke="#101d19" stroke-width="3"/>
-      <g fill="#f0f7f2" font-size="23">
-        <text x="57" y="92">task/start</text>
-        <text x="57" y="156">approval/respond</text>
-        <text x="57" y="220">artifacts/read</text>
+    <g transform="translate(609 36)">
+      <rect width="462" height="312" rx="18" fill="#0e1d24" stroke="#52736f"/>
+      <path d="M0 56h462M22 133h418m-418 77h418" stroke="#304b50"/>
+      <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="15" letter-spacing="1.7">
+        <text x="24" y="34" fill="#acc7c4">TASK TRACE</text>
+        <text x="438" y="34" fill="#acc7c4" text-anchor="end">STDIO</text>
       </g>
-      <rect x="348" y="68" width="144" height="32" rx="8" fill="#1c3039"/>
-      <rect x="348" y="132" width="144" height="32" rx="8" fill="#3b3020"/>
-      <rect x="348" y="196" width="144" height="32" rx="8" fill="#283a24"/>
-      <g font-size="16" text-anchor="middle">
-        <text x="420" y="90" fill="#bbd5ff">running</text>
-        <text x="420" y="154" fill="#ffdb91">allow_once</text>
-        <text x="420" y="218" fill="#d1f49e">saved locally</text>
+      <path d="M48 100v140" stroke="#4e6e71" stroke-dasharray="4 5" stroke-width="2"/>
+      <g transform="translate(31 80)">
+        <rect width="34" height="34" rx="10" fill="#233a56" stroke="#608cc2"/>
+        <path d="m14 11 9 6-9 6z" fill="#bdd8ff"/>
+      </g>
+      <g transform="translate(31 157)">
+        <rect width="34" height="34" rx="10" fill="#42331f" stroke="#ae824f"/>
+        <path d="M17 8l8 4v5c0 4-4 7-8 9-4-2-8-5-8-9v-5zm-4 9 3 3 5-6" fill="none" stroke="#ffd294" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <g transform="translate(31 234)">
+        <rect width="34" height="34" rx="10" fill="#1e4038" stroke="#609d8a"/>
+        <path d="M11 10h9l4 4v10H11zm8 0v5h5m-10 4h7" fill="none" stroke="#a6ebce" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="22" fill="#f6ebd8">
+        <text x="84" y="104">task/start</text>
+        <text x="84" y="181">approval/respond</text>
+        <text x="84" y="258">artifacts/read</text>
+      </g>
+      <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="14" text-anchor="middle">
+        <rect x="321" y="83" width="117" height="28" rx="7" fill="#233a56"/>
+        <rect x="321" y="160" width="117" height="28" rx="7" fill="#42331f"/>
+        <rect x="321" y="237" width="117" height="28" rx="7" fill="#1e4038"/>
+        <text x="379.5" y="102" fill="#bdd8ff">running</text>
+        <text x="379.5" y="179" fill="#ffd294">allow_once</text>
+        <text x="379.5" y="256" fill="#a6ebce">content chunk</text>
       </g>
     </g>
   </g>
-  <rect x=".5" y=".5" width="1119" height="359" rx="23.5" fill="none" stroke="#58776b"/>
+  <rect x="1" y="1" width="1118" height="382" rx="24" fill="none" stroke="#52736f"/>
 </svg>

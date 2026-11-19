@@ -1,43 +1,41 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="184" viewBox="0 0 1120 184" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="216" viewBox="0 0 1120 216" role="img" aria-labelledby="title desc">
   <title id="title">Fliuno documentation</title>
-  <desc id="description">Three reading paths: run a demo, connect a client, or explore the kernel.</desc>
+  <desc id="desc">Three paths through the docs: run a task, connect an app, or explore the kernel.</desc>
   <defs>
-    <clipPath id="frame"><rect width="1120" height="184" rx="22"/></clipPath>
-    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
-      <path d="M28 0H0v28" fill="none" stroke="#acddbf" stroke-opacity=".13"/>
+    <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#6f9a91" opacity=".34"/>
     </pattern>
+    <clipPath id="edge"><rect x="1" y="1" width="1118" height="214" rx="24"/></clipPath>
   </defs>
-
-  <g clip-path="url(#frame)">
-    <path d="M0 0h1120v184H0z" fill="#101f1a"/>
-    <path d="M596 0h524v184H596z" fill="#132d25"/>
-    <path d="M596 0h524v184H596z" fill="url(#grid)"/>
-    <path d="M596 0v184" stroke="#426057"/>
-    <g transform="translate(56 63)">
-      <rect width="58" height="58" rx="13" fill="#d1f49e"/>
-      <path d="M18 42V22a5 5 0 0 1 5-5h18M18 31h16" fill="none" stroke="#172820" stroke-width="5" stroke-linecap="round"/>
+  <g clip-path="url(#edge)">
+    <path fill="#14242d" d="M0 0h1120v216H0z"/>
+    <path fill="#172d35" d="M552 0h568v216H552z"/>
+    <path fill="url(#dots)" d="M552 0h568v216H552z"/>
+    <path d="M552 0v216" stroke="#44605e"/>
+    <g transform="translate(64 55)">
+      <rect width="54" height="54" rx="13" fill="#a6ebce"/>
+      <path d="M15 39V20l5-5h20M15 28h17" fill="none" stroke="#112127" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="39" cy="28" r="2.6" fill="#112127"/>
     </g>
-    <text x="140" y="75" fill="#d1f49e" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="18" letter-spacing="3">FLIUNO FIELD GUIDE</text>
-    <text x="137" y="128" fill="#f4f8f2" font-family="'Segoe UI', system-ui, sans-serif" font-size="56" font-weight="700" letter-spacing="-1.6">Documentation</text>
+    <text x="136" y="89" fill="#a6ebce" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="19" letter-spacing="3">FLIUNO FIELD GUIDE</text>
+    <text x="62" y="159" fill="#f6ebd8" font-family="system-ui, 'Segoe UI', sans-serif" font-size="58" font-weight="700" letter-spacing="-1.7">Documentation</text>
 
-    <path d="M691 76h308" stroke="#688f7d" stroke-width="2" stroke-dasharray="4 6"/>
-    <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" text-anchor="middle" font-size="18">
-      <g transform="translate(691 76)" fill="#bbd5ff">
-        <circle r="25" fill="#1c3039" stroke="#83a7cc"/>
-        <path d="m-11-7 7 7-7 7M3 7h8" fill="none" stroke="#bbd5ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <text y="59">01 / Run</text>
+    <path d="M677 91h318" stroke="#648583" stroke-width="2" stroke-dasharray="4 6"/>
+    <g text-anchor="middle" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">
+      <rect x="649" y="63" width="56" height="56" rx="14" fill="#233a56" stroke="#608cc2"/>
+      <rect x="808" y="63" width="56" height="56" rx="14" fill="#42331f" stroke="#ae824f"/>
+      <rect x="967" y="63" width="56" height="56" rx="14" fill="#1e4038" stroke="#609d8a"/>
+      <g font-size="22" font-weight="700">
+        <text x="677" y="99" fill="#bdd8ff">01</text>
+        <text x="836" y="99" fill="#ffd294">02</text>
+        <text x="995" y="99" fill="#a6ebce">03</text>
       </g>
-      <g transform="translate(845 76)" fill="#ffdb91">
-        <circle r="25" fill="#3b3020" stroke="#c49c56"/>
-        <path d="m-5-7-7 7 7 7m10-14 7 7-7 7" fill="none" stroke="#ffdb91" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <text y="59">02 / Connect</text>
-      </g>
-      <g transform="translate(999 76)" fill="#d1f49e">
-        <circle r="25" fill="#283a24" stroke="#9cb978"/>
-        <path d="m-12-5 12-6 12 6-12 6zM-12 1l12 6 12-6m-24 6 12 6 12-6" fill="none" stroke="#d1f49e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <text y="59">03 / Build</text>
+      <g font-size="16" letter-spacing="1.2" fill="#f6ebd8">
+        <text x="677" y="150">RUN A TASK</text>
+        <text x="836" y="150">CONNECT</text>
+        <text x="995" y="150">KERNEL</text>
       </g>
     </g>
   </g>
-  <rect x=".5" y=".5" width="1119" height="183" rx="21.5" fill="none" stroke="#58776b"/>
+  <rect x="1" y="1" width="1118" height="214" rx="24" fill="none" stroke="#52736f"/>
 </svg>

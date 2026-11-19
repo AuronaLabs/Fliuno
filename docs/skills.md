@@ -1,6 +1,6 @@
 # Skills 与按需资源
 
-[文档首页](README.md) · [运行与配置](setup.md#文件与-skills) · [MCP 资源、提示与技能](mcp-content.md)
+[文档中心](README.md) › [模型、工具与 Agent](README.md#模型工具与-agent) · [运行与配置](setup.md#文件与-skills) · [MCP 资源、提示与技能](mcp-content.md)
 
 宿主用 `--skills-dir ABSOLUTE_PATH` 配置 Agent Skills 目录。发现只读取各子目录的 `SKILL.md` 元数据，模型随后按需请求指令和资源；目录内容不会自动进入上下文，也不会注册进程或获得工作区权限。
 

@@ -1,6 +1,6 @@
 # 内核调研
 
-[文档首页](README.md) · [内核架构](architecture.md) · [开发路线图](roadmap.md)
+[文档中心](README.md) › [内核与开发](README.md#内核与开发) · [内核架构](architecture.md) · [开发路线图](roadmap.md)
 
 [参考系统](#参考系统) · [协议分层](#协议不是同一个层次) · [选型](#选型判断) · [平台隔离](#操作系统隔离)
 

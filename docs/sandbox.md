@@ -1,6 +1,6 @@
 # 原生进程隔离边界
 
-[文档首页](README.md) · [宿主配置](host-configuration.md) · [原生执行验收](execution-evidence.md)
+[文档中心](README.md) › [本机执行与隔离](README.md#本机执行与隔离) · [宿主配置](host-configuration.md) · [原生执行验收](execution-evidence.md)
 
 当前实现与本机验证日期：2026-11-18。`fliuno-sandbox` 不依赖任务内核、模型或外部 Agent 协议；`fliuno-mcp/launch.rs` 和 `fliuno-acp/transport.rs` 分别接到官方 SDK 的 stdio 传输。MCP 主机配置必须明确选择 `trusted_host`、`windows_app_container` 或 `linux_landlock`；ACP 的 `connect_isolated` 使用当前平台后端，通用 transport 由调用方管理权限和生命周期。隔离启动不存在失败后转宿主运行的路径。
 
