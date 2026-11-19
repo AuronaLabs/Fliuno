@@ -7,6 +7,7 @@ mod terminal_subscriptions;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use fliuno_core::{
     Error, EventReceiver, EventScope, EventWatermarkReceiver, Kernel, ProgressReceiver,
+    TaskSummaryStart,
 };
 use fliuno_protocol::*;
 use scheduler::TaskScheduler;
@@ -741,7 +742,19 @@ impl RpcServer {
                     p.through_sequence,
                 )?)
             }
-            "task/start" | "task/startSummary" => {
+            "task/startSummary" => {
+                let p: TaskStartParams = decode(params)?;
+                let started = self.kernel()?.create_task_for_summary(p)?;
+                let summary = match started {
+                    TaskSummaryStart::Existing(summary) => summary,
+                    TaskSummaryStart::Created(task) => {
+                        let task = self.schedule_or_fail(*task)?;
+                        self.kernel()?.get_task_summary(&task.id)?
+                    }
+                };
+                json!(summary)
+            }
+            "task/start" => {
                 let p: TaskStartParams = decode(params)?;
                 let (task, created) = self.kernel()?.create_task_with_context(
                     &p.session_id,
@@ -755,11 +768,7 @@ impl RpcServer {
                 } else {
                     task
                 };
-                if method == "task/startSummary" {
-                    json!(self.kernel()?.get_task_summary(&task.id)?)
-                } else {
-                    json!(task)
-                }
+                json!(task)
             }
             "task/getSummaryByRequest" => {
                 let p: TaskRequestLookupParams = decode(params)?;

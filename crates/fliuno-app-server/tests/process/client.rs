@@ -35,6 +35,8 @@ mod session_catalog;
 mod task_cancel;
 #[path = "client/task_changes.rs"]
 mod task_changes;
+#[path = "client/task_start_receipts.rs"]
+mod task_start_receipts;
 #[path = "client/task_summaries.rs"]
 mod task_summaries;
 #[path = "client/work.rs"]

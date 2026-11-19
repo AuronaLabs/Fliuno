@@ -259,11 +259,13 @@ fn scoped_model_usage_pages_keep_order_and_watermark_after_v39_upgrade() {
     );
     drop(peer);
     let db_conn = rusqlite::Connection::open(&db).unwrap();
-    assert_eq!(
+    // This probe verifies the scoped usage migration and its indexed rows.
+    // Later unrelated migrations can raise the version further.
+    assert!(
         db_conn
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
-            .unwrap(),
-        43
+            .unwrap()
+            >= 40
     );
     assert_eq!(
         db_conn

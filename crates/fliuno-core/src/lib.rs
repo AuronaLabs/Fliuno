@@ -42,7 +42,7 @@ pub use provider::{
     ModelTurn, ProviderReplay,
 };
 pub use storage::MAX_EVENT_TARGET_BYTES;
-pub use task::PreparedModelStep;
+pub use task::{PreparedModelStep, start::TaskSummaryStart};
 pub use tool::{Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec};
 
 use fliuno_protocol::*;

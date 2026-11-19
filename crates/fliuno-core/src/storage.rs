@@ -11,6 +11,7 @@ mod run_boundaries;
 mod sessions;
 mod task_cancel;
 mod task_changes;
+mod task_starts;
 mod task_summaries;
 mod work;
 mod workspaces;
@@ -22,7 +23,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 43;
+pub(crate) const SCHEMA_VERSION: u32 = 44;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -34,6 +35,11 @@ fn read_task(db: &Connection, id: &str) -> Result<Task> {
     Ok(serde_json::from_str(data)?)
 }
 
+struct RequestBinding<'a> {
+    key: &'a str,
+    receipt: Option<&'a task_starts::Receipt>,
+}
+
 /// Write all projections in the caller's transaction. Publish the returned
 /// sequences only after that transaction successfully commits.
 fn write_transition(
@@ -41,7 +47,7 @@ fn write_transition(
     task: &Task,
     events: &[EventKind],
     artifacts: &[Artifact],
-    key: Option<&str>,
+    binding: Option<RequestBinding<'_>>,
     resume: Option<&ApprovalResumeParams>,
 ) -> Result<Vec<u64>> {
     let running = task.status == TaskStatus::Running
@@ -60,7 +66,7 @@ fn write_transition(
     if let Some(continuation) = &task.remote_continuation
         && continuation.expected.state == AgentTaskState::InputRequired
     {
-        if key.is_some() {
+        if binding.is_some() {
             let inserted = tx.execute("INSERT INTO remote_continuation_claims VALUES(?1,?2) ON CONFLICT(source_task_id) DO NOTHING",
                 params![continuation.source_task_id, task.id])?;
             if inserted == 0 {
@@ -74,7 +80,7 @@ fn write_transition(
         }
     }
     if let Some(continuation) = &task.agent_session_continuation {
-        if key.is_some() {
+        if binding.is_some() {
             let claimed = tx.prepare_cached(
                 "INSERT INTO agent_session_continuation_claims VALUES(?1,?2) ON CONFLICT(source_task_id) DO NOTHING",
             )?.execute(params![continuation.source_task_id, task.id])?;
@@ -89,11 +95,12 @@ fn write_transition(
             )?.execute(params![continuation.source_task_id, task.id])?;
         }
     }
-    if let Some(key) = key {
-        tx.execute(
-            "INSERT INTO task_requests VALUES(?1,?2,?3)",
-            params![task.session_id, key, task.id],
-        )?;
+    if let Some(binding) = binding {
+        tx.prepare_cached("INSERT INTO task_requests VALUES(?1,?2,?3)")?
+            .execute(params![task.session_id, binding.key, task.id])?;
+        if let Some(receipt) = binding.receipt {
+            receipt.record(tx, &task.session_id, binding.key)?;
+        }
     }
     for artifact in artifacts {
         artifacts::record(tx, &task.id, artifact)?;
@@ -387,6 +394,9 @@ impl Kernel {
         if version < 43 {
             model_usage::migrate_totals(&mut db)?;
         }
+        if version < 44 {
+            task_starts::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         tools.insert(
@@ -472,8 +482,43 @@ impl Kernel {
         key: Option<&str>,
         resume: Option<&ApprovalResumeParams>,
     ) -> Result<()> {
+        let binding = key.map(|key| RequestBinding { key, receipt: None });
+        self.commit_transition(task, events, artifacts, binding, resume)
+    }
+
+    pub(crate) fn commit_task_start(
+        &mut self,
+        task: &Task,
+        request: Option<(&str, &str)>,
+    ) -> Result<()> {
+        let events = &[EventKind::TaskStarted];
+        if let Some((key, input)) = request {
+            let receipt = task_starts::Receipt::new(task, input)?;
+            self.commit_transition(
+                task,
+                events,
+                &[],
+                Some(RequestBinding {
+                    key,
+                    receipt: Some(&receipt),
+                }),
+                None,
+            )
+        } else {
+            self.commit_transition(task, events, &[], None, None)
+        }
+    }
+
+    fn commit_transition(
+        &mut self,
+        task: &Task,
+        events: &[EventKind],
+        artifacts: &[Artifact],
+        binding: Option<RequestBinding<'_>>,
+        resume: Option<&ApprovalResumeParams>,
+    ) -> Result<()> {
         let tx = self.db.transaction()?;
-        let sequences = write_transition(&tx, task, events, artifacts, key, resume)?;
+        let sequences = write_transition(&tx, task, events, artifacts, binding, resume)?;
         tx.commit()?;
         self.publish_task_events(&task.id, &task.session_id, &sequences, events);
         Ok(())
