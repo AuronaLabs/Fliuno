@@ -60,6 +60,38 @@ impl Kernel {
             .query_row([], |row| row.get::<_, i64>(0))? as u64)
     }
 
+    /// Index-only point reads of the latest durable event for each task.
+    pub fn task_event_watermarks(&self, request: &TaskWatermarksParams) -> Result<TaskWatermarks> {
+        let ids = &request.task_ids;
+        if !(1..=MAX_TASK_WATERMARKS).contains(&ids.len())
+            || ids.iter().any(|id| {
+                id.is_empty()
+                    || id.len() > MAX_TASK_SUMMARY_ID_BYTES
+                    || !id.bytes().all(|byte| byte.is_ascii_graphic())
+            })
+        {
+            return Err(Error::Invalid(format!(
+                "taskIds must contain 1 to {MAX_TASK_WATERMARKS} IDs of 1 to {MAX_TASK_SUMMARY_ID_BYTES} visible ASCII bytes"
+            )));
+        }
+        let tx = self.db.unchecked_transaction()?;
+        let through_sequences = {
+            let mut stmt =
+                tx.prepare_cached("SELECT MAX(sequence) FROM events WHERE task_id=?1")?;
+            ids.iter()
+                .map(|id| {
+                    stmt.query_row([id], |row| {
+                        Ok(row
+                            .get::<_, Option<i64>>(0)?
+                            .map(|sequence| sequence as u64))
+                    })
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        tx.commit()?;
+        Ok(TaskWatermarks { through_sequences })
+    }
+
     pub fn get_event(&self, sequence: u64) -> Result<Event> {
         if sequence == 0 {
             return Err(Error::Invalid("event sequence must be positive".into()));

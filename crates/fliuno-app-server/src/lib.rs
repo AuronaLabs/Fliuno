@@ -458,6 +458,7 @@ impl RpcServer {
             capabilities["eventSubscriptionCursor"] = json!(true);
             capabilities["eventWatermarkNotifications"] = json!(true);
             capabilities["coalescedEventWatermarks"] = json!(true);
+            capabilities["taskEventWatermarks"] = json!(true);
             capabilities["eventWatermarkQuery"] = json!(true);
             capabilities["workspaceEventSubscription"] = json!(true);
             capabilities["taskEventSubscription"] = json!(true);
@@ -986,6 +987,10 @@ impl RpcServer {
                 json!(EventWatermark {
                     through_sequence: self.kernel()?.event_watermark()?
                 })
+            }
+            "events/getTaskWatermarks" => {
+                let p: TaskWatermarksParams = decode(params)?;
+                json!(self.kernel()?.task_event_watermarks(&p)?)
             }
             "events/setScope" => {
                 let p: EventsSetScopeParams = decode(params)?;

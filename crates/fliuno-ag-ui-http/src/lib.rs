@@ -1,6 +1,7 @@
 //! An embeddable HTTP transport for Fliuno's AG-UI text profile.
 mod approval;
 mod delivery;
+mod task_poll;
 
 use axum::{
     Router,
@@ -40,6 +41,7 @@ struct Gateway<R, W> {
     interrupt_profile: bool,
     controls: Arc<Semaphore>,
     watermark: Mutex<Option<(Instant, u64)>>,
+    tasks: task_poll::TaskPoll,
 }
 
 /// Mount `POST /run`, `GET /runs/{run_id}` and `DELETE /runs/{run_id}`.
@@ -106,6 +108,7 @@ where
         interrupt_profile,
         controls: Arc::new(Semaphore::new(8)),
         watermark: Mutex::new(None),
+        tasks: task_poll::TaskPoll::default(),
     });
     let routes = Router::new()
         .route("/run", post(start::<R, W>))
@@ -198,15 +201,15 @@ async fn start<R: BufRead + Send + 'static, W: Write + Send + 'static>(
             session: submitter.ok_or(StatusCode::UNAUTHORIZED)?,
         }
     };
-    let (replay, through) = gateway
+    let (replay, through, task) = gateway
         .rpc(move |client| {
             let run = start.submit(client)?;
             let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
             let replay = run.replay_sse(through, None).map_err(replay_status)?;
-            Ok((replay, through))
+            Ok((replay, through, watched_task(client, &run)))
         })
         .await?;
-    respond(gateway, replay, through, permit).await
+    respond(gateway, replay, through, task, permit).await
 }
 
 enum Start {
@@ -283,17 +286,17 @@ async fn attach<R: BufRead + Send + 'static, W: Write + Send + 'static>(
         .clone()
         .try_acquire_owned()
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let (replay, through) = gateway
+    let (replay, through, task) = gateway
         .rpc(move |client| {
             let run = lookup_run(client, &session, &run_id, interrupt_profile)?;
             let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
             let replay = run
                 .reconnect_sse(client, through, last_id.as_deref(), |_| {})
                 .map_err(replay_status)?;
-            Ok((replay, through))
+            Ok((replay, through, watched_task(client, &run)))
         })
         .await?;
-    respond(gateway, replay, through, permit).await
+    respond(gateway, replay, through, task, permit).await
 }
 
 async fn cancel<R: BufRead + Send + 'static, W: Write + Send + 'static>(
@@ -322,9 +325,10 @@ async fn respond<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     gateway: Arc<Gateway<R, W>>,
     replay: AgUiSseReplay,
     through: u64,
+    task: Option<String>,
     permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Status<Response> {
-    let mut delivery = delivery::Delivery::new(gateway, replay, through, permit);
+    let mut delivery = delivery::Delivery::new(gateway, replay, through, task, permit);
     // Validate the resume position before committing response headers.
     let first = loop {
         let chunk = delivery.available().await?;
@@ -341,6 +345,16 @@ async fn respond<R: BufRead + Send + 'static, W: Write + Send + 'static>(
         Body::from_stream(stream),
     )
         .into_response())
+}
+
+fn watched_task<R: BufRead, W: Write>(client: &Client<R, W>, run: &AgUiRun) -> Option<String> {
+    client
+        .info()
+        .capabilities
+        .get("taskEventWatermarks")
+        .and_then(serde_json::Value::as_bool)
+        .is_some_and(|supported| supported)
+        .then(|| run.task().id.clone())
 }
 
 async fn read_json(request: Request, limit: usize) -> Status<axum::body::Bytes> {

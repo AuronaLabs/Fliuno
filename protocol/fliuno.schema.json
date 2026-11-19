@@ -2666,6 +2666,28 @@
       "properties": {},
       "additionalProperties": false
     },
+    "events/getTaskWatermarks": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskWatermarksParams",
+      "type": "object",
+      "properties": {
+        "taskIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!-~]+$"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskIds"
+      ]
+    },
     "events/setScope": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsSetScopeParams",
@@ -9307,6 +9329,30 @@
       "additionalProperties": false,
       "required": [
         "throughSequence"
+      ]
+    },
+    "TaskWatermarks": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskWatermarks",
+      "type": "object",
+      "properties": {
+        "throughSequences": {
+          "description": "Latest global event sequence for each requested task, in input order.\nA task with no durable events has a null entry.",
+          "type": "array",
+          "items": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "throughSequences"
       ]
     },
     "ModelUsageSummary": {

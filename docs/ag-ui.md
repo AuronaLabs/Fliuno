@@ -87,7 +87,7 @@ while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &
 
 ### 在一条连接上交错回放多个任务
 
-宿主需要服务多个读取方时，可以用 `client.event_watermark` 读一次已提交水位，再为每个任务建立 `run.replay_sse(through, last_event_id)`。各个 `AgUiSseReplay` 共用 stdio 连接，但各自保存投影和游标。`next_chunk` 每次读取并编码一页，由宿主释放客户端借用后再将字节写给消费者。
+宿主需要服务多个读取方时，可以用 `client.event_watermark` 读一次已提交水位，再为每个任务建立 `run.replay_sse(through, last_event_id)`。各个 `AgUiSseReplay` 共用 stdio 连接，但各自保存投影和游标。`next_chunk` 每次读取并编码一页，由宿主释放客户端借用后再将字节写给消费者。服务声明 `taskEventWatermarks` 时，宿主可用 `client.task_event_watermarks` 批量读取各任务水位，只推进有新事件的读取方。
 
 读完窗口后，用 `advance_through` 接入新的已提交水位。宿主可以查询水位，或从自己维护的实时通知中得到水位。每个读取方只读所属任务，回放和水位查询都保留现有实时订阅。
 
@@ -113,7 +113,7 @@ Rust 宿主演示位于 [`local_host.rs`](../crates/fliuno-ag-ui-http/examples/l
 | `GET /runs/{run_id}` | 在授权会话中找回运行。可发送 `Last-Event-ID`，从指定帧之后续传。不存在或不属于该会话的运行返回 `404`。 |
 | `DELETE /runs/{run_id}` | 取消授权会话中的运行，成功返回 `204`。重复取消仍返回 `204`。已经完成或失败的任务返回 `409`。 |
 
-路由每次读取一页持久事件，释放客户端后再把编码好的页交给响应体。当前限制同时 16 条响应或待解析请求，POST 正文最多 1 MiB，读取超时 10 秒。空闲响应共享约每 150 毫秒一次的水位查询。水位没有推进时不读取事件页，并定期发送 SSE 保活注释。执行段结束后关闭响应。
+路由每次读取一页持久事件，释放客户端后再把编码好的页交给响应体。当前限制同时 16 条响应或待解析请求，POST 正文最多 1 MiB，读取超时 10 秒。重连先用全局水位校验恢复位置。空闲响应共享约每 150 毫秒一次的批量任务水位查询，同一任务只查询一次，无关任务的事件不会触发空闲流读页。旧服务继续使用共享的全局水位查询。空闲时定期发送 SSE 保活注释，执行段结束后关闭响应。
 
 ### HTTP 审批
 

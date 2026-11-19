@@ -200,3 +200,84 @@ fn work_feed_coalesces_a_burst_and_replays_every_matching_commit() {
     assert!(server.0.wait().unwrap().success());
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn task_watermark_batch_is_positional_and_only_matching_commits_advance_it() {
+    use fliuno_protocol::{MAX_TASK_WATERMARKS, TaskWatermarks, TaskWatermarksParams};
+
+    let root =
+        std::env::temp_dir().join(format!("fliuno-task-watermarks-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let start = |peer: &mut Peer| {
+        let task = peer.call(
+            "task/startSummary",
+            json!({"sessionId":session["id"],"input":"build an artifact"}),
+        );
+        let id = task["id"].as_str().unwrap().to_owned();
+        peer.wait_for_status(&id, "waiting_approval");
+        id
+    };
+    let first = start(&mut peer);
+    let second = start(&mut peer);
+    let request = TaskWatermarksParams {
+        task_ids: vec![
+            second.clone(),
+            "not-found".into(),
+            first.clone(),
+            second.clone(),
+        ],
+    };
+    let params = serde_json::to_value(&request).unwrap();
+    let read = |peer: &mut Peer| -> TaskWatermarks {
+        serde_json::from_value(peer.call("events/getTaskWatermarks", params.clone())).unwrap()
+    };
+    let original = read(&mut peer).through_sequences;
+    assert_eq!(original[0], original[3]);
+    assert_eq!(original[1], None);
+    assert!(original[0].unwrap() > original[2].unwrap());
+    assert_eq!(
+        peer.call("events/get", json!({"sequence":original[2]}))["taskId"],
+        first
+    );
+    let watermark_before = peer.call("events/getWatermark", json!({}));
+    for invalid in [
+        json!({"taskIds":[]}),
+        json!({"taskIds":vec!["id"; MAX_TASK_WATERMARKS+1]}),
+        json!({"taskIds":["bad id"]}),
+    ] {
+        assert_eq!(
+            peer.request("events/getTaskWatermarks", invalid)["error"]["code"],
+            -32602
+        );
+    }
+    assert_eq!(
+        peer.call("events/getWatermark", json!({})),
+        watermark_before
+    );
+    peer.call("task/cancelSummary", json!({"taskId":first}));
+    let changed = read(&mut peer).through_sequences;
+    assert_eq!((&changed[..2], changed[3]), (&original[..2], original[3]));
+    assert!(changed[2].unwrap() > original[2].unwrap());
+    assert_eq!(
+        peer.call("events/get", json!({"sequence":changed[2]}))["data"]["type"],
+        "task_cancelled"
+    );
+    drop(peer);
+
+    let (server, mut client) = super::ag_ui_run::connect(&db);
+    assert_eq!(client.info().capabilities["taskEventWatermarks"], true);
+    assert_eq!(
+        client
+            .task_event_watermarks(&request, |_| {})
+            .unwrap()
+            .through_sequences,
+        changed
+    );
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}

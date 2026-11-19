@@ -5,7 +5,8 @@ use super::{Client, Error, Notification};
 use fliuno_protocol::{
     Event, EventKind, EventSubscription, EventWatermark, EventsListAllParams, EventsListParams,
     EventsListSessionParams, EventsListWorkspaceParams, EventsPage, EventsSetScopeParams,
-    ModelUsageSummary, ModelUsageSummaryParams, ModelUsageSummaryScope,
+    ModelUsageSummary, ModelUsageSummaryParams, ModelUsageSummaryScope, TaskWatermarks,
+    TaskWatermarksParams,
 };
 use std::io::{BufRead, Write};
 
@@ -40,6 +41,27 @@ impl<R: BufRead, W: Write> Client<R, W> {
             return Err(Error::InvalidReplayWindow);
         }
         Ok(watermark.through_sequence)
+    }
+
+    /// Read each task's latest durable event without changing the subscription.
+    /// Results retain request order; `None` means no durable event for that ID.
+    pub fn task_event_watermarks(
+        &mut self,
+        request: &TaskWatermarksParams,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<TaskWatermarks, Error> {
+        let result: TaskWatermarks =
+            self.call("events/getTaskWatermarks", request, on_notification)?;
+        if result.through_sequences.len() != request.task_ids.len()
+            || result
+                .through_sequences
+                .iter()
+                .flatten()
+                .any(|seq| !(1..=i64::MAX as u64).contains(seq))
+        {
+            return Err(Error::InvalidResult);
+        }
+        Ok(result)
     }
 
     /// Read exact lifetime totals and their event watermark in one request.

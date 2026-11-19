@@ -7,18 +7,38 @@ use std::{
 };
 use tokio::sync::Mutex;
 
+#[derive(Default)]
+struct Traffic {
+    scoped: Vec<(Instant, Vec<String>)>,
+    global: Vec<Instant>,
+    replay: Vec<(Instant, String)>,
+}
+
 struct CountWatermarks {
     stdin: ChildStdin,
-    times: Arc<SyncMutex<Vec<Instant>>>,
+    traffic: Arc<SyncMutex<Traffic>>,
 }
 
 impl Write for CountWatermarks {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        if bytes
-            .windows(b"events/getWatermark".len())
-            .any(|part| part == b"events/getWatermark")
-        {
-            self.times.lock().unwrap().push(Instant::now());
+        let request: Value = serde_json::from_slice(bytes).unwrap();
+        match request["method"].as_str().unwrap() {
+            "events/getWatermark" => self.traffic.lock().unwrap().global.push(Instant::now()),
+            "events/getTaskWatermarks" => {
+                let mut ids: Vec<String> =
+                    serde_json::from_value(request["params"]["taskIds"].clone()).unwrap();
+                ids.sort_unstable();
+                self.traffic
+                    .lock()
+                    .unwrap()
+                    .scoped
+                    .push((Instant::now(), ids));
+            }
+            "events/list" => self.traffic.lock().unwrap().replay.push((
+                Instant::now(),
+                request["params"]["taskId"].as_str().unwrap().to_owned(),
+            )),
+            _ => {}
         }
         self.stdin.write_all(bytes)?;
         Ok(bytes.len())
@@ -33,11 +53,11 @@ impl Write for CountWatermarks {
 async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
     let root = std::env::temp_dir().join(format!("fliuno-ag-ui-http-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
-    let watermarks = Arc::new(SyncMutex::new(Vec::new()));
+    let watermarks = Arc::new(SyncMutex::new(Traffic::default()));
     let (server, mut client) =
         connect_with_writer(&root.join("kernel.db"), |stdin| CountWatermarks {
             stdin,
-            times: watermarks.clone(),
+            traffic: watermarks.clone(),
         });
     let workspace: Workspace = client
         .call("workspace/open", &json!({"root":root}), |_| {})
@@ -144,37 +164,115 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
     }
     assert!(std::str::from_utf8(&start).unwrap().contains("RUN_STARTED"));
 
-    // The two startup requests query their snapshots separately. After both
-    // are initialized, keep the streams idle and observe actual stdio traffic.
-    let idle_since = Instant::now();
-    let deadline = idle_since + Duration::from_secs(4);
+    // Three bodies watch two tasks. Verify duplicate reconnects share the
+    // same task sample and that foreign commits cannot trigger empty replays.
+    let duplicate = http
+        .get(format!("{base}/runs/http-run-1"))
+        .bearer_auth("local-test")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), 200);
+    let mut watched = {
+        let mut client = shared.lock().await;
+        ["http-run-1", "http-run-2"].map(|id| {
+            client
+                .attach_ag_ui_run(&session.id, id, |_| {})
+                .unwrap()
+                .task()
+                .id
+                .clone()
+        })
+    };
+    watched.sort_unstable();
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let samples = watermarks
-            .lock()
-            .unwrap()
-            .iter()
-            .copied()
-            .filter(|instant| *instant >= idle_since)
-            .collect::<Vec<_>>();
-        if samples.len() >= 4 {
-            assert!(
-                samples
-                    .windows(2)
-                    .all(|pair| pair[1] - pair[0] >= Duration::from_millis(145)),
-                "idle responses sent separate watermark queries: {:?}",
-                samples
-                    .windows(2)
-                    .map(|pair| pair[1] - pair[0])
-                    .collect::<Vec<_>>()
-            );
+        let mut client = shared.lock().await;
+        if watched.iter().all(|id| {
+            let summary: TaskSummary = client
+                .call("task/getSummary", &json!({"taskId":id}), |_| {})
+                .unwrap();
+            summary.status == TaskStatus::WaitingApproval
+        }) {
             break;
         }
-        assert!(
-            Instant::now() < deadline,
-            "idle listeners stopped querying the watermark"
-        );
+        drop(client);
+        assert!(Instant::now() < deadline, "runs never reached approval");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let settled = Instant::now();
+    let deadline = settled + Duration::from_secs(5);
+    loop {
+        if watermarks
+            .lock()
+            .unwrap()
+            .scoped
+            .iter()
+            .filter(|(at, _)| *at >= settled)
+            .count()
+            >= 3
+        {
+            break;
+        }
+        assert!(Instant::now() < deadline, "scoped polling did not start");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    let idle_since = Instant::now();
+    let deadline = idle_since + Duration::from_secs(5);
+    for expected in 1..=4 {
+        {
+            let mut client = shared.lock().await;
+            let foreign: TaskSummary = client
+                .call(
+                    "task/startSummary",
+                    &json!({"sessionId":other.id,"input":"unrelated artifact"}),
+                    |_| {},
+                )
+                .unwrap();
+            let _: TaskSummary = client
+                .call("task/cancelSummary", &json!({"taskId":foreign.id}), |_| {})
+                .unwrap();
+        }
+        loop {
+            if watermarks
+                .lock()
+                .unwrap()
+                .scoped
+                .iter()
+                .filter(|(at, _)| *at >= idle_since)
+                .count()
+                >= expected
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "idle listeners stopped polling");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+    {
+        let traffic = watermarks.lock().unwrap();
+        let samples = traffic
+            .scoped
+            .iter()
+            .filter(|(at, _)| *at >= idle_since)
+            .collect::<Vec<_>>();
+        assert!(samples.iter().all(|(_, ids)| ids.as_slice() == watched));
+        assert!(
+            samples
+                .windows(2)
+                .all(|pair| pair[1].0 - pair[0].0 >= Duration::from_millis(145)),
+            "idle bodies sent separate watermark queries"
+        );
+        assert!(
+            !traffic.replay.iter().any(|(at, _)| *at >= idle_since),
+            "foreign work woke an idle stream"
+        );
+        assert!(
+            !traffic.global.iter().any(|at| *at >= idle_since),
+            "idle streams polled the global watermark"
+        );
+    }
+    drop(duplicate);
 
     let mut first_approval = None;
     for run_id in ["http-run-1", "http-run-2"] {

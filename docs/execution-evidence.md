@@ -789,3 +789,13 @@ Windows `scripts/check.ps1` 以退出码 0 完成：495 项测试、28 个离线
 SQLite 3.49.1 使用实际 v44 结构的内存副本，填充 16 万条任务分到 4 条会话。筛选时使用 `task_summary_status_cursor`，未筛选时使用 `tasks_session`；均直接定位游标并按主键读紧凑摘要，无临时排序或迁移。对比倒序第 8,000 条之后同样的 20 条，先核对结果一致，预热 20 对后交替测量 200 对。筛选中位耗时为 95.40 µs 对 `OFFSET` 的 5,211.45 µs；未筛选为 94.60 µs 对 6,281.90 µs。此合成基准只测本机 SQL，不含服务和磁盘开销。日志：`D:/Fliuno-Native-Test/task-catalog-query-plan.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：497 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-task-catalog-check.log`。
+
+## 0.0.3 AG-UI 空闲流任务水位（2026-11-20）
+
+`events/getTaskWatermarks` 按输入顺序返回最多 64 个任务的最新持久事件序号，缺少事件的任务为 `null`。SQLite 3.49.1 的查询计划使用已有 `events_task_sequence` 覆盖索引，VM 取得索引末端后直接完成 `MAX(sequence)`，无需读事件正文或新增迁移。应用协议 `0.1` 增加方法和结果类型，原契约不变。日志：`D:/Fliuno-Native-Test/task-watermarks-query-plan.log`。
+
+AG-UI HTTP 仍用全局水位校验起始回放和重连位置。空闲时，每个响应登记正在观察的任务；同一任务的多个响应共享批量水位样本，无关提交不会推动其回放窗口。不声明 `taskEventWatermarks` 的服务沿用全局查询。见 [HTTP 接入](ag-ui.md#http-接入)。
+
+真实进程测试让三条 SSE 响应观察两个任务，向另一个会话提交四组任务启动与取消。记录的 stdio 请求显示，每个空闲样本只查询这两个任务，没有全局轮询，也没有 `events/list` 调用；审批后两条运行仍正确结束，指定 SSE 帧可续传。协议测试验证请求顺序、重复和缺失 ID、边界拒绝、仅匹配事件推进及跨重启结果一致。Debian Linux 6.12.107 来宾的 7 项进程测试通过，覆盖工作台、事件流、AG-UI HTTP 和审批中断。日志：`D:/Fliuno-Native-Test/guest-task-watermarks.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：498 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-task-watermarks-check.log`。

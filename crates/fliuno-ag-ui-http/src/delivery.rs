@@ -1,5 +1,5 @@
 //! Pull small encoded pages in response to demand from the HTTP body.
-use super::{Gateway, POLL_INTERVAL, Status, replay_status};
+use super::{Gateway, POLL_INTERVAL, Status, replay_status, task_poll::TaskWatch};
 use axum::body::Bytes;
 use fliuno_client::ag_ui::{AgUiRunPhase, AgUiSseReplay};
 use futures_util::{Stream, stream};
@@ -18,6 +18,7 @@ pub(super) struct Delivery<R, W> {
     replay: Option<AgUiSseReplay>,
     heartbeat: Instant,
     through: u64,
+    watch: Option<TaskWatch>,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -26,13 +27,16 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Delivery<R, W> {
         gateway: Arc<Gateway<R, W>>,
         replay: AgUiSseReplay,
         through: u64,
+        task: Option<String>,
         permit: OwnedSemaphorePermit,
     ) -> Self {
+        let watch = task.map(|id| gateway.tasks.watch(id));
         Self {
             gateway,
             replay: Some(replay),
             heartbeat: Instant::now(),
             through,
+            watch,
             _permit: permit,
         }
     }
@@ -69,7 +73,12 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Delivery<R, W> {
             }
             loop {
                 sleep(POLL_INTERVAL).await;
-                let through = self.gateway.poll_watermark(self.through).await?;
+                let through = match &self.watch {
+                    Some(watch) => self.gateway.tasks.poll(&self.gateway, watch).await?,
+                    None => self.gateway.poll_watermark(self.through).await?,
+                };
+                // The first page used the global watermark. A task's current
+                // sequence may be lower until its next event commits.
                 if through > self.through {
                     replay.advance_through(through).map_err(replay_status)?;
                     self.through = through;

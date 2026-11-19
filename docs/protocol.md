@@ -128,6 +128,7 @@ staged.sync_all()?;
 | `modelUsage/getSummary` | `{scope:{kind:"task",taskId}}`、`{scope:{kind:"session",sessionId}}` 或 `{scope:{kind:"workspace",workspaceId}}` | `{throughSequence,totals}`，读取该范围内已保存报告的累计值 |
 | `events/listTaskChanges` | `{taskId?,sessionId?,workspaceId?,after?,through?,limit?}` | 固定水位并回放发生变动的任务 ID，每页去重，不返回事件正文 |
 | `events/getWatermark` | `{}` | 当前已提交的全局 `throughSequence`，供多个回放读取方共用 |
+| `events/getTaskWatermarks` | `{taskIds}` | 按输入顺序返回每个任务的最新事件序号；没有持久事件的项为 `null` |
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
 | `events/get` | `{sequence}` | 按全局序号读取一条持久事件 |
 | `events/listSession` | `{sessionId, after?:0, through?, limit?:100, targetBytes?}` | 单个会话的持久事件页，沿用全局序号 |
@@ -523,6 +524,8 @@ SQLite v40 为任务、会话和工作区建立用量索引。v37–v39 的数�
 `initialize.capabilities.eventReplayTargetBytes` 表示回放方法支持的最大字节目标。客户端可设置 `targetBytes` 为 1024..8388608，按紧凑 JSON 的 `events` 数组大小分页。单个事件已超过目标时，该页完整返回该事件，游标仍会前进。
 
 服务声明 `eventWatermarkQuery` 时，可用 `events/getWatermark` 读取当前水位。该方法保留连接现有的订阅、通知队列和缺口状态。多个读取方可把同一水位传给各自的 `events/list*` 请求，按各自的游标独立翻页。
+
+服务声明 `taskEventWatermarks` 时，`events/getTaskWatermarks` 可按任务批量读取最新已提交事件。例如 `{"taskIds":["a","b","a"]}` 可返回 `{"throughSequences":[42,null,42]}`。每批 1 到 64 个 ID，单个 ID 为 1 到 128 个可见 ASCII 字节。返回的序号属于同一个全局事件序列，但仅在该任务有新事件时推进。读取使用同一个 SQLite 视图，不读取事件正文，也不替换现有订阅。Rust 接口为 `Client::task_event_watermarks`。
 
 支持 `eventSubscriptionScope` 的 stdio 连接可请求 `events/setScope`。传入现有 `sessionId` 即可订阅该会话的持久事件。如有 `workspaceEventSubscription`，也可传入 `workspaceId` 订阅整个工作区。如有 `taskEventSubscription`，可传入 `taskId` 订阅单个任务，并用 `events/list` 的 `through` 参数限定回放上界。至多指定一个范围。三个范围参数均省略或为 `null` 时恢复全局范围。声明 `eventSubscriptionCursor` 的服务接受可选的 `after`。如果该序号超过切换时的水位，返回 `-32009` 并保留原有订阅。请求成功时服务替换旧队列，并返回切换时的全局水位 `throughSequence`。在响应之后暂存新通知。按当前范围用 `events/list`、`events/listSession`、`events/listWorkspace` 或 `events/listAll` 补齐至这个水位，再按序号处理暂存通知。队列中尚未发送的旧通知可从持久回放读取。实时模型预览和终端通知各自独立。批量请求依次执行，实时队列使用最后一次成功切换的范围。
 
