@@ -22,6 +22,11 @@ enum Action {
     Cancel,
 }
 
+enum ParsedArgs {
+    TaskId(String),
+    Update(UpdateArgs),
+}
+
 impl Action {
     fn method(self) -> &'static str {
         match self {
@@ -104,8 +109,17 @@ fn schema(action: Action) -> Value {
 }
 
 impl TaskTool {
-    fn task_id(&self, arguments: &Value) -> Result<String, String> {
-        parse_task_id(arguments)
+    fn parse_arguments(&self, arguments: &Value) -> Result<ParsedArgs, String> {
+        if !arguments.is_object() {
+            return Err("MCP task arguments must be an object".into());
+        }
+        if !self.validator.is_valid(arguments) {
+            return Err("MCP task arguments do not match the registered schema".into());
+        }
+        match self.action {
+            Action::Get | Action::Cancel => parse_task_id(arguments).map(ParsedArgs::TaskId),
+            Action::Update => parse_update_args(arguments).map(ParsedArgs::Update),
+        }
     }
 }
 
@@ -131,21 +145,7 @@ impl Tool for TaskTool {
     }
 
     fn validate(&self, arguments: &Value) -> Result<(), String> {
-        if !arguments.is_object() {
-            return Err("MCP task arguments must be an object".into());
-        }
-        if !self.validator.is_valid(arguments) {
-            return Err("MCP task arguments do not match the registered schema".into());
-        }
-        match self.action {
-            Action::Get | Action::Cancel => {
-                let _ = self.task_id(arguments)?;
-            }
-            Action::Update => {
-                let _ = parse_update_args(arguments)?;
-            }
-        }
-        Ok(())
+        self.parse_arguments(arguments).map(|_| ())
     }
 
     fn execute(
@@ -154,21 +154,16 @@ impl Tool for TaskTool {
         call: &ToolCall,
         cancellation: &CancellationToken,
     ) -> Result<ToolOutput, ToolError> {
-        self.validate(&call.arguments)?;
-        let task_id = match self.action {
-            Action::Update => {
-                parse_update_args(&call.arguments)
-                    .map_err(ToolError::Failed)?
-                    .task_id
-            }
-            Action::Get | Action::Cancel => self.task_id(&call.arguments)?,
-        };
-        let output = match self.action {
-            Action::Get => {
+        let parsed = self
+            .parse_arguments(&call.arguments)
+            .map_err(ToolError::Failed)?;
+        let output = match (self.action, parsed) {
+            (Action::Get, ParsedArgs::TaskId(task_id)) => {
+                let request_task_id = task_id;
                 let response = self.host.request(cancellation, move |service| {
                     Box::pin(async move {
                         service
-                            .get_task(GetTaskParams::new(task_id))
+                            .get_task(GetTaskParams::new(request_task_id))
                             .await
                             .map(Some)
                     })
@@ -176,13 +171,14 @@ impl Tool for TaskTool {
                 serde_json::to_value(response)
                     .map_err(|_| ToolError::Failed("cannot encode MCP task snapshot".into()))?
             }
-            Action::Update => {
-                let parsed = parse_update_args(&call.arguments).map_err(ToolError::Failed)?;
+            (Action::Update, ParsedArgs::Update(parsed)) => {
+                let task_id = parsed.task_id;
+                let request_task_id = task_id.clone();
                 self.host.request(cancellation, move |service| {
                     Box::pin(async move {
                         service
                             .update_task(UpdateTaskParams::new(
-                                parsed.task_id,
+                                request_task_id,
                                 parsed.input_responses,
                             ))
                             .await
@@ -191,7 +187,7 @@ impl Tool for TaskTool {
                 })?;
                 json!({"taskId":task_id,"updateAccepted":true,"statusMayLag":true})
             }
-            Action::Cancel => {
+            (Action::Cancel, ParsedArgs::TaskId(task_id)) => {
                 let request_task_id = task_id.clone();
                 self.host.request(cancellation, move |service| {
                     Box::pin(async move {
@@ -203,6 +199,7 @@ impl Tool for TaskTool {
                 })?;
                 json!({"taskId":task_id,"cancellationRequested":true,"cooperative":true})
             }
+            _ => return Err(ToolError::Failed("invalid MCP task arguments".into())),
         };
         let output = json!({
             "serverId":self.server_id,
@@ -253,8 +250,8 @@ fn parse_update_args(arguments: &Value) -> Result<UpdateArgs, String> {
     {
         return Err("MCP task responses exceed their entry or key limits".into());
     }
-    let responses = Value::Object(parsed.input_responses.clone().into_iter().collect());
-    if json_size(&responses).map_err(|_| "invalid MCP task responses")? > INPUT_RESPONSES_MAX_BYTES
+    if json_size(&parsed.input_responses).map_err(|_| "invalid MCP task responses")?
+        > INPUT_RESPONSES_MAX_BYTES
     {
         return Err("MCP task responses exceed 256 KiB".into());
     }
