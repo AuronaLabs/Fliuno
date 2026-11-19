@@ -6,11 +6,9 @@
 
 [项目首页](../README.md) · [更新记录](../CHANGELOG.md)
 
-第一次用 Fliuno，先跑一个离线任务。已经有客户端或宿主，可以直接查应用协议和对应的接入方式。
-
-1. **跑示例**：[离线任务](../README.md#跑一次离线任务) → [环境与配置](setup.md) → [真实模型](setup.md#真实模型)
-2. **接客户端**：[stdio 握手](protocol.md#传输) → [Rust 客户端](protocol.md#rust-调用方) 或 [AG-UI HTTP](ag-ui.md#http-接入)
-3. **读内核**：[内核架构](architecture.md) → [注册身份与授权](authority.md) → [验收记录](execution-evidence.md)
+1. **第一次运行**：[跑离线任务](../README.md#跑一次离线任务) → [配置运行环境](setup.md) → [接入真实模型](setup.md#真实模型)
+2. **开发客户端或宿主**：[stdio 握手](protocol.md#传输) → [Rust 客户端](protocol.md#rust-调用方) 或 [AG-UI HTTP](ag-ui.md#http-接入)
+3. **理解或修改内核**：[内核架构](architecture.md) → [注册身份与授权](authority.md) → [验收记录](execution-evidence.md)
 
 [接入客户端](#接入客户端) · [模型、工具与 Agent](#模型工具与-agent) · [本机执行与隔离](#本机执行与隔离) · [内核与开发](#内核与开发)
 
@@ -22,8 +20,8 @@
 | --- | --- |
 | [应用协议 0.1](protocol.md) · [JSON Schema](../protocol/fliuno.schema.json) | 握手、任务、审批、事件和产物的接口定义 |
 | [Rust 客户端](protocol.md#rust-调用方) | 类型化调用、订阅与回放交接、分段下载和摘要校验 |
-| [AG-UI](ag-ui.md) · [本机 HTTP 演示](../examples/ag_ui_http_demo.py) | 提交文本任务、独立授权审批和 SSE 断线续传 |
-| [会话历史分页](context.md#会话历史分页) | 用固定水位读取已完成对话与产物引用 |
+| [AG-UI](ag-ui.md) · [本机 HTTP 演示](../examples/ag_ui_http_demo.py) | 提交文本任务、审批后续跑、通过 SSE 断线续传 |
+| [会话历史与检索](context.md#会话历史分页) · [搜索接口](protocol.md#查找历史任务) | 用固定水位读取已完成对话，按文本定位历史任务 |
 
 ## 模型、工具与 Agent
 

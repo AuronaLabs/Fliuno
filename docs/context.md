@@ -4,6 +4,8 @@
 
 同一 `Session` 的后续任务默认接收此前已完成工作的有界历史。历史由 Fliuno 保存和选择，OpenAI、Anthropic 与 ACP 后端使用同一份中性记录。每个任务仍有自己的执行、审批和供应商续接状态。
 
+[创建任务](#协议与使用) · [读取历史](#会话历史分页) · [冻结快照](#冻结与幂等) · [选择与预算](#选择预算与省略) · [持久化](#持久化与迁移)
+
 ## 协议与使用
 
 `initialize.capabilities` 声明 `sessionContext:true`、`contextTaskSelection:true`、`maxContextTurns:32`、`maxContextBytes:262144`。客户端可先预览，再提交任务：

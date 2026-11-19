@@ -4,6 +4,8 @@
 
 Fliuno 的 A2A 通道用于调用主机预先注册的远程 Agent。`fliuno-a2a` 只负责有界 HTTP 与 wire 校验；`fliuno-agents` 将协议转换为中性 Agent 观察；`fliuno-core` 保存任务、远程身份、结束原因、产物和事件。它与模型 provider、MCP 工具通道、ACP 本地进程后端分别维护。
 
+[配置与调用](#配置与调用) · [核对状态](#显式核对远端状态) · [续接任务](#显式续接远端任务) · [保存产物](#产物保存) · [验证与演示](#验证与演示)
+
 ## 固定版本与支持范围
 
 本实现固定 [A2A v1.0.0 规范](https://a2a-protocol.org/v1.0.0/specification/) 的 JSON-RPC binding；请求发送 `A2A-Version: 1.0`。方法为 `SendMessage`、`GetTask`、`CancelTask`，使用 `ROLE_USER` / `ROLE_AGENT`、`TASK_STATE_*`、`text` / `data` / `raw` / `url` oneof。旧版 `message/send`、小写状态和 `kind/file` Part 不作为兼容协议接受。

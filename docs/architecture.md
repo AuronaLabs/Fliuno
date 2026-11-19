@@ -4,39 +4,37 @@
 
 从模块依赖图了解客户端如何启动任务，再看任务如何暂停、恢复和提交结果。
 
-[模块与依赖](#领域与依赖) · [Rust 工作区](#rust-工作区模块) · [任务状态机](#状态机) · [事务和失败](#事务和失败语义) · [权限边界](#权限边界)
+[请求与注册](#领域与依赖) · [Rust 工作区](#rust-工作区模块) · [任务状态机](#状态机) · [事务和失败](#事务和失败语义) · [权限边界](#权限边界)
 
 ## 领域与依赖
 
+### 请求如何进入内核
+
 ```mermaid
 flowchart TD
-  Tauri[未来 Tauri / CLI / 其他客户端] --> App[app-server: 应用协议]
-  App --> Core[core: 任务与权限]
-  App --> Providers[providers: 模型适配]
-  App --> MCP[mcp: 外部工具适配]
-  App --> Exec[exec: 主机注册命令]
-  Exec --> Sandbox[sandbox: 原生进程与 OS 权限]
-  App --> Terminal[terminal: PTY 工具与服务 facade]
-  Terminal --> Sandbox
-  Terminal --> Supervisor[独立 supervisor: 生命周期 actor]
-  Supervisor --> PTY[portable-pty: 原生 PTY 与 IO worker]
-  Supervisor --> Spool[SQLite: 有界原始输出与操作去重]
-  App --> Tools[tools: 工作区文件能力]
-  App --> Skills[skills: 技能发现与读取]
-  Providers --> Core
-  MCP --> Core
-  MCP --> Sandbox
-  ACP[acp: 独立外部 Agent 客户端] --> Sandbox
-  App --> Agents[agents: 外部运行与宿主代理]
-  Agents --> ACP
-  Agents --> A2A[a2a: 独立有界 JSON-RPC 客户端]
-  Agents --> Core
-  Agents --> Tools
-  Tools --> Core
-  Skills --> Core
-  Core --> Protocol[protocol: 契约]
-  Core --> Storage[SQLite: 快照与事件事务]
+  Stdio["本机 stdio 客户端"] --> Server["app-server · JSON-RPC"]
+  Http["HTTP / SSE 客户端"] --> Host["宿主 · AG-UI 路由"]
+  Host -->|Rust client| Server
+  Server --> Core["core · 任务与审批"]
+  Core --> Store[("SQLite · 任务、事件与产物")]
 ```
+
+Rust 客户端直接使用应用协议。HTTP 路径由宿主先授权会话，再用同一个 Rust 客户端访问应用服务。协议对象和 JSON Schema 由 `fliuno-protocol` 定义。
+
+### 执行能力如何注册
+
+```mermaid
+flowchart TD
+  Server["app-server · 装配适配器"] --> Models["providers · 模型"]
+  Server --> Agents["agents · ACP / A2A"]
+  Server --> Tools["MCP、命令与 PTY"]
+  Server --> Local["工作区文件、Skills"]
+  Agents -->|隔离启动的 ACP| Sandbox["sandbox · OS 隔离与预算"]
+  Tools -->|隔离启动的 MCP、命令与 PTY| Sandbox
+  Tools -->|跨轮次 PTY| Supervisor["独立 supervisor · 进程与输出"]
+```
+
+模型、Agent 和工具适配器实现各自的执行接口。应用服务把它们注册给 `core`；内核负责决定何时运行、何时等待审批、何时提交结果。PTY 的监督进程独立持有终端和输出账本。
 
 `Workspace` 是用户指定的工作根目录；`Session` 属于一个工作区；`Task` 是一次执行；`Approval` 精确绑定任务和不可由客户端替换的工具调用；`Artifact` 是可审阅的交付物；`Event.sequence` 是数据库内单调递增的全局回放游标。
 

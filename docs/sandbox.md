@@ -4,6 +4,8 @@
 
 当前实现与本机验证日期：2026-11-18。`fliuno-sandbox` 不依赖任务内核、模型或外部 Agent 协议；`fliuno-mcp/launch.rs` 和 `fliuno-acp/transport.rs` 分别接到官方 SDK 的 stdio 传输。MCP 主机配置必须明确选择 `trusted_host`、`windows_app_container` 或 `linux_landlock`；ACP 的 `connect_isolated` 使用当前平台后端，通用 transport 由调用方管理权限和生命周期。隔离启动不存在失败后转宿主运行的路径。
 
+[Windows](#windows-私有目录模式) · [Linux](#linux-landlock-模式) · [测试证据](#测试证据) · [持久终端](#持久终端)
+
 ## Windows 私有目录模式
 
 每次启动创建随机 UUID 命名的 AppContainer profile，不复用身份。将主机指定的单个原生 `.exe` 通过新建文件写入私有 `LocalState/fliuno`，不使用会携带源文件 ACL 的 Windows 文件复制操作。工作目录、用户目录与临时目录环境变量指向此私有目录。没有宿主目录授权、网络能力或 loopback exemption；不改宿主工作区或祖先目录的 ACL。
