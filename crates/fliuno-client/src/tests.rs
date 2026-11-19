@@ -632,3 +632,50 @@ fn malformed_summary_changes_do_not_move_the_event_cursor() {
         assert_eq!(replay.cursor(), 4);
     }
 }
+
+#[test]
+fn artifact_catalog_rejects_rewritten_windows_and_invalid_continuations() {
+    use fliuno_protocol::{ArtifactCatalogScope, ArtifactCatalogSnapshotParams};
+    let item = json!({"id":"a","taskId":"t","mediaType":"text/plain","title":"note","contentBytes":8,"binary":false});
+    let changed = |items, after, through, more| json!({"items":items,"nextAfter":after,"throughSequence":through,"hasMore":more});
+    let mut wrong_media = item.clone();
+    wrong_media["mediaType"] = json!("application/json");
+    let replies = [
+        changed(json!([item]), 5, 10, false),
+        changed(json!([item, item]), 7, 9, true),
+        changed(json!([item]), 4, 9, false),
+        changed(json!([]), 4, 9, true),
+        changed(json!([item]), 9, 9, true),
+        changed(json!([wrong_media]), 5, 9, false),
+        changed(json!([item]), 5, 9, false),
+    ];
+    let input = replies
+        .iter()
+        .enumerate()
+        .map(|(i, reply)| format!("{}\n", json!({"jsonrpc":"2.0","id":i+2,"result":reply})))
+        .collect::<String>();
+    let mut client = fake_client(input.as_bytes());
+    let mut catalog = ArtifactCatalog::new(ArtifactCatalogSnapshotParams {
+        scope: ArtifactCatalogScope::Session {
+            session_id: "session".into(),
+        },
+        after: 4,
+        through_sequence: Some(9),
+        limit: 2,
+        media_type: Some("text/plain".into()),
+    });
+    for _ in 0..replies.len() - 1 {
+        assert!(matches!(
+            catalog.next_page(&mut client, |_| {}),
+            Err(Error::InvalidArtifactCatalogPage)
+        ));
+        let saved = catalog.next_request().unwrap();
+        assert_eq!(saved.after, 4);
+        assert_eq!(saved.through_sequence, Some(9));
+    }
+    let page = catalog.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert_eq!(page.next_after, 5);
+    assert_eq!(catalog.completed_through(), Some(9));
+    assert!(catalog.begin_next_window());
+    assert_eq!(catalog.next_request().unwrap().after, 9);
+}

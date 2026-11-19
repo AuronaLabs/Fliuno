@@ -129,6 +129,7 @@ staged.sync_all()?;
 | `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
 | `artifacts/listScopedSummaries` | `{scope:{kind:"session",sessionId} 或 {kind:"workspace",workspaceId},after?,limit?,mediaType?}` | 按保存顺序查询指定会话或工作区的产物元数据 |
 | `artifacts/listSnapshot` | `{scope,after?,limit?,mediaType?,throughSequence?}` | 返回目录水位和该水位以内的元数据页 |
+| `artifacts/subscribe` | `{scope,after?,limit?,mediaType?}` | 一次返回当前目录首页和事件水位，并替换连接的实时订阅 |
 | `artifacts/getSummary` | `{taskId,artifactId}` | 单份 ArtifactSummary |
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
 | `artifacts/digest` | `{taskId,artifactId}` | 正文的 `contentBytes` 与小写十六进制 `sha256` |
@@ -188,6 +189,18 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 下载方仍需对自己实际收到的字节计算 SHA-256 并比对。摘要描述提交时的内容（旧产物为首次计算时的内容）；它不表示服务刚刚校验了磁盘上的正文。
 
 `initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
+
+### 交付物目录订阅
+
+`artifactCatalogSubscription:true` 表示可用 `artifacts/subscribe`。传入会话或工作区范围；`after` 省略为 0，也可填入同范围、同筛选条件下已经完整消费的目录水位。`limit` 默认 100，范围为 1..100。服务原子读取目录页、记录事件水位并注册同范围的水位通知；校验失败时保留原订阅。每条连接只有一个实时事件订阅；响应前收到的通知仍属于旧订阅。
+
+```json
+{"jsonrpc":"2.0","id":15,"method":"artifacts/subscribe","params":{"scope":{"kind":"workspace","workspaceId":"<workspace-id>"},"limit":20,"mediaType":"text/plain"}}
+```
+
+响应为 `{catalog,eventThroughSequence}`。`catalog` 是 [固定水位的元数据页](#审批事件与产物)。目录还有下一页时，以它的 `nextAfter` 和 `throughSequence` 继续调用 `artifacts/listSnapshot`。当前窗口读完后，用 `throughSequence` 作为下个目录窗口的 `after`，包括最后一页没有匹配条目的情况。`eventThroughSequence` 是事件流的起点，用于 `events/listSession`、`events/listWorkspace` 或 Rust `EventFeed`，不能拿来翻目录。
+
+媒体类型只筛选目录页。收到匹配事件范围的 `artifact_created` 后，客户端可将其作为刷新目录的信号。Rust 的 `Client::subscribe_artifacts` 同时返回首页、`ArtifactCatalog` 和 `EventFeed`；把日常 RPC 的通知交给 `events.observe`。保存 `ArtifactCatalog::next_request()` 可在重启后继续读固定窗口，窗口读完后保存 `completed_through()`，同一进程内也可调用 `begin_next_window()` 读取新增产物。事件消费进度单独以 `EventFeed::cursor()` 保存。
 
 ### 批量读取任务摘要
 

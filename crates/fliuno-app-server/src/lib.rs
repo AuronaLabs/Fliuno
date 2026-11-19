@@ -192,6 +192,36 @@ impl RpcServer {
         Ok(snapshot)
     }
 
+    fn subscribe_artifacts(
+        &mut self,
+        request: ArtifactCatalogParams,
+    ) -> Result<ArtifactSubscriptionSnapshot, RpcError> {
+        let scope = match &request.scope {
+            ArtifactCatalogScope::Session { session_id } => EventScope::Session(session_id.clone()),
+            ArtifactCatalogScope::Workspace { workspace_id } => {
+                EventScope::Workspace(workspace_id.clone())
+            }
+        };
+        let (catalog, event_through_sequence, receiver) = {
+            // Catalog rows and their ArtifactCreated events commit together.
+            // Keep this lock across both reads and the receiver registration.
+            let kernel = self.kernel()?;
+            let catalog = kernel.list_artifact_snapshot(request.into())?;
+            let event_through_sequence = kernel.event_watermark()?;
+            let receiver = kernel.subscribe_event_watermarks(scope.clone())?;
+            (catalog, event_through_sequence, receiver)
+        };
+        self.install_event_delivery(
+            scope,
+            event_through_sequence,
+            EventDelivery::Watermarks(receiver),
+        );
+        Ok(ArtifactSubscriptionSnapshot {
+            catalog,
+            event_through_sequence,
+        })
+    }
+
     fn install_event_delivery(&mut self, scope: EventScope, through: u64, delivery: EventDelivery) {
         (
             self.event_receiver,
@@ -466,6 +496,7 @@ impl RpcServer {
             capabilities["binaryArtifacts"] = json!(true);
             capabilities["maxBinaryArtifactBytes"] = json!(MAX_BINARY_ARTIFACT_BYTES);
             capabilities["artifactCatalogSnapshots"] = json!(true);
+            capabilities["artifactCatalogSubscription"] = json!(true);
             capabilities["artifactSummaryById"] = json!(true);
             capabilities["scopedArtifactSummaries"] = json!(true);
             capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
@@ -988,6 +1019,10 @@ impl RpcServer {
             "artifacts/listSnapshot" => {
                 let p: ArtifactCatalogSnapshotParams = decode(params)?;
                 json!(self.kernel()?.list_artifact_snapshot(p)?)
+            }
+            "artifacts/subscribe" => {
+                let p: ArtifactCatalogParams = decode(params)?;
+                json!(self.subscribe_artifacts(p)?)
             }
             "artifacts/read" => {
                 let p: ArtifactReadParams = decode(params)?;

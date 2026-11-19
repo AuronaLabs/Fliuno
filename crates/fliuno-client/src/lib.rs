@@ -1,6 +1,7 @@
 //! Blocking stdio client for Fliuno's local application protocol.
 pub mod ag_ui;
 mod approval_inbox;
+mod artifact_catalog;
 mod download;
 mod feed;
 mod history;
@@ -11,6 +12,7 @@ mod wire;
 mod work;
 
 pub use approval_inbox::ApprovalInbox;
+pub use artifact_catalog::{ArtifactCatalog, ArtifactSubscription};
 pub use feed::EventFeed;
 pub use history::SessionHistory;
 pub use history_search::{HistorySearch, HistorySearchRequest};
@@ -48,6 +50,8 @@ pub enum Error {
     InvalidHistoryPage,
     #[error("invalid approval inbox snapshot page")]
     InvalidApprovalInboxPage,
+    #[error("invalid artifact catalog page")]
+    InvalidArtifactCatalogPage,
     #[error("invalid expected artifact SHA-256")]
     InvalidArtifactDigest,
     #[error("artifact chunk violates the requested range or content length")]

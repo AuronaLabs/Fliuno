@@ -56,6 +56,27 @@ pub struct ArtifactCatalogSnapshotPage {
     pub has_more: bool,
 }
 
+impl From<ArtifactCatalogParams> for ArtifactCatalogSnapshotParams {
+    fn from(params: ArtifactCatalogParams) -> Self {
+        Self {
+            scope: params.scope,
+            media_type: params.media_type,
+            after: params.after,
+            through_sequence: None,
+            limit: params.limit,
+        }
+    }
+}
+
+/// Catalog page and event cursor captured before installing the same-scope feed.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactSubscriptionSnapshot {
+    pub catalog: ArtifactCatalogSnapshotPage,
+    /// Global event sequence, independent of the catalog sequence space.
+    pub event_through_sequence: u64,
+}
+
 pub const MAX_ARTIFACT_READ_BYTES: u32 = 64 * 1024;
 pub const MAX_ARTIFACT_DIGEST_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_BINARY_ARTIFACT_BYTES: usize = 256 * 1024;

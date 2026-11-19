@@ -21,6 +21,8 @@ mod ag_ui_http;
 mod ag_ui_interrupt;
 #[path = "client/ag_ui_run.rs"]
 mod ag_ui_run;
+#[path = "client/artifact_catalog.rs"]
+mod artifact_catalog;
 #[path = "client/artifact_digest.rs"]
 mod artifact_digest;
 #[path = "client/artifact_download.rs"]

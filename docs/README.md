@@ -29,7 +29,8 @@
 | **订阅进度与断线恢复** | [Rust 客户端](protocol.md#rust-调用方) · [AG-UI SSE 续传](ag-ui.md#sse-输出与续传) |
 | **走 HTTP 提交、审批与续跑** | [挂载 AG-UI 路由](ag-ui.md#http-接入) · [HTTP 演示](../examples/ag_ui_http_demo.py) |
 | **浏览会话或定位任务** | [历史分页](context.md#会话历史分页) · [搜索接口](protocol.md#查找历史任务) |
-| **下载交付物与统计用量** | [产物读取与校验](protocol.md#审批事件与产物) · [模型用量分页](protocol.md#模型用量) |
+| **浏览并下载交付物** | [目录订阅](protocol.md#交付物目录订阅) · [产物读取与校验](protocol.md#审批事件与产物) |
+| **统计用量** | [模型用量分页](protocol.md#模型用量) |
 
 ## 模型、工具与 Agent
 

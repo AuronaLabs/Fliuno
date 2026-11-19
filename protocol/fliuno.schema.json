@@ -2727,6 +2727,81 @@
         }
       }
     },
+    "artifacts/subscribe": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactCatalogParams",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/ArtifactCatalogScope"
+        },
+        "mediaType": {
+          "description": "Match the stored media type exactly, including any parameters.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "$defs": {
+        "ArtifactCatalogScope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "session"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "workspace"
+                },
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "workspaceId"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "artifacts/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ArtifactGetParams",
@@ -7674,6 +7749,94 @@
         "hasMore"
       ],
       "$defs": {
+        "ArtifactSummary": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "binary": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "title",
+            "mediaType",
+            "contentBytes"
+          ]
+        }
+      }
+    },
+    "ArtifactSubscriptionSnapshot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactSubscriptionSnapshot",
+      "description": "Catalog page and event cursor captured before installing the same-scope feed.",
+      "type": "object",
+      "properties": {
+        "catalog": {
+          "$ref": "#/$defs/ArtifactCatalogSnapshotPage"
+        },
+        "eventThroughSequence": {
+          "description": "Global event sequence, independent of the catalog sequence space.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "catalog",
+        "eventThroughSequence"
+      ],
+      "$defs": {
+        "ArtifactCatalogSnapshotPage": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ArtifactSummary"
+              }
+            },
+            "throughSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "nextAfter": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "hasMore": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "items",
+            "throughSequence",
+            "nextAfter",
+            "hasMore"
+          ]
+        },
         "ArtifactSummary": {
           "type": "object",
           "properties": {
