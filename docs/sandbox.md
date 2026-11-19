@@ -39,9 +39,9 @@ Windows 启动流程：
 
 异步管道不会在 Tokio 文件线程池保留阻塞读写。Windows 独立 writer 补足默认 named-pipe flush 不等待 pending WriteFile 完成的差异，确认完成或错误后才 shutdown，并限制每笔缓冲 64 KiB。MCP/ACP stderr 由可 abort 的异步任务丢弃；结束时不在协议线程 join 阻塞读端。字段语义与原生取消探针见 [执行证据](execution-evidence.md)。
 
-Windows 的 exec、MCP 和 ACP 可信启动复用 `spawn_host_async(HostLaunchSpec)`，使用绝对可执行路径、绝对 cwd 和显式 Unicode 环境。宿主进程保留当前用户权限，使用独立 Job 管理生命周期。MCP 和 ACP 可显式配置 `resources.pidsMax` 和 `resources.memoryMaxBytes`。Windows 要求配置 `.exe`，运行脚本时由宿主选定解释器。
+Windows 的 exec、MCP 和 ACP 可信启动复用 `spawn_host_async(HostLaunchSpec)`，使用绝对可执行路径、绝对 cwd 和显式 Unicode 环境。宿主进程保留当前用户权限，使用独立 Job 管理生命周期。exec、MCP 和 ACP 可显式配置 `resources.pidsMax` 和 `resources.memoryMaxBytes`。Windows 要求配置 `.exe`，运行脚本时由宿主选定解释器。
 
-Linux 的可信 MCP 和 ACP 使用同一 API。启动时加入独立进程组，并在委派可用时接入 cgroup v2 与 guardian。配置了 `linuxCgroupParent` 或资源上限时，无法应用配置就拒绝启动。可信 MCP 继续使用配置的宿主 cwd。Linux 可信 exec 目前使用 Tokio 进程与进程组。共享管道探针覆盖大块往返、取消、已退出 reader 和写入错误。
+Linux 的可信 exec、MCP 和 ACP 使用同一 API。启动时加入独立进程组，并在委派可用时接入 cgroup v2 与 guardian。配置了 `linuxCgroupParent` 或资源上限时，无法应用配置就拒绝启动。可信 MCP 和 ACP 使用固定的宿主 cwd。可信 exec 使用任务工作区作为 cwd。共享管道探针覆盖大块往返、取消、已退出 reader 和写入错误。
 
 句柄中转进程没有执行自己的入口、加载器线程或 Rust 初始化代码；启动时即以 `JOB_LIST` 放入独立的 kill-on-close Job，宿主硬崩溃也会回收它。中转 Job 的 silent breakaway 允许真实子进程离开这个临时 Job，外层禁止脱离的 Job 约束仍适用；恢复线程前另用 `IsProcessInJob` 验证实际归属。持久 service bootstrap 复用句柄中转，但实际 service 的 Job 仍由 worker 自己持有，以支持 app-server 重启。此启动路径要求支持 `PROC_THREAD_ATTRIBUTE_JOB_LIST` 的 Windows 10 / Server 2016 或更新系统，不支持时拒绝启动。
 

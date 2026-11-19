@@ -128,6 +128,32 @@ fn assert_complete(kernel: &Kernel, task: &Task, mode: ProcessIsolation) {
         kernel.list_events(&task.id, 0, 100).unwrap().events
     );
 }
+#[cfg(any(windows, target_os = "linux"))]
+#[test]
+fn trusted_execution_applies_the_approved_process_limit() {
+    let directory = Directory::new();
+    let args = json!({"args":["child-status"]});
+    let mut limited = config(ProcessIsolation::TrustedHost);
+    #[cfg(target_os = "linux")]
+    {
+        let Some(parent) = std::env::var_os("FLIUNO_EXEC_TEST_CGROUP_PARENT") else {
+            eprintln!("set FLIUNO_EXEC_TEST_CGROUP_PARENT for delegated Linux validation");
+            return;
+        };
+        limited.linux_cgroup_parent = Some(parent.into());
+    }
+    limited.resources.pids_max = Some(1);
+    let baseline = config(ProcessIsolation::TrustedHost);
+    for (program, spawned) in [(baseline, true), (limited, false)] {
+        let (mut kernel, session) = setup(&directory, args.clone(), program);
+        let task = approve(&mut kernel, &session);
+        assert_complete(&kernel, &task, ProcessIsolation::TrustedHost);
+        let report: Value =
+            serde_json::from_str(output(&task)["stdout"]["data"].as_str().unwrap()).unwrap();
+        assert_eq!(report["spawned"], spawned);
+    }
+}
+
 fn modes() -> Vec<ProcessIsolation> {
     let mut modes = vec![ProcessIsolation::TrustedHost];
     if cfg!(windows) {
@@ -278,12 +304,12 @@ fn concurrent_native_workers_keep_lifetimes_and_streams_independent() {
         assert_eq!(report["evidence"]["cleanupExpired"], false);
         // A reaped Unix process group may already be absent. Its failed
         // terminate observation is distinct from an input/output failure.
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         assert!(
             report["evidence"]["faults"].as_array().unwrap().is_empty(),
             "{report}"
         );
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         for fault in report["evidence"]["faults"].as_array().unwrap() {
             assert_eq!(fault["operation"], "terminate", "{report}");
             assert_eq!(fault["osCode"], libc::ESRCH, "{report}");

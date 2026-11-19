@@ -19,7 +19,7 @@ base64 = "0.22"
 tokio = { version = "1", features = ["rt", "io-util", "process", "time", "fs"] }
 
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(all(unix, not(target_os = "linux")))'.dependencies]
 process-wrap = { version = "10", default-features = false, features = ["tokio1", "kill-on-drop", "process-group"] }
 libc = "0.2"
 

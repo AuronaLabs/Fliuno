@@ -21,6 +21,16 @@ pub fn main() -> io::Result<()> {
             );
             eprintln!("stderr:中文");
         }
+        Some("child-status") => {
+            let child = std::process::Command::new(std::env::current_exe()?)
+                .arg("child-exit")
+                .status();
+            println!(
+                "{}",
+                serde_json::json!({"spawned": child.is_ok_and(|status| status.success())})
+            );
+        }
+        Some("child-exit") => {}
         Some("exit") => {
             println!("known failure");
             std::process::exit(7);

@@ -3,18 +3,18 @@
 use crate::{Arguments, Program, config::ProcessIsolation};
 use fliuno_core::{ToolContext, ToolError};
 use fliuno_sandbox::{PipeReader, PipeWriter};
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
 use process_wrap::tokio::ProcessGroup;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
 use process_wrap::tokio::{ChildWrapper, CommandWrap, KillOnDrop};
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
 use std::process::Stdio;
 use std::{io, process::ExitStatus};
 
 pub(super) enum Process {
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "linux")))]
     Host(Box<dyn ChildWrapper>),
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     NativeHost(
         Box<fliuno_sandbox::HostChild>,
         Option<fliuno_sandbox::AsyncStdio>,
@@ -37,18 +37,18 @@ pub(super) trait ProcessControl {
 impl ProcessControl for Process {
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         match self {
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "linux")))]
             Self::Host(child) => child.try_wait(),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             Self::NativeHost(child, _) => child.try_wait(),
             Self::Scratch(child, _) => child.try_wait(),
         }
     }
     fn stop(&mut self) -> io::Result<()> {
         match self {
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "linux")))]
             Self::Host(child) => child.start_kill(),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             Self::NativeHost(child, _) => child.kill(),
             Self::Scratch(child, _) => child.kill(),
         }
@@ -57,39 +57,43 @@ impl ProcessControl for Process {
         // Only ESRCH from our Unix host process group proves that there is no
         // group left to signal. A Windows Job or other sandbox cleanup failure
         // must stay unknown even when the root's exit status is available.
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "linux")))]
         {
             root_reaped
                 && matches!(self, Self::Host(_))
                 && error.raw_os_error() == Some(libc::ESRCH)
         }
-        #[cfg(not(unix))]
+        #[cfg(not(all(unix, not(target_os = "linux"))))]
         {
             let _ = (root_reaped, error);
             false
         }
     }
     fn pipes(&mut self) -> io::Result<(PipeWriter, PipeReader, PipeReader)> {
+        #[cfg(all(unix, not(target_os = "linux")))]
         let missing = || io::Error::other("missing process pipe");
         Ok(match self {
-            #[cfg(unix)]
+            #[cfg(all(unix, not(target_os = "linux")))]
             Self::Host(child) => (
                 Box::new(child.stdin().take().ok_or_else(missing)?),
                 Box::new(child.stdout().take().ok_or_else(missing)?),
                 Box::new(child.stderr().take().ok_or_else(missing)?),
             ),
-            Self::Scratch(_, pipes) => {
-                let pipes = pipes.take().ok_or_else(missing)?;
-                (pipes.stdin, pipes.stdout, pipes.stderr)
-            }
-            #[cfg(windows)]
-            Self::NativeHost(_, pipes) => {
-                let pipes = pipes.take().ok_or_else(missing)?;
-                (pipes.stdin, pipes.stdout, pipes.stderr)
-            }
+            Self::Scratch(_, pipes) => take_native_pipes(pipes)?,
+            #[cfg(any(windows, target_os = "linux"))]
+            Self::NativeHost(_, pipes) => take_native_pipes(pipes)?,
         })
     }
 }
+fn take_native_pipes(
+    pipes: &mut Option<fliuno_sandbox::AsyncStdio>,
+) -> io::Result<(PipeWriter, PipeReader, PipeReader)> {
+    let pipes = pipes
+        .take()
+        .ok_or_else(|| io::Error::other("missing process pipe"))?;
+    Ok((pipes.stdin, pipes.stdout, pipes.stderr))
+}
+
 impl Process {
     pub(super) async fn spawn(
         program: &Program,
@@ -123,20 +127,20 @@ impl Process {
                     })
             }
             ProcessIsolation::TrustedHost => {
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "linux"))]
                 {
                     fliuno_sandbox::spawn_host_async(fliuno_sandbox::HostLaunchSpec {
                         program: program.config.command.clone(), args: argv,
                         env: program.environment.clone(), cwd: context.workspace.root.clone().into(),
-                        resources: Default::default(),
-                        linux_cgroup_parent: None,
+                        resources: program.config.resources,
+                        linux_cgroup_parent: program.config.linux_cgroup_parent.clone(),
                     }).await.map(|(child, pipes)| Self::NativeHost(Box::new(child), Some(pipes)))
                         .map_err(|error| match error.stage {
                             fliuno_sandbox::AsyncSpawnStage::NativeLaunch => ToolError::Failed("cannot launch host program".into()),
                             _ => ToolError::OutcomeUnknown("host launcher worker or pipe registration failed after native launch may have run; inspect effects before retrying".into()),
                         })
                 }
-                #[cfg(unix)]
+                #[cfg(all(unix, not(target_os = "linux")))]
                 {
                     let mut command = CommandWrap::with_new(&program.config.command, |command| {
                         command

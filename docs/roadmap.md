@@ -2,6 +2,8 @@
 
 ## 0.0.2：内核增量开发中
 
+- [x] 可信前台命令复用 Windows Job 和 Linux cgroup v2 启动层，可按宿主配置限制进程、内存及 Linux CPU。工程测试覆盖任务审批、原生进程限额和回收。
+
 - [x] 可信 MCP stdio 支持 Windows Job 和 Linux cgroup v2 的显式预算。通过真实 SDK 子进程验证宿主目录、Windows 进程限制、Linux 预算与回收。
 
 - [x] MCP 目录监听根据对端声明分别开放资源、提示和工具清单变更。每次审批后最多等待一条更新，完成后关闭订阅。

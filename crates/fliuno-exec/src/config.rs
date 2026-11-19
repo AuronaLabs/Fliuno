@@ -114,15 +114,8 @@ impl Program {
             .resources
             .validate()
             .map_err(|_| "invalid or unsupported process resource limits")?;
-        if config.isolation == ProcessIsolation::TrustedHost
-            && (!config.resources.is_empty()
-                || config.linux_cgroup_parent.is_some()
-                || !config.assets.is_empty())
-        {
-            return Err(
-                "assets, resource limits and linuxCgroupParent require an isolated process mode"
-                    .into(),
-            );
+        if config.isolation == ProcessIsolation::TrustedHost && !config.assets.is_empty() {
+            return Err("staged assets require an isolated process mode".into());
         }
         if let Some(parent) = &config.linux_cgroup_parent
             && (!cfg!(target_os = "linux") || !parent.is_absolute() || !parent.is_dir())

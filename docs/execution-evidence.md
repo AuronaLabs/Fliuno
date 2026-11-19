@@ -207,3 +207,9 @@ Windows 全量 `scripts/check.ps1` 以退出码 0 完成，包括 385 项测试�
 Windows 的 `scripts/check.ps1` 退出码为 0，包含 388 项测试和 26 个离线演示。日志为 `target/0.0.2-search-mcp-catalog-windows.log`。Debian 复验通过一项真实 app-server 历史检索契约和三项 MCP 官方 SDK HTTP SSE 契约。日志为 `D:/Fliuno-Native-Test/guest-search-catalog.log`。
 
 检索性能试验使用相同 SQLite 数据库和 Windows 调试二进制，在 128 条模拟历史中查找最早一条。两份二进制交替运行，每组 55 次。仅反序列化必要字段的试验版本对纯 ASCII 数据有改善，混合文本的结果随轮次波动且没有稳定收益。此轮保留原有查询实现。对照记录为 `target/0.0.2-history-search-lighter-bench.log`。
+
+## 可信 MCP 与前台命令的原生预算（2026-11-19）
+
+可信 MCP 在 Windows 的两项新增进程测试中验证了宿主目录和显式 Job 进程上限。Debian 通过三项可信 MCP 测试及一项 stdio 内容测试。委派用例确认 MCP 子进程加入 cgroup，读取 `pids.max=16` 和 `memory.max=268435456`，关闭后目录被回收。配置错误的委派目录在进程启动前被拒绝。Windows 完整脚本通过 390 项测试及 26 个离线演示。Linux 全工作区交叉 Clippy 通过。日志为 `target/0.0.2-trusted-mcp-windows.log`、`D:/Fliuno-Native-Test/guest-mcp-trusted.log` 和 `guest-mcp-trusted-clippy.log`。
+
+Debian 另通过前台命令的 12 项执行测试，覆盖管道、超时、取消、进程回收、隔离文件和审批。`pids.max=1` 的探针在受限用例里观察到内核拒绝 fork，未配置限制时额外子进程正常退出。日志为 `D:/Fliuno-Native-Test/guest-exec-final.log`。
