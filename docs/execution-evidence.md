@@ -518,3 +518,5 @@ Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt�
 回环测试记录发给真实 stdio 服务的 `events/getWatermark` 请求。两个 HTTP 响应在待审批阶段保持打开，连续四次空闲查询的间隔均至少为 145 毫秒。审批后两个响应分别结束，帧级续传仍返回相同字节。
 
 Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-http-coalescing-windows.log`。
+
+Debian Linux 6.12.107 来宾的 5 项 AG-UI 进程测试通过，覆盖 HTTP 授权、并发 SSE 与水位合并、跨重启重新附接、取消和帧级续传。日志为 `D:/Fliuno-Native-Test/guest-ag-ui-http-0.0.3-linux.log`。
