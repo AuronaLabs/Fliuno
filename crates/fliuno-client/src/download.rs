@@ -5,7 +5,7 @@ use fliuno_protocol::{
     ArtifactChunk, ArtifactDigest, ArtifactGetParams, ArtifactReadParams, MAX_ARTIFACT_READ_BYTES,
 };
 use sha2::{Digest, Sha256};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 
 impl<R: BufRead, W: Write> Client<R, W> {
     /// Fetch the digest of the stored body. A caller with a pinned digest can
@@ -26,27 +26,101 @@ impl<R: BufRead, W: Write> Client<R, W> {
         artifact: &ArtifactGetParams,
         expected: &ArtifactDigest,
         output: &mut impl Write,
-        mut on_notification: impl FnMut(Notification),
+        on_notification: impl FnMut(Notification),
     ) -> Result<(), Error> {
+        // Preserve the server identity/length check for a fresh empty download.
+        Download::new(expected)?.receive(self, artifact, output, on_notification)
+    }
+
+    /// Continue an interrupted download into an exclusively owned staging file.
+    /// Rehash the existing prefix locally and request only the missing bytes.
+    /// Use the same artifact identity and pinned digest across reconnects. A
+    /// complete staging file is verified locally without issuing a request.
+    ///
+    /// The current file length determines the offset, regardless of the initial
+    /// file position. Failures can leave unverified bytes in the staging file.
+    /// Discard the staging data on a digest mismatch. The caller owns cleanup,
+    /// flushing, and publication after verification.
+    pub fn resume_artifact_download(
+        &mut self,
+        artifact: &ArtifactGetParams,
+        expected: &ArtifactDigest,
+        staging: &mut (impl Read + Write + Seek),
+        on_notification: impl FnMut(Notification),
+    ) -> Result<(), Error> {
+        let mut download = Download::new(expected)?;
+        download.hash_prefix(staging)?;
+        if download.after == expected.content_bytes {
+            return download.verify();
+        }
+        download.receive(self, artifact, staging, on_notification)
+    }
+}
+
+struct Download<'a> {
+    expected: &'a ArtifactDigest,
+    after: u64,
+    sha256: Sha256,
+    buffer: Vec<u8>,
+}
+
+impl<'a> Download<'a> {
+    fn new(expected: &'a ArtifactDigest) -> Result<Self, Error> {
         if expected.sha256.len() != 64 || !expected.sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(Error::InvalidArtifactDigest);
         }
+        let buffer_bytes = expected
+            .content_bytes
+            .min(u64::from(MAX_ARTIFACT_READ_BYTES)) as usize;
+        Ok(Self {
+            expected,
+            after: 0,
+            sha256: Sha256::new(),
+            // The Base64 decoder's estimate rounds up to a full group.
+            buffer: vec![0; buffer_bytes.div_ceil(3) * 3],
+        })
+    }
+
+    fn hash_prefix(&mut self, staging: &mut (impl Read + Seek)) -> Result<(), Error> {
+        let length = staging
+            .seek(SeekFrom::End(0))
+            .map_err(Error::ArtifactStagingRead)?;
+        if length > self.expected.content_bytes {
+            return Err(Error::InvalidArtifactPrefix);
+        }
+        staging.rewind().map_err(Error::ArtifactStagingRead)?;
+        while self.after < length {
+            let count = (length - self.after).min(u64::from(MAX_ARTIFACT_READ_BYTES)) as usize;
+            let bytes = &mut self.buffer[..count];
+            staging
+                .read_exact(bytes)
+                .map_err(Error::ArtifactStagingRead)?;
+            self.sha256.update(bytes);
+            self.after += count as u64;
+        }
+        // The read leaves the staging file positioned at the end for appending.
+        Ok(())
+    }
+
+    fn receive<R: BufRead, W: Write>(
+        mut self,
+        client: &mut Client<R, W>,
+        artifact: &ArtifactGetParams,
+        output: &mut impl Write,
+        mut on_notification: impl FnMut(Notification),
+    ) -> Result<(), Error> {
         let mut request = ArtifactReadParams {
             task_id: artifact.task_id.clone(),
             artifact_id: artifact.artifact_id.clone(),
-            after: 0,
+            after: self.after,
             limit: MAX_ARTIFACT_READ_BYTES,
         };
-        let mut sha256 = Sha256::new();
-        let buffer_bytes = expected.content_bytes.min(u64::from(request.limit)) as usize;
-        // The decoder's slice size estimate rounds up to a full Base64 group.
-        let mut buffer = vec![0; buffer_bytes.div_ceil(3) * 3];
         loop {
             let chunk: ArtifactChunk =
-                self.call("artifacts/read", &request, &mut on_notification)?;
-            let count = (expected.content_bytes - request.after).min(u64::from(request.limit));
+                client.call("artifacts/read", &request, &mut on_notification)?;
+            let count = (self.expected.content_bytes - request.after).min(u64::from(request.limit));
             let end = request.after + count;
-            if chunk.content_bytes != expected.content_bytes
+            if chunk.content_bytes != self.expected.content_bytes
                 || chunk.offset != request.after
                 || chunk.next_offset != end
                 || chunk.data_base64.len() != (count as usize).div_ceil(3) * 4
@@ -54,20 +128,23 @@ impl<R: BufRead, W: Write> Client<R, W> {
                 return Err(Error::InvalidArtifactChunk);
             }
             let decoded = STANDARD
-                .decode_slice(chunk.data_base64, &mut buffer)
+                .decode_slice(chunk.data_base64, &mut self.buffer)
                 .map_err(|_| Error::InvalidArtifactChunk)?;
             if decoded != count as usize {
                 return Err(Error::InvalidArtifactChunk);
             }
-            let bytes = &buffer[..decoded];
+            let bytes = &self.buffer[..decoded];
             output.write_all(bytes).map_err(Error::ArtifactOutput)?;
-            sha256.update(bytes);
-            if end == expected.content_bytes {
-                break;
+            self.sha256.update(bytes);
+            if end == self.expected.content_bytes {
+                return self.verify();
             }
             request.after = end;
         }
-        if !format!("{:x}", sha256.finalize()).eq_ignore_ascii_case(&expected.sha256) {
+    }
+
+    fn verify(self) -> Result<(), Error> {
+        if !format!("{:x}", self.sha256.finalize()).eq_ignore_ascii_case(&self.expected.sha256) {
             return Err(Error::ArtifactDigestMismatch);
         }
         Ok(())

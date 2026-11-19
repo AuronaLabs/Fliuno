@@ -23,6 +23,8 @@ mod ag_ui_interrupt;
 mod ag_ui_run;
 #[path = "client/artifact_digest.rs"]
 mod artifact_digest;
+#[path = "client/artifact_download.rs"]
+mod artifact_download;
 #[path = "client/feed.rs"]
 mod feed;
 #[path = "client/task_changes.rs"]

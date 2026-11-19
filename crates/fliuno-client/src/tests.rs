@@ -184,6 +184,45 @@ fn artifact_download_checks_empty_body_against_pinned_digest() {
 }
 
 #[test]
+fn artifact_download_resume_rejects_bad_staging_data() {
+    use fliuno_protocol::{ArtifactDigest, ArtifactGetParams};
+    let identity = ArtifactGetParams {
+        task_id: "t".into(),
+        artifact_id: "a".into(),
+    };
+    let digest = ArtifactDigest {
+        content_bytes: 3,
+        sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+    };
+    let mut client = fake_client(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"offset\":2,\"nextOffset\":3,\"contentBytes\":3,\"dataBase64\":\"Yw==\"}}\n");
+    let mut oversized = Cursor::new(b"abcd".to_vec());
+    assert!(matches!(
+        client.resume_artifact_download(&identity, &digest, &mut oversized, |_| {}),
+        Err(Error::InvalidArtifactPrefix)
+    ));
+    assert_eq!(oversized.into_inner(), b"abcd");
+    let mut staged = Cursor::new(b"xb".to_vec());
+    assert!(matches!(
+        client.resume_artifact_download(&identity, &digest, &mut staged, |_| {}),
+        Err(Error::ArtifactDigestMismatch)
+    ));
+    assert_eq!(staged.into_inner(), b"xbc");
+    let mut complete = Cursor::new(b"abc".to_vec());
+    client
+        .resume_artifact_download(&identity, &digest, &mut complete, |_| {})
+        .unwrap();
+    let (_, written) = client.into_parts();
+    let sent = written
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1]["method"], "artifacts/read");
+    assert_eq!(sent[1]["params"]["after"], 2);
+}
+
+#[test]
 fn history_checkpoint_retries_invalid_pages_without_skipping_entries() {
     use fliuno_protocol::SessionHistoryListParams;
 

@@ -54,6 +54,10 @@ pub enum Error {
     InvalidArtifactChunk,
     #[error("artifact SHA-256 does not match the expected digest")]
     ArtifactDigestMismatch,
+    #[error("artifact staging data is longer than the expected body")]
+    InvalidArtifactPrefix,
+    #[error("reading artifact staging data: {0}")]
+    ArtifactStagingRead(#[source] io::Error),
     #[error("writing artifact output: {0}")]
     ArtifactOutput(#[source] io::Error),
     #[error("application RPC error {code}: {message}")]

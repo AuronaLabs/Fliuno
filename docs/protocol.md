@@ -43,6 +43,18 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 
 `Client::artifact_digest` 读取产物的正文长度和 SHA-256，调用方也可直接提供已保存的摘要。`Client::download_artifact` 按 64 KiB 分段读取，检查每段的长度和偏移，将原始字节写入调用方提供的 `Write`，返回前校验完整 SHA-256。需要在验证完成后才对外可见时，先写到临时文件，再由调用方发布。失败时输出中可能已有部分字节。
 
+重连后，可用 `Client::resume_artifact_download` 继续写入原暂存文件。保持原 `taskId`、`artifactId`、`contentBytes` 和 `sha256`，独占打开暂存文件供读写，不截断已有内容：
+
+```rust
+let mut staged = std::fs::OpenOptions::new()
+    .read(true).write(true).open(part_path)?;
+client.resume_artifact_download(&artifact, &expected, &mut staged, |_| {})?;
+staged.sync_all()?;
+// 验证完毕，由调用方关闭文件并发布。
+```
+
+客户端从文件长度取得字节偏移，先在本机重算已有前缀的哈希，再请求剩余字节。偏移可落在 UTF-8 字符中间；前缀哈希和分块解码共用约 64 KiB 的字节缓冲区。已完整的文件直接校验，无需向服务发请求。失败可能留下部分写入的暂存内容；最终摘要不符时，应丢弃暂存内容。旧服务只要支持 `artifacts/read` 即可使用续传，无需新的协议能力。
+
 ## 方法
 
 ### 工作区、会话与任务
