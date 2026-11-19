@@ -1,10 +1,9 @@
 //! Bound discovery while fetching pages, rather than after SDK accumulation.
-use rmcp::{RoleClient, model::PaginatedRequestParams, service::RunningService};
+use crate::host::McpService;
+use rmcp::model::PaginatedRequestParams;
 use std::collections::BTreeSet;
 
-pub(crate) async fn tools(
-    service: &RunningService<RoleClient, ()>,
-) -> Result<Vec<rmcp::model::Tool>, String> {
+pub(crate) async fn tools(service: &McpService) -> Result<Vec<rmcp::model::Tool>, String> {
     let mut tools = Vec::new();
     let mut cursor = None;
     let mut seen = BTreeSet::new();

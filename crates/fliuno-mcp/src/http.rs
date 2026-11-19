@@ -6,9 +6,9 @@ use reqwest::{
     header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue},
 };
 use rmcp::{
-    ClientLifecycleMode, ClientServiceExt, RoleClient,
+    ClientLifecycleMode, ClientServiceExt,
     model::ProtocolVersion,
-    service::{ClientInitializeError, RunningService},
+    service::ClientInitializeError,
     transport::{
         StreamableHttpClientTransport, common::client_side_sse::NeverRetry,
         streamable_http_client::StreamableHttpClientTransportConfig,
@@ -128,7 +128,7 @@ pub(crate) async fn connect_with_headers(
     config: &HttpServerConfig,
     url: Url,
     headers: HeaderMap,
-) -> Result<RunningService<RoleClient, ()>, String> {
+) -> Result<super::host::McpService, String> {
     let timeout = Duration::from_millis(config.timeout_ms);
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -150,7 +150,7 @@ pub(crate) async fn connect_with_headers(
     // Neither reconnect nor session recovery may turn an uncertain effect into
     // an implicit second tools/call. Reconnection requires a new host lifecycle.
     options.retry_config = Arc::new(NeverRetry::default());
-    let result = ()
+    let result = crate::client_config()
         .serve_with_lifecycle(
             StreamableHttpClientTransport::with_client(client.clone(), options.clone()),
             config.lifecycle.sdk(),
@@ -170,7 +170,7 @@ pub(crate) async fn connect_with_headers(
         _ => false,
     };
     if matches!(config.lifecycle, crate::Lifecycle::Auto) && shared_legacy {
-        return ()
+        return crate::client_config()
             .serve_with_lifecycle(
                 StreamableHttpClientTransport::with_client(client, options),
                 ClientLifecycleMode::Initialize,

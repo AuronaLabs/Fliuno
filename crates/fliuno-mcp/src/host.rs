@@ -1,11 +1,17 @@
 //! One serialized request owner per MCP connection. Queue cancellation never
 //! affects the current owner; request/transport uncertainty closes the connection.
 use fliuno_core::{CancellationToken, ToolError};
-use rmcp::{RoleClient, ServiceError, model::ResultType, service::RunningService};
+use rmcp::{
+    RoleClient, ServiceError,
+    model::{ClientConfig, ResultType},
+    service::RunningService,
+};
 use std::{future::Future, pin::Pin, time::Duration};
 use tokio::{runtime::Runtime, sync::Mutex};
 
 type Response<'a, T> = Pin<Box<dyn Future<Output = Result<Option<T>, ServiceError>> + 'a>>;
+
+pub(crate) type McpService = RunningService<RoleClient, ClientConfig>;
 
 /// Untagged SDK results can have a final payload shape and a non-final marker
 /// simultaneously. Missing markers preserve pre-2026 protocol compatibility.
@@ -17,7 +23,7 @@ pub(crate) fn is_complete(result_type: &Option<ResultType>) -> bool {
 
 pub(crate) struct Host {
     pub authority: String,
-    pub service: Mutex<RunningService<RoleClient, ()>>,
+    pub service: Mutex<McpService>,
     pub runtime: Runtime,
     pub timeout: Duration,
 }
@@ -28,7 +34,7 @@ impl Host {
     pub fn request<T: 'static>(
         &self,
         cancellation: &CancellationToken,
-        operation: impl for<'a> FnOnce(&'a RunningService<RoleClient, ()>) -> Response<'a, T>,
+        operation: impl for<'a> FnOnce(&'a McpService) -> Response<'a, T>,
     ) -> Result<T, ToolError> {
         self.runtime.block_on(async {
             let deadline = tokio::time::Instant::now() + self.timeout;

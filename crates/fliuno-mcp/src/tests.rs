@@ -2,8 +2,10 @@ use super::*;
 use rmcp::{
     ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
-        CallToolResponse, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
-        ServerCapabilities, ServerConfig,
+        CallToolResponse, CallToolResult, CancelTaskParams, ContentBlock, CreateTaskResult,
+        DetailedTask, GetTaskParams, GetTaskResult, InputRequest, InputRequests, ListToolsResult,
+        PaginatedRequestParams, ServerCapabilities, ServerConfig, Task, TaskPayload, TaskStatus,
+        UpdateTaskParams,
     },
     service::RequestContext,
 };
@@ -56,7 +58,7 @@ fn sdk_discovery_validation_and_execution_roundtrip() {
             .await
             .unwrap();
         });
-        let service = ().serve(client_io).await.unwrap();
+        let service = client_config().serve(client_io).await.unwrap();
         let tools = service.list_all_tools().await.unwrap();
         (service, tools)
     });
@@ -66,7 +68,7 @@ fn sdk_discovery_validation_and_execution_roundtrip() {
         runtime,
         timeout: TIMEOUT,
     });
-    let tools = wrap_tools(host, "fixture", tools, None).unwrap();
+    let tools = wrap_tools(host, "fixture", tools, None, false).unwrap();
     let tool = &tools[0];
     assert!(matches!(tool.spec().effect, ToolEffect::External));
     assert!(tool.validate(&json!({"text":123})).is_err());
@@ -93,6 +95,183 @@ fn sdk_discovery_validation_and_execution_roundtrip() {
     assert!(result.artifacts.is_empty());
 }
 
+#[derive(Clone, Default)]
+struct TasksFixture {
+    updates: Arc<std::sync::Mutex<Vec<UpdateTaskParams>>>,
+    cancellations: Arc<std::sync::Mutex<Vec<CancelTaskParams>>>,
+}
+
+impl ServerHandler for TasksFixture {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tasks()
+                .build(),
+        )
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(serde_json::from_value(json!({
+            "tools":[{"name":"start","inputSchema":{"type":"object","additionalProperties":false}}]
+        }))
+        .unwrap())
+    }
+
+    async fn call_tool(
+        &self,
+        _request: rmcp::model::CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let task = Task::new(
+            "remote-task-1",
+            TaskStatus::Working,
+            "2026-11-19T00:00:00Z",
+            "2026-11-19T00:00:00Z",
+        );
+        Ok(CreateTaskResult::new(task).into())
+    }
+
+    async fn get_task(
+        &self,
+        request: GetTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<GetTaskResult, ErrorData> {
+        assert_eq!(request.task_id, "remote-task-1");
+        let task = Task::new(
+            request.task_id,
+            TaskStatus::InputRequired,
+            "2026-11-19T00:00:00Z",
+            "2026-11-19T00:00:01Z",
+        );
+        let request: InputRequest =
+            serde_json::from_value(json!({"method":"roots/list","params":{}}))
+                .map_err(|_| ErrorData::invalid_params("invalid fixture request", None))?;
+        let input_requests: InputRequests = [("roots-1".to_owned(), request)].into();
+        Ok(GetTaskResult::new(DetailedTask::new(
+            task,
+            TaskPayload::InputRequired { input_requests },
+        )))
+    }
+
+    async fn update_task(
+        &self,
+        request: UpdateTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.updates.lock().unwrap().push(request);
+        Ok(())
+    }
+
+    async fn cancel_task(
+        &self,
+        request: CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.cancellations.lock().unwrap().push(request);
+        Ok(())
+    }
+}
+
+#[test]
+fn official_sdk_tasks_create_read_update_and_cancel_roundtrip() {
+    let runtime = Runtime::new().unwrap();
+    let fixture = TasksFixture::default();
+    let (service, remote_tools) = runtime.block_on(async {
+        let (client_io, server_io) = tokio::io::duplex(16384);
+        tokio::spawn({
+            let fixture = fixture.clone();
+            async move {
+                fixture
+                    .serve(server_io)
+                    .await
+                    .unwrap()
+                    .waiting()
+                    .await
+                    .unwrap();
+            }
+        });
+        let service = client_config().serve(client_io).await.unwrap();
+        let tools = service.list_all_tools().await.unwrap();
+        (service, tools)
+    });
+    let tasks_capability = serde_json::to_value(
+        &service
+            .peer_info()
+            .unwrap()
+            .capabilities
+            .extensions
+            .as_ref()
+            .unwrap()[rmcp::model::TASKS_EXTENSION_ID],
+    )
+    .unwrap();
+    let host = Arc::new(Host {
+        authority: authority_digest_for_fixture(),
+        service: Mutex::new(service),
+        runtime,
+        timeout: Duration::from_secs(2),
+    });
+    let mut tools = wrap_tools(Arc::clone(&host), "fixture", remote_tools, None, true).unwrap();
+    tools.extend(tasks::tools(Arc::clone(&host), "fixture", tasks_capability).unwrap());
+
+    let start = tools
+        .iter()
+        .find(|tool| tool.spec().name.contains("start_"))
+        .unwrap();
+    let created = invoke_arguments(start.as_ref(), json!({})).unwrap();
+    assert_eq!(created.output["resultType"], "task");
+    assert_eq!(created.output["taskId"], "remote-task-1");
+
+    let get = tools
+        .iter()
+        .find(|tool| tool.spec().name == "mcp_fixture_tasks_get")
+        .unwrap();
+    let snapshot = invoke_arguments(get.as_ref(), json!({"taskId":"remote-task-1"})).unwrap();
+    assert_eq!(snapshot.output["result"]["status"], "input_required");
+    assert_eq!(
+        snapshot.output["result"]["inputRequests"]["roots-1"]["method"],
+        "roots/list"
+    );
+
+    let update = tools
+        .iter()
+        .find(|tool| tool.spec().name == "mcp_fixture_tasks_update")
+        .unwrap();
+    let updated = invoke_arguments(
+        update.as_ref(),
+        json!({"taskId":"remote-task-1","inputResponses":{"roots-1":{"roots":[]}}}),
+    )
+    .unwrap();
+    assert_eq!(updated.output["result"]["updateAccepted"], true);
+    assert_eq!(
+        fixture.updates.lock().unwrap()[0].input_responses["roots-1"]["roots"],
+        json!([])
+    );
+
+    let cancel = tools
+        .iter()
+        .find(|tool| tool.spec().name == "mcp_fixture_tasks_cancel")
+        .unwrap();
+    let cancelled = invoke_arguments(cancel.as_ref(), json!({"taskId":"remote-task-1"})).unwrap();
+    assert_eq!(cancelled.output["result"]["cancellationRequested"], true);
+    assert_eq!(
+        fixture.cancellations.lock().unwrap()[0].task_id,
+        "remote-task-1"
+    );
+}
+
+#[test]
+fn client_declares_tasks_without_advertising_deprecated_capabilities() {
+    let config = client_config();
+    assert!(config.capabilities.supports_tasks());
+    assert!(config.capabilities.roots.is_none());
+    assert!(config.capabilities.sampling.is_none());
+}
+
 #[test]
 fn timed_out_tool_closes_the_mcp_host_and_marks_result_unknown() {
     let runtime = Runtime::new().unwrap();
@@ -109,7 +288,7 @@ fn timed_out_tool_closes_the_mcp_host_and_marks_result_unknown() {
             .await
             .unwrap();
         });
-        let service = ().serve(client_io).await.unwrap();
+        let service = client_config().serve(client_io).await.unwrap();
         let tools = service.list_all_tools().await.unwrap();
         (service, tools)
     });
@@ -119,7 +298,7 @@ fn timed_out_tool_closes_the_mcp_host_and_marks_result_unknown() {
         runtime,
         timeout: Duration::from_millis(10),
     });
-    let tools = wrap_tools(host, "fixture", tools, None).unwrap();
+    let tools = wrap_tools(host, "fixture", tools, None, false).unwrap();
     let tool = &tools[0];
     let context = ToolContext {
         session_id: "session_test",
@@ -212,6 +391,28 @@ fn invoke(
     )
 }
 
+fn invoke_arguments(
+    tool: &dyn Tool,
+    arguments: serde_json::Value,
+) -> Result<ToolOutput, ToolError> {
+    tool.execute(
+        &ToolContext {
+            session_id: "session_test",
+            task_id: "task",
+            workspace: &fliuno_protocol::Workspace {
+                id: "ws".into(),
+                root: "unused".into(),
+            },
+        },
+        &ToolCall {
+            id: "call".into(),
+            name: tool.spec().name,
+            arguments,
+        },
+        &CancellationToken::new(),
+    )
+}
+
 #[test]
 fn cancelling_queued_call_returns_without_sending_or_closing_busy_host() {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -235,7 +436,7 @@ fn cancelling_queued_call_returns_without_sending_or_closing_busy_host() {
                 .await
                 .unwrap();
         });
-        let service = ().serve(client_io).await.unwrap();
+        let service = client_config().serve(client_io).await.unwrap();
         let tools = service.list_all_tools().await.unwrap();
         (service, tools)
     });
@@ -245,7 +446,7 @@ fn cancelling_queued_call_returns_without_sending_or_closing_busy_host() {
         runtime,
         timeout: Duration::from_secs(5),
     });
-    let mut tools = wrap_tools(host, "fixture", tools, None).unwrap();
+    let mut tools = wrap_tools(host, "fixture", tools, None, false).unwrap();
     let tool: Arc<dyn Tool> = Arc::from(tools.remove(0));
     let first = std::thread::spawn({
         let tool = Arc::clone(&tool);

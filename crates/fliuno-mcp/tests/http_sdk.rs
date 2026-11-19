@@ -34,7 +34,7 @@ impl ServerHandler for SdkPeer {
         let capabilities = if self.legacy {
             capabilities.enable_resources_subscribe().build()
         } else {
-            capabilities.build()
+            capabilities.enable_tasks().build()
         };
         ServerConfig::new(capabilities)
     }
@@ -177,6 +177,12 @@ fn official_http_server_interoperates_in_both_lifecycles_and_response_formats() 
                 !tools
                     .iter()
                     .any(|tool| tool.spec().name == "mcp_sdk_resources_watch")
+            );
+            assert_eq!(
+                tools
+                    .iter()
+                    .any(|tool| tool.spec().name.starts_with("mcp_sdk_tasks_")),
+                !legacy
             );
             let result = tools[0]
                 .execute(

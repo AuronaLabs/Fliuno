@@ -8,6 +8,7 @@ mod host;
 mod http;
 mod launch;
 mod registration;
+mod tasks;
 pub use config::{
     HttpServerConfig, HttpTransport, Lifecycle, McpConfig, ServerConfig, StdioServerConfig,
     StdioTransport,
@@ -25,6 +26,21 @@ use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
+
+pub(crate) fn client_config() -> rmcp::model::ClientConfig {
+    use rmcp::model::{
+        ClientCapabilities, ClientConfig, ExtensionCapabilities, Implementation, TASKS_EXTENSION_ID,
+    };
+
+    let mut extensions = ExtensionCapabilities::new();
+    extensions.insert(TASKS_EXTENSION_ID.into(), Default::default());
+    let mut capabilities = ClientCapabilities::default();
+    capabilities.extensions = Some(extensions);
+    ClientConfig::new(
+        capabilities,
+        Implementation::new("fliuno", env!("CARGO_PKG_VERSION")),
+    )
+}
 
 pub fn register_config(kernel: &mut Kernel, config: McpConfig) -> Result<(), String> {
     let mut ids = BTreeSet::new();
@@ -114,8 +130,29 @@ pub fn connect_server(config: ServerConfig) -> Result<Vec<Box<dyn Tool>>, String
         };
         Ok::<_, String>((tools, peer))
     })?;
-    let mut registered = wrap_tools(Arc::clone(&host), config.id(), tools, bundle.as_deref())?;
-    registered.extend(content::tools(host, config.id(), &peer));
+    let tasks_supported = peer.capabilities.supports_tasks()
+        && peer.protocol_version >= rmcp::model::ProtocolVersion::V_2026_07_28;
+    let mut registered = wrap_tools(
+        Arc::clone(&host),
+        config.id(),
+        tools,
+        bundle.as_deref(),
+        tasks_supported,
+    )?;
+    registered.extend(content::tools(Arc::clone(&host), config.id(), &peer));
+    if tasks_supported {
+        let extension = peer
+            .capabilities
+            .extensions
+            .as_ref()
+            .and_then(|extensions| extensions.get(rmcp::model::TASKS_EXTENSION_ID))
+            .expect("tasks support was checked above");
+        registered.extend(tasks::tools(
+            host,
+            config.id(),
+            serde_json::to_value(extension).map_err(|_| "invalid MCP tasks capability")?,
+        )?);
+    }
     Ok(registered)
 }
 
@@ -124,6 +161,7 @@ fn wrap_tools(
     server: &str,
     tools: Vec<rmcp::model::Tool>,
     bundle: Option<&str>,
+    tasks_supported: bool,
 ) -> Result<Vec<Box<dyn Tool>>, String> {
     let mut registered: Vec<Box<dyn Tool>> = Vec::new();
     for tool in tools {
@@ -153,6 +191,7 @@ fn wrap_tools(
             description,
             schema,
             validator,
+            tasks_supported,
         }));
     }
     Ok(registered)
@@ -198,17 +237,23 @@ struct McpTool {
     description: String,
     schema: Value,
     validator: jsonschema::Validator,
+    tasks_supported: bool,
 }
 
 impl Tool for McpTool {
     fn authority(&self) -> String {
-        fliuno_core::authority_digest(
-            "mcp.tool.v2",
-            &serde_json::json!({
-                "host":self.host.authority, "remoteName":self.remote_name,
-                "description":self.description, "inputSchema":self.schema,
-            }),
-        )
+        let identity = serde_json::json!({
+            "host":self.host.authority, "remoteName":self.remote_name,
+            "description":self.description, "inputSchema":self.schema,
+        });
+        if self.tasks_supported {
+            fliuno_core::authority_digest(
+                "mcp.tool.v3",
+                &serde_json::json!({"contract":identity,"tasksSupported":true}),
+            )
+        } else {
+            fliuno_core::authority_digest("mcp.tool.v2", &identity)
+        }
     }
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -239,6 +284,7 @@ impl Tool for McpTool {
             .ok_or("MCP arguments must be an object")?
             .clone();
         let name = self.remote_name.clone();
+        let tasks_supported = self.tasks_supported;
         let response = self.host.request(cancellation, move |service| {
             Box::pin(async move {
                 // The high-level SDK helper drives MRTR rounds itself. Keep one
@@ -251,14 +297,35 @@ impl Tool for McpTool {
                         CallToolResponse::Complete(result)
                             if host::is_complete(&result.result_type) =>
                         {
-                            Some(result)
+                            Some(CallToolResponse::Complete(result))
+                        }
+                        CallToolResponse::Task(task) if tasks_supported => {
+                            Some(CallToolResponse::Task(task))
                         }
                         _ => None,
                     },
                 )
             })
         })?;
-        let output = serde_json::to_value(response).map_err(|_| "cannot encode MCP output")?;
+        let output = match response {
+            CallToolResponse::Complete(result) => {
+                serde_json::to_value(result).map_err(|_| "cannot encode MCP output")?
+            }
+            CallToolResponse::Task(task) => {
+                let task_id = task.task.task_id.clone();
+                let output = serde_json::to_value(task).map_err(|_| "cannot encode MCP task")?;
+                if fliuno_core::json_size(&output).map_err(|_| "cannot encode MCP task")?
+                    > 1024 * 1024
+                {
+                    return Err(ToolError::OutcomeUnknownWithOutput {
+                        message: "MCP task was created but its handle exceeds the output budget; use mcp tasks/get with the task ID".into(),
+                        output: serde_json::json!({"taskId":task_id}),
+                    });
+                }
+                output
+            }
+            _ => unreachable!("Host::request only returns accepted MCP responses"),
+        };
         if fliuno_core::json_size(&output).map_err(|_| "cannot encode MCP output")? > 1024 * 1024 {
             return Err(ToolError::OutcomeUnknown("MCP output exceeds 1 MiB".into()));
         }

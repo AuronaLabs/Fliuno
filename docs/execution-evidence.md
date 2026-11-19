@@ -275,3 +275,9 @@ Debian Linux 6.12.107 来宾通过 3 项 task_status 与 2 项 approval app-serv
 新增最多 32 项的原子批量归档/恢复。真实 app-server 进程测试验证请求顺序、重复请求、空/重复/缺失/超额 ID 的拒绝、SQLite 写入故障回滚和重启后的持久状态。Windows 全量 scripts/check.ps1 通过 403 项测试、Schema 一致性和 26 个离线演示；Clippy 与 rustfmt 检查通过。日志为 target/0.0.2-session-archive-batch-windows.log。
 
 Debian Linux 6.12.107 来宾通过 5 项 sessions app-server 真实进程测试，包含同一事务触发器故障回滚探针。日志为 D:/Fliuno-Native-Test/guest-session-batch-build.log 和 D:/Fliuno-Native-Test/guest-session-batch.log。
+
+## MCP Tasks 客户端适配（2026-11-19）
+
+MCP 客户端声明 `io.modelcontextprotocol/tasks`。现代对端声明该扩展后，`tools/call` 创建的远端任务句柄作为本地工具结果持久化；新增受主机注册摘要约束的 `tasks/get`、`tasks/update` 和 `tasks/cancel` 工具。输入响应限制为 16 项和 256 KiB，任务快照限制为 1 MiB。取消回执按协作请求处理，不代表远端任务已结束。
+
+官方 Rust SDK 双端测试通过任务创建、包含待补请求的状态查询、补答和协作取消。Streamable HTTP SDK 矩阵覆盖 2026 现代协议启用 Tasks 工具及 2025 旧协议不启用，并验证 JSON/SSE 两种响应。`scripts/check.ps1` 退出码为 0，涵盖 workspace 测试、Clippy、rustfmt、协议 Schema 与 Windows 离线演示；另有 workspace 全量测试及两组 Clippy 独立通过。本轮未在 Debian Linux 来宾复验。

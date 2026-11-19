@@ -8,7 +8,7 @@ use process_wrap::tokio::{CommandWrap, KillOnDrop};
 use rmcp::transport::TokioChildProcess;
 use rmcp::{
     ClientServiceExt, RoleClient,
-    service::{RunningService, RxJsonRpcMessage, TxJsonRpcMessage},
+    service::{RxJsonRpcMessage, TxJsonRpcMessage},
     transport::{Transport, async_rw::AsyncRwTransport},
 };
 use serde::{Deserialize, Serialize};
@@ -91,7 +91,7 @@ pub(super) async fn connect(
     config: &StdioServerConfig,
     env: BTreeMap<String, String>,
     executable_digest: String,
-) -> Result<RunningService<RoleClient, ()>, String> {
+) -> Result<super::host::McpService, String> {
     match config.isolation {
         ProcessIsolation::TrustedHost => {
             #[cfg(any(windows, target_os = "linux"))]
@@ -108,7 +108,8 @@ pub(super) async fn connect(
                     .await
                     .map_err(|_| "cannot spawn trusted MCP server")?;
                 let transport = ProcessTransport::new(ProcessOwner::Host(child), pipes);
-                ().serve_with_lifecycle(transport, config.lifecycle.sdk())
+                crate::client_config()
+                    .serve_with_lifecycle(transport, config.lifecycle.sdk())
                     .await
                     .map_err(|_| "MCP initialization failed".into())
             }
@@ -126,7 +127,8 @@ pub(super) async fn connect(
                 command.wrap(ProcessGroup::leader());
                 let transport = TokioChildProcess::new(command)
                     .map_err(|_| "cannot spawn trusted MCP server")?;
-                ().serve_with_lifecycle(transport, config.lifecycle.sdk())
+                crate::client_config()
+                    .serve_with_lifecycle(transport, config.lifecycle.sdk())
                     .await
                     .map_err(|_| "MCP initialization failed".into())
             }
@@ -145,7 +147,8 @@ pub(super) async fn connect(
                 .await
                 .map_err(|error| format!("MCP sandbox launch failed: {error}"))?;
             let transport = ProcessTransport::new(ProcessOwner::Sandbox(child), pipes);
-            ().serve_with_lifecycle(transport, config.lifecycle.sdk())
+            crate::client_config()
+                .serve_with_lifecycle(transport, config.lifecycle.sdk())
                 .await
                 .map_err(|_| "isolated MCP initialization failed".into())
         }
