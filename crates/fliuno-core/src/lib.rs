@@ -84,6 +84,13 @@ impl Kernel {
         self.events.subscribe(events::EventScope::All)
     }
 
+    /// Subscribe to committed events for one existing task.
+    pub fn subscribe_task_events(&self, task_id: &str) -> Result<EventReceiver> {
+        self.require_task(task_id)?;
+        self.events
+            .subscribe(events::EventScope::Task(task_id.into()))
+    }
+
     /// Subscribe to committed events for one existing session.
     pub fn subscribe_session_events(&self, session_id: &str) -> Result<EventReceiver> {
         self.require_session(session_id)?;

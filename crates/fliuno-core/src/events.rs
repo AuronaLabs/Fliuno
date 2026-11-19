@@ -48,6 +48,7 @@ impl EventReceiver {
 
 pub(crate) enum EventScope {
     All,
+    Task(String),
     Session(String),
     Workspace(String),
 }
@@ -59,9 +60,10 @@ struct EventSubscriber {
 }
 
 impl EventSubscriber {
-    fn accepts(&self, session_id: &str, workspace_id: Option<&str>) -> bool {
+    fn accepts(&self, task_id: &str, session_id: &str, workspace_id: Option<&str>) -> bool {
         match &self.scope {
             EventScope::All => true,
+            EventScope::Task(id) => id == task_id,
             EventScope::Session(id) => id == session_id,
             EventScope::Workspace(id) => Some(id.as_str()) == workspace_id,
         }
@@ -107,6 +109,7 @@ impl EventHub {
     /// Evaluate the iterator only when delivering to a matching subscriber.
     pub(crate) fn publish(
         &self,
+        task_id: &str,
         session_id: &str,
         mut events: impl Iterator<Item = Event> + Clone,
         lookup_workspace: impl FnOnce() -> Result<String>,
@@ -135,7 +138,7 @@ impl EventHub {
         if let [subscriber] = subscribers.as_slice() {
             // A stdio server normally has one subscriber. Move the committed
             // event directly into its queue, even for large tool payloads.
-            if subscriber.accepts(session_id, workspace)
+            if subscriber.accepts(task_id, session_id, workspace)
                 && events.any(|event| subscriber.sender.try_send(event).is_err())
             {
                 subscribers.clear();
@@ -143,7 +146,7 @@ impl EventHub {
             return;
         }
         subscribers.retain(|subscriber| {
-            if !subscriber.accepts(session_id, workspace) {
+            if !subscriber.accepts(task_id, session_id, workspace) {
                 return true;
             }
             events
@@ -261,7 +264,7 @@ mod tests {
             data: fliuno_protocol::EventKind::TaskStarted,
         });
 
-        hub.publish("session_test", events, || unreachable!());
+        hub.publish("task_test", "session_test", events, || unreachable!());
 
         for sequence in 1..=SUBSCRIBER_CAPACITY {
             assert_eq!(receiver.recv().unwrap().sequence, sequence as u64);
@@ -284,14 +287,14 @@ mod tests {
                 }
             })
         };
-        hub.publish("current", events(), || unreachable!());
+        hub.publish("task_test", "current", events(), || unreachable!());
         assert_eq!(copies.get(), 0);
 
         let global = hub.subscribe(EventScope::All).unwrap();
         let matching = hub
             .subscribe(EventScope::Session("current".into()))
             .unwrap();
-        hub.publish("current", events(), || unreachable!());
+        hub.publish("task_test", "current", events(), || unreachable!());
         assert_eq!(copies.get(), 2);
         assert!(scoped.is_empty());
         assert_eq!(global.try_recv().unwrap().sequence, 1);

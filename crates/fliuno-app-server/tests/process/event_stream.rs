@@ -250,6 +250,79 @@ fn exercise_scoped_live_events(workspace_scope: bool) {
 }
 
 #[test]
+fn task_subscription_ignores_sibling_tasks_and_can_replay_to_its_watermark() {
+    let temp = std::env::temp_dir().canonicalize().unwrap();
+    let root = temp.join(format!("fliuno-task-events-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let mut peer = Peer::start(&root.join("kernel.db"));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let task = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"selected"}),
+    );
+    let task_id = task["id"].as_str().unwrap();
+    peer.wait_for_status(task_id, "waiting_approval");
+    let through = peer.call("events/setScope", json!({"taskId":task_id}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    peer.notifications.clear();
+
+    assert_eq!(
+        peer.request("events/setScope", json!({"taskId":"missing"}))["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request(
+            "events/setScope",
+            json!({"taskId":task_id,"sessionId":session["id"]})
+        )["error"]["code"],
+        -32602
+    );
+    // A single stdio batch can outfill the 64-event queue. Sibling tasks
+    // should contribute neither events nor an overflow signal to this scope.
+    let siblings: Vec<_> = (0..72).map(|i| json!({"jsonrpc":"2.0","method":"task/start","params":{
+        "sessionId":session["id"],"input":format!("sibling {i}"),"context":{"mode":"isolated"}
+    }})).collect();
+    writeln!(peer.input, "{}", json!(siblings)).unwrap();
+    peer.input.flush().unwrap();
+    peer.call("task/cancel", json!({"taskId":task_id}));
+    let live = peer.wait_for_event(task_id, "task_cancelled");
+    let sequence = live["params"]["event"]["sequence"].as_u64().unwrap();
+    assert!(sequence > through);
+    assert!(
+        peer.notifications
+            .iter()
+            .all(|frame| match frame["method"].as_str() {
+                Some("notifications/event") => frame["params"]["event"]["taskId"] == task_id,
+                Some("notifications/eventGap") => false,
+                _ => true,
+            })
+    );
+    let backfill = peer.call("events/list", json!({"taskId":task_id,"through":through}));
+    let events = backfill["events"].as_array().unwrap();
+    assert_eq!(events.last().unwrap()["data"]["type"], "approval_requested");
+    assert!(
+        events
+            .iter()
+            .all(|event| event["sequence"].as_u64().unwrap() <= through)
+    );
+    assert_eq!(backfill["hasMore"], false);
+    let tail = peer.call(
+        "events/list",
+        json!({"taskId":task_id,"after":through,"through":sequence}),
+    );
+    assert_eq!(
+        tail["events"].as_array().unwrap().last().unwrap(),
+        &live["params"]["event"]
+    );
+    drop(peer);
+    let root = root.canonicalize().unwrap();
+    assert_eq!(root.parent(), Some(temp.as_path()));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn session_replay_scopes_the_global_cursor_across_upgrade_and_restart() {
     fn cancelled_task(peer: &mut Peer, session: &Value, input: &str) -> Value {
         let task = peer.call(

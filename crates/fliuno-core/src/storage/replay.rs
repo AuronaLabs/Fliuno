@@ -86,10 +86,21 @@ impl Kernel {
         limit: u32,
         target_bytes: Option<u32>,
     ) -> Result<EventsPage> {
+        self.list_task_events_through(task_id, after, None, limit, target_bytes)
+    }
+
+    pub fn list_task_events_through(
+        &self,
+        task_id: &str,
+        after: u64,
+        through: Option<u64>,
+        limit: u32,
+        target_bytes: Option<u32>,
+    ) -> Result<EventsPage> {
         self.require_task(task_id)?;
         self.query_event_page(
-            "SELECT sequence,task_id,data FROM events WHERE task_id=?1 AND sequence>?2 ORDER BY sequence LIMIT ?3",
-            params![task_id, validate_event_cursor(after)?, validate_event_limit(limit)?],
+            "SELECT sequence,task_id,data FROM events WHERE task_id=?1 AND sequence>?2 AND sequence<=?3 ORDER BY sequence LIMIT ?4",
+            params![task_id, validate_event_cursor(after)?, through.map(validate_event_cursor).transpose()?.unwrap_or(i64::MAX), validate_event_limit(limit)?],
             after,
             limit,
             target_bytes,

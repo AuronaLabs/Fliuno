@@ -390,13 +390,13 @@ impl Kernel {
                     task_id: task.id.clone(),
                     data: data.clone(),
                 });
-            self.publish_task_events(&task.session_id, committed);
+            self.publish_task_events(&task.id, &task.session_id, committed);
         }
         Ok(())
     }
 
     /// Append evidence without rewriting a task snapshot or projecting a turn.
-    pub(crate) fn append_task_event(&mut self, task_id: String, data: EventKind) -> Result<()> {
+    pub(crate) fn append_task_event(&mut self, task_id: &str, data: EventKind) -> Result<()> {
         let session_id: String = self.db.query_row(
             "SELECT session_id FROM tasks WHERE id=?1",
             [&task_id],
@@ -406,18 +406,24 @@ impl Kernel {
             .prepare_cached(INSERT_EVENT)?
             .execute(params![task_id, serde_json::to_string(&data)?])?;
         self.publish_task_events(
+            task_id,
             &session_id,
             std::iter::once(Event {
                 sequence: self.db.last_insert_rowid() as u64,
-                task_id,
+                task_id: task_id.into(),
                 data,
             }),
         );
         Ok(())
     }
 
-    fn publish_task_events(&self, session_id: &str, events: impl Iterator<Item = Event> + Clone) {
-        self.events.publish(session_id, events, || {
+    fn publish_task_events(
+        &self,
+        task_id: &str,
+        session_id: &str,
+        events: impl Iterator<Item = Event> + Clone,
+    ) {
+        self.events.publish(task_id, session_id, events, || {
             Ok(self
                 .db
                 .prepare_cached("SELECT workspace_id FROM sessions WHERE id=?1")?

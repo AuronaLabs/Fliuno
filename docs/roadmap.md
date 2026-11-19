@@ -4,6 +4,7 @@
 
 - [x] Windows 可信 ACP Agent 支持显式内存与进程数上限，实机探针分别覆盖超额分配和额外子进程。续接测试使用启用预算的 Agent。
 - [x] `events/listWorkspace` 可在工作区内跨会话回放持久事件，保留全局游标、上界和每页字节目标。SQLite v27 回填索引。`events/setScope` 可订阅同一工作区的实时事件，断流后保留范围。
+- [x] `events/setScope` 可订阅单个任务。`events/list` 支持包含式上界，可用同一全局序号补齐历史和实时通知。
 - [x] `workspace_stat` 可在审批后查询文件类型、字节数和修改时间，适用于超过正文读取上限的文件。
 - [x] `workspace_sha256` 经审批以固定大小缓冲区计算至多 64 MiB 文件的 SHA-256，返回摘要和字节数。
 - [x] `workspace/get` 能由已保存的工作区 ID 查回根目录记录，包括原目录暂不可用的情况。

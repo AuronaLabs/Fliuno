@@ -15,6 +15,7 @@ const MAX_BATCH_ITEMS: usize = 128;
 #[derive(Clone)]
 enum EventScope {
     All,
+    Task(String),
     Session(String),
     Workspace(String),
 }
@@ -132,6 +133,7 @@ impl RpcServer {
             let kernel = self.kernel()?;
             let through_sequence = kernel.event_watermark()?;
             let receiver = match &scope {
+                EventScope::Task(id) => kernel.subscribe_task_events(id)?,
                 EventScope::Session(id) => kernel.subscribe_session_events(id)?,
                 EventScope::Workspace(id) => kernel.subscribe_workspace_events(id)?,
                 EventScope::All => kernel.subscribe_events()?,
@@ -334,6 +336,7 @@ impl RpcServer {
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);
             capabilities["workspaceEventSubscription"] = json!(true);
+            capabilities["taskEventSubscription"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
             capabilities["contextAtSequence"] = json!(true);
             capabilities["taskSummaryById"] = json!(true);
@@ -629,9 +632,10 @@ impl RpcServer {
             }
             "events/list" => {
                 let p: EventsListParams = decode(params)?;
-                json!(self.kernel()?.list_events_with_target(
+                json!(self.kernel()?.list_task_events_through(
                     &p.task_id,
                     p.after,
+                    p.through,
                     p.limit,
                     p.target_bytes
                 )?)
@@ -667,11 +671,12 @@ impl RpcServer {
             }
             "events/setScope" => {
                 let p: EventsSetScopeParams = decode(params)?;
-                let scope = match (p.session_id, p.workspace_id) {
-                    (None, None) => EventScope::All,
-                    (Some(id), None) => EventScope::Session(id),
-                    (None, Some(id)) => EventScope::Workspace(id),
-                    (Some(_), Some(_)) => {
+                let scope = match (p.task_id, p.session_id, p.workspace_id) {
+                    (None, None, None) => EventScope::All,
+                    (Some(id), None, None) => EventScope::Task(id),
+                    (None, Some(id), None) => EventScope::Session(id),
+                    (None, None, Some(id)) => EventScope::Workspace(id),
+                    _ => {
                         return Err(
                             Error::Invalid("select one event subscription scope".into()).into()
                         );

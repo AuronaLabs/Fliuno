@@ -669,6 +669,8 @@ pub struct EventsListParams {
     pub task_id: String,
     #[serde(default)]
     pub after: u64,
+    #[serde(default)]
+    pub through: Option<u64>,
     #[serde(default = "default_limit")]
     pub limit: u32,
     /// Target size of the compact events array. A single larger event still advances the cursor.
@@ -720,6 +722,8 @@ pub struct EventsListWorkspaceParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventsSetScopeParams {
+    #[serde(default)]
+    pub task_id: Option<String>,
     #[serde(default)]
     pub session_id: Option<String>,
     #[serde(default)]

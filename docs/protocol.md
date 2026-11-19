@@ -38,12 +38,12 @@
 | `approval/listPending` | `{workspaceId?,sessionId?,after?:0,limit?:100}` | `{items,nextAfter,hasMore}`，只包含当前待审批的摘要 |
 | `approval/get` | `{taskId,approvalId}` | `{kind,approval}`，包含指定待审批项的完整请求 |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
-| `events/list` | `{taskId, after?:0, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
+| `events/list` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
 | `events/get` | `{sequence}` | 按全局序号读取一条持久事件 |
 | `events/listSession` | `{sessionId, after?:0, through?, limit?:100, targetBytes?}` | 单个会话的持久事件页，沿用全局序号 |
 | `events/listWorkspace` | `{workspaceId,after?,through?,limit?,targetBytes?}` | 按全局游标回放工作区各会话的持久事件 |
-| `events/setScope` | `{sessionId?,workspaceId?}` | 将实时持久事件限定到一个会话、一个工作区或恢复全局范围，返回 `{throughSequence}` |
+| `events/setScope` | `{taskId?,sessionId?,workspaceId?}` | 将实时持久事件限定到一个任务、会话或工作区，也可恢复全局范围，返回 `{throughSequence}` |
 | `events/resubscribe` | `{}` | 在队列溢出后恢复实时通知，返回 `{throughSequence}` |
 | `artifacts/list` | `{taskId}` | Artifact 数组 |
 | `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
@@ -189,9 +189,9 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 `initialize.capabilities.eventReplayTargetBytes` 表示回放方法支持的最大字节目标。客户端可设置 `targetBytes` 为 1024..8388608，按紧凑 JSON 的 `events` 数组大小分页。单个事件已超过目标时，该页完整返回该事件，游标仍会前进。
 
-支持 `eventSubscriptionScope` 的 stdio 连接可请求 `events/setScope`。传入现有 `sessionId` 即可订阅该会话的持久事件。如有 `workspaceEventSubscription`，也可传入 `workspaceId` 订阅整个工作区。至多指定一个范围。两个参数均省略或为 `null` 时恢复全局范围。请求成功时服务替换旧队列，并返回切换时的全局水位 `throughSequence`。在响应之后暂存新通知。按当前范围用 `events/listSession`、`events/listWorkspace` 或 `events/listAll` 补齐至这个水位，再按序号处理暂存通知。队列中尚未发送的旧通知可从持久回放读取。实时模型预览和终端通知各自独立。批量请求依次执行，实时队列使用最后一次成功切换的范围。
+支持 `eventSubscriptionScope` 的 stdio 连接可请求 `events/setScope`。传入现有 `sessionId` 即可订阅该会话的持久事件。如有 `workspaceEventSubscription`，也可传入 `workspaceId` 订阅整个工作区。如有 `taskEventSubscription`，可传入 `taskId` 订阅单个任务，并用 `events/list` 的 `through` 参数限定回放上界。至多指定一个范围。所有参数均省略或为 `null` 时恢复全局范围。请求成功时服务替换旧队列，并返回切换时的全局水位 `throughSequence`。在响应之后暂存新通知。按当前范围用 `events/list`、`events/listSession`、`events/listWorkspace` 或 `events/listAll` 补齐至这个水位，再按序号处理暂存通知。队列中尚未发送的旧通知可从持久回放读取。实时模型预览和终端通知各自独立。批量请求依次执行，实时队列使用最后一次成功切换的范围。
 
-支持 `eventResubscribe` 的连接收到 `notifications/eventGap` 后，可用 `events/resubscribe` 重新订阅。先暂存恢复后的实时通知，再从本地游标调用当前范围对应的 `events/listAll` 或 `events/listSession`，传入返回的 `throughSequence` 作为包含式 `through`。回放结束后按序号处理暂存通知。服务在同一内核锁下采集水位并建立订阅，实时通知从该水位之后开始，沿用恢复前的范围。若实时队列再次溢出，可重新建立订阅并从已保存游标补齐。订阅仍有效时重复调用返回 -32009。
+支持 `eventResubscribe` 的连接收到 `notifications/eventGap` 后，可用 `events/resubscribe` 重新订阅。先暂存恢复后的实时通知，再从本地游标调用当前范围对应的回放方法，传入返回的 `throughSequence` 作为包含式 `through`。回放结束后按序号处理暂存通知。服务在同一内核锁下采集水位并建立订阅，实时通知从该水位之后开始，沿用恢复前的范围。若实时队列再次溢出，可重新建立订阅并从已保存游标补齐。订阅仍有效时重复调用返回 -32009。
 
 ## 错误
 

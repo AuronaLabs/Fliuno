@@ -993,6 +993,15 @@
           "minimum": 0,
           "default": 0
         },
+        "through": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
         "limit": {
           "type": "integer",
           "format": "uint32",
@@ -1146,6 +1155,13 @@
       "title": "EventsSetScopeParams",
       "type": "object",
       "properties": {
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "sessionId": {
           "type": [
             "string",
