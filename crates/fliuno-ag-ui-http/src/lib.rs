@@ -21,8 +21,10 @@ use std::{
 };
 use tokio::{
     sync::{Mutex, Semaphore},
-    time::timeout,
+    time::{Instant, timeout},
 };
+
+const POLL_INTERVAL: Duration = Duration::from_millis(150);
 
 type Authorize = dyn Fn(&HeaderMap) -> Option<String> + Send + Sync;
 
@@ -30,6 +32,7 @@ struct Gateway<R, W> {
     client: Arc<Mutex<Client<R, W>>>,
     authorize: Box<Authorize>,
     streams: Arc<Semaphore>,
+    watermark: Mutex<Option<(Instant, u64)>>,
 }
 
 /// Mount `POST /run` and `GET /runs/{run_id}` on the host's HTTP listener.
@@ -48,6 +51,7 @@ where
         client,
         authorize: Box::new(authorize),
         streams: Arc::new(Semaphore::new(16)),
+        watermark: Mutex::new(None),
     });
     Router::new()
         .route("/run", post(start::<R, W>))
@@ -66,6 +70,26 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Gateway<R, W> {
         tokio::task::spawn_blocking(move || call(&mut client))
             .await
             .map_err(|_| StatusCode::BAD_GATEWAY)?
+    }
+
+    async fn poll_watermark(&self, minimum: u64) -> Status<u64> {
+        // Coalesce overlapping idle readers. Initial requests still use a fresh
+        // sample to validate a reconnect against the current store.
+        let mut sample = self.watermark.lock().await;
+        if let Some((time, through)) = *sample
+            && time.elapsed() < POLL_INTERVAL
+            && through >= minimum
+        {
+            return Ok(through);
+        }
+        let through = self
+            .rpc(|client| client.event_watermark(|_| {}).map_err(rpc_status))
+            .await?;
+        if through < minimum {
+            return Err(StatusCode::BAD_GATEWAY);
+        }
+        *sample = Some((Instant::now(), through));
+        Ok(through)
     }
 }
 
@@ -103,16 +127,17 @@ async fn start<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     .await
     .map_err(|_| StatusCode::REQUEST_TIMEOUT)?
     .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
-    let replay = gateway
+    let (replay, through) = gateway
         .rpc(move |client| {
             let run = client
                 .start_ag_ui_run(&session, &body, |_| {})
                 .map_err(run_status)?;
             let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
-            run.replay_sse(through, None).map_err(replay_status)
+            let replay = run.replay_sse(through, None).map_err(replay_status)?;
+            Ok((replay, through))
         })
         .await?;
-    respond(gateway, replay, permit).await
+    respond(gateway, replay, through, permit).await
 }
 
 async fn attach<R: BufRead + Send + 'static, W: Write + Send + 'static>(
@@ -135,25 +160,28 @@ async fn attach<R: BufRead + Send + 'static, W: Write + Send + 'static>(
         .clone()
         .try_acquire_owned()
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let replay = gateway
+    let (replay, through) = gateway
         .rpc(move |client| {
             let run = client
                 .attach_ag_ui_run(&session, &run_id, |_| {})
                 .map_err(run_status)?;
             let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
-            run.replay_sse(through, last_id.as_deref())
-                .map_err(replay_status)
+            let replay = run
+                .replay_sse(through, last_id.as_deref())
+                .map_err(replay_status)?;
+            Ok((replay, through))
         })
         .await?;
-    respond(gateway, replay, permit).await
+    respond(gateway, replay, through, permit).await
 }
 
 async fn respond<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     gateway: Arc<Gateway<R, W>>,
     replay: AgUiSseReplay,
+    through: u64,
     permit: tokio::sync::OwnedSemaphorePermit,
 ) -> Status<Response> {
-    let mut delivery = delivery::Delivery::new(gateway, replay, permit);
+    let mut delivery = delivery::Delivery::new(gateway, replay, through, permit);
     // Validate the resume position before committing response headers.
     let first = loop {
         let chunk = delivery.available().await?;

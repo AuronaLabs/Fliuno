@@ -1,14 +1,44 @@
 //! Verify the HTTP boundary against a real stdio server and SQLite database.
-use super::{ag_ui_run::connect, *};
+use super::{ag_ui_run::connect_with_writer, *};
 use fliuno_protocol::Session;
-use std::sync::Arc;
+use std::{
+    io,
+    sync::{Arc, Mutex as SyncMutex},
+};
 use tokio::sync::Mutex;
+
+struct CountWatermarks {
+    stdin: ChildStdin,
+    times: Arc<SyncMutex<Vec<Instant>>>,
+}
+
+impl Write for CountWatermarks {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes
+            .windows(b"events/getWatermark".len())
+            .any(|part| part == b"events/getWatermark")
+        {
+            self.times.lock().unwrap().push(Instant::now());
+        }
+        self.stdin.write_all(bytes)?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stdin.flush()
+    }
+}
 
 #[tokio::test]
 async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
     let root = std::env::temp_dir().join(format!("fliuno-ag-ui-http-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
-    let (server, mut client) = connect(&root.join("kernel.db"));
+    let watermarks = Arc::new(SyncMutex::new(Vec::new()));
+    let (server, mut client) =
+        connect_with_writer(&root.join("kernel.db"), |stdin| CountWatermarks {
+            stdin,
+            times: watermarks.clone(),
+        });
     let workspace: Workspace = client
         .call("workspace/open", &json!({"root":root}), |_| {})
         .unwrap();
@@ -105,6 +135,38 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
         start.extend_from_slice(&first.chunk().await.unwrap().unwrap());
     }
     assert!(std::str::from_utf8(&start).unwrap().contains("RUN_STARTED"));
+
+    // The two startup requests query their snapshots separately. After both
+    // are initialized, keep the streams idle and observe actual stdio traffic.
+    let idle_since = Instant::now();
+    let deadline = idle_since + Duration::from_secs(4);
+    loop {
+        let samples = watermarks
+            .lock()
+            .unwrap()
+            .iter()
+            .copied()
+            .filter(|instant| *instant >= idle_since)
+            .collect::<Vec<_>>();
+        if samples.len() >= 4 {
+            assert!(
+                samples
+                    .windows(2)
+                    .all(|pair| pair[1] - pair[0] >= Duration::from_millis(145)),
+                "idle responses sent separate watermark queries: {:?}",
+                samples
+                    .windows(2)
+                    .map(|pair| pair[1] - pair[0])
+                    .collect::<Vec<_>>()
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "idle listeners stopped querying the watermark"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 
     // Both HTTP applications wait on the normal kernel approval gate. The host
     // approves through the shared client while the HTTP response remains open.

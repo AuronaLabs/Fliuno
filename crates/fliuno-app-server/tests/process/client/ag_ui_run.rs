@@ -8,6 +8,13 @@ use std::process::ChildStdout;
 pub(super) fn connect(
     db: &std::path::Path,
 ) -> (Server, Client<BufReader<ChildStdout>, ChildStdin>) {
+    connect_with_writer(db, std::convert::identity)
+}
+
+pub(super) fn connect_with_writer<W: Write>(
+    db: &std::path::Path,
+    wrap: impl FnOnce(ChildStdin) -> W,
+) -> (Server, Client<BufReader<ChildStdout>, W>) {
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
             .arg("--db")
@@ -20,7 +27,7 @@ pub(super) fn connect(
     );
     let client = Client::connect(
         BufReader::new(server.0.stdout.take().unwrap()),
-        server.0.stdin.take().unwrap(),
+        wrap(server.0.stdin.take().unwrap()),
         "ag-ui-run-contract",
         |_| {},
     )

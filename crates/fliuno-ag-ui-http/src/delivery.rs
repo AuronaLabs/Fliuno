@@ -1,5 +1,5 @@
 //! Pull small encoded pages in response to demand from the HTTP body.
-use super::{Gateway, Status, replay_status, rpc_status};
+use super::{Gateway, POLL_INTERVAL, Status, replay_status};
 use axum::body::Bytes;
 use fliuno_client::ag_ui::{AgUiRunPhase, AgUiSseReplay};
 use futures_util::{Stream, stream};
@@ -17,6 +17,7 @@ pub(super) struct Delivery<R, W> {
     gateway: Arc<Gateway<R, W>>,
     replay: Option<AgUiSseReplay>,
     heartbeat: Instant,
+    through: u64,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -24,12 +25,14 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Delivery<R, W> {
     pub(super) fn new(
         gateway: Arc<Gateway<R, W>>,
         replay: AgUiSseReplay,
+        through: u64,
         permit: OwnedSemaphorePermit,
     ) -> Self {
         Self {
             gateway,
             replay: Some(replay),
             heartbeat: Instant::now(),
+            through,
             _permit: permit,
         }
     }
@@ -57,26 +60,25 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Delivery<R, W> {
                 }
                 continue;
             }
-            let mut replay = self.replay.take().expect("delivery owns its replay");
+            let replay = self.replay.as_mut().expect("delivery owns its replay");
             if matches!(
                 replay.run_phase(),
                 Some(AgUiRunPhase::Finished | AgUiRunPhase::Interrupted)
             ) {
                 return Ok(None);
             }
-            sleep(Duration::from_millis(150)).await;
-            self.replay = Some(
-                self.gateway
-                    .rpc(move |client| {
-                        let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
-                        replay.advance_through(through).map_err(replay_status)?;
-                        Ok(replay)
-                    })
-                    .await?,
-            );
-            if self.heartbeat.elapsed() >= Duration::from_secs(10) {
-                self.heartbeat = Instant::now();
-                return Ok(Some(Bytes::from_static(b": keep-alive\n\n")));
+            loop {
+                sleep(POLL_INTERVAL).await;
+                let through = self.gateway.poll_watermark(self.through).await?;
+                if through > self.through {
+                    replay.advance_through(through).map_err(replay_status)?;
+                    self.through = through;
+                    break;
+                }
+                if self.heartbeat.elapsed() >= Duration::from_secs(10) {
+                    self.heartbeat = Instant::now();
+                    return Ok(Some(Bytes::from_static(b": keep-alive\n\n")));
+                }
             }
         }
     }
