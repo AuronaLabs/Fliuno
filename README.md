@@ -3,27 +3,32 @@
     <source media="(max-width: 600px) and (prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-compact-light.svg">
     <source media="(max-width: 600px)" srcset="docs/assets/fliuno-cover-compact.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-light.svg">
-    <img src="docs/assets/fliuno-cover.svg" alt="Fliuno — 提交任务、审批操作、收取交付物" width="960">
+    <img src="docs/assets/fliuno-cover.svg" alt="任务流程：提交、审批、交付" width="960">
   </picture>
 </p>
 
-# Fliuno · 面向工作任务的 Rust Agent 内核
+# Fliuno
 
-Fliuno 为桌面工作台和宿主应用运行任务。在执行前向用户请求所需授权，把进度、审批和交付物保存在本机，方便宿主在重连后继续读取。
+**面向桌面工作台和宿主应用的 Rust Agent 内核。** 提交任务、审批操作、收取交付物。执行进度与结果保存在本机，客户端重连后可按游标继续读取。
 
-**[运行离线演示](#跑一次离线任务)** · **[接入客户端](#接入自己的客户端)** · **[浏览文档](docs/README.md)**
+**[快速开始](#快速开始)** · **[文档中心](docs/README.md)** · [内核架构](docs/architecture.md)
 
-`0.0.3` 开发中 · [已发布 0.0.2](CHANGELOG.md#002) · [应用协议 0.1](docs/protocol.md) · [Windows / Linux](docs/sandbox.md)
+`0.0.3` 开发中 · [已发布 0.0.2](CHANGELOG.md#002) · [开发路线图](docs/roadmap.md)
 
 ## 快速开始
 
 ### 跑一次离线任务
 
-在仓库根目录运行。需要 **Rust 1.89+**、平台的 C/C++ 构建工具和 Python。首次运行会构建应用服务，演示使用内置模型与临时数据库，无需 API Key。
+在仓库根目录运行。需要 [Rust 1.89+、C/C++ 构建工具和 Python](docs/setup.md#快速开始)，无需 API Key。
 
 ```sh
 python examples/demo.py
 ```
+
+演示先停在待审批状态，允许一次 `artifact_create` 后完成任务并保留一个交付物。
+
+<details>
+<summary>预期输出与拒绝审批的演示</summary>
 
 ```text
 Task: waiting_approval
@@ -32,9 +37,11 @@ Result: completed
 Artifacts: 1
 ```
 
-脚本先验证任务在 `waiting_approval` 时没有交付物，再允许一次 `artifact_create`，确认任务完成并保存了产物。运行 `python examples/demo.py --deny` 可以验证另一条路径：任务结束为 `failed`，产物为 `0`。
+脚本会验证审批前没有交付物。加上 `--deny` 可测试拒绝路径：任务结束为 `failed`，产物为 `0`。
 
-[安装与配置](docs/setup.md#快速开始) · [示例源码](examples/demo.py)
+[示例源码](examples/demo.py)
+
+</details>
 
 ### 接入自己的客户端
 
@@ -44,36 +51,22 @@ Artifacts: 1
 cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 ```
 
-```json
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1","clientName":"my-client"}}
-```
-
-读到 `capabilities` 后，用 `workspace/open` → `session/create` → `task/start` 提交第一项工作。
+`initialize` 握手后，依次调用 `workspace/open` → `session/create` → `task/start`。宿主可用同一套接口展示待审批操作、订阅执行进度和取回交付物。
 
 [完整接入步骤](docs/setup.md#再启动自己的服务) · [Rust 客户端](docs/protocol.md#rust-调用方) · [AG-UI HTTP / SSE](docs/ag-ui.md#http-接入)
 
-## 一项任务如何运行
+## 能力一览
 
-| 阶段 | 内核做什么 |
-| --- | --- |
-| **01 · 提交** | 在指定工作区和会话中运行任务，可按配置使用模型或外部 Agent。 |
-| **02 · 审批** | 操作需要授权时暂停任务。宿主展示提议，由用户允许或拒绝。 |
-| **03 · 交付** | 保存结果与执行事件。客户端按游标恢复进度，按目录收取交付物。 |
-
-## 按用途查文档
-
-| 如果你在做… | 建议接着看 |
-| --- | --- |
-| **桌面工作台** | [任务、审批和交付物的接入顺序](docs/README.md#工作台要展示什么) |
-| **模型或工具集成** | [OpenAI、Anthropic、Gemini、MCP、ACP、A2A](docs/README.md#模型工具与-agent) |
-| **本机执行** | [命令注册、终端和平台隔离](docs/README.md#本机执行与隔离) |
+- **任务与交付**：在会话中提交与恢复任务，展示审批，跟踪交付物。[工作台接入](docs/README.md#工作台要展示什么)
+- **模型和工具**：连接 OpenAI、Anthropic、Gemini，或通过 MCP、ACP、A2A 接入外部能力。[集成索引](docs/README.md#模型工具与-agent)
+- **本机执行**：由宿主注册命令和终端，并按平台配置进程隔离。[Windows / Linux 执行](docs/README.md#本机执行与隔离)
 
 ## 开发与验证
 
 ```powershell
-pwsh -File scripts/check.ps1
+pwsh -NoProfile -File scripts/check.ps1
 ```
 
 这条命令检查格式、Clippy、工作区测试、应用协议 Schema 和离线演示。
 
-[内核架构](docs/architecture.md) · [验收与性能记录](docs/execution-evidence.md) · [开发路线图](docs/roadmap.md) · [更新记录](CHANGELOG.md)
+[验收与性能记录](docs/execution-evidence.md) · [更新记录](CHANGELOG.md)

@@ -76,7 +76,8 @@ Skills 分成 frontmatter、catalog、resources 和工具适配层。catalog 固
 | `fliuno-sandbox` | 原生启动与进程所有权；Windows host/AppContainer 共享 Job/reactor、Linux Landlock/seccomp、私有目录与受限句柄继承 |
 | `fliuno-tools` | 工作区目录分页、元数据、文本和二进制读取、流式 SHA-256、文件创建和有基线校验的编辑 |
 | `fliuno-skills` | Agent Skills 元数据、指令与资源按需读取，单技能目录能力和来源绑定 |
-| `fliuno-client` | 本机 Rust stdio 客户端，支持握手、类型化调用和通知 |
+| `fliuno-client` | 本机 Rust stdio 客户端，支持握手、类型化调用、通知和 AG-UI 事件投影 |
+| `fliuno-ag-ui-http` | 可嵌入宿主的 AG-UI HTTP 路由与 SSE 输出，使用 Rust 客户端访问内核 |
 | `fliuno-app-server` | JSON-RPC 分发、stdio 传输、配置组装；不承载业务逻辑 |
 
 ## 状态机

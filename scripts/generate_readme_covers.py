@@ -60,8 +60,8 @@ def lifecycle(x, y, w, c, compact):
     inset = 15 if compact else 22
     gap = 16 if compact else 22
     card = (w - 2 * inset - 2 * gap) // 3
-    top = 47
-    height = 149 if compact else 173
+    top = 37 if compact else 47
+    height = 124 if compact else 173
     footer = height - 15
     nodes = [
         ('01', 'Submit', 'M4 6h16v12H4zM4 6l8 6 8-6', c['muted']),
@@ -71,54 +71,56 @@ def lifecycle(x, y, w, c, compact):
     pieces = [f'<g transform="translate({x} {y})">',
               rect(0, 0, w, height, 15, c['panel'], c['line']),
               rect(1, 1, w-2, height-2, 14, 'url(#grid)'),
-              text(inset, 29, 'TASK LIFECYCLE', 11, c['muted'], mono=True, spacing=1.5)]
+              text(inset, 24 if compact else 29, 'TASK LIFECYCLE', 11, c['muted'], mono=True, spacing=1.5)]
     for i, (number, label, icon, color) in enumerate(nodes):
         left = inset + i * (card + gap)
-        pieces += [rect(left, top, card, 67 if compact else 83, 9, c['bg'], color),
-                   f'<g transform="translate({left + 11} {top + 10})">{path(icon, color, 1.55)}</g>',
-                   text(left + card - 10, top + 25, number, 10, color, mono=True, anchor='end'),
-                   text(left + 11, top + (51 if compact else 57), label, 14 if compact else 17, c['ink'])]
+        pieces += [rect(left, top, card, 55 if compact else 83, 9, c['bg'], color),
+                   f'<g transform="translate({left + 11} {top + (5 if compact else 10)})">{path(icon, color, 1.55)}</g>',
+                   text(left + card - 10, top + (20 if compact else 25), number, 10, color, mono=True, anchor='end'),
+                   text(left + 11, top + (43 if compact else 57), label, 14 if compact else 17, c['ink'])]
         if i < 2:
             edge = left + card
-            mid = top + (34 if compact else 42)
+            mid = top + (28 if compact else 42)
             pieces.append(path(f'M{edge+3} {mid}h{gap-6}m-4-4 4 4-4 4', c['muted']))
     pieces += [text(inset, footer, 'LOCAL RUN  /  DURABLE RECEIPTS', 10, c['muted'], mono=True, spacing=.8), '</g>']
     return pieces
 
 
 def project(c, compact):
-    w, h = (480, 360) if compact else (1120, 318)
+    w, h = (480, 274) if compact else (1120, 318)
     x = 24 if compact else 60
-    logo_y = 23 if compact else 49
-    baseline = 130 if compact else 186
+    logo_y = 31 if compact else 49
     pieces = [rect(w * .45, 0, w * .55, h, 0, 'url(#grid)'),
-              logo(x, logo_y, c),
-              text(x + 48, logo_y + 22, 'RUST AGENT KERNEL', 12, c['accent'], mono=True, spacing=1.4),
-              text(x - 4, baseline, 'Fliuno', 74 if compact else 112, c['ink'], weight=800, spacing=-4),
-              text(x, baseline + (33 if compact else 43), 'From task to deliverable.', 21 if compact else 26, c['muted'], weight=500)]
-    pieces += lifecycle(24 if compact else 552, 185 if compact else 72,
+              logo(x, logo_y, c)]
+    if compact:
+        pieces += [text(x + 48, 67, 'Fliuno', 56, c['ink'], weight=800),
+                   text(x, 103, 'RUST AGENT KERNEL', 13, c['accent'], mono=True, spacing=1.4)]
+    else:
+        pieces += [text(x + 48, logo_y + 22, 'RUST AGENT KERNEL', 12, c['accent'], mono=True, spacing=1.4),
+                   text(x - 4, 186, 'Fliuno', 112, c['ink'], weight=800),
+                   text(x, 229, 'From task to deliverable.', 26, c['muted'], weight=500)]
+    pieces += lifecycle(24 if compact else 552, 126 if compact else 72,
                         432 if compact else 508, c, compact)
     return cover(w, h, 'Fliuno — Rust agent kernel', 'Submit a task, approve an operation, and collect a deliverable.', c, pieces)
 
 
 def guide(c, compact):
-    w, h = (480, 220) if compact else (1120, 176)
+    w, h = (480, 100) if compact else (1120, 128)
     x = 24 if compact else 56
+    y = 33 if compact else 47
     pieces = [rect(w * .47, 0, w * .53, h, 0, 'url(#grid)'),
-              logo(x, 24 if compact else 33, c),
-              text(x + 48, 46 if compact else 55, 'FLIUNO / DOCUMENTATION', 12, c['accent'], mono=True, spacing=1.4),
-              text(x - 2, 117 if compact else 127, 'Field guide', 52 if compact else 64, c['ink'], weight=750, spacing=-2)]
-    start = 24 if compact else 533
-    top = 144 if compact else 66
-    card = 136 if compact else 166
-    gap = 12 if compact else 16
-    for i, (label, color) in enumerate([('Run a task', c['teal']), ('Connect', c['accent']), ('Build', c['muted'])]):
-        left = start + i * (card + gap)
-        pieces += [rect(left, top, card, 48, 9, c['panel'], c['line']),
-                   rect(left + 11, top + 13, 24, 22, 5, c['tint']),
-                   text(left + 23, top + 28, f'0{i+1}', 11, color, mono=True, anchor='middle'),
-                   text(left + 43, top + 29, label, 14 if compact else 16, c['ink'])]
-    return cover(w, h, 'Fliuno field guide', 'Three paths: run a task, connect a client, or build the kernel.', c, pieces)
+              logo(x, y, c),
+              text(x + 48, y - 2, 'FLIUNO / HANDBOOK', 11, c['accent'], mono=True, spacing=1.4),
+              text(x + 48, y + 36, 'Documentation', 30 if compact else 42, c['ink'], weight=750)]
+    entry = 352 if compact else 762
+    end = w - (33 if compact else 62)
+    center = h // 2
+    split = entry + (end - entry) // 3
+    pieces += [path(f'M{entry} {center}H{end}M{split} {center}v-22H{end}M{split} {center}v22H{end}', c['line'], 1.5),
+               rect(entry - 4, center - 4, 8, 8, 2, c['accent'])]
+    for dy, color in [(-22, c['accent']), (0, c['teal']), (22, c['muted'])]:
+        pieces.append(rect(end - 3, center + dy - 3, 6, 6, 2, color))
+    return cover(w, h, 'Fliuno documentation', 'A single path branches into three.', c, pieces)
 
 
 if __name__ == '__main__':

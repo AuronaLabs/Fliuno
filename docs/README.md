@@ -3,23 +3,21 @@
     <source media="(max-width: 600px) and (prefers-color-scheme: light)" srcset="assets/fliuno-docs-compact-light.svg">
     <source media="(max-width: 600px)" srcset="assets/fliuno-docs-compact.svg">
     <source media="(prefers-color-scheme: light)" srcset="assets/fliuno-docs-light.svg">
-    <img src="assets/fliuno-docs.svg" alt="Fliuno 文档：运行任务、接入应用、开发内核" width="960">
+    <img src="assets/fliuno-docs.svg" alt="" width="960">
   </picture>
 </p>
 
 # Fliuno 文档中心
 
-[项目首页](../README.md) / 文档中心 · [更新记录](../CHANGELOG.md) · [开发路线图](roadmap.md)
+[项目首页](../README.md) › 文档中心
 
 ## 从这里开始
 
-| 路线 | 阅读顺序 |
-| --- | --- |
-| **01 · 运行第一项任务** | [准备环境](setup.md#快速开始) → [运行离线演示](../README.md#跑一次离线任务) → [配置真实模型](setup.md#真实模型) |
-| **02 · 接入自己的应用** | [启动服务并握手](setup.md#再启动自己的服务) → [选择连接方式](#连接方式) → [接入工作台](#工作台要展示什么) |
-| **03 · 开发内核** | [读懂模块依赖](architecture.md#领域与依赖) → [理解授权边界](authority.md) → [运行工程检查](setup.md#检查与演示) |
+1. **第一次运行**：先[跑一次离线任务](../README.md#跑一次离线任务)，再按需[配置模型](setup.md#真实模型)。
+2. **把 Fliuno 接进应用**：[启动服务并握手](setup.md#再启动自己的服务)，再[选择连接方式](#连接方式)。
+3. **修改内核**：[看模块依赖](architecture.md#领域与依赖)，了解[授权边界](authority.md)，然后[运行工程检查](setup.md#检查与演示)。
 
-**主题索引：** [接入客户端](#接入客户端) · [模型、工具与 Agent](#模型工具与-agent) · [本机执行与隔离](#本机执行与隔离) · [内核与开发](#内核与开发)
+**按主题浏览：** [接入客户端](#接入客户端) · [模型、工具与 Agent](#模型工具与-agent) · [本机执行与隔离](#本机执行与隔离) · [内核与开发](#内核与开发)
 
 ## 接入客户端
 
@@ -33,19 +31,22 @@
 
 ### 工作台要展示什么
 
-先让用户完整跑通提交、审批和取回产物，再补上实时刷新、历史查询和用量统计。
+**最小接入顺序**
 
-| 操作 | 对应文档 |
-| --- | --- |
-| **提交、恢复与停止** | [提交和断线重试](protocol.md#任务提交与重试) · [判断能否恢复](protocol.md#任务恢复判断) · [批量取消](protocol.md#批量取消任务) |
-| **展示待审批** | [待审批快照](protocol.md#待审批快照) · [提交决定](protocol.md#决定与运行) · [批量核对结果](protocol.md#批量读取审批决定) |
-| **收取交付物** | [目录订阅](protocol.md#交付物目录订阅) · [批量校验摘要](protocol.md#批量读取交付物摘要) · [分段下载](protocol.md#审批事件与产物) |
-| **实时更新工作台** | [工作台快照](protocol.md#工作台快照) · [实时订阅](protocol.md#工作台实时订阅) · [按修订回放](protocol.md#任务摘要修订回放) |
-| **浏览会话与任务** | [会话目录](protocol.md#会话目录) · [任务目录](protocol.md#任务目录) · [历史分页](context.md#会话历史分页) · [搜索](protocol.md#查找历史任务) |
-| **查询模型用量** | [累计用量](protocol.md#用量汇总) · [批量汇总](protocol.md#批量用量汇总) · [逐次报告](protocol.md#回放用量报告) |
+1. [提交任务](protocol.md#任务提交与重试)，在断线重试时复用请求 ID。
+2. 展示[待审批操作](protocol.md#待审批快照)，由用户[允许或拒绝](protocol.md#决定与运行)。
+3. [订阅交付物目录](protocol.md#交付物目录订阅)，按需[分段下载](protocol.md#审批事件与产物)。
 
-> [!TIP]
-> 断线后要同步任务列表，可[按游标读取变动摘要](protocol.md#任务变动摘要)，也可[先回放任务 ID](protocol.md#任务变动回放)，再[批量取摘要](protocol.md#批量读取任务摘要)。
+<details>
+<summary>进阶：重连、批量操作、历史和用量</summary>
+
+- **工作台刷新**：[工作台快照](protocol.md#工作台快照) · [实时订阅](protocol.md#工作台实时订阅) · [按修订回放](protocol.md#任务摘要修订回放)
+- **断线补读**：[按游标读变动摘要](protocol.md#任务变动摘要)；或[回放任务 ID](protocol.md#任务变动回放)后[批量取摘要](protocol.md#批量读取任务摘要)。
+- **恢复与批量操作**：[判断能否恢复](protocol.md#任务恢复判断) · [批量取消任务](protocol.md#批量取消任务) · [核对审批结果](protocol.md#批量读取审批决定) · [校验交付物摘要](protocol.md#批量读取交付物摘要)
+- **目录与历史**：[会话目录](protocol.md#会话目录) · [任务目录](protocol.md#任务目录) · [历史分页](context.md#会话历史分页) · [历史搜索](protocol.md#查找历史任务)
+- **模型用量**：[累计用量](protocol.md#用量汇总) · [批量汇总](protocol.md#批量用量汇总) · [逐次报告](protocol.md#回放用量报告)
+
+</details>
 
 ## 模型、工具与 Agent
 
@@ -72,8 +73,9 @@
 | --- | --- |
 | **[内核架构](architecture.md)** | 模块依赖、任务状态机、事务和权限边界 |
 | **[会话上下文](context.md)** | 历史选择、冻结快照和模型请求预算 |
-| **[开发路线图](roadmap.md)** · [更新记录](../CHANGELOG.md) | 当前开发范围与已发布版本 |
 | **[验收与性能记录](execution-evidence.md)** · [检查与演示](setup.md#检查与演示) | 可复现的命令、双平台验收和性能测量 |
 | **[内核调研](research.md)** | 模型、工具、Agent 和系统隔离的选型依据 |
+
+**版本与进度**：[更新记录](../CHANGELOG.md) · [开发路线图](roadmap.md)
 
 [回到阅读入口](#从这里开始) · [返回项目首页](../README.md)
