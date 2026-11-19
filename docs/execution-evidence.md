@@ -355,3 +355,11 @@ app-server 进程用例覆盖路径越界在审批前被拒绝，拒绝时不向
 Windows `scripts/check.ps1` 退出码为 0。432 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 均通过。日志为 `target/0.0.2-workspace-search-windows.log`。
 
 Debian Linux 6.12.107 来宾通过 4 项产物进程测试和 1 项文本定位进程测试，包含产物快照跨重启续读。日志为 `D:/Fliuno-Native-Test/guest-artifact-search.log`。
+
+## 事件回放字节预算（2026-11-19）
+
+回放页达到字节目标后仍探测下一行是否存在。该行留在原有游标之后，直到客户端请求下一页时再解析正文。对照 Windows 调试版 app-server 的两个构建，页面、`hasMore`、精确目标边界、包含式 `through` 和下一页正文均一致。
+
+使用两份相同的 SQLite 测试库，目标为 4 KiB，首个事件形成 24,688 字节的页面，下一事件含 1,048,576 字节正文。61 轮交替测得本机 stdio JSON-RPC 延迟中位数由 63.38 ms 降至 4.97 ms。该结果针对下一条事件较大且当前页已达到目标的场景。日志为 `target/0.0.2-event-replay-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0。432 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 均通过。Debian Linux 6.12.107 来宾的 6 项事件回放及订阅进程测试均通过。日志分别为 `target/0.0.2-event-replay-windows.log` 和 `D:/Fliuno-Native-Test/guest-event-replay.log`。

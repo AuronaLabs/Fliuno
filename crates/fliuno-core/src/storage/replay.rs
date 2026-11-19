@@ -211,7 +211,10 @@ impl Kernel {
         let mut has_more = false;
         let mut bytes = 2; // Array brackets.
         while let Some(row) = rows.next()? {
-            if events.len() == limit as usize {
+            // Step once to probe for another row without decoding its payload.
+            if events.len() == limit as usize
+                || target_bytes.is_some_and(|target| bytes >= target as usize)
+            {
                 has_more = true;
                 break;
             }
