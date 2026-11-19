@@ -35,6 +35,8 @@ mod task_status;
 #[cfg(feature = "test-fixtures")]
 #[path = "process/terminal.rs"]
 mod terminal;
+#[path = "process/workspace_search.rs"]
+mod workspace_search;
 
 struct Peer {
     child: Child,

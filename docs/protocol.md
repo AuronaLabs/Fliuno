@@ -304,6 +304,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 - `workspace_sha256({path})`：审批后对至多 64 MiB 的工作区普通文件逐块计算 SHA-256，返回 `path`、实际读取的 `bytes` 和小写十六进制 `sha256`。结果不含正文。并发修改文件时，摘要只描述实际读到的字节流。
 - `workspace_read_text({path,line?,limit?})`：读取最多 256 KiB UTF-8 文件；line 从 1 开始，limit 是最大行数，均须为正整数。按行截取保留原换行，SHA-256 始终针对完整文件；超出末行返回空文本。
 - `workspace_read_bytes({path})`：读取最多 256 KiB 原始字节并返回 `{path,encoding:"base64",data,bytes,sha256,grantsPermissions:false}`。长度和摘要针对原始字节；不检测 MIME、不解码格式、不执行，也不自动创建 artifact。该读取和所有其他工具调用一样，每次需要审批；拒绝审批不会返回文件数据。
+- `workspace_search_text({paths,query,maxMatches?:24})`：一次审批搜索 1 到 8 个明确指定的工作区相对文件路径，每份文件最多 256 KiB。`query` 为 1 到 256 字节的单行 UTF-8 字面文本，区分大小写。按输入的文件顺序和行序，每行只返回首个命中的行号和 UTF-8 字节列，均从 1 开始。`maxMatches` 限制整批返回 1 到 64 个命中。每份文件分别报告 `searched`、`nonText` 或 `unreadable`。超过匹配预算时，相应文件的 `hasMore` 为 true。工具结果仅含位置，不含原文。
 - `workspace_create_text({path,content})`：创建新文件，父目录须存在，目标须不存在。
 - `workspace_patch_text({path,baseSha256,patch})`：对已存在文本文件应用一个 unified diff。diff 的 `a/` 与 `b/` 路径必须与 `path` 一致，且必须是单文件修改；`baseSha256` 必须等于最近读取的内容哈希。审批记录包含完整 diff，批准前不修改文件。执行时通过打开的文件句柄复核基线，以不跟随符号链接方式打开最终文件，拒绝多硬链接目标。本进程内的新建和补丁会串行化；其他进程不受此互斥锁约束，因此外部并发编辑不具备事务性保证。写入错误或同步错误标记为结果未知，中断任务且不会自动重试。
 - `workspace_replace_text({path,content,baseSha256})`：全文替换或创建；baseSha256 必须提供，既有文件须匹配小写 SHA-256，null 仅允许新建。与补丁共享最终文件的符号链接/硬链接检查以及写入锁；保留权限的原位更新不构成针对外部进程的原子 CAS。

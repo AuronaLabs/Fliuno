@@ -347,3 +347,11 @@ app-server 进程测试覆盖空目录、翻页间新增、重启后的旧水位
 Windows 内存 SQLite 3.49.1 微基准使用 100,000 条目录记录，在序号 70,000 以内取同样的 14 条匹配项。无查询规划统计时，61 轮交替采样中，SQLite 自选工作区索引的查询与取行中位数为 10.2127 ms，显式使用既有工作区与媒体类型复合索引后为 0.1511 ms。该测量只覆盖 SQLite 查询及取行。日志为 `target/0.0.2-artifact-snapshot-query-plan.log`。
 
 Windows `scripts/check.ps1` 退出码为 0。431 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 均通过。日志为 `target/0.0.2-artifact-catalog-snapshot-windows.log`。本轮未在 Debian Linux 来宾复验。
+
+## 工作区文本定位与 Debian 复验（2026-11-19）
+
+app-server 进程用例覆盖路径越界在审批前被拒绝，拒绝时不向模型返回文件结果，以及允许后读取当前字节。测试核对中文 UTF-8 和 CRLF 的位置、同一行只返回首个命中、跨文件结果上限、二进制和不可读文件。模型收到的位置结果不含原文。
+
+Windows `scripts/check.ps1` 退出码为 0。432 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 均通过。日志为 `target/0.0.2-workspace-search-windows.log`。
+
+Debian Linux 6.12.107 来宾通过 4 项产物进程测试和 1 项文本定位进程测试，包含产物快照跨重启续读。日志为 `D:/Fliuno-Native-Test/guest-artifact-search.log`。
