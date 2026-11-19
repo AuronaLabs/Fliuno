@@ -10,7 +10,10 @@ use rmcp::{
     service::RequestContext,
 };
 use serde_json::json;
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Duration,
+};
 use tokio::runtime::Runtime;
 
 struct Fixture {
@@ -97,6 +100,8 @@ fn sdk_discovery_validation_and_execution_roundtrip() {
 
 #[derive(Clone, Default)]
 struct TasksFixture {
+    invalid_creation: bool,
+    reads: Arc<AtomicUsize>,
     updates: Arc<std::sync::Mutex<Vec<UpdateTaskParams>>>,
     cancellations: Arc<std::sync::Mutex<Vec<CancelTaskParams>>>,
 }
@@ -128,7 +133,11 @@ impl ServerHandler for TasksFixture {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let task = Task::new(
-            "remote-task-1",
+            if self.invalid_creation {
+                "invalid\ntask"
+            } else {
+                "remote-task-1"
+            },
             TaskStatus::Working,
             "2026-11-19T00:00:00Z",
             "2026-11-19T00:00:00Z",
@@ -141,24 +150,36 @@ impl ServerHandler for TasksFixture {
         request: GetTaskParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetTaskResult, ErrorData> {
-        if request.task_id != "remote-task-1" {
-            return Err(ErrorData::invalid_params("unknown task", None));
-        }
-        assert_eq!(request.task_id, "remote-task-1");
+        let reads = self.reads.fetch_add(1, Ordering::Relaxed);
+        let id = request.task_id.as_str();
+        let payload = match id {
+            "slow" | "working" => TaskPayload::Working,
+            "then-input" | "then-terminal" if reads == 0 => TaskPayload::Working,
+            "then-terminal" => TaskPayload::Cancelled,
+            "remote-task-1" | "then-input" | "wrong-id" | "wrong-kind" => {
+                let request: InputRequest =
+                    serde_json::from_value(json!({"method":"roots/list","params":{}})).unwrap();
+                let input_requests: InputRequests = [("roots-1".to_owned(), request)].into();
+                TaskPayload::InputRequired { input_requests }
+            }
+            _ => return Err(ErrorData::invalid_params("unknown task", None)),
+        };
         let task = Task::new(
-            request.task_id,
-            TaskStatus::InputRequired,
+            if id == "wrong-id" {
+                "different-task"
+            } else {
+                id
+            },
+            payload.status(),
             "2026-11-19T00:00:00Z",
             "2026-11-19T00:00:01Z",
-        );
-        let request: InputRequest =
-            serde_json::from_value(json!({"method":"roots/list","params":{}}))
-                .map_err(|_| ErrorData::invalid_params("invalid fixture request", None))?;
-        let input_requests: InputRequests = [("roots-1".to_owned(), request)].into();
-        Ok(GetTaskResult::new(DetailedTask::new(
-            task,
-            TaskPayload::InputRequired { input_requests },
-        )))
+        )
+        .with_poll_interval_ms(if id == "slow" { u64::MAX } else { 100 });
+        let mut result = GetTaskResult::new(DetailedTask::new(task, payload));
+        if id == "wrong-kind" {
+            result.result_type = rmcp::model::ResultType::TASK;
+        }
+        Ok(result)
     }
 
     async fn update_task(
@@ -180,10 +201,8 @@ impl ServerHandler for TasksFixture {
     }
 }
 
-#[test]
-fn official_sdk_tasks_create_read_update_and_cancel_roundtrip() {
+fn task_tools(fixture: &TasksFixture) -> Vec<Box<dyn Tool>> {
     let runtime = Runtime::new().unwrap();
-    let fixture = TasksFixture::default();
     let (service, remote_tools) = runtime.block_on(async {
         let (client_io, server_io) = tokio::io::duplex(16384);
         tokio::spawn({
@@ -216,11 +235,25 @@ fn official_sdk_tasks_create_read_update_and_cancel_roundtrip() {
         authority: authority_digest_for_fixture(),
         service: Mutex::new(service),
         runtime,
-        timeout: Duration::from_secs(2),
+        timeout: Duration::from_secs(6),
     });
     let mut tools = wrap_tools(Arc::clone(&host), "fixture", remote_tools, None, true).unwrap();
     tools.extend(tasks::tools(Arc::clone(&host), "fixture", tasks_capability).unwrap());
+    tools
+}
 
+fn task_tool<'a>(tools: &'a [Box<dyn Tool>], name: &str) -> &'a dyn Tool {
+    tools
+        .iter()
+        .find(|tool| tool.spec().name == name)
+        .unwrap()
+        .as_ref()
+}
+
+#[test]
+fn official_sdk_tasks_create_read_update_and_cancel_roundtrip() {
+    let fixture = TasksFixture::default();
+    let tools = task_tools(&fixture);
     let start = tools
         .iter()
         .find(|tool| tool.spec().name.contains("start_"))
@@ -269,6 +302,72 @@ fn official_sdk_tasks_create_read_update_and_cancel_roundtrip() {
         fixture.cancellations.lock().unwrap()[0].task_id,
         "remote-task-1"
     );
+}
+
+#[test]
+fn official_sdk_task_wait_stops_at_actionable_states_and_poll_bounds() {
+    for (id, wait_ms, reason, polls, status) in [
+        ("then-input", 2_000, "input_required", 2, "input_required"),
+        ("then-terminal", 2_000, "terminal", 2, "cancelled"),
+        ("slow", 50, "wait_budget", 1, "working"),
+        ("working", 3_000, "poll_limit", 8, "working"),
+    ] {
+        let fixture = TasksFixture::default();
+        let tools = task_tools(&fixture);
+        let wait = task_tool(&tools, "mcp_fixture_tasks_wait");
+        let get = task_tool(&tools, "mcp_fixture_tasks_get");
+        assert_ne!(get.authority(), wait.authority());
+        assert!(wait.validate(&json!({"taskId":id,"waitMs":3001})).is_err());
+        let observation = invoke_arguments(wait, json!({"taskId":id,"waitMs":wait_ms})).unwrap();
+        assert_eq!(observation.output["method"], "tasks/get");
+        let result = &observation.output["result"];
+        assert_eq!(result["reason"], reason);
+        assert_eq!(result["polls"], polls);
+        assert_eq!(result["snapshot"]["status"], status);
+        assert_eq!(result["snapshot"]["taskId"], id);
+        assert_eq!(fixture.reads.load(Ordering::Relaxed), polls);
+        assert!(fixture.updates.lock().unwrap().is_empty());
+        assert!(fixture.cancellations.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn unexpected_task_id_or_result_kind_closes_connection() {
+    for (method, args) in [
+        ("mcp_fixture_tasks_get", json!({"taskId":"wrong-id"})),
+        (
+            "mcp_fixture_tasks_wait",
+            json!({"taskId":"wrong-kind","waitMs":250}),
+        ),
+    ] {
+        let fixture = TasksFixture::default();
+        let tools = task_tools(&fixture);
+        assert!(matches!(
+            invoke_arguments(task_tool(&tools, method), args),
+            Err(ToolError::OutcomeUnknown(_))
+        ));
+        let get = task_tool(&tools, "mcp_fixture_tasks_get");
+        assert!(
+            matches!(invoke_arguments(get, json!({"taskId":"remote-task-1"})), Err(ToolError::Failed(message)) if message.contains("host is closed"))
+        );
+        assert_eq!(fixture.reads.load(Ordering::Relaxed), 1);
+    }
+}
+
+#[test]
+fn invalid_created_task_handle_is_never_returned() {
+    let tools = task_tools(&TasksFixture {
+        invalid_creation: true,
+        ..TasksFixture::default()
+    });
+    let start = tools
+        .iter()
+        .find(|tool| tool.spec().name.contains("start_"))
+        .unwrap();
+    assert!(matches!(
+        invoke_arguments(start.as_ref(), json!({})),
+        Err(ToolError::OutcomeUnknown(_))
+    ));
 }
 
 #[test]

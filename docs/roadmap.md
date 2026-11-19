@@ -126,6 +126,7 @@
    - [x] exec/MCP/ACP 的伴随文件清单、SHA-256 复制核验、路径/容量边界、资源变更后的待批身份回归；Windows 真实 Node/CPython 多文件 MCP 允许/拒绝/篡改验收。
    - [x] Linux 真实 Node/CPython 多文件 MCP 允许、拒绝、篡改均已通过。Python 演示使用系统只读标准库，自定义 Python 安装的依赖打包仍待实现。
    - [x] MCP Tasks 扩展客户端能力协商、远端任务句柄持久为工具结果，以及逐次审批的 `tasks/get`、`tasks/update`、`tasks/cancel`；官方 Rust SDK 双端契约覆盖补答与协作取消。
+   - [x] MCP Tasks 提供单独审批的短时状态轮询，遵循对端间隔并限制请求次数，在需要输入或结束时返回最后一份快照。
    - [ ] MCP 宿主工具代理。
    - [x] MCP/Agent 全配置注册摘要：端点/程序/参数/实际环境/凭据/schema 与旧待批/排队任务绑定，v8 不替旧记录补造授权；隔离启动核验实际复制的 executable pin。
    - [x] 跨轮次 PTY preset、独立 supervisor/actor、逐操作审批、字节 spool、幂等输入、app-server 重启观察、Windows Job 预算与硬崩溃进程树回收。

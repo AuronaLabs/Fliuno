@@ -1,14 +1,19 @@
 //! Explicit, approval-gated controls for remote MCP Tasks.
-use crate::host::Host;
+use crate::host::{Host, McpService};
 use fliuno_core::{
     CancellationToken, Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec,
     authority_digest, json_size,
 };
 use fliuno_protocol::ToolCall;
-use rmcp::model::{CancelTaskParams, GetTaskParams, UpdateTaskParams};
+use rmcp::{
+    ServiceError,
+    model::{CancelTaskParams, GetTaskParams, GetTaskResult, ResultType, UpdateTaskParams},
+};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
+
+mod wait;
 
 const TASK_ID_MAX_BYTES: usize = 512;
 const INPUT_REQUESTS_MAX: usize = 16;
@@ -18,19 +23,21 @@ const RESULT_MAX_BYTES: usize = 1024 * 1024;
 #[derive(Clone, Copy)]
 enum Action {
     Get,
+    Wait,
     Update,
     Cancel,
 }
 
 enum ParsedArgs {
     TaskId(String),
+    Wait(wait::Args),
     Update(UpdateArgs),
 }
 
 impl Action {
     fn method(self) -> &'static str {
         match self {
-            Self::Get => "tasks/get",
+            Self::Get | Self::Wait => "tasks/get",
             Self::Update => "tasks/update",
             Self::Cancel => "tasks/cancel",
         }
@@ -39,6 +46,7 @@ impl Action {
     fn label(self) -> &'static str {
         match self {
             Self::Get => "get",
+            Self::Wait => "wait",
             Self::Update => "update",
             Self::Cancel => "cancel",
         }
@@ -48,6 +56,9 @@ impl Action {
         match self {
             Self::Get => {
                 "Read one remote MCP task snapshot, including pending input requests or its final result."
+            }
+            Self::Wait => {
+                "Wait briefly for a remote MCP task to need input or finish. Only reads task status; never sends input or cancels the remote task."
             }
             Self::Update => "Submit responses to pending input requests for one remote MCP task.",
             Self::Cancel => "Request cooperative cancellation of one remote MCP task.",
@@ -60,9 +71,10 @@ pub(crate) fn tools(
     server: &str,
     extension_capability: Value,
 ) -> Result<Vec<Box<dyn Tool>>, String> {
-    let mut tools = Vec::with_capacity(3);
-    for action in [Action::Get, Action::Update, Action::Cancel] {
-        let schema = schema(action);
+    let mut tools = Vec::with_capacity(4);
+    let max_wait_ms = wait::max_wait_ms(host.timeout);
+    for action in [Action::Get, Action::Wait, Action::Update, Action::Cancel] {
+        let schema = schema(action, max_wait_ms);
         let validator =
             jsonschema::validator_for(&schema).map_err(|_| "invalid MCP task input schema")?;
         tools.push(Box::new(TaskTool {
@@ -73,6 +85,7 @@ pub(crate) fn tools(
             schema,
             validator,
             extension_capability: extension_capability.clone(),
+            max_wait_ms,
         }) as Box<dyn Tool>);
     }
     Ok(tools)
@@ -86,9 +99,10 @@ struct TaskTool {
     schema: Value,
     validator: jsonschema::Validator,
     extension_capability: Value,
+    max_wait_ms: u64,
 }
 
-fn schema(action: Action) -> Value {
+fn schema(action: Action, max_wait_ms: u64) -> Value {
     let task_id = json!({
         "type":"string", "minLength":1, "maxLength":TASK_ID_MAX_BYTES
     });
@@ -96,6 +110,11 @@ fn schema(action: Action) -> Value {
         Action::Get | Action::Cancel => json!({
             "type":"object", "additionalProperties":false, "required":["taskId"],
             "properties":{"taskId":task_id}
+        }),
+        Action::Wait => json!({
+            "type":"object", "additionalProperties":false,
+            "required":["taskId","waitMs"],
+            "properties":{"taskId":task_id,"waitMs":{"type":"integer","minimum":1,"maximum":max_wait_ms}}
         }),
         Action::Update => json!({
             "type":"object", "additionalProperties":false,
@@ -118,6 +137,7 @@ impl TaskTool {
         }
         match self.action {
             Action::Get | Action::Cancel => parse_task_id(arguments).map(ParsedArgs::TaskId),
+            Action::Wait => wait::Args::parse(arguments, self.max_wait_ms).map(ParsedArgs::Wait),
             Action::Update => parse_update_args(arguments).map(ParsedArgs::Update),
         }
     }
@@ -125,6 +145,13 @@ impl TaskTool {
 
 impl Tool for TaskTool {
     fn authority(&self) -> String {
+        if matches!(self.action, Action::Wait) {
+            return authority_digest(
+                "mcp.task.wait.v1",
+                &json!({"host":self.host.authority,"extensionCapability":self.extension_capability,
+                    "method":self.action.method(),"inputSchema":self.schema}),
+            );
+        }
         authority_digest(
             "mcp.task.v1",
             &json!({
@@ -159,17 +186,18 @@ impl Tool for TaskTool {
             .map_err(ToolError::Failed)?;
         let output = match (self.action, parsed) {
             (Action::Get, ParsedArgs::TaskId(task_id)) => {
-                let request_task_id = task_id;
                 let response = self.host.request_read(cancellation, move |service| {
-                    Box::pin(async move {
-                        service
-                            .get_task(GetTaskParams::new(request_task_id))
-                            .await
-                            .map(Some)
-                    })
+                    Box::pin(async move { fetch(service, &task_id).await })
                 })?;
                 serde_json::to_value(response)
                     .map_err(|_| ToolError::Failed("cannot encode MCP task snapshot".into()))?
+            }
+            (Action::Wait, ParsedArgs::Wait(args)) => {
+                let observation = self.host.request_read(cancellation, move |service| {
+                    Box::pin(wait::observe(service, args))
+                })?;
+                serde_json::to_value(observation)
+                    .map_err(|_| ToolError::Failed("cannot encode MCP task observation".into()))?
             }
             (Action::Update, ParsedArgs::Update(parsed)) => {
                 let task_id = parsed.task_id;
@@ -221,7 +249,15 @@ impl Tool for TaskTool {
     }
 }
 
-fn validate_task_id(task_id: &str) -> Result<(), String> {
+async fn fetch(service: &McpService, task_id: &str) -> Result<Option<GetTaskResult>, ServiceError> {
+    let result = service.get_task(GetTaskParams::new(task_id)).await?;
+    Ok(
+        (result.result_type == ResultType::COMPLETE && result.task.task.task_id == task_id)
+            .then_some(result),
+    )
+}
+
+pub(crate) fn validate_task_id(task_id: &str) -> Result<(), String> {
     if task_id.is_empty()
         || task_id.len() > TASK_ID_MAX_BYTES
         || task_id.chars().any(char::is_control)
@@ -233,14 +269,14 @@ fn validate_task_id(task_id: &str) -> Result<(), String> {
 
 fn parse_task_id(arguments: &Value) -> Result<String, String> {
     let parsed: TaskIdArgs =
-        serde_json::from_value(arguments.clone()).map_err(|_| "invalid MCP task arguments")?;
+        TaskIdArgs::deserialize(arguments).map_err(|_| "invalid MCP task arguments")?;
     validate_task_id(&parsed.task_id)?;
     Ok(parsed.task_id)
 }
 
 fn parse_update_args(arguments: &Value) -> Result<UpdateArgs, String> {
-    let parsed: UpdateArgs = serde_json::from_value(arguments.clone())
-        .map_err(|_| "invalid MCP task update arguments")?;
+    let parsed: UpdateArgs =
+        UpdateArgs::deserialize(arguments).map_err(|_| "invalid MCP task update arguments")?;
     validate_task_id(&parsed.task_id)?;
     if parsed.input_responses.len() > INPUT_REQUESTS_MAX
         || parsed

@@ -50,16 +50,19 @@ HTTP `lifecycle` 默认 `auto`：首先使用 `2026-07-28` 的 `server/discover`
 | 工具 | MCP 方法 | 参数 |
 | --- | --- | --- |
 | `mcp_<id>_tasks_get` | `tasks/get` | `{taskId:string}` |
+| `mcp_<id>_tasks_wait` | `tasks/get`（短轮询） | `{taskId:string,waitMs:integer}` |
 | `mcp_<id>_tasks_update` | `tasks/update` | `{taskId:string,inputResponses:object}` |
 | `mcp_<id>_tasks_cancel` | `tasks/cancel` | `{taskId:string}` |
 
-三种操作均绑定远端扩展能力和服务器注册摘要，且每次独立审批。`tasks/get` 保留状态、待补请求或最终结果；`tasks/update` 只转交调用者明确提供的响应，不自动执行 `roots/list`、采样或 elicitation；`tasks/cancel` 的成功结果只表示服务器接受了协作取消请求，需再调用 `tasks/get` 核实最终状态。输入限制为任务 ID 最多 512 字节、每次最多 16 个响应、响应 JSON 合计最多 256 KiB，读取结果最多 1 MiB。
+四种操作均绑定远端扩展能力和服务器注册摘要，且每次独立审批。`tasks/get` 保留状态、待补请求或最终结果；`tasks/update` 只转交调用者明确提供的响应，不自动执行 `roots/list`、采样或 elicitation；`tasks/cancel` 的成功结果只表示服务器接受了协作取消请求，需再调用 `tasks/get` 核实最终状态。任务 ID 最多 512 字节且不得包含控制字符；每次最多 16 个响应、响应 JSON 合计最多 256 KiB，读取结果最多 1 MiB。
+
+`tasks_wait` 立即读取一次，之后遵循服务端建议的 `pollIntervalMs`（至少 100 毫秒，未提供时为 500 毫秒），总计最多 8 次。`waitMs` 限制在 1 毫秒至主机超时的一半，且最多 5 秒；该窗口限制发起下一次查询的时间，已发出的查询仍由主机总超时约束。等待期间该连接继续串行处理请求。返回 `{reason,polls,snapshot}`，其中原因是 `terminal`、`input_required`、`wait_budget` 或 `poll_limit`。等待不会补答或请求取消远端任务。
 
 `tasks/get` 收到远端 JSON-RPC 拒绝时作为已知读取失败返回，并保留连接；发送后的超时、取消或传输错误仍属于结果未知，会关闭该主机，避免后续请求复用不确定的会话状态。
 
 资源、提示、Skills 元数据和 completion 查询使用相同的只读错误语义。
 
-Fliuno 将任务句柄持久化在正常工具结果中，由模型或调用方显式选择后续的 `tasks/get`、`tasks/update` 或 `tasks/cancel`；它不会在后台隐式轮询，也不会在重启后自动重发任何 Tasks 请求。任务状态通知、自动续接、过期清理和 MRTR 续交互仍未实现。
+Fliuno 将任务句柄持久化在正常工具结果中，由模型或调用方显式选择单次读取、短轮询、补答或协作取消；它不会在后台隐式轮询，也不会在重启后自动重发任何 Tasks 请求。读取结果必须匹配请求的任务 ID，且是完整快照。任务状态通知、自动续接、过期清理和 MRTR 续交互仍未实现。
 
 ## 当前范围
 

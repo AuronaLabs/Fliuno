@@ -46,6 +46,7 @@ impl Host {
     }
 
     /// Preserve the connection when a side-effect-free MCP method is rejected.
+    /// An operation may perform bounded sequential reads under the same lease.
     pub fn request_read<T: 'static>(
         &self,
         cancellation: &CancellationToken,

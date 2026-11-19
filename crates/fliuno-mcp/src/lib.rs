@@ -299,7 +299,10 @@ impl Tool for McpTool {
                         {
                             Some(CallToolResponse::Complete(result))
                         }
-                        CallToolResponse::Task(task) if tasks_supported => {
+                        CallToolResponse::Task(task)
+                            if tasks_supported
+                                && tasks::validate_task_id(&task.task.task_id).is_ok() =>
+                        {
                             Some(CallToolResponse::Task(task))
                         }
                         _ => None,
