@@ -571,3 +571,5 @@ Windows `scripts/check.ps1` 通过 464 项测试、28 个离线演示、rustfmt�
 真实 app-server 接入本机模型对端，连续请求两次产物工具调用。HTTP 测试验证已解决审批不可读取，父运行 ID 既不能读取后续工具参数，也不能替子运行处理第二个审批。用正确的子运行拒绝第二次调用，新的 SSE 段以 `RUN_ERROR` 结束。重复拒绝回放同一执行段；数据库中只记录一次工具启动和一次拒绝决定。
 
 Windows `scripts/check.ps1` 通过 465 项测试、28 个离线演示、rustfmt、两组严格 Clippy 和协议 Schema 检查。日志：`target/0.0.3-ag-ui-approval-scope-windows.log`。
+
+Debian Linux 6.12.107 来宾使用 `4a600db` 构建的原生 app-server 和进程测试二进制，四项定向测试全部通过：v37/v38 迁移与重启去重、连续审批与拒绝、按帧重连及旧 HTTP 审批模式。交叉构建使用 Zig 0.15.2 与 cargo-zigbuild 0.24.1；QEMU 本机回环测试以 `FLIUNO_RESULT=0` 结束。日志：`D:/Fliuno-Native-Test/guest-ag-ui-approval-scope-build.log` 与 `D:/Fliuno-Native-Test/guest-ag-ui-approval-scope.log`。
