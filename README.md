@@ -1,24 +1,27 @@
 <p align="center">
   <picture>
+    <source media="(max-width: 540px) and (prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-compact-light.svg">
     <source media="(max-width: 540px)" srcset="docs/assets/fliuno-cover-compact.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-light.svg">
-    <img src="docs/assets/fliuno-cover.svg" alt="Fliuno：从提交任务、人工审批到交付产物的 Rust Agent 内核" width="960">
+    <img src="docs/assets/fliuno-cover.svg" alt="Fliuno · Rust Agent kernel. Submit, approve, deliver." width="960">
   </picture>
 </p>
 
 # Fliuno · 面向工作任务的 Rust Agent 内核
 
-Fliuno 为桌面工作台和其他宿主应用提供 Rust 内核。把一项工作交给 Agent，遇到需要授权的操作时由人决定，完成后在本机留下交付物和执行记录。
+Fliuno 是为桌面工作台和宿主应用设计的 Rust Agent 内核。交给它一项工作：需要授权时由人决定，完成后在本机留下交付物和执行记录。
 
-**[运行离线演示](#快速开始)** · [接入自己的客户端](#接入自己的客户端) · [文档中心](docs/README.md) · [更新记录](CHANGELOG.md)
+**[跑一次离线任务 ↓](#跑一次离线任务)** · **[接入自己的客户端 ↓](#接入自己的客户端)** · [文档中心 →](docs/README.md)
 
-> **当前开发 `0.0.3`** · [已发布 `0.0.2`](CHANGELOG.md#002) · 应用协议 `0.1` · Windows / Linux
+| 开发版本 | 已发布 | 应用协议 | 本机执行 |
+| --- | --- | --- | --- |
+| `0.0.3` | [`0.0.2`](CHANGELOG.md#002) | [`0.1`](docs/protocol.md) | [Windows / Linux](docs/sandbox.md) |
 
 ## 快速开始
 
 ### 跑一次离线任务
 
-在仓库根目录运行。需要 **Rust 1.89+**、C/C++ 构建工具和 Python。演示会启动真实的本机服务，用内置模型和临时数据库跑完整个流程，无需 API Key。
+在仓库根目录运行。请先准备 **Rust 1.89+**、C/C++ 构建工具和 Python。演示用内置模型和临时数据库启动真实的本机服务，无需 API Key。
 
 ```sh
 python examples/demo.py
@@ -31,7 +34,7 @@ Result: completed
 Artifacts: 1
 ```
 
-脚本先确认审批前没有交付物，再批准一次调用，最后验证产物已保存。
+看到 `waiting_approval` 后，脚本会先确认没有交付物，再批准一次 `artifact_create`。最后的 `Artifacts: 1` 表示产物已保存。
 
 <details>
 <summary>试试拒绝审批</summary>
@@ -63,14 +66,14 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 ```mermaid
 flowchart LR
   Task[提交任务] --> Agent[Agent 推进任务]
-  Agent -->|操作需要许可| Approval{人工审批}
+  Agent -->|需要授权| Approval{人工审批}
   Approval -->|允许一次| Tool[执行操作]
-  Tool --> Agent
-  Approval -->|拒绝| Decision[记录拒绝决定]
+  Tool -->|返回结果| Agent
+  Approval -->|拒绝| Decision[保存拒绝记录]
   Agent -->|完成| Artifact[保存交付物]
 ```
 
-任务、审批、事件和交付物由 SQLite 持久保存。客户端断线后，可以从已消费的游标补读事件，再接上实时通知。
+SQLite 持久保存任务、审批、事件和交付物。客户端重连后可从上次消费的位置补读，再接上实时通知。
 
 | 要做的事 | 从这里接入 |
 | --- | --- |
@@ -87,4 +90,4 @@ pwsh -File scripts/check.ps1
 
 这条命令检查格式、Clippy、工作区测试、应用协议 Schema 和离线演示。
 
-[内核架构](docs/architecture.md) · [验收与性能记录](docs/execution-evidence.md) · [开发路线图](docs/roadmap.md)
+[内核架构](docs/architecture.md) · [验收与性能记录](docs/execution-evidence.md) · [开发路线图](docs/roadmap.md) · [更新记录](CHANGELOG.md)

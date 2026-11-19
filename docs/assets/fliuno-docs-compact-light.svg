@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="440" height="190" viewBox="0 0 440 190" role="img" aria-labelledby="title desc">
+  <title id="title">Fliuno field guide</title>
+  <desc id="desc">Run a task, connect a client, or explore the kernel.</desc>
+  <defs>
+    <clipPath id="frame"><rect x="1" y="1" width="438" height="188" rx="23"/></clipPath>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0v24" fill="none" stroke="#adc1ce" stroke-opacity=".44"/></pattern>
+  </defs>
+  <g clip-path="url(#frame)" fill="#142b3b" font-family="system-ui, 'Segoe UI', sans-serif">
+    <rect x="0" y="0" width="440" height="190" rx="23" fill="#f4f8fa"/>
+    <g transform="translate(24 22)"><rect x="0" y="0" width="40" height="40" rx="11" fill="#14654d"/><path d="M11 30V15l4-4h15M11 21h12" fill="none" stroke="#f5fffa" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="29" cy="21" r="2" fill="#f5fffa"/></g>
+    <text x="79" y="47" font-size="15" fill="#14654d" font-weight="700" letter-spacing="2" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">FLIUNO DOCS</text>
+    <text x="24" y="107" font-size="49" font-weight="750" letter-spacing="-1.8">Field guide</text>
+    <path d="M34 148h365" stroke="#adc1ce" stroke-width="2"/>
+    <g transform="translate(24 130)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="111" height="38" rx="9" fill="#eef4f9" stroke="#adc1ce"/><text x="11" y="24" font-size="10" fill="#285e9b" font-weight="700">01</text><text x="30" y="24" font-size="13" font-weight="700">Run</text></g>
+    <g transform="translate(163 130)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="111" height="38" rx="9" fill="#eef4f9" stroke="#adc1ce"/><text x="11" y="24" font-size="10" fill="#8d451e" font-weight="700">02</text><text x="30" y="24" font-size="13" font-weight="700">Connect</text></g>
+    <g transform="translate(303 130)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="111" height="38" rx="9" fill="#eef4f9" stroke="#adc1ce"/><text x="11" y="24" font-size="10" fill="#14654d" font-weight="700">03</text><text x="30" y="24" font-size="13" font-weight="700">Kernel</text></g>
+  </g>
+  <rect x="1" y="1" width="438" height="188" rx="23" fill="none" stroke="#adc1ce"/>
+</svg>

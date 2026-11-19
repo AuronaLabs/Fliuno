@@ -1,73 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="384" viewBox="0 0 1120 384" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="332" viewBox="0 0 1120 332" role="img" aria-labelledby="title desc">
   <title id="title">Fliuno — Rust agent kernel</title>
-  <desc id="desc">A task begins, pauses for approval, and produces a locally saved artifact.</desc>
+  <desc id="desc">Local execution for agent work. Submit a task, approve a tool call, and collect the result.</desc>
   <defs>
-    <linearGradient id="ink" x2="1" y2="1">
-      <stop stop-color="#14242d"/>
-      <stop offset="1" stop-color="#0e181e"/>
-    </linearGradient>
-    <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
-      <circle cx="1" cy="1" r="1" fill="#6f9a91" opacity=".34"/>
-    </pattern>
-    <clipPath id="edge"><rect x="1" y="1" width="1118" height="382" rx="24"/></clipPath>
+    <clipPath id="frame"><rect x="1" y="1" width="1118" height="330" rx="23"/></clipPath>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0v24" fill="none" stroke="#344759" stroke-opacity=".44"/></pattern>
   </defs>
-
-  <g clip-path="url(#edge)">
-    <path fill="url(#ink)" d="M0 0h1120v384H0z"/>
-    <path fill="#172d35" d="M568 0h552v384H568z"/>
-    <path fill="url(#dots)" d="M568 0h552v384H568z"/>
-    <circle cx="1118" cy="380" r="180" fill="none" stroke="#43605f"/>
-    <circle cx="1118" cy="380" r="236" fill="none" stroke="#43605f"/>
-    <path d="M568 1v382" stroke="#44605e"/>
-
-    <g transform="translate(64 59)">
-      <rect width="54" height="54" rx="13" fill="#a6ebce"/>
-      <path d="M15 39V20l5-5h20M15 28h17" fill="none" stroke="#112127" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <circle cx="39" cy="28" r="2.6" fill="#112127"/>
-    </g>
-    <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">
-      <text x="136" y="92" fill="#a6ebce" font-size="19" letter-spacing="2.8">LOCAL AGENT RUNTIME</text>
-      <text x="66" y="257" fill="#f6ebd8" font-size="26">Rust kernel for agent work</text>
-      <path d="M65 293h438" stroke="#44605e"/>
-      <path d="M65 293h46" stroke="#a6ebce" stroke-width="3"/>
-      <text x="66" y="327" fill="#a4bebb" font-size="17">PERSISTENT TASKS · JSON-RPC OVER STDIO</text>
-    </g>
-    <text x="55" y="214" fill="#f6ebd8" font-family="system-ui, 'Segoe UI', sans-serif" font-size="120" font-weight="760" letter-spacing="-5">Fliuno</text>
-
-    <g transform="translate(609 36)">
-      <rect width="462" height="312" rx="18" fill="#0e1d24" stroke="#52736f"/>
-      <path d="M0 56h462M22 133h418m-418 77h418" stroke="#304b50"/>
-      <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="15" letter-spacing="1.7">
-        <text x="24" y="34" fill="#acc7c4">TASK TRACE</text>
-        <text x="438" y="34" fill="#acc7c4" text-anchor="end">STDIO</text>
-      </g>
-      <path d="M48 100v140" stroke="#4e6e71" stroke-dasharray="4 5" stroke-width="2"/>
-      <g transform="translate(31 80)">
-        <rect width="34" height="34" rx="10" fill="#233a56" stroke="#608cc2"/>
-        <path d="m14 11 9 6-9 6z" fill="#bdd8ff"/>
-      </g>
-      <g transform="translate(31 157)">
-        <rect width="34" height="34" rx="10" fill="#42331f" stroke="#ae824f"/>
-        <path d="M17 8l8 4v5c0 4-4 7-8 9-4-2-8-5-8-9v-5zm-4 9 3 3 5-6" fill="none" stroke="#ffd294" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-      </g>
-      <g transform="translate(31 234)">
-        <rect width="34" height="34" rx="10" fill="#1e4038" stroke="#609d8a"/>
-        <path d="M11 10h9l4 4v10H11zm8 0v5h5m-10 4h7" fill="none" stroke="#a6ebce" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-      </g>
-      <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="22" fill="#f6ebd8">
-        <text x="84" y="104">task/start</text>
-        <text x="84" y="181">approval/respond</text>
-        <text x="84" y="258">artifacts/read</text>
-      </g>
-      <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="14" text-anchor="middle">
-        <rect x="321" y="83" width="117" height="28" rx="7" fill="#233a56"/>
-        <rect x="321" y="160" width="117" height="28" rx="7" fill="#42331f"/>
-        <rect x="321" y="237" width="117" height="28" rx="7" fill="#1e4038"/>
-        <text x="379.5" y="102" fill="#bdd8ff">running</text>
-        <text x="379.5" y="179" fill="#ffd294">allow_once</text>
-        <text x="379.5" y="256" fill="#a6ebce">content chunk</text>
-      </g>
-    </g>
+  <g clip-path="url(#frame)" fill="#eff7fb" font-family="system-ui, 'Segoe UI', sans-serif">
+    <rect x="0" y="0" width="1120" height="332" rx="23" fill="#101923"/>
+    <path fill="#152231" d="M577 0H1120V332H530Z"/><path fill="url(#grid)" d="M577 0H1120V332H530Z"/><path d="M577 0L530 332" stroke="#344759"/>
+    <g transform="translate(46 42)"><rect x="0" y="0" width="40" height="40" rx="11" fill="#a9f0cd"/><path d="M11 30V15l4-4h15M11 21h12" fill="none" stroke="#153428" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="29" cy="21" r="2" fill="#153428"/></g>
+    <text x="103" y="68" font-size="15" fill="#a9f0cd" font-weight="700" letter-spacing="2" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">RUST AGENT KERNEL</text>
+    <text x="39" y="182" font-size="115" font-weight="750" letter-spacing="-5">Fliuno</text>
+    <text x="48" y="222" font-size="23" fill="#b0c3d5">Local execution for agent work.</text>
+    <path d="M48 260h423" stroke="#344759"/>
+    <text x="48" y="287" font-size="13" fill="#88a0b7" font-weight="650" letter-spacing="1.5" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">STDIO  /  SQLITE  /  WINDOWS + LINUX</text>
+    <rect x="621" y="39" width="451" height="253" rx="16" fill="#101923" stroke="#344759"/>
+    <rect x="636" y="53" width="421" height="31" rx="7" fill="#243f48"/>
+    <circle cx="652" cy="68.5" r="4" fill="#a9f0cd"/>
+    <text x="666" y="73" font-size="12" fill="#a9f0cd" font-weight="700" letter-spacing="1.9" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">TASK LIFECYCLE</text>
+    <path d="M663 107v144" stroke="#344759" stroke-width="1.5" stroke-dasharray="3 5"/>
+    <g><rect x="644" y="100" width="37" height="33" rx="8" fill="#1a2b3b" stroke="#344759"/><text x="662.5" y="121" font-size="13" fill="#acd4ff" font-weight="750" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" text-anchor="middle">01</text><text x="696" y="122" font-size="17" font-weight="650">Submit a task</text><text x="1048" y="121" font-size="12" fill="#88a0b7" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" text-anchor="end">task/start</text></g>
+    <g><rect x="644" y="158" width="37" height="33" rx="8" fill="#1a2b3b" stroke="#344759"/><text x="662.5" y="179" font-size="13" fill="#ffd0a2" font-weight="750" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" text-anchor="middle">02</text><text x="696" y="180" font-size="17" font-weight="650">Approve a tool call</text><text x="1048" y="179" font-size="12" fill="#88a0b7" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" text-anchor="end">approval/respond</text></g>
+    <g><rect x="644" y="216" width="37" height="33" rx="8" fill="#1a2b3b" stroke="#344759"/><text x="662.5" y="237" font-size="13" fill="#a9f0cd" font-weight="750" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" text-anchor="middle">03</text><text x="696" y="238" font-size="17" font-weight="650">Collect the result</text><text x="1048" y="237" font-size="12" fill="#88a0b7" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" text-anchor="end">artifacts/read</text></g>
   </g>
-  <rect x="1" y="1" width="1118" height="382" rx="24" fill="none" stroke="#52736f"/>
+  <rect x="1" y="1" width="1118" height="330" rx="23" fill="none" stroke="#344759"/>
 </svg>

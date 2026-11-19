@@ -2,7 +2,7 @@
 
 [文档中心](README.md) › [内核与开发](README.md#内核与开发) · [应用协议](protocol.md) · [运行与配置](setup.md)
 
-从模块依赖图了解客户端如何启动任务，再看任务如何暂停、恢复和提交结果。
+`app-server` 接收请求，`core` 管理任务、审批和事务，可替换的适配器连接模型、工具与 Agent。
 
 [请求与注册](#领域与依赖) · [Rust 工作区](#rust-工作区模块) · [任务状态机](#状态机) · [事务和失败](#事务和失败语义) · [权限边界](#权限边界)
 
@@ -12,11 +12,17 @@
 
 ```mermaid
 flowchart TD
-  Stdio["本机 stdio 客户端"] --> Server["app-server · JSON-RPC"]
-  Http["HTTP / SSE 客户端"] --> Host["宿主 · AG-UI 路由"]
-  Host -->|Rust client| Server
-  Server --> Core["core · 任务与审批"]
-  Core --> Store[("SQLite · 任务、事件与产物")]
+  subgraph Host["宿主应用"]
+    direction LR
+    Stdio["本机客户端"]
+    Http["HTTP / SSE"] --> Route["AG-UI 路由"]
+  end
+  subgraph Kernel["Fliuno"]
+    Server["app-server · JSON-RPC"] --> Core["core · 任务与审批"]
+    Core --> Store[("SQLite · 事件与交付物")]
+  end
+  Stdio -->|stdio| Server
+  Route -->|Rust client| Server
 ```
 
 Rust 客户端直接使用应用协议。HTTP 路径由宿主先授权会话，再用同一个 Rust 客户端访问应用服务。协议对象和 JSON Schema 由 `fliuno-protocol` 定义。
@@ -146,3 +152,7 @@ app-server 使用容量 32 的有界队列和 4 个固定 worker，最多同时�
 宿主文件代理分为三层：`acp/filesystem` 只绑定会话、请求种类、容量与到期时间；`agents/filesystem` 将私有虚拟 cwd 下的路径转换为工作区相对路径，准备写入 diff 并调度最多 8 个阻塞作业；`core/agent_tools` 校验注册工具和策略、事务保存独立审批及操作状态。实际 IO 复用 `fliuno-tools` 的目录能力。虚拟 cwd 中没有宿主文件副本，也不授权宿主目录 ACL；Agent 只能通过获批代理获得文件内容。
 
 写提案会先读取宿主基线供客户端审阅，此时不修改文件，也不向 Agent 发送旧内容。执行前持久保存 started，再由工具复核基线；完成结果落盘后才答复 ACP。Agent 的 EndTurn 不能掩盖宿主操作的未知结果。请求使用同一固定截止时间覆盖准备、审批与执行，取消也传递给阻塞作业；操作系统阻塞文件 IO 不能被 Tokio 强行中断，极慢文件系统下不保证严格墙钟回收上限。当前伴随文件、网络和终端限制及完整预算见 [ACP 文档](acp.md)。
+
+---
+
+[文档中心 ↑](README.md) · 接下来：[应用协议](protocol.md) · [持久授权](authority.md) · [验收与性能记录](execution-evidence.md)

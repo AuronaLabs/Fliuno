@@ -10,9 +10,11 @@
 
 ## 快速开始
 
-需要 Rust 1.89 或更新版本，以及对应平台的 C/C++ 构建工具（SQLite、TLS 依赖需要）。
-
-Windows 原生启动层要求 Windows 10 / Server 2016 或更新版本，使用创建时 Job 分配与独立句柄中转，避免并发进程启动意外保留另一任务的管道。Linux 隔离要求 Landlock ABI 6；平台实际验收范围见 [沙箱文档](sandbox.md)。
+| 用途 | 准备 |
+| --- | --- |
+| **构建内核** | Rust 1.89+ 和平台的 C/C++ 构建工具。SQLite 和 TLS 依赖需要原生构建。 |
+| **运行离线演示** | Python。离线内置模型不需要 API Key。 |
+| **启用本机隔离** | Windows 原生启动需要 Windows 10 / Server 2016 或更新版本；Linux 隔离需要 Landlock ABI 6。见 [平台与隔离边界](sandbox.md)。 |
 
 ### 先运行离线演示
 
@@ -30,7 +32,10 @@ python examples/demo.py
 cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 ```
 
-进程从 stdin 读取逐行 JSON-RPC 2.0，向 stdout 写入响应；stderr 用于诊断。首先发送：
+> [!TIP]
+> 把服务作为子进程启动，通过 **stdin** 逐行发送 JSON-RPC 2.0，通过 **stdout** 读取响应与通知。**stderr** 单独用于诊断。
+
+第一条请求是：
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1","clientName":"my-client"}}
@@ -174,3 +179,7 @@ python examples/ag_ui_http_demo.py
 `check.ps1` 运行格式、Clippy、测试、生成契约一致性检查和离线进程演示；解释器演示需要本机 Node 24，Windows 另需 CPython 3.12。GitHub Actions 配置了 Windows/Linux 两个平台；本地验证结果不代表远程 CI 已经运行。
 
 开发和测试构建保留行号堆栈、关闭增量缓存，以控制 Windows 调试产物占用；需要调试局部变量时可通过本地 Cargo 配置覆盖 `profile.dev.debug=2`。
+
+---
+
+[文档中心 ↑](README.md) · 接下来：[应用协议](protocol.md) · [宿主配置](host-configuration.md) · [内核架构](architecture.md)
