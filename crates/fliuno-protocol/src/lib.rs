@@ -11,6 +11,8 @@ mod schema;
 pub use schema::schema_bundle;
 mod session;
 pub use session::*;
+mod task_cancel;
+pub use task_cancel::*;
 mod task_changes;
 mod task_summary;
 mod terminal;

@@ -40,6 +40,8 @@
 
 - [x] `task/getSummaries` 按 ID 批量读取指定范围的当前摘要与同一事件水位，无需重拉任务清单。Rust 客户端验证响应位置和会话范围。
 
+- [x] `task/cancelBatch` 按显式会话或工作区原子取消选定任务，事务后通知执行器；响应丢失时可原样重试。
+
 - [x] `events/listTaskChanges` 按现有事件索引回放变动任务，每页去重和固定水位，不读取正文；Rust 工作台订阅可使用同一个游标直接读取。
 
 - [x] `events/listTaskSummaryChanges` 在一个 SQLite 读快照内找出变动任务并读取当前摘要，Rust 客户端区分已消费游标与摘要水位。

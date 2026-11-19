@@ -9,6 +9,7 @@ mod remote_checks;
 mod replay;
 mod run_boundaries;
 mod sessions;
+mod task_cancel;
 mod task_changes;
 mod task_summaries;
 mod work;
@@ -24,6 +25,103 @@ use std::{
 pub(crate) const SCHEMA_VERSION: u32 = 43;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
+
+fn read_task(db: &Connection, id: &str) -> Result<Task> {
+    let mut statement = db.prepare_cached("SELECT data FROM tasks WHERE id=?1")?;
+    let mut rows = statement.query([id])?;
+    let row = rows.next()?.ok_or_else(|| Error::NotFound("task".into()))?;
+    let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+    Ok(serde_json::from_str(data)?)
+}
+
+/// Write all projections in the caller's transaction. Publish the returned
+/// sequences only after that transaction successfully commits.
+fn write_transition(
+    tx: &rusqlite::Transaction<'_>,
+    task: &Task,
+    events: &[EventKind],
+    artifacts: &[Artifact],
+    key: Option<&str>,
+    resume: Option<&ApprovalResumeParams>,
+) -> Result<Vec<u64>> {
+    let running = task.status == TaskStatus::Running
+        || task.agent_run.as_ref().is_some_and(|run| !run.finished);
+    tx.prepare_cached(
+        "INSERT INTO tasks VALUES(?1,?2,?3,?4)
+         ON CONFLICT(id) DO UPDATE SET running=excluded.running,data=excluded.data",
+    )?
+    .execute(params![
+        task.id,
+        task.session_id,
+        running,
+        serde_json::to_string(task)?
+    ])?;
+    task_summaries::record(tx, task)?;
+    if let Some(continuation) = &task.remote_continuation
+        && continuation.expected.state == AgentTaskState::InputRequired
+    {
+        if key.is_some() {
+            let inserted = tx.execute("INSERT INTO remote_continuation_claims VALUES(?1,?2) ON CONFLICT(source_task_id) DO NOTHING",
+                params![continuation.source_task_id, task.id])?;
+            if inserted == 0 {
+                return Err(Error::Conflict(
+                    "this paused turn already has a continuation".into(),
+                ));
+            }
+        } else if !running && !continuation.submission_started {
+            tx.execute("DELETE FROM remote_continuation_claims WHERE source_task_id=?1 AND attempt_task_id=?2",
+                params![continuation.source_task_id, task.id])?;
+        }
+    }
+    if let Some(continuation) = &task.agent_session_continuation {
+        if key.is_some() {
+            let claimed = tx.prepare_cached(
+                "INSERT INTO agent_session_continuation_claims VALUES(?1,?2) ON CONFLICT(source_task_id) DO NOTHING",
+            )?.execute(params![continuation.source_task_id, task.id])?;
+            if claimed == 0 {
+                return Err(Error::Conflict(
+                    "this agent turn already has a continuation".into(),
+                ));
+            }
+        } else if !running && !continuation.submission_started {
+            tx.prepare_cached(
+                "DELETE FROM agent_session_continuation_claims WHERE source_task_id=?1 AND attempt_task_id=?2",
+            )?.execute(params![continuation.source_task_id, task.id])?;
+        }
+    }
+    if let Some(key) = key {
+        tx.execute(
+            "INSERT INTO task_requests VALUES(?1,?2,?3)",
+            params![task.session_id, key, task.id],
+        )?;
+    }
+    for artifact in artifacts {
+        artifacts::record(tx, &task.id, artifact)?;
+    }
+    let mut sequences = Vec::with_capacity(events.len());
+    if !events.is_empty() {
+        let mut insert = tx.prepare_cached(INSERT_EVENT)?;
+        for event in events {
+            insert.execute(params![task.id, serde_json::to_string(event)?])?;
+            let sequence = tx.last_insert_rowid();
+            if matches!(event, EventKind::TaskCompleted { .. }) {
+                context::record(tx, task, sequence as u64, true)?;
+            }
+            approval_decisions::record(tx, &task.id, event, sequence)?;
+            run_boundaries::record(tx, &task.id, event, sequence)?;
+            if let (Some(resume), EventKind::ApprovalResolved { .. }) = (resume, event) {
+                approval_runs::record(tx, &task.id, resume, sequence)?;
+            }
+            if let EventKind::ModelUsageReported { usage, .. } = event {
+                model_usage::record(tx, task, sequence, usage)?;
+            }
+            sequences.push(sequence as u64);
+        }
+    }
+    // Inbox transitions are stamped with the final event in this transaction.
+    approvals::record(tx, task)?;
+    Ok(sequences)
+}
 
 impl Kernel {
     pub(crate) fn workspace_for_task(&self, task_id: &str) -> Result<Workspace> {
@@ -344,13 +442,7 @@ impl Kernel {
     }
 
     pub fn get_task(&self, id: &str) -> Result<Task> {
-        let mut statement = self
-            .db
-            .prepare_cached("SELECT data FROM tasks WHERE id=?1")?;
-        let mut rows = statement.query([id])?;
-        let row = rows.next()?.ok_or_else(|| Error::NotFound("task".into()))?;
-        let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
-        Ok(serde_json::from_str(data)?)
+        read_task(&self.db, id)
     }
 
     pub(crate) fn commit(
@@ -381,82 +473,7 @@ impl Kernel {
         resume: Option<&ApprovalResumeParams>,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
-        let running = task.status == TaskStatus::Running
-            || task.agent_run.as_ref().is_some_and(|run| !run.finished);
-        tx.prepare_cached(
-            "INSERT INTO tasks VALUES(?1,?2,?3,?4)
-             ON CONFLICT(id) DO UPDATE SET running=excluded.running,data=excluded.data",
-        )?
-        .execute(params![
-            task.id,
-            task.session_id,
-            running,
-            serde_json::to_string(task)?
-        ])?;
-        task_summaries::record(&tx, task)?;
-        if let Some(continuation) = &task.remote_continuation
-            && continuation.expected.state == AgentTaskState::InputRequired
-        {
-            if key.is_some() {
-                let inserted = tx.execute("INSERT INTO remote_continuation_claims VALUES(?1,?2) ON CONFLICT(source_task_id) DO NOTHING",
-                    params![continuation.source_task_id, task.id])?;
-                if inserted == 0 {
-                    return Err(Error::Conflict(
-                        "this paused turn already has a continuation".into(),
-                    ));
-                }
-            } else if !running && !continuation.submission_started {
-                tx.execute("DELETE FROM remote_continuation_claims WHERE source_task_id=?1 AND attempt_task_id=?2",
-                    params![continuation.source_task_id, task.id])?;
-            }
-        }
-        if let Some(continuation) = &task.agent_session_continuation {
-            if key.is_some() {
-                let claimed = tx.prepare_cached(
-                    "INSERT INTO agent_session_continuation_claims VALUES(?1,?2) ON CONFLICT(source_task_id) DO NOTHING",
-                )?.execute(params![continuation.source_task_id, task.id])?;
-                if claimed == 0 {
-                    return Err(Error::Conflict(
-                        "this agent turn already has a continuation".into(),
-                    ));
-                }
-            } else if !running && !continuation.submission_started {
-                tx.prepare_cached(
-                    "DELETE FROM agent_session_continuation_claims WHERE source_task_id=?1 AND attempt_task_id=?2",
-                )?.execute(params![continuation.source_task_id, task.id])?;
-            }
-        }
-        if let Some(key) = key {
-            tx.execute(
-                "INSERT INTO task_requests VALUES(?1,?2,?3)",
-                params![task.session_id, key, task.id],
-            )?;
-        }
-        for artifact in artifacts {
-            artifacts::record(&tx, &task.id, artifact)?;
-        }
-        let mut sequences = Vec::with_capacity(events.len());
-        if !events.is_empty() {
-            let mut insert = tx.prepare_cached(INSERT_EVENT)?;
-            for event in events {
-                insert.execute(params![task.id, serde_json::to_string(event)?])?;
-                let sequence = tx.last_insert_rowid();
-                if matches!(event, EventKind::TaskCompleted { .. }) {
-                    context::record(&tx, task, sequence as u64, true)?;
-                }
-                approval_decisions::record(&tx, &task.id, event, sequence)?;
-                run_boundaries::record(&tx, &task.id, event, sequence)?;
-                if let (Some(resume), EventKind::ApprovalResolved { .. }) = (resume, event) {
-                    approval_runs::record(&tx, &task.id, resume, sequence)?;
-                }
-                if let EventKind::ModelUsageReported { usage, .. } = event {
-                    model_usage::record(&tx, task, sequence, usage)?;
-                }
-                sequences.push(sequence as u64);
-            }
-        }
-        // Inbox transitions are stamped with the final event in this transaction.
-        approvals::record(&tx, task)?;
+        let sequences = write_transition(&tx, task, events, artifacts, key, resume)?;
         tx.commit()?;
         self.publish_task_events(&task.id, &task.session_id, &sequences, events);
         Ok(())

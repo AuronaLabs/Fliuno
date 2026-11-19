@@ -269,6 +269,16 @@ impl RpcServer {
         })
     }
 
+    /// Call with the kernel lock held after commit so a worker cannot record
+    /// its cancellation outcome ahead of the user's durable transition.
+    fn signal_committed_cancellations<'a>(&self, ids: impl IntoIterator<Item = &'a str>) {
+        if let Err(error) = self.scheduler.cancel_all(ids) {
+            // The state is already durable. Keep the receipt and diagnose
+            // the failed background signal separately.
+            eprintln!("fliuno: signalling committed cancellation: {error}");
+        }
+    }
+
     fn schedule_or_fail(&self, task: Task) -> Result<Task, RpcError> {
         if task.status != TaskStatus::Running {
             return Ok(task);
@@ -423,6 +433,8 @@ impl RpcServer {
             });
             capabilities["taskStartSummary"] = json!(true);
             capabilities["taskCancelSummary"] = json!(true);
+            capabilities["taskCancelBatch"] = json!(true);
+            capabilities["maxTaskCancelBatch"] = json!(MAX_TASK_CANCEL_BATCH);
             capabilities["taskSummaryByRequest"] = json!(true);
             capabilities["sessionHistoryList"] = json!(true);
             capabilities["sessionHistoryGet"] = json!(true);
@@ -814,19 +826,27 @@ impl RpcServer {
             }
             "task/cancel" | "task/cancelSummary" => {
                 let p: TaskIdParams = decode(params)?;
-                self.scheduler
-                    .cancel(&p.task_id)
-                    .map_err(|message| RpcError {
-                        code: -32603,
-                        message: message.into(),
-                    })?;
                 let mut kernel = self.kernel()?;
                 let task = kernel.cancel_task(&p.task_id)?;
+                self.signal_committed_cancellations([task.id.as_str()]);
                 if method == "task/cancelSummary" {
                     json!(kernel.get_task_summary(&task.id)?)
                 } else {
                     json!(task)
                 }
+            }
+            "task/cancelBatch" => {
+                let p: TaskCancelBatchParams = decode(params)?;
+                let mut kernel = self.kernel()?;
+                let batch = kernel.cancel_task_batch(&p)?;
+                self.signal_committed_cancellations(
+                    batch
+                        .items
+                        .iter()
+                        .filter(|item| item.task.status == TaskStatus::Cancelled)
+                        .map(|item| item.task.id.as_str()),
+                );
+                json!(batch)
             }
             "task/resume" => {
                 let p: TaskResumeParams = decode(params)?;

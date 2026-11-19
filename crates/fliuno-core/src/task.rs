@@ -305,17 +305,16 @@ impl Kernel {
         if task.status.is_terminal() {
             return Err(Error::Conflict("task already finished".into()));
         }
-        task.status = TaskStatus::Cancelled;
-        task.pending_approval = None;
-        let mut events = vec![EventKind::TaskCancelled];
-        if let Some(run) = &mut task.agent_run {
-            events.extend(agent::close_approvals(run));
-        }
+        let events = transition_to_cancelled(&mut task);
         self.commit(&task, &events, &[])?;
+        self.signal_agent_cancellation(task_id);
+        Ok(task)
+    }
+
+    pub(crate) fn signal_agent_cancellation(&mut self, task_id: &str) {
         if let Some(control) = self.agent_controls.remove(task_id) {
             control.cancellation.cancel();
         }
-        Ok(task)
     }
 
     pub fn fail_task(&mut self, task_id: &str, message: String) -> Result<Task> {
@@ -404,6 +403,18 @@ impl Kernel {
         )?;
         Ok(task)
     }
+}
+
+/// Prepare the same cancellation transition for single and batch callers.
+pub(crate) fn transition_to_cancelled(task: &mut Task) -> Vec<EventKind> {
+    debug_assert!(!task.status.is_terminal());
+    task.status = TaskStatus::Cancelled;
+    task.pending_approval = None;
+    let mut events = vec![EventKind::TaskCancelled];
+    if let Some(run) = &mut task.agent_run {
+        events.extend(agent::close_approvals(run));
+    }
+    events
 }
 
 pub(crate) fn validate_input(input: &str) -> Result<()> {

@@ -41,6 +41,7 @@
 | --- | --- |
 | **建立连接** | [应用协议 0.1](protocol.md) · [JSON Schema](../protocol/fliuno.schema.json) |
 | **展示工作台与待审批** | [工作台实时订阅](protocol.md#工作台实时订阅) · [待审批快照与续页](protocol.md#待审批快照) |
+| **停止选中的任务** | [批量取消任务](protocol.md#批量取消任务) |
 | **刷新变动任务** | [一次读取变动摘要](protocol.md#任务变动摘要) · [仅回放任务 ID](protocol.md#任务变动回放) · [按 ID 读取摘要](protocol.md#批量读取任务摘要) |
 | **订阅进度与断线恢复** | [Rust 客户端](protocol.md#rust-调用方) · [AG-UI SSE 续传](ag-ui.md#sse-输出与续传) |
 | **走 HTTP 提交、审批与续跑** | [挂载 AG-UI 路由](ag-ui.md#http-接入) · [HTTP 演示](../examples/ag_ui_http_demo.py) |

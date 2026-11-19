@@ -102,7 +102,7 @@ pub(super) fn migrate_workspace_scope(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
+pub(super) fn summarize(task: &Task) -> TaskSummary {
     let input_preview = match task.messages.first() {
         // SQLite substr() used to stop at the first NUL. Preserve that preview
         // for existing clients while limiting allocation to 160 scalars.
@@ -114,7 +114,7 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
         _ => String::new(),
     };
     let run = task.agent_run.as_ref();
-    let summary = TaskSummary {
+    TaskSummary {
         id: task.id.clone(),
         session_id: task.session_id.clone(),
         status: task.status,
@@ -124,7 +124,11 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
             + run.map_or(0, |run| run.pending_approvals.len() as u32),
         model_outcome_unknown: task.model_outcome_unknown,
         agent_outcome_unknown: run.is_some_and(|run| run.outcome_unknown),
-    };
+    }
+}
+
+pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
+    let summary = summarize(task);
     tx.prepare_cached(
         "INSERT INTO task_summaries(task_id,data) VALUES(?1,?2)
          ON CONFLICT(task_id) DO UPDATE SET data=excluded.data

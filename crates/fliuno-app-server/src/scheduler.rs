@@ -191,14 +191,24 @@ impl TaskScheduler {
     }
 
     pub(super) fn cancel(&self, task_id: &str) -> Result<(), &'static str> {
-        if let Some(reservation) = self
+        self.cancel_all([task_id])
+    }
+
+    pub(super) fn cancel_all<'a>(
+        &self,
+        tasks: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), &'static str> {
+        let active = self
             .active
             .lock()
-            .map_err(|_| "task scheduler lock is poisoned")?
-            .get(task_id)
-            .filter(|reservation| !reservation.remote_check)
-        {
-            reservation.cancellation.cancel();
+            .map_err(|_| "task scheduler lock is poisoned")?;
+        for task_id in tasks {
+            if let Some(reservation) = active
+                .get(task_id)
+                .filter(|reservation| !reservation.remote_check)
+            {
+                reservation.cancellation.cancel();
+            }
         }
         Ok(())
     }

@@ -1678,6 +1678,72 @@
         "taskId"
       ]
     },
+    "task/cancelBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskCancelBatchParams",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/TaskCancelScope"
+        },
+        "taskIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!-~]+$"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "taskIds"
+      ],
+      "$defs": {
+        "TaskCancelScope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "session"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "workspace"
+                },
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "workspaceId"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "task/resume": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskResumeParams",
@@ -4221,6 +4287,139 @@
         "throughSequence"
       ],
       "$defs": {
+        "TaskSummary": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskStatus"
+            },
+            "backend": {
+              "$ref": "#/$defs/TaskBackend"
+            },
+            "inputPreview": {
+              "description": "At most 160 Unicode characters from the first user message.",
+              "type": "string"
+            },
+            "pendingApprovalCount": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "modelOutcomeUnknown": {
+              "type": "boolean"
+            },
+            "agentOutcomeUnknown": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "sessionId",
+            "status",
+            "backend",
+            "inputPreview",
+            "pendingApprovalCount",
+            "modelOutcomeUnknown",
+            "agentOutcomeUnknown"
+          ]
+        },
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "TaskCancelBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskCancelBatch",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "Summaries in request order, including tasks already in a terminal state.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskCancelBatchItem"
+          }
+        },
+        "throughSequence": {
+          "description": "Global event watermark after the batch's durable transitions.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "throughSequence"
+      ],
+      "$defs": {
+        "TaskCancelBatchItem": {
+          "type": "object",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/TaskSummary"
+            },
+            "changed": {
+              "description": "True only when this request committed a new cancellation for this task.",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "task",
+            "changed"
+          ]
+        },
         "TaskSummary": {
           "type": "object",
           "properties": {

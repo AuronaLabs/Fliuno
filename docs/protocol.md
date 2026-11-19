@@ -9,7 +9,7 @@
 <details>
 <summary>展开协议索引</summary>
 
-- **任务与工作台**：[工作区、会话与任务](#工作区会话与任务) · [工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照)
+- **任务与工作台**：[工作区、会话与任务](#工作区会话与任务) · [工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照) · [批量取消任务](#批量取消任务)
 - **恢复与查询**：[变动摘要](#任务变动摘要) · [轻量回放](#任务变动回放) · [批量读取任务摘要](#批量读取任务摘要) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
 - **事件与交付物**：[审批、事件与产物](#审批事件与产物) · [交付物目录订阅](#交付物目录订阅) · [批量校验摘要](#批量读取交付物摘要)
 - **工具与宿主**：[工具、Agent 与终端](#工具agent-与终端) · [A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
@@ -103,6 +103,7 @@ staged.sync_all()?;
 | `task/continueAgentSession` | `{taskId,input,clientRequestId}` | 独立的本机 Task，在原 ACP 会话中发送新一轮，见 [ACP](acp.md#跨重启续接-agent-会话) |
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |
 | `task/cancelSummary` | `{taskId}` | 复用取消流程，返回 `TaskSummary`。能力标记为 `taskCancelSummary`。 |
+| `task/cancelBatch` | `{scope,taskIds}` | 原子提交选中任务的取消，返回 `{items:[{task,changed}],throughSequence}` |
 | `task/resume` | `{taskId,retryUncertainModelStep?:false}` | Task；恢复后排队；外部未知结果不能重试；模型结果不确定时须显式传 true |
 
 ### 审批、事件与产物
@@ -226,6 +227,20 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 | `missing` | ID 不存在或不属于所给任务。 |
 
 响应逐项对应请求并保留重复项。不打开正文、不补算摘要、不新增事件，也不需要数据库迁移。Rust 调用方使用 `Client::artifact_digests`，可把 `ready` 的摘要直接交给 `download_artifact` 或 `resume_artifact_download` 校验收到的字节。旧服务可继续逐份使用 `artifacts/digest`。
+
+### 批量取消任务
+
+`initialize.capabilities.taskCancelBatch` 为真时，`task/cancelBatch` 可在一次调用中取消同一会话或工作区里选中的任务。`maxTaskCancelBatch` 公布批次上限，当前为 32。每个 ID 含 1–128 个可见 ASCII 字节，列表不能重复。范围必须显式给出：会话为 `{kind:"session",sessionId}`，工作区为 `{kind:"workspace",workspaceId}`。
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"task/cancelBatch","params":{"scope":{"kind":"workspace","workspaceId":"<workspace-id>"},"taskIds":["<task-a>","<task-b>"]}}
+```
+
+服务在同一事务内校验每个 ID 的归属，并提交任务、审批收件箱和取消事件。若有任务缺失或不属于范围，整批返回 `-32004`；输入格式错误返回 `-32602`。事务失败不会留下部分取消，也不会向执行器发送停止信号。无需迁移数据库。
+
+`items` 按请求顺序返回，每项的 `task` 为 `TaskSummary`；已完成、已失败或已取消的任务保留原状态，`changed:false`。本次新取消的任务返回 `changed:true`。响应丢失时可原样重试，已取消的任务不会重复写事件。`throughSequence` 是该事务看到的全局事件水位；若还要消费取消事件，可从调用前的游标回放到该水位。
+
+单项与批次都先提交取消，再通知后台执行器。响应表示本地状态已提交，不能据此确认在途工具已退出、远端任务已停止或先前副作用被撤销。仍可通过持久事件观察后续结果。Rust 客户端提供 `Client::cancel_task_batch`。
 
 ### 批量读取任务摘要
 
