@@ -2,6 +2,7 @@
 mod approvals;
 mod artifacts;
 mod context;
+mod remote_checks;
 mod replay;
 mod sessions;
 mod task_summaries;
@@ -13,7 +14,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 28;
+pub(crate) const SCHEMA_VERSION: u32 = 29;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -235,6 +236,9 @@ impl Kernel {
         if version < 28 {
             artifacts::migrate_catalog_media_type(&mut db)?;
         }
+        if version < 29 {
+            remote_checks::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         let mut kernel = Self {
@@ -392,28 +396,6 @@ impl Kernel {
                 });
             self.publish_task_events(&task.id, &task.session_id, committed);
         }
-        Ok(())
-    }
-
-    /// Append evidence without rewriting a task snapshot or projecting a turn.
-    pub(crate) fn append_task_event(&mut self, task_id: &str, data: EventKind) -> Result<()> {
-        let session_id: String = self.db.query_row(
-            "SELECT session_id FROM tasks WHERE id=?1",
-            [&task_id],
-            |row| row.get(0),
-        )?;
-        self.db
-            .prepare_cached(INSERT_EVENT)?
-            .execute(params![task_id, serde_json::to_string(&data)?])?;
-        self.publish_task_events(
-            task_id,
-            &session_id,
-            std::iter::once(Event {
-                sequence: self.db.last_insert_rowid() as u64,
-                task_id: task_id.into(),
-                data,
-            }),
-        );
         Ok(())
     }
 

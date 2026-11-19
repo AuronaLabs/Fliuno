@@ -335,6 +335,7 @@ impl RpcServer {
             capabilities["sessionHistorySearch"] = json!(true);
             capabilities["artifactMediaTypeFilter"] = json!(true);
             capabilities["remoteTaskWatch"] = json!(self.kernel()?.remote_task_watch_supported());
+            capabilities["remoteTaskCheckLookup"] = json!(true);
             capabilities["agentCapabilitiesById"] = json!(true);
             let check_workers = self.scheduler.remote_check_workers();
             capabilities["maxConcurrentRemoteTaskChecks"] = json!(check_workers);
@@ -599,6 +600,13 @@ impl RpcServer {
                     .schedule_remote_check(check)
                     .map_err(|message| Error::Conflict(message.into()))?;
                 json!(accepted)
+            }
+            "task/getRemoteCheck" => {
+                let p: RemoteTaskCheckLookupParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .get_remote_task_check(&p.task_id, &p.check_id)?
+                )
             }
             "task/cancel" => {
                 let p: TaskIdParams = decode(params)?;

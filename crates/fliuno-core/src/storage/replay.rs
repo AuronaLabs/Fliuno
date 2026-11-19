@@ -235,7 +235,7 @@ impl Kernel {
     }
 }
 
-fn event_row(row: &rusqlite::Row<'_>) -> Result<Event> {
+pub(super) fn event_row(row: &rusqlite::Row<'_>) -> Result<Event> {
     let data = row.get_ref(2)?.as_str().map_err(rusqlite::Error::from)?;
     Ok(Event {
         sequence: row.get::<_, i64>(0)? as u64,

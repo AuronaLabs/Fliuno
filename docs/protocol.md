@@ -32,6 +32,7 @@
 | `task/get` | `{taskId}` | Task |
 | `task/getSummary` | `{taskId}` | 单条 `TaskSummary`，可以轻量轮询任务状态 |
 | `task/checkRemote` | `{taskId,waitMs?}` | `{checkId}`；后台只读核对，结果经事件返回，见 [A2A](a2a.md#显式核对远端状态) |
+| `task/getRemoteCheck` | `{taskId,checkId}` | 指定核对的持久 `Event`。见 `initialize.capabilities.remoteTaskCheckLookup` |
 | `task/continueRemote` | `{taskId,input,clientRequestId}` | 独立的本机 Task；后台复核后向原远端任务或上下文提交，见 [A2A](a2a.md#显式续接远端任务) |
 | `task/continueAgentSession` | `{taskId,input,clientRequestId}` | 独立的本机 Task，在原 ACP 会话中发送新一轮，见 [ACP](acp.md#跨重启续接-agent-会话) |
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |

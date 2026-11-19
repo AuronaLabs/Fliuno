@@ -249,3 +249,9 @@ Windows app-server Clippy、15 项库测试和 65 项进程测试通过。Debian
 ## MCP 多资源短时监听（2026-11-19）
 
 Windows 和 Debian 各通过 5 项官方 SDK 订阅测试及 1 项 HTTP 生命周期测试。新增用例验证一次订阅报告第二条 URI 的更新，部分确认返回 `declined`，非法、重复与超额 URI 在发送前被拒绝，两个有效请求结束后服务端都释放流。Debian 记录在 `D:/Fliuno-Native-Test/guest-mcp-watch-many.log`。
+
+首次全量复验发现 stdio fixture 仍预期旧的工具数量。更新为 8 后，同一真实 SDK 进程同时验证单 URI 和多 URI 监听，在 Windows 的可信主机与 AppContainer、Debian 的可信主机与 Landlock 均通过。
+
+## 远端核对证据索引（2026-11-19）
+
+Windows 和 Debian 通过真实 app-server 进程用例，按 ID 读取事件，与常规回放逐字段一致。跨任务查找返回未找到。回退到 v28 结构后，在未配置远端 Agent 的进程中升级并取回原事件。内核故障测试验证索引拒绝重复 ID 时不提交额外事件或发送通知。Debian 记录在 `D:/Fliuno-Native-Test/guest-remote-lookup.log`。

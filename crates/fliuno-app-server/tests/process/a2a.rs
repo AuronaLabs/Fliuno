@@ -313,15 +313,38 @@ fn remote_watch_after_restart_records_only_changed_status_without_resubmitting()
         );
     }
     let accepted = peer.call("task/checkRemote", json!({"taskId":id,"waitMs":3000}));
+    let lookup = json!({"taskId":id,"checkId":accepted["checkId"]});
     let observed = wait_checked(&mut peer, id, &accepted["checkId"]);
     assert_eq!(
         observed["data"]["outcome"],
         json!({"status":"observed","state":"completed"})
     );
+    assert_eq!(peer.call("task/getRemoteCheck", lookup.clone()), observed);
     assert_eq!(peer.call("task/get", json!({"taskId":id})), before);
     assert_eq!(peer.call("artifacts/list", json!({"taskId":id})), json!([]));
+    let other = peer.call(
+        "task/start",
+        json!({"sessionId":session,"input":"unrelated"}),
+    );
+    assert_eq!(
+        peer.request(
+            "task/getRemoteCheck",
+            json!({"taskId":other["id"],"checkId":accepted["checkId"]})
+        )["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request("task/getRemoteCheck", json!({"taskId":id,"checkId":""}))["error"]["code"],
+        -32602
+    );
     drop(peer);
-    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+
+    rusqlite::Connection::open(&directory.db)
+        .unwrap()
+        .execute_batch("DROP TABLE remote_task_checks; PRAGMA user_version=28;")
+        .unwrap();
+    let mut peer = Peer::start(&directory.db);
+    assert_eq!(peer.call("task/getRemoteCheck", lookup), observed);
     assert_eq!(wait_checked(&mut peer, id, &accepted["checkId"]), observed);
     assert_eq!(wire.requests().len(), 2);
 }

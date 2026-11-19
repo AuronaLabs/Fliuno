@@ -139,13 +139,6 @@ impl Kernel {
     }
 
     pub fn record_remote_task_check(&mut self, check: CompletedRemoteTaskCheck) -> Result<()> {
-        self.append_task_event(
-            &check.task_id,
-            EventKind::AgentRemoteTaskChecked {
-                run_id: check.run_id,
-                check_id: check.check_id,
-                outcome: check.outcome,
-            },
-        )
+        self.append_remote_task_check(&check.task_id, check.run_id, check.check_id, check.outcome)
     }
 }

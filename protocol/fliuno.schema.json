@@ -936,6 +936,24 @@
         "taskId"
       ]
     },
+    "task/getRemoteCheck": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RemoteTaskCheckLookupParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "checkId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "checkId"
+      ]
+    },
     "task/cancel": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskIdParams",

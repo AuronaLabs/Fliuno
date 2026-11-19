@@ -247,6 +247,13 @@ pub struct RemoteTaskCheckAccepted {
     pub check_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteTaskCheckLookupParams {
+    pub task_id: String,
+    pub check_id: String,
+}
+
 pub const MAX_REMOTE_TASK_WATCH_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
