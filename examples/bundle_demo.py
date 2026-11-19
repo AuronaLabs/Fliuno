@@ -67,7 +67,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix='fliuno-bundle-') as temporary, socket.socket() as listener:
         root = Path(temporary)
         source = root / 'sources'
-        shutil.copytree(Path(__file__).with_name('bundle' if args.runtime == 'node' else 'bundle_python'), source)
+        template = Path(__file__).with_name('bundle' if args.runtime == 'node' else 'bundle_python')
+        shutil.copytree(template, source, ignore=shutil.ignore_patterns('__pycache__'))
         host_path = root / 'private.txt'
         host_path.write_text('private host bytes', encoding='utf-8')
         listener.bind(('127.0.0.1', 0))
