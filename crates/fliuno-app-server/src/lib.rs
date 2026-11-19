@@ -374,6 +374,7 @@ impl RpcServer {
             capabilities["workspaceById"] = json!(true);
             capabilities["workspaceProfiles"] = json!(true);
             capabilities["modelUsageEvents"] = json!(true);
+            capabilities["modelUsageEventReplay"] = json!(true);
             capabilities["maxWorkspaceTitleChars"] = json!(MAX_WORKSPACE_TITLE_CHARS);
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
@@ -741,6 +742,10 @@ impl RpcServer {
                     p.limit,
                     p.target_bytes
                 )?)
+            }
+            "events/listModelUsage" => {
+                let p: EventsListParams = decode(params)?;
+                json!(self.kernel()?.list_model_usage_events(&p)?)
             }
             "events/listAll" => {
                 let p: EventsListAllParams = decode(params)?;

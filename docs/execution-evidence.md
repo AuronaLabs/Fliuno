@@ -438,3 +438,12 @@ Windows `scripts/check.ps1` 退出码为 0，446 项测试、26 个离线演示�
 真实 app-server 进程测试先建立会话订阅，再提交超出数据库水位的游标尝试切换到单任务。服务返回冲突并保留会话范围。切换请求之后新提交的任务通过实时通知送达，回放只读到建立订阅时的水位。
 
 Windows `scripts/check.ps1` 以退出码 0 完成。446 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.2-checked-subscription-windows.log`。
+
+
+## 0.0.3 模型用量分页（2026-11-19）
+
+真实 app-server 进程测试覆盖同一任务的两步用量、限条数翻页、包含式上界、无有效用量的空结果，以及从 SQLite v36 回填后沿用原序号和游标。
+
+SQLite 3.49.1 内存库中，使用 100,000 条模拟事件，其中 400 条报告用量。读取固定窗口中的 50 条及翻页探针，61 轮交替样本的查询中位数从逐条解析 JSON 扫描的 49.21 ms 降至索引查询的 0.259 ms。两种结果一致，索引路线只读命中的事件正文。一次回填用时 347.19 ms。该对照只计 SQLite 查询和取行。日志为 `target/0.0.3-usage-replay-bench.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成。446 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.3-usage-replay-windows.log`。

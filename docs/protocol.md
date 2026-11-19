@@ -73,6 +73,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `approval/getDecision` | `{taskId,approvalId}` | 已提交决定对应的 `Event`，用于重连核对 |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
 | `events/list` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
+| `events/listModelUsage` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | 仅返回该任务的模型用量事件，沿用全局序号 |
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
 | `events/get` | `{sequence}` | 按全局序号读取一条持久事件 |
 | `events/listSession` | `{sessionId, after?:0, through?, limit?:100, targetBytes?}` | 单个会话的持久事件页，沿用全局序号 |
@@ -237,6 +238,8 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 支持 `sessionEventReplay` 的客户端可用 `events/listSession` 回放某一会话内各任务的持久事件。它沿用全局的 `sequence`，所以相邻记录的序号可能不连续。使用 `nextAfter` 翻页，并可传入包含式 `through` 固定回放上界。有固定上界时，最后一页即使没有事件，也代表该会话已回放到上界。实时通知默认采用全局事件订阅。
 
 `workspaceEventReplay` 表示支持 `events/listWorkspace`。该方法使用相同的序号、包含式 `through` 和字节分页规则，跨会话读取整个工作区的持久事件。SQLite v27 回填工作区索引。
+
+客户端可用 `events/listModelUsage` 查本任务的用量，`initialize.capabilities.modelUsageEventReplay` 声明此能力。返回原始持久事件及序号。SQLite v37 从既有事件回填索引，分页不会读取其它事件的正文。
 
 `initialize.capabilities.modelUsageEvents` 表示模型用量可作为 `model_usage_reported` 持久事件回放。OpenAI Responses、Anthropic Messages 和 Gemini Interactions 均支持 JSON 与 SSE。事件含 `step`、供应商及 `inputTokens`、`outputTokens`。`cachedInputTokens` 与 `reasoningOutputTokens` 可选，并包含在对应总数内。Anthropic 的输入总量包含创建与命中缓存的 token。Gemini 沿用 Interactions 报告的输入与输出总量，单独报告的思考计数未纳入 `reasoningOutputTokens`。
 

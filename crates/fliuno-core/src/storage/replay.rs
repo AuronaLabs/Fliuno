@@ -193,7 +193,7 @@ impl Kernel {
         )
     }
 
-    fn query_event_page<P: rusqlite::Params>(
+    pub(super) fn query_event_page<P: rusqlite::Params>(
         &self,
         sql: &str,
         params: P,
@@ -247,7 +247,7 @@ pub(super) fn event_row(row: &rusqlite::Row<'_>) -> Result<Event> {
     })
 }
 
-fn validate_event_limit(limit: u32) -> Result<u32> {
+pub(super) fn validate_event_limit(limit: u32) -> Result<u32> {
     if !(1..=1000).contains(&limit) {
         return Err(Error::Invalid("limit must be 1..1000".into()));
     }

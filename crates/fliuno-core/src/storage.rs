@@ -3,6 +3,7 @@ mod approval_decisions;
 mod approvals;
 mod artifacts;
 mod context;
+mod model_usage;
 mod remote_checks;
 mod replay;
 mod sessions;
@@ -16,7 +17,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 36;
+pub(crate) const SCHEMA_VERSION: u32 = 37;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -266,6 +267,9 @@ impl Kernel {
             // Older kernels cannot replay model_usage_reported events.
             db.pragma_update(None, "user_version", 36)?;
         }
+        if version < 37 {
+            model_usage::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         tools.insert(
@@ -412,6 +416,9 @@ impl Kernel {
                     context::record(&tx, task, sequence as u64, true)?;
                 }
                 approval_decisions::record(&tx, &task.id, event, sequence)?;
+                if matches!(event, EventKind::ModelUsageReported { .. }) {
+                    model_usage::record(&tx, &task.id, sequence)?;
+                }
                 sequences.push(sequence as u64);
             }
         }
