@@ -18,12 +18,17 @@ fn approval_run_binding_migrates_and_replays_one_decision_after_restart() {
     drop(peer);
 
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("DROP TABLE approval_runs; PRAGMA user_version=37;")
+    db.execute_batch("DROP TABLE task_run_ends; DROP TABLE approval_runs; PRAGMA user_version=37;")
         .unwrap();
     drop(db);
     let mut peer = Peer::start(&path);
     let parent = json!({"sessionId":session["id"],"clientRequestId":"parent"});
     let child = json!({"sessionId":session["id"],"clientRequestId":"child"});
+    let original = peer.call("approval/getRunWindow", parent.clone());
+    let first = peer.call("events/get", json!({"sequence":original["firstSequence"]}));
+    assert_eq!(first["data"]["type"], "task_started");
+    let boundary = peer.call("events/get", json!({"sequence":original["lastSequence"]}));
+    assert_eq!(boundary["data"]["approval"]["id"], *approval);
     assert_eq!(
         peer.call("approval/getRun", parent.clone())["startSequence"],
         Value::Null
@@ -52,13 +57,25 @@ fn approval_run_binding_migrates_and_replays_one_decision_after_restart() {
         json!({"type":"approval_resolved","approvalId":approval,"decision":"allow_once"})
     );
     assert_eq!(
-        peer.request("approval/cancelRun", parent)["error"]["code"],
+        peer.request("approval/cancelRun", parent.clone())["error"]["code"],
         -32009
     );
     peer.wait_for_status(task_id, "completed");
+    let resumed = peer.call("approval/getRunWindow", child.clone());
+    assert_eq!(resumed["firstSequence"], *sequence);
+    let completed = peer.call("events/get", json!({"sequence":resumed["lastSequence"]}));
+    assert_eq!(completed["data"]["type"], "task_completed");
     drop(peer);
 
+    // Existing v38 databases already contain parent and child bindings.
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE task_run_ends; PRAGMA user_version=38;")
+        .unwrap();
+    drop(db);
+
     let mut peer = Peer::start(&path);
+    assert_eq!(peer.call("approval/getRunWindow", parent), original);
+    assert_eq!(peer.call("approval/getRunWindow", child.clone()), resumed);
     assert_eq!(
         peer.call("approval/getRun", child)["startSequence"],
         *sequence

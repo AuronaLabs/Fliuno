@@ -19,6 +19,16 @@ pub struct ApprovalRun {
     pub start_sequence: Option<u64>,
 }
 
+/// Inclusive bounds of one segment of a task's approval lifecycle.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalRunWindow {
+    pub task_id: String,
+    pub first_sequence: u64,
+    /// `None` while no event has sealed the run.
+    pub last_sequence: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApprovalListParams {

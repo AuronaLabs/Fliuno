@@ -5,8 +5,8 @@ use super::{
 };
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
-    ApprovalRun, MAX_APP_REQUEST_BYTES, TaskIdParams, TaskRequestLookupParams, TaskStartParams,
-    TaskStatus, TaskSummary,
+    ApprovalRun, ApprovalRunWindow, MAX_APP_REQUEST_BYTES, TaskIdParams, TaskRequestLookupParams,
+    TaskStartParams, TaskStatus, TaskSummary,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -236,6 +236,31 @@ impl AgUiRun {
         last_event_id: Option<&str>,
     ) -> Result<AgUiSseReplay, AgUiSseFeedError> {
         AgUiSseReplay::with_stream(self.sse(last_event_id)?, through)
+    }
+
+    /// Reconnect to a durable frame, using the indexed segment bounds when
+    /// available. Older servers and the task-wide profile replay as before.
+    pub fn reconnect_sse<R: BufRead, W: Write>(
+        &self,
+        client: &mut Client<R, W>,
+        through: u64,
+        last_event_id: Option<&str>,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<AgUiSseReplay, AgUiSseFeedError> {
+        let mut stream = self.sse(last_event_id)?;
+        stream.check_watermark(through)?;
+        if self.segment_start.is_some()
+            && last_event_id.is_some_and(|id| !id.is_empty())
+            && client.info().capabilities.get("approvalRunWindow") == Some(&Value::Bool(true))
+        {
+            let window: ApprovalRunWindow = client.call(
+                "approval/getRunWindow",
+                &lookup(&self.task.session_id, &self.run_id, true),
+                on_notification,
+            )?;
+            stream.seek(window)?;
+        }
+        AgUiSseReplay::with_stream(stream, through)
     }
 
     /// Drive this run's SSE output through one connection's task subscription.

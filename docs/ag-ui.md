@@ -152,6 +152,8 @@ Rust 宿主演示位于 [`local_host.rs`](../crates/fliuno-ag-ui-http/examples/l
 
 同一个子 `runId` 重试相同答复时返回同一执行段，重启后也不会重新执行工具。重复 ID 换成不同父运行、审批或决定时返回 `409`。把一个执行段的 `Last-Event-ID` 传给另一个执行段返回 `400`。子运行接管后，通过父 ID 取消任务返回 `409`。
 
+服务声明 `approvalRunWindow` 时，HTTP 重连会先查询该执行段的范围，再从游标对应的事件开始读取，仍逐帧检查编号。Rust 宿主可用 `run.reconnect_sse` 获得相同的行为；旧服务和默认文本模式会从执行段开头重放来恢复状态。
+
 Rust 宿主可先用 `AgUiRunInput::parse` 解码请求，再调用 `start_ag_ui_interrupt_run` 或 `resume_ag_ui_run`。后者应在宿主独立验证审批身份后调用。用 `attach_ag_ui_interrupt_run` 重连。底层手动投影子运行时，应先喂入 `approval/getRun` 返回的 `startSequence` 对应的事件；`replay_sse` 和 `subscribe_sse` 会自动定位。
 
 ```sh

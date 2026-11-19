@@ -119,13 +119,17 @@ impl Kernel {
         let start = validate_event_cursor(parent.start_sequence.unwrap_or(0))?;
         // Only the first pause in this segment is answerable with its run ID.
         // A model step resumed through a different API cannot be claimed here.
-        let first: Option<String> = self.db.prepare_cached(
-            "SELECT json_extract(data,'$.approval.id') FROM events
-             WHERE task_id=?1 AND sequence>?2 AND json_extract(data,'$.type') IN
-                ('approval_requested','task_interrupted','task_cancelled','task_failed','task_completed')
-             ORDER BY sequence LIMIT 1",
-         )?.query_row(params![parent.task.id, start], |row| row.get(0))
-            .optional()?.flatten();
+        let first: Option<String> = self
+            .db
+            .prepare_cached(
+                "SELECT json_extract(data,'$.approval.id') FROM events WHERE sequence=(
+                SELECT sequence FROM task_run_ends WHERE task_id=?1 AND sequence>?2
+                ORDER BY sequence LIMIT 1
+             )",
+            )?
+            .query_row(params![parent.task.id, start], |row| row.get(0))
+            .optional()?
+            .flatten();
         if first.as_deref() != Some(p.approval_id.as_str()) {
             return Err(Error::Conflict(
                 "approval did not interrupt this run".into(),

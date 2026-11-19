@@ -1748,6 +1748,24 @@
         "clientRequestId"
       ]
     },
+    "approval/getRunWindow": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskRequestLookupParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clientRequestId"
+      ]
+    },
     "approval/cancelRun": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskRequestLookupParams",
@@ -6089,6 +6107,36 @@
           ]
         }
       }
+    },
+    "ApprovalRunWindow": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalRunWindow",
+      "description": "Inclusive bounds of one segment of a task's approval lifecycle.",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "firstSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "lastSequence": {
+          "description": "`None` while no event has sealed the run.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "firstSequence"
+      ]
     },
     "Artifact": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

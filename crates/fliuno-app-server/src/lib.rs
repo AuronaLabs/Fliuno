@@ -412,6 +412,7 @@ impl RpcServer {
             capabilities["approvalDecisionLookup"] = json!(true);
             capabilities["approvalRespondDecision"] = json!(true);
             capabilities["approvalResumeRun"] = json!(true);
+            capabilities["approvalRunWindow"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
             capabilities["sessionArchiveBatch"] = json!(true);
             capabilities["maxSessionArchiveBatch"] =
@@ -766,6 +767,13 @@ impl RpcServer {
                 json!(
                     self.kernel()?
                         .get_approval_run(&p.session_id, &p.client_request_id)?
+                )
+            }
+            "approval/getRunWindow" => {
+                let p: TaskRequestLookupParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .get_approval_run_window(&p.session_id, &p.client_request_id)?
                 )
             }
             "events/get" => {

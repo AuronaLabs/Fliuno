@@ -555,3 +555,12 @@ Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt�
 真实 HTTP 测试通过本机回环连接验证父流在 `RUN_FINISHED.outcome.type=interrupt` 后断开。审批者可读取详情并用新 ID 续跑，提交者无此权限。重连父流不混入子运行，跨执行段游标被拒绝；重启后子运行的 SSE 可逐帧重放。原有审批路由的测试与离线演示继续通过。
 
 Windows `scripts/check.ps1` 通过 464 项测试、28 个离线演示、rustfmt、两组严格 Clippy 及应用协议 Schema 检查。`@ag-ui/core@1.0.5` 验证了文档示例、两次实际 HTTP 输入和父子运行的 8 条 SSE 消息。日志为 `target/0.0.3-ag-ui-interrupt-windows.log` 与 `target/0.0.3-ag-ui-interrupt-sdk.log`。
+
+
+## 0.0.3 AG-UI 按游标定位事件（2026-11-19）
+
+真实 HTTP 进程测试记录宿主发送的 `events/list` 请求。子运行的每个有效帧重连都只读取一个事件页，首个读取游标为请求序号减一；流内多帧事件仍按序号与帧编号精确续传。跨执行段游标不读取事件页，超出合法帧编号的游标返回 `400`。真实 stdio 测试从 v37 和 v38 迁移数据库，验证父、子运行的边界与原事件保持一致。
+
+另外用 60,004 条事件的合成数据库核对 SQL 查询计划：结束索引只存两条边界记录，查找按任务和序号使用主键范围。查询计划未扫描或排序事件历史。该探针验证查询路径，未测量 HTTP 延迟。日志：`target/0.0.3-ag-ui-indexed-replay-sqlite-plan.log`。
+
+Windows `scripts/check.ps1` 通过 464 项测试、28 个离线演示、rustfmt、两组严格 Clippy 和协议 Schema 检查。日志：`target/0.0.3-ag-ui-indexed-replay-windows.log`。

@@ -7,6 +7,7 @@ mod context;
 mod model_usage;
 mod remote_checks;
 mod replay;
+mod run_boundaries;
 mod sessions;
 mod task_summaries;
 mod workspaces;
@@ -18,7 +19,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 38;
+pub(crate) const SCHEMA_VERSION: u32 = 39;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -274,6 +275,9 @@ impl Kernel {
         if version < 38 {
             approval_runs::migrate(&mut db)?;
         }
+        if version < 39 {
+            run_boundaries::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         tools.insert(
@@ -431,6 +435,7 @@ impl Kernel {
                     context::record(&tx, task, sequence as u64, true)?;
                 }
                 approval_decisions::record(&tx, &task.id, event, sequence)?;
+                run_boundaries::record(&tx, &task.id, event, sequence)?;
                 if let (Some(resume), EventKind::ApprovalResolved { .. }) = (resume, event) {
                     approval_runs::record(&tx, &task.id, resume, sequence)?;
                 }

@@ -288,7 +288,7 @@ async fn attach<R: BufRead + Send + 'static, W: Write + Send + 'static>(
             let run = lookup_run(client, &session, &run_id, interrupt_profile)?;
             let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
             let replay = run
-                .replay_sse(through, last_id.as_deref())
+                .reconnect_sse(client, through, last_id.as_deref(), |_| {})
                 .map_err(replay_status)?;
             Ok((replay, through))
         })

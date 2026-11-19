@@ -130,6 +130,18 @@ impl AgUiProjector {
             && matches!(self.state, RunState::Interrupted | RunState::Finished)
     }
 
+    /// Restore the only state needed inside a verified, single AG-UI segment.
+    fn seek_within_segment(&mut self, first: u64, sequence: u64) {
+        debug_assert!(self.segment_start.is_some() && sequence >= first && first > 0);
+        self.sequence = sequence - 1;
+        if sequence != first {
+            self.state = RunState::Running {
+                start_sequence: first,
+                initial: true,
+            };
+        }
+    }
+
     pub fn run_phase(&self) -> AgUiRunPhase {
         match self.state {
             RunState::Pending => AgUiRunPhase::AwaitingStart,

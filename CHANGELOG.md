@@ -5,6 +5,7 @@
 - **会话历史**。`session/listHistory` 按完成顺序倒序读取用户、助手消息和产物引用。客户端能保存固定水位和续页游标，重启后继续读取。单条记录超出页预算时保留任务 ID 和完成序号。[会话历史分页](docs/context.md#会话历史分页)
 - **审批决定**。`approval/respondDecision` 在一次 RPC 中提交并返回持久决定。同一决定可以跨重启重试。[应用协议](docs/protocol.md#方法)
 - **AG-UI 审批中断**。可选模式在审批请求处结束当前 SSE 流。独立授权的审批者使用新的 `runId` 续跑同一任务。SQLite v38 将续跑绑定和审批决定一起保存，重启重试也不会重复执行工具。[审批中断与续跑](docs/ag-ui.md#审批中断与续跑)
+- **AG-UI 重连性能**。SQLite v39 按任务保存审批执行段的结束序号。中断模式下，SSE 重连从 `Last-Event-ID` 对应的事件开始读取，无需重复读取前面的事件。[HTTP 重连](docs/ag-ui.md#审批中断与续跑)
 - **任务摘要**。`task/startSummary` 创建任务并返回精简摘要。`task/getSummaryByRequest` 可按会话和幂等键找回已有任务。[应用协议](docs/protocol.md#方法)
 - **模型用量**。`events/listModelUsage` 直接按任务分页读取已提交的用量事件，沿用全局事件序号。SQLite v37 为已有用量事件回填索引。[应用协议](docs/protocol.md#方法)
 - **共享事件回放**。宿主可读取一次已提交水位，在同一条 stdio 连接交错读取不同任务的 SSE 页。每个读取方有独立游标，可在释放连接后向消费者写入。[AG-UI 接入](docs/ag-ui.md#在一条连接上交错回放多个任务)

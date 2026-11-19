@@ -1,6 +1,6 @@
 //! SSE framing for a task's durable AG-UI projection.
-use super::{AgUiProjectionError, AgUiProjector, AgUiRunPhase};
-use fliuno_protocol::{Event, TaskSummary};
+use super::{AgUiProjectionError, AgUiProjector, AgUiRunPhase, AgUiSseFeedError};
+use fliuno_protocol::{ApprovalRunWindow, Event, TaskSummary};
 use std::{
     cmp::Ordering,
     io::{self, Write},
@@ -103,7 +103,36 @@ impl AgUiSseStream {
     }
 
     pub(super) fn after(&self) -> u64 {
-        self.projector.after()
+        self.projector.sequence
+    }
+
+    pub(super) fn seek(&mut self, window: ApprovalRunWindow) -> Result<(), AgUiSseFeedError> {
+        let Some(position) = self.resume else {
+            return Ok(());
+        };
+        let first = window.first_sequence;
+        if window.task_id != self.task_id()
+            || !(1..=i64::MAX as u64).contains(&first)
+            || window
+                .last_sequence
+                .is_some_and(|last| last <= first || last > i64::MAX as u64)
+            || self
+                .projector
+                .segment_start
+                .is_some_and(|start| start != 0 && start != first)
+        {
+            return Err(crate::Error::InvalidResult.into());
+        }
+        if position.sequence < first
+            || window
+                .last_sequence
+                .is_some_and(|last| position.sequence > last)
+        {
+            return Err(AgUiSseError::UnknownResumeId.into());
+        }
+        // Leave the cursor unresolved until we verify the exact event and ordinal.
+        self.projector.seek_within_segment(first, position.sequence);
+        Ok(())
     }
 
     pub(super) fn sealed(&self) -> bool {
