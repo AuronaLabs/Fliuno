@@ -14,8 +14,8 @@ use axum::{
 use fliuno_client::{
     Client, Error,
     ag_ui::{
-        AG_UI_SSE_CONTENT_TYPE, AgUiRun, AgUiRunError, AgUiRunInput, AgUiSseError,
-        AgUiSseFeedError, AgUiSseReplay,
+        AG_UI_SSE_CONTENT_TYPE, AgUiModelStepLimit, AgUiRun, AgUiRunError, AgUiRunInput,
+        AgUiRunOptions, AgUiSseError, AgUiSseFeedError, AgUiSseReplay,
     },
 };
 use fliuno_protocol::MAX_APP_REQUEST_BYTES;
@@ -38,10 +38,65 @@ struct Gateway<R, W> {
     authorize: Box<Authorize>,
     streams: Arc<Semaphore>,
     reviewer: Option<Box<Authorize>>,
-    interrupt_profile: bool,
+    run_options: AgUiRunOptions,
     controls: Arc<Semaphore>,
     watermark: Mutex<Option<(Instant, u64)>>,
     tasks: task_poll::TaskPoll,
+}
+
+/// Configures a host-authorized AG-UI route without exposing kernel controls
+/// through the HTTP request body.
+pub struct RouterBuilder<R, W> {
+    client: Arc<Mutex<Client<R, W>>>,
+    authorize: Box<Authorize>,
+    reviewer: Option<Box<Authorize>>,
+    run_options: AgUiRunOptions,
+}
+
+impl<R: BufRead + Send + 'static, W: Write + Send + 'static> RouterBuilder<R, W> {
+    /// The callback authenticates each request and selects the local session.
+    pub fn new(
+        client: Arc<Mutex<Client<R, W>>>,
+        authorize: impl Fn(&HeaderMap) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            client,
+            authorize: Box::new(authorize),
+            reviewer: None,
+            run_options: AgUiRunOptions::default(),
+        }
+    }
+
+    /// Enable the dedicated reviewer endpoints for continuous SSE runs.
+    pub fn approvals(
+        mut self,
+        reviewer: impl Fn(&HeaderMap) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.reviewer = Some(Box::new(reviewer));
+        self.run_options.interrupt_on_approval = false;
+        self
+    }
+
+    /// Enable the reviewer continuation profile instead of legacy approval POSTs.
+    pub fn interrupts(
+        mut self,
+        reviewer: impl Fn(&HeaderMap) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.reviewer = Some(Box::new(reviewer));
+        self.run_options.interrupt_on_approval = true;
+        self
+    }
+
+    /// Bound new tasks. Approvals, reconnects, and cancellation use the
+    /// originally stored task and do not reapply current policy.
+    pub fn model_step_limit(mut self, limit: AgUiModelStepLimit) -> Self {
+        self.run_options.model_step_limit = Some(limit);
+        self
+    }
+
+    pub fn build(self) -> Router {
+        build_router(self.client, self.authorize, self.reviewer, self.run_options)
+    }
 }
 
 /// Mount `POST /run`, `GET /runs/{run_id}` and `DELETE /runs/{run_id}`.
@@ -56,7 +111,7 @@ where
     R: BufRead + Send + 'static,
     W: Write + Send + 'static,
 {
-    build_router(client, Box::new(authorize), None, false)
+    RouterBuilder::new(client, authorize).build()
 }
 
 /// Also mount the host approval routes. The reviewer callback selects the local
@@ -71,7 +126,9 @@ where
     R: BufRead + Send + 'static,
     W: Write + Send + 'static,
 {
-    build_router(client, Box::new(authorize), Some(Box::new(reviewer)), false)
+    RouterBuilder::new(client, authorize)
+        .approvals(reviewer)
+        .build()
 }
 
 /// Mount the AG-UI interrupt profile. A text request uses `authorize`; a
@@ -86,14 +143,16 @@ where
     R: BufRead + Send + 'static,
     W: Write + Send + 'static,
 {
-    build_router(client, Box::new(authorize), Some(Box::new(reviewer)), true)
+    RouterBuilder::new(client, authorize)
+        .interrupts(reviewer)
+        .build()
 }
 
 fn build_router<R, W>(
     client: Arc<Mutex<Client<R, W>>>,
     authorize: Box<Authorize>,
     reviewer: Option<Box<Authorize>>,
-    interrupt_profile: bool,
+    run_options: AgUiRunOptions,
 ) -> Router
 where
     R: BufRead + Send + 'static,
@@ -105,7 +164,7 @@ where
         authorize,
         streams: Arc::new(Semaphore::new(16)),
         reviewer,
-        interrupt_profile,
+        run_options,
         controls: Arc::new(Semaphore::new(8)),
         watermark: Mutex::new(None),
         tasks: task_poll::TaskPoll::default(),
@@ -113,7 +172,7 @@ where
     let routes = Router::new()
         .route("/run", post(start::<R, W>))
         .route("/runs/{run_id}", get(attach::<R, W>).delete(cancel::<R, W>));
-    let routes = if interrupt_profile {
+    let routes = if run_options.interrupt_on_approval {
         routes.route(
             "/runs/{run_id}/approvals/{approval_id}",
             get(approval::get::<R, W>),
@@ -171,7 +230,7 @@ async fn start<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     let reviewer = gateway
         .reviewer
         .as_ref()
-        .filter(|_| gateway.interrupt_profile)
+        .filter(|_| gateway.run_options.interrupt_on_approval)
         .and_then(|authorize| authorize(request.headers()));
     if submitter.is_none() && reviewer.is_none() {
         return Err(StatusCode::UNAUTHORIZED);
@@ -184,63 +243,26 @@ async fn start<R: BufRead + Send + 'static, W: Write + Send + 'static>(
         .clone()
         .try_acquire_owned()
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let body = read_json(request, MAX_APP_REQUEST_BYTES).await?;
-    let interrupt_profile = gateway.interrupt_profile;
-    let start = if interrupt_profile {
-        let input = AgUiRunInput::parse(&body).map_err(run_status)?;
-        let resume = input.is_resume();
-        let session = if resume { reviewer } else { submitter }.ok_or(StatusCode::UNAUTHORIZED)?;
-        Start::Interrupt {
-            input: Box::new(input),
-            session,
-            resume,
-        }
-    } else {
-        Start::Legacy {
-            body,
-            session: submitter.ok_or(StatusCode::UNAUTHORIZED)?,
-        }
-    };
+    let input = AgUiRunInput::parse(&read_json(request, MAX_APP_REQUEST_BYTES).await?)
+        .map_err(run_status)?;
+    let options = gateway.run_options;
+    let resume = options.interrupt_on_approval && input.is_resume();
+    let session = if resume { reviewer } else { submitter }.ok_or(StatusCode::UNAUTHORIZED)?;
     let (replay, through, task) = gateway
         .rpc(move |client| {
-            let run = start.submit(client)?;
+            let notify = |_| {};
+            let run = if resume {
+                client.resume_ag_ui_run(&session, input, notify)
+            } else {
+                client.start_ag_ui_text_run(&session, input, options, notify)
+            }
+            .map_err(run_status)?;
             let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
             let replay = run.replay_sse(through, None).map_err(replay_status)?;
             Ok((replay, through, watched_task(client, &run)))
         })
         .await?;
     respond(gateway, replay, through, task, permit).await
-}
-
-enum Start {
-    Legacy {
-        body: axum::body::Bytes,
-        session: String,
-    },
-    Interrupt {
-        input: Box<AgUiRunInput>,
-        session: String,
-        resume: bool,
-    },
-}
-
-impl Start {
-    fn submit<R: BufRead, W: Write>(self, client: &mut Client<R, W>) -> Status<AgUiRun> {
-        match self {
-            Self::Legacy { body, session } => client.start_ag_ui_run(&session, &body, |_| {}),
-            Self::Interrupt {
-                input,
-                session,
-                resume: false,
-            } => client.start_ag_ui_interrupt_run(&session, *input, |_| {}),
-            Self::Interrupt {
-                input,
-                session,
-                resume: true,
-            } => client.resume_ag_ui_run(&session, *input, |_| {}),
-        }
-        .map_err(run_status)
-    }
 }
 
 fn lookup_run<R: BufRead, W: Write>(
@@ -267,11 +289,11 @@ async fn attach<R: BufRead + Send + 'static, W: Write + Send + 'static>(
             gateway
                 .reviewer
                 .as_ref()
-                .filter(|_| gateway.interrupt_profile)
+                .filter(|_| gateway.run_options.interrupt_on_approval)
                 .and_then(|authorize| authorize(&headers))
         })
         .ok_or(StatusCode::UNAUTHORIZED)?;
-    let interrupt_profile = gateway.interrupt_profile;
+    let interrupt_profile = gateway.run_options.interrupt_on_approval;
     let last_id = headers
         .get("last-event-id")
         .map(|value| {
@@ -305,7 +327,7 @@ async fn cancel<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     headers: HeaderMap,
 ) -> Status<StatusCode> {
     let session = (gateway.authorize)(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
-    let interrupt_profile = gateway.interrupt_profile;
+    let interrupt_profile = gateway.run_options.interrupt_on_approval;
     // Cancellation must remain available while all SSE slots are occupied.
     let _permit = gateway
         .controls
@@ -386,7 +408,9 @@ fn run_status(error: AgUiRunError) -> StatusCode {
         AgUiRunError::WrongThread => StatusCode::NOT_FOUND,
         AgUiRunError::InputTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         AgUiRunError::Rpc(error) => rpc_status(error),
-        AgUiRunError::InvalidResult => StatusCode::BAD_GATEWAY,
+        AgUiRunError::InvalidResult | AgUiRunError::ModelStepLimitUnavailable => {
+            StatusCode::BAD_GATEWAY
+        }
         _ => StatusCode::BAD_REQUEST,
     }
 }

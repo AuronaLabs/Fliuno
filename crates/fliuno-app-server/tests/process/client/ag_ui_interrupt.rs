@@ -491,3 +491,202 @@ async fn ag_ui_http_approval_details_and_denial_follow_the_owning_run() {
     drop(server);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn ag_ui_http_interrupt_host_model_limit_survives_restart_and_approval() {
+    host_model_step_limit(true).await;
+}
+
+#[tokio::test]
+async fn ag_ui_http_continuous_host_model_limit_survives_restart_and_approval() {
+    host_model_step_limit(false).await;
+}
+
+async fn host_model_step_limit(interrupts: bool) {
+    use fliuno_ag_ui_http::RouterBuilder;
+    use fliuno_client::ag_ui::AgUiModelStepLimit;
+
+    let root = std::env::temp_dir().join(format!("fliuno-http-attempts-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let (server, mut client) = connect(&db);
+    let ws: Workspace = client
+        .call("workspace/open", &json!({"root":root}), |_| {})
+        .unwrap();
+    let session: Session = client
+        .call("session/create", &json!({"workspaceId":ws.id}), |_| {})
+        .unwrap();
+    let routes = |client, limit| {
+        let submitter = session.id.clone();
+        let reviewer = session.id.clone();
+        let authorize_review = move |headers: &axum::http::HeaderMap| {
+            (headers.get("authorization")? == "Bearer review").then(|| reviewer.clone())
+        };
+        let mut router = RouterBuilder::new(client, move |headers| {
+            (headers.get("authorization")? == "Bearer submit").then(|| submitter.clone())
+        });
+        if let Some(limit) = limit {
+            router = router.model_step_limit(limit);
+        }
+        if interrupts {
+            router.interrupts(authorize_review)
+        } else {
+            router.approvals(authorize_review)
+        }
+        .build()
+    };
+    let (listener, base) = listen(routes(
+        Arc::new(Mutex::new(client)),
+        Some(AgUiModelStepLimit::new(1).unwrap()),
+    ))
+    .await;
+    let http = Http::builder()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .unwrap();
+    let initial = json!({"threadId":session.id,"runId":"limited","messages":[{"id":"u","role":"user","content":"prepare an artifact"}]});
+    let mut injection = initial.clone();
+    injection["maxModelSteps"] = json!(8);
+    assert_eq!(
+        http.post(format!("{base}/run"))
+            .bearer_auth("submit")
+            .json(&injection)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    let mut started = http
+        .post(format!("{base}/run"))
+        .bearer_auth("submit")
+        .json(&initial)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(started.status(), 200);
+    let approval = if interrupts {
+        let parent = accepted(started).await;
+        let events = frames(&parent);
+        events.last().unwrap().1["outcome"]["interrupts"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    } else {
+        let mut received = Vec::new();
+        loop {
+            received.extend_from_slice(
+                &started
+                    .chunk()
+                    .await
+                    .unwrap()
+                    .expect("stream ended before approval"),
+            );
+            let text = String::from_utf8_lossy(&received);
+            let Some((complete, _)) = text.rsplit_once("\n\n") else {
+                continue;
+            };
+            if let Some(id) = frames(complete).iter().find_map(|(_, event)| {
+                (event["name"] == "fliuno.approval_requested")
+                    .then(|| event["value"]["approvalId"].as_str().unwrap().to_owned())
+            }) {
+                break id;
+            }
+        }
+    };
+
+    // Restart while approval is still pending with the default policy. This
+    // must not widen the saved task's limit or require a fresh run to review.
+    listener.abort();
+    let _ = listener.await;
+    drop(server);
+    let (server, client) = connect(&db);
+    let shared = Arc::new(Mutex::new(client));
+    let (listener, base) = listen(routes(shared.clone(), None)).await;
+    assert_eq!(
+        http.post(format!("{base}/run"))
+            .bearer_auth("submit")
+            .json(&initial)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
+    let path = if interrupts {
+        let continuation = json!({"threadId":session.id,"runId":"reviewed","parentRunId":"limited","messages":[],"resume":[{"interruptId":approval,"status":"resolved","payload":{"decision":"allow_once"}}]});
+        let reviewed = http
+            .post(format!("{base}/run"))
+            .bearer_auth("review")
+            .json(&continuation)
+            .send()
+            .await
+            .unwrap();
+        let delivered = accepted(reviewed).await;
+        let retry = http
+            .post(format!("{base}/run"))
+            .bearer_auth("review")
+            .json(&continuation)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(accepted(retry).await, delivered);
+        "reviewed"
+    } else {
+        let reviewed = http
+            .post(format!("{base}/runs/limited/approvals/{approval}"))
+            .bearer_auth("review")
+            .json(&json!({"decision":"allow_once"}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(reviewed.status(), 200);
+        "limited"
+    };
+    let reconnected = http
+        .get(format!("{base}/runs/{path}"))
+        .bearer_auth("submit")
+        .send()
+        .await
+        .unwrap();
+    let delivered = accepted(reconnected).await;
+    let events = frames(&delivered);
+    assert_eq!(
+        events.last().unwrap().1,
+        json!({"type":"RUN_ERROR","message":"model step budget exceeded","code":"fliuno.task_failed"})
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|(_, event)| event["name"] == "fliuno.artifact_created")
+            .count(),
+        1
+    );
+
+    {
+        let mut client = shared.lock().await;
+        let task = if interrupts {
+            client.attach_ag_ui_interrupt_run(&session.id, path, |_| {})
+        } else {
+            client.attach_ag_ui_run(&session.id, path, |_| {})
+        }
+        .unwrap();
+        let snapshot: Task = client
+            .call("task/get", &json!({"taskId":task.task().id}), |_| {})
+            .unwrap();
+        assert_eq!(snapshot.model_steps, 1);
+        assert_eq!(snapshot.max_model_steps, Some(1));
+    }
+    listener.abort();
+    let _ = listener.await;
+    drop(shared);
+    drop(server);
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    assert_eq!(
+        conn.query_row::<u32, _, _>("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+            .unwrap(),
+        1
+    );
+    drop(conn);
+    fs::remove_dir_all(root).unwrap();
+}

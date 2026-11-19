@@ -7,7 +7,7 @@ mod stream;
 
 pub use interrupt::AgUiInterrupt;
 pub use replay::AgUiSseReplay;
-pub use run::{AgUiRun, AgUiRunError, AgUiRunInput};
+pub use run::{AgUiModelStepLimit, AgUiRun, AgUiRunError, AgUiRunInput, AgUiRunOptions};
 pub use sse::{AG_UI_SSE_CONTENT_TYPE, AgUiSseError, AgUiSseStream};
 pub use stream::{AgUiSseFeed, AgUiSseFeedError};
 

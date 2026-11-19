@@ -847,3 +847,33 @@ fn history_search_uses_negotiated_scan_limit_without_losing_its_checkpoint() {
     );
     assert!(search.next_request().is_none());
 }
+
+#[test]
+fn host_ag_ui_model_step_limit_requires_server_support_before_submitting() {
+    use crate::ag_ui::{AgUiModelStepLimit, AgUiRunError, AgUiRunInput, AgUiRunOptions};
+
+    assert!(matches!(
+        AgUiModelStepLimit::new(0),
+        Err(AgUiRunError::ModelStepLimit)
+    ));
+    assert!(matches!(
+        AgUiModelStepLimit::new(9),
+        Err(AgUiRunError::ModelStepLimit)
+    ));
+    let mut client = fake_client(b"");
+    let input = AgUiRunInput::parse(br#"{"threadId":"session","runId":"run","messages":[{"id":"msg","role":"user","content":"hello"}]}"#).unwrap();
+    let error = client
+        .start_ag_ui_text_run(
+            "session",
+            input,
+            AgUiRunOptions {
+                model_step_limit: Some(AgUiModelStepLimit::new(1).unwrap()),
+                ..AgUiRunOptions::default()
+            },
+            |_| {},
+        )
+        .unwrap_err();
+    assert!(matches!(error, AgUiRunError::ModelStepLimitUnavailable));
+    let (_, sent) = client.into_parts();
+    assert_eq!(sent.iter().filter(|&&byte| byte == b'\n').count(), 1);
+}

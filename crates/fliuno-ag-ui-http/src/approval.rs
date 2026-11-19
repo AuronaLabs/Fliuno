@@ -28,7 +28,7 @@ pub(super) async fn get<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     headers: HeaderMap,
 ) -> Status<Response> {
     let (session, _permit) = review_access(&gateway, &headers, &approval_id)?;
-    let interrupt_profile = gateway.interrupt_profile;
+    let interrupt_profile = gateway.run_options.interrupt_on_approval;
     let details: ApprovalDetails = gateway
         .rpc(move |client| {
             if interrupt_profile {

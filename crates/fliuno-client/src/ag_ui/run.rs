@@ -6,8 +6,8 @@ use super::{
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
     ApprovalDetails, ApprovalRun, ApprovalRunPendingParams, ApprovalRunWindow,
-    MAX_APP_REQUEST_BYTES, TaskIdParams, TaskRequestLookupParams, TaskStartParams, TaskStatus,
-    TaskSummary,
+    MAX_APP_REQUEST_BYTES, MAX_TASK_MODEL_STEPS, TaskIdParams, TaskRequestLookupParams,
+    TaskStartParams, TaskStatus, TaskSummary,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -33,8 +33,32 @@ pub enum AgUiRunError {
     UserText,
     #[error("the server returned a task outside the selected session or backend")]
     InvalidResult,
+    #[error("AG-UI model step limit must be 1 to {MAX_TASK_MODEL_STEPS}")]
+    ModelStepLimit,
+    #[error("the server does not support the requested AG-UI model step limit")]
+    ModelStepLimitUnavailable,
     #[error(transparent)]
     Rpc(#[from] Error),
+}
+
+/// A host-selected bound for new model tasks. This is not an AG-UI input field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgUiModelStepLimit(u32);
+
+impl AgUiModelStepLimit {
+    pub fn new(steps: u32) -> Result<Self, AgUiRunError> {
+        if !(1..=MAX_TASK_MODEL_STEPS).contains(&steps) {
+            return Err(AgUiRunError::ModelStepLimit);
+        }
+        Ok(Self(steps))
+    }
+}
+
+/// Options for a root text run, set by the host before sending it to the kernel.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgUiRunOptions {
+    pub interrupt_on_approval: bool,
+    pub model_step_limit: Option<AgUiModelStepLimit>,
 }
 
 #[derive(Deserialize)]
@@ -140,7 +164,7 @@ impl AgUiRunInput {
     fn into_task(
         self,
         session_id: &str,
-        interrupt_profile: bool,
+        options: AgUiRunOptions,
     ) -> Result<(TaskStartParams, String), AgUiRunError> {
         self.validate(session_id)?;
         if self.is_resume() {
@@ -164,10 +188,10 @@ impl AgUiRunInput {
             TaskStartParams {
                 session_id: session_id.to_owned(),
                 input: text,
-                client_request_id: Some(request_key(&self.run_id, interrupt_profile)),
+                client_request_id: Some(request_key(&self.run_id, options.interrupt_on_approval)),
                 backend: Default::default(),
                 context: None,
-                max_model_steps: None,
+                max_model_steps: options.model_step_limit.map(|limit| limit.0),
             },
             self.run_id,
         ))
@@ -331,10 +355,10 @@ impl<R: BufRead, W: Write> Client<R, W> {
         body: &[u8],
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
-        self.start_ag_ui(
+        self.start_ag_ui_text_run(
             session_id,
             AgUiRunInput::parse(body)?,
-            None,
+            AgUiRunOptions::default(),
             on_notification,
         )
     }
@@ -346,19 +370,44 @@ impl<R: BufRead, W: Write> Client<R, W> {
         input: AgUiRunInput,
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
-        self.start_ag_ui(session_id, input, Some(0), on_notification)
+        self.start_ag_ui_text_run(
+            session_id,
+            input,
+            AgUiRunOptions {
+                interrupt_on_approval: true,
+                ..AgUiRunOptions::default()
+            },
+            on_notification,
+        )
     }
 
-    fn start_ag_ui(
+    /// Submit a parsed text run with host policy. Fail before submitting if
+    /// the server does not advertise support for the requested bound.
+    pub fn start_ag_ui_text_run(
         &mut self,
         session_id: &str,
         input: AgUiRunInput,
-        segment_start: Option<u64>,
+        options: AgUiRunOptions,
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
-        let (request, run_id) = input.into_task(session_id, segment_start.is_some())?;
+        let (request, run_id) = input.into_task(session_id, options)?;
+        if let Some(steps) = request.max_model_steps
+            && !self
+                .info()
+                .capabilities
+                .get("maxTaskModelSteps")
+                .and_then(Value::as_u64)
+                .is_some_and(|max| max >= u64::from(steps))
+        {
+            return Err(AgUiRunError::ModelStepLimitUnavailable);
+        }
         let task = self.call("task/startSummary", &request, on_notification)?;
-        AgUiRun::checked(task, session_id, run_id, segment_start)
+        AgUiRun::checked(
+            task,
+            session_id,
+            run_id,
+            options.interrupt_on_approval.then_some(0),
+        )
     }
 
     /// Answer one interrupt after the host has authorized the reviewer.

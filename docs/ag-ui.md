@@ -6,7 +6,7 @@
 
 | 要做什么 | 对应步骤 |
 | --- | --- |
-| **挂载 HTTP 接口** | [路由与宿主授权](#http-接入) · [离线示例](../examples/ag_ui_http_demo.py) |
+| **挂载 HTTP 接口** | [路由与宿主授权](#http-接入) · [宿主模型尝试上限](#宿主模型尝试上限) · [离线示例](../examples/ag_ui_http_demo.py) |
 | **运行任务并展示进度** | [提交文本任务](#提交文本任务) → [投影内核事件](#投影内核事件) |
 | **恢复运行** | [SSE 输出与续传](#sse-输出与续传) · [审批中断与续跑](#审批中断与续跑) |
 
@@ -129,6 +129,24 @@ Rust 宿主演示位于 [`local_host.rs`](../crates/fliuno-ag-ui-http/examples/l
 | `POST /runs/{run_id}/approvals/{approval_id}` | 提交 `{"decision":"allow_once"}` 或 `{"decision":"deny"}`，返回持久决定事件。 |
 
 审批 ID 来自 SSE 的 `fliuno.approval_requested` 事件。重复提交同一决定返回原事件，提交相反决定返回 `409`。属于其他任务或会话的审批返回 `404`。宿主可以在响应保持打开时处理审批，审批入口有独立的并发名额，并通过 `approval/respondDecision` 提交决定。
+
+### 宿主模型尝试上限
+
+宿主可为一个路由设置 [每任务模型尝试上限](protocol.md#模型尝试次数)。下面的 Rust 代码给新任务最多两次尝试；`client` 是已经连接的共享客户端，`authorize` 和 `reviewer` 分别验证提交者和审批者。
+
+```rust
+use fliuno_ag_ui_http::RouterBuilder;
+use fliuno_client::ag_ui::AgUiModelStepLimit;
+
+let router = RouterBuilder::new(client, authorize)
+    .model_step_limit(AgUiModelStepLimit::new(2)?)
+    .approvals(reviewer)
+    .build();
+```
+
+需要审批中断时改用 `.interrupts(reviewer)`。直接通过 Rust 客户端接入时，可用 `AgUiRunOptions::model_step_limit` 与 `Client::start_ag_ui_text_run`。不配置时沿用服务默认值。已配置限额而服务未声明支持时，HTTP 返回 `502`，不会降级为不限额提交。HTTP 请求体不能设置 `maxModelSteps`。
+
+限额与任务一起保存。审批续跑和 SSE 重连沿用该任务，无论宿主重启后设置了什么新上限。用同一个根 `runId` 重新提交时，如果有效上限已经改变，返回 `409`；通过 `GET /runs/{run_id}` 可继续读取原运行。最后一次模型响应提议的工具获批后仍可执行，若之后还需要模型则 SSE 输出 `RUN_ERROR`，已保存的交付物仍可读取。
 
 ### 审批中断与续跑
 

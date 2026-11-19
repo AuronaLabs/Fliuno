@@ -861,3 +861,11 @@ Windows `scripts/check.ps1` 以退出码 0 完成：504 项测试、28 个离线
 Debian Linux 6.12.107 来宾通过 15 项进程测试，涵盖模型预算、启动回执和审批。日志：`D:/Fliuno-Native-Test/guest-model-step-limit.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：507 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-model-step-limit-check.log`。
+
+## 0.0.3 AG-UI 宿主模型尝试上限（2026-11-20）
+
+`fliuno-ag-ui-http::RouterBuilder` 可给新任务设置限额，沿用 SQLite v46 的任务参数与重试规则。现有构建函数继续使用默认上限。配置了限额时，Rust 客户端先检查握手能力，不支持就不发送提交。请求正文不能覆盖宿主设置；同一执行段的 SSE 重连和审批续跑均不重新应用宿主配置。见 [宿主模型尝试上限](ag-ui.md#宿主模型尝试上限)。
+
+进程测试通过真实 HTTP 启动连续流和审批中断两种任务，拒绝请求体中的限额覆盖。收到审批后，在默认策略下重启 app-server 与 HTTP 路由。原根 ID 重新提交返回冲突；通过原审批继续后只产生一份交付物，随后 SSE 报告尝试用尽。重连可读取完整结果，重复续跑不会重复交付。Debian Linux 6.12.107 来宾通过 8 项进程测试，涵盖两种新场景和既有 SSE 重连、审批及任务绑定。日志：`D:/Fliuno-Native-Test/guest-ag-ui-host-limit.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：510 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-ag-ui-host-limit-check.log`。
