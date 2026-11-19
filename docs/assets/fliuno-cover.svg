@@ -1,58 +1,59 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title description">
-  <title id="title">Fliuno · Rust Agent Kernel</title>
-  <desc id="description">An example of the Fliuno task lifecycle: start a task, approve a tool call, then read the artifact.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="360" viewBox="0 0 1120 360" role="img" aria-labelledby="title description">
+  <title id="title">Fliuno · Rust agent kernel</title>
+  <desc id="description">A local execution trace shows a task starting, an approval being granted, and an artifact being read.</desc>
   <defs>
-    <clipPath id="frame"><rect width="1200" height="320" rx="20"/></clipPath>
-    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-      <path d="M24 0H0v24" fill="none" stroke="#90b6a4" stroke-opacity=".12"/>
-    </pattern>
-    <pattern id="approval-lines" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-      <path d="M0 0v8" stroke="#f1d285" stroke-opacity=".3" stroke-width="2"/>
+    <clipPath id="frame"><rect width="1120" height="360" rx="24"/></clipPath>
+    <linearGradient id="background" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#101f1a"/>
+      <stop offset="1" stop-color="#132d25"/>
+    </linearGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M28 0H0v28" fill="none" stroke="#acddbf" stroke-opacity=".13"/>
     </pattern>
   </defs>
+
   <g clip-path="url(#frame)">
-    <path d="M0 0h1200v320H0z" fill="#111b18"/>
-    <path d="M509 0h691v320H509z" fill="#172822"/>
-    <path d="M509 0h691v320H509z" fill="url(#grid)"/>
-    <path d="M509 0v320M0 271h509" stroke="#375247"/>
-    <path d="M0 271h64" stroke="#c9f38d" stroke-width="2"/>
+    <path d="M0 0h1120v360H0z" fill="url(#background)"/>
+    <path d="M504 0h616v360H504z" fill="url(#grid)"/>
+    <path d="M504 0v360" stroke="#426057"/>
+    <path d="M60 307h380" stroke="#426057"/>
+    <path d="M60 307h38" stroke="#d1f49e" stroke-width="2"/>
 
-    <g transform="translate(64 49)">
-      <rect width="58" height="58" rx="12" fill="#c9f38d"/>
-      <path d="M18 43V20a5 5 0 0 1 5-5h18M18 29h16" fill="none" stroke="#15251a" stroke-width="5" stroke-linecap="round"/>
+    <g transform="translate(60 54)">
+      <rect width="48" height="48" rx="12" fill="#d1f49e"/>
+      <path d="M15 34V18a4 4 0 0 1 4-4h15M15 25h13" fill="none" stroke="#172820" stroke-width="4.5" stroke-linecap="round"/>
     </g>
-    <text x="60" y="201" fill="#f1f6ef" font-family="'Segoe UI', system-ui, sans-serif" font-size="110" font-weight="700">Fliuno</text>
-    <g font-family="ui-monospace, Consolas, monospace" font-size="20">
-      <text x="65" y="242" fill="#b8d7c7" letter-spacing="3">RUST AGENT KERNEL</text>
-      <text x="65" y="301" fill="#a2bcaf" font-size="16" letter-spacing="1">TASKS / APPROVALS / ARTIFACTS</text>
+    <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">
+      <text x="125" y="84" fill="#d1f49e" font-size="18" letter-spacing="3">LOCAL WORK</text>
+      <text x="64" y="251" fill="#cce1d5" font-size="24" letter-spacing="3">RUST AGENT KERNEL</text>
+      <text x="60" y="331" fill="#adc6b9" font-size="14" letter-spacing="1.5">TASKS  /  APPROVALS  /  ARTIFACTS</text>
     </g>
+    <text x="52" y="210" fill="#f4f8f2" font-family="'Segoe UI', system-ui, sans-serif" font-size="126" font-weight="700" letter-spacing="-4">Fliuno</text>
 
-    <g transform="translate(549 37)">
-      <rect width="597" height="246" rx="11" fill="#101d18" stroke="#4c6d5e"/>
-      <path d="M0 46h597M22 112h553M22 172h553" stroke="#344d41"/>
-      <path d="M34 77v123" stroke="#547664" stroke-width="1.5"/>
-      <circle cx="34" cy="82" r="5" fill="#a4c8ff" stroke="#101d18" stroke-width="2"/>
-      <rect x="29" y="137" width="10" height="10" rx="2" transform="rotate(45 34 142)" fill="#ffd989" stroke="#101d18" stroke-width="2"/>
-      <circle cx="34" cy="202" r="5" fill="#c9f38d" stroke="#101d18" stroke-width="2"/>
+    <g transform="translate(550 52)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">
+      <rect width="514" height="256" rx="15" fill="#101d19" stroke="#58776b"/>
+      <path d="M0 48h514M18 116h478m-478 64h478" stroke="#385249"/>
+      <text x="22" y="30" fill="#b9d1c6" font-size="15" letter-spacing="1.7">EXECUTION TRACE</text>
+      <text x="492" y="30" fill="#b9d1c6" font-size="15" text-anchor="end">JSON-RPC / STDIO</text>
 
-      <g font-family="ui-monospace, Consolas, monospace">
-        <text x="24" y="29" fill="#b8d7c7" font-size="15" letter-spacing="2">TASK LIFECYCLE</text>
-        <text x="573" y="29" fill="#9ab8aa" font-size="15" text-anchor="end">JSON-RPC</text>
-        <g fill="#f1f6ef" font-size="23">
-          <text x="58" y="90">task/start</text>
-          <text x="58" y="150">approval/respond</text>
-          <text x="58" y="210">artifacts/read</text>
-        </g>
-        <g font-size="18" text-anchor="end">
-          <text x="573" y="89" fill="#a4c8ff">running</text>
-          <text x="573" y="149" fill="#ffd989">allow_once</text>
-          <text x="573" y="209" fill="#c9f38d">saved locally</text>
-        </g>
+      <path d="M32 84v128" stroke="#58776b" stroke-width="2"/>
+      <circle cx="32" cy="84" r="7" fill="#a8ccff" stroke="#101d19" stroke-width="3"/>
+      <rect x="25" y="141" width="14" height="14" rx="2" transform="rotate(45 32 148)" fill="#ffdb91" stroke="#101d19" stroke-width="3"/>
+      <circle cx="32" cy="212" r="7" fill="#d1f49e" stroke="#101d19" stroke-width="3"/>
+      <g fill="#f0f7f2" font-size="23">
+        <text x="57" y="92">task/start</text>
+        <text x="57" y="156">approval/respond</text>
+        <text x="57" y="220">artifacts/read</text>
       </g>
-      <path d="M23 233h138" stroke="#a4c8ff" stroke-width="3"/>
-      <rect x="166" y="231.5" width="87" height="3" fill="url(#approval-lines)"/>
-      <path d="M258 233h316" stroke="#c9f38d" stroke-width="3"/>
+      <rect x="348" y="68" width="144" height="32" rx="8" fill="#1c3039"/>
+      <rect x="348" y="132" width="144" height="32" rx="8" fill="#3b3020"/>
+      <rect x="348" y="196" width="144" height="32" rx="8" fill="#283a24"/>
+      <g font-size="16" text-anchor="middle">
+        <text x="420" y="90" fill="#bbd5ff">running</text>
+        <text x="420" y="154" fill="#ffdb91">allow_once</text>
+        <text x="420" y="218" fill="#d1f49e">saved locally</text>
+      </g>
     </g>
   </g>
-  <rect x=".5" y=".5" width="1199" height="319" rx="19.5" fill="none" stroke="#547664"/>
+  <rect x=".5" y=".5" width="1119" height="359" rx="23.5" fill="none" stroke="#58776b"/>
 </svg>

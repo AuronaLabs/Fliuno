@@ -2,6 +2,8 @@
 
 [文档首页](README.md) · [内核架构](architecture.md) · [开发路线图](roadmap.md)
 
+[参考系统](#参考系统) · [协议分层](#协议不是同一个层次) · [选型](#选型判断) · [平台隔离](#操作系统隔离)
+
 核对日期：2026-11-18。以下是公开文档提供的事实及 Fliuno 的设计判断，不能视为其他产品未公开的内部架构。
 
 OpenCode 源码于核对日检出 `anomalyco/opencode` 提交 `a9a35b4b4ce35573d71207e246e770cfa26ff0e1`。其 core bus 将持久事件日志与 volatile subscribe 分开，server event feed 为慢订阅者设置有界队列并在溢出时断开；Fliuno 采用同样的可靠性分层，但用 SQLite 全局 sequence 与 `events/listAll` 恢复，不复制其实现。

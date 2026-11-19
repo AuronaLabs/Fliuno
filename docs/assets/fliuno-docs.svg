@@ -1,41 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="172" viewBox="0 0 1200 172" role="img" aria-labelledby="title">
-  <title id="title">Fliuno Field Guide</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="184" viewBox="0 0 1120 184" role="img" aria-labelledby="title description">
+  <title id="title">Fliuno documentation</title>
+  <desc id="description">Three reading paths: run a demo, connect a client, or explore the kernel.</desc>
   <defs>
-    <clipPath id="frame"><rect width="1200" height="172" rx="18"/></clipPath>
-    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-      <path d="M24 0H0v24" fill="none" stroke="#90b6a4" stroke-opacity=".12"/>
+    <clipPath id="frame"><rect width="1120" height="184" rx="22"/></clipPath>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <path d="M28 0H0v28" fill="none" stroke="#acddbf" stroke-opacity=".13"/>
     </pattern>
   </defs>
-  <g clip-path="url(#frame)">
-    <path d="M0 0h1200v172H0z" fill="#111b18"/>
-    <path d="M587 0h613v172H587z" fill="#172822"/>
-    <path d="M587 0h613v172H587z" fill="url(#grid)"/>
-    <path d="M587 0v172" stroke="#375247"/>
-    <g transform="translate(56 51)">
-      <rect width="70" height="70" rx="14" fill="#c9f38d"/>
-      <path d="M22 52V25a6 6 0 0 1 6-6h21M22 35h19" fill="none" stroke="#15251a" stroke-width="6" stroke-linecap="round"/>
-    </g>
-    <text x="155" y="66" fill="#b8d7c7" font-family="ui-monospace, Consolas, monospace" font-size="20" letter-spacing="4">FLIUNO DOCS</text>
-    <text x="151" y="119" fill="#f1f6ef" font-family="'Segoe UI', system-ui, sans-serif" font-size="58" font-weight="700">Field Guide</text>
 
-    <path d="M670 69h439" stroke="#547664" stroke-width="1.5" stroke-dasharray="5 6"/>
-    <g font-family="ui-monospace, Consolas, monospace" font-size="17" text-anchor="middle">
-      <g transform="translate(680 69)">
-        <circle r="24" fill="#182a28" stroke="#7699bf"/>
-        <path d="m-11-8 8 8-8 8m14 0h9" fill="none" stroke="#a4c8ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <text y="61" fill="#cfe0fe">01 / Run</text>
+  <g clip-path="url(#frame)">
+    <path d="M0 0h1120v184H0z" fill="#101f1a"/>
+    <path d="M596 0h524v184H596z" fill="#132d25"/>
+    <path d="M596 0h524v184H596z" fill="url(#grid)"/>
+    <path d="M596 0v184" stroke="#426057"/>
+    <g transform="translate(56 63)">
+      <rect width="58" height="58" rx="13" fill="#d1f49e"/>
+      <path d="M18 42V22a5 5 0 0 1 5-5h18M18 31h16" fill="none" stroke="#172820" stroke-width="5" stroke-linecap="round"/>
+    </g>
+    <text x="140" y="75" fill="#d1f49e" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="18" letter-spacing="3">FLIUNO FIELD GUIDE</text>
+    <text x="137" y="128" fill="#f4f8f2" font-family="'Segoe UI', system-ui, sans-serif" font-size="56" font-weight="700" letter-spacing="-1.6">Documentation</text>
+
+    <path d="M691 76h308" stroke="#688f7d" stroke-width="2" stroke-dasharray="4 6"/>
+    <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" text-anchor="middle" font-size="18">
+      <g transform="translate(691 76)" fill="#bbd5ff">
+        <circle r="25" fill="#1c3039" stroke="#83a7cc"/>
+        <path d="m-11-7 7 7-7 7M3 7h8" fill="none" stroke="#bbd5ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text y="59">01 / Run</text>
       </g>
-      <g transform="translate(890 69)">
-        <circle r="24" fill="#29291e" stroke="#ad945b"/>
-        <path d="m-6-8-8 8 8 8m12-16 8 8-8 8M3-10l-6 20" fill="none" stroke="#ffd989" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-        <text y="61" fill="#f3dda8">02 / Connect</text>
+      <g transform="translate(845 76)" fill="#ffdb91">
+        <circle r="25" fill="#3b3020" stroke="#c49c56"/>
+        <path d="m-5-7-7 7 7 7m10-14 7 7-7 7" fill="none" stroke="#ffdb91" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text y="59">02 / Connect</text>
       </g>
-      <g transform="translate(1100 69)">
-        <circle r="24" fill="#273820" stroke="#9cba74"/>
-        <path d="m0-10 13 7L0 4l-13-7 13-7ZM-13 4 0 11 13 4" fill="none" stroke="#c9f38d" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-        <text y="61" fill="#d4edb7">03 / Internals</text>
+      <g transform="translate(999 76)" fill="#d1f49e">
+        <circle r="25" fill="#283a24" stroke="#9cb978"/>
+        <path d="m-12-5 12-6 12 6-12 6zM-12 1l12 6 12-6m-24 6 12 6 12-6" fill="none" stroke="#d1f49e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <text y="59">03 / Build</text>
       </g>
     </g>
   </g>
-  <rect x=".5" y=".5" width="1199" height="171" rx="17.5" fill="none" stroke="#547664"/>
+  <rect x=".5" y=".5" width="1119" height="183" rx="21.5" fill="none" stroke="#58776b"/>
 </svg>
