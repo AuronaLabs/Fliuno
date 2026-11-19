@@ -1,4 +1,6 @@
 //! Checked paging of durable events through an inclusive server watermark.
+mod task_changes;
+
 use super::{Client, Error, Notification};
 use fliuno_protocol::{
     Event, EventKind, EventSubscription, EventWatermark, EventsListAllParams, EventsListParams,

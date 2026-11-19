@@ -1,6 +1,6 @@
 //! A cursor-driven subscription that uses live notifications to locate durable pages.
 use super::{Client, Error, EventReplay, Notification, ReplayScope};
-use fliuno_protocol::Event;
+use fliuno_protocol::{Event, TaskChange};
 use std::io::{BufRead, Write};
 
 /// Bounded event delivery over a connection's current subscription scope.
@@ -77,18 +77,42 @@ impl EventFeed {
         client: &mut Client<R, W>,
         limit: u32,
         target_bytes: Option<u32>,
-        mut on_notification: impl FnMut(Notification),
+        on_notification: impl FnMut(Notification),
     ) -> Result<Option<Vec<Event>>, Error> {
+        self.next_with(client, on_notification, |replay, client, observe| {
+            replay.next_page(client, limit, target_bytes, observe)
+        })
+    }
+
+    /// Read changed task IDs through the known watermark without fetching event
+    /// bodies. Shares the same cursor and gap recovery as `next_page`.
+    pub fn next_task_changes<R: BufRead, W: Write>(
+        &mut self,
+        client: &mut Client<R, W>,
+        limit: u32,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<Option<Vec<TaskChange>>, Error> {
+        self.next_with(client, on_notification, |replay, client, observe| {
+            replay.next_task_changes(client, limit, observe)
+        })
+    }
+
+    fn next_with<R: BufRead, W: Write, T>(
+        &mut self,
+        client: &mut Client<R, W>,
+        mut on_notification: impl FnMut(Notification),
+        mut read: impl FnMut(
+            &mut EventReplay,
+            &mut Client<R, W>,
+            &mut dyn FnMut(Notification),
+        ) -> Result<Option<T>, Error>,
+    ) -> Result<Option<T>, Error> {
         loop {
-            let signals = &mut self.signals;
-            if let Some(page) =
-                self.replay
-                    .next_page(client, limit, target_bytes, |notification| {
-                        if let Some(note) = signals.observe(notification) {
-                            on_notification(note);
-                        }
-                    })?
-            {
+            if let Some(page) = read(&mut self.replay, client, &mut |notification| {
+                if let Some(note) = self.signals.observe(notification) {
+                    on_notification(note);
+                }
+            })? {
                 return Ok(Some(page));
             }
             let after = self.replay.cursor();

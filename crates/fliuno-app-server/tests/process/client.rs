@@ -23,6 +23,8 @@ mod ag_ui_interrupt;
 mod ag_ui_run;
 #[path = "client/feed.rs"]
 mod feed;
+#[path = "client/task_changes.rs"]
+mod task_changes;
 #[path = "client/task_summaries.rs"]
 mod task_summaries;
 #[path = "client/work.rs"]

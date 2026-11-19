@@ -9,6 +9,7 @@ mod remote_checks;
 mod replay;
 mod run_boundaries;
 mod sessions;
+mod task_changes;
 mod task_summaries;
 mod work;
 mod workspaces;

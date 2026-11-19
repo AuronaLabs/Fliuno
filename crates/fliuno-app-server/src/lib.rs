@@ -425,6 +425,7 @@ impl RpcServer {
                 json!(fliuno_core::MAX_TASK_LIST_TARGET_BYTES);
             capabilities["taskSummaryById"] = json!(true);
             capabilities["taskSummaryBatch"] = json!(true);
+            capabilities["taskChangeReplay"] = json!(true);
             capabilities["maxTaskSummaryBatch"] = json!(MAX_TASK_SUMMARY_BATCH);
             capabilities["workSnapshot"] = json!(true);
             capabilities["workSubscription"] = json!(true);
@@ -895,6 +896,10 @@ impl RpcServer {
                     p.limit,
                     p.target_bytes
                 )?)
+            }
+            "events/listTaskChanges" => {
+                let p: TaskChangesParams = decode(params)?;
+                json!(self.kernel()?.list_task_changes(&p)?)
             }
             "events/getWatermark" => {
                 if params != json!({}) {

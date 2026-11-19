@@ -2279,6 +2279,55 @@
       },
       "additionalProperties": false
     },
+    "events/listTaskChanges": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskChangesParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "through": {
+          "description": "Inclusive window end. If omitted, capture the current global watermark.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "limit": {
+          "description": "Maximum matching events to examine, before deduplicating task IDs.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        }
+      },
+      "additionalProperties": false
+    },
     "events/listSession": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsListSessionParams",
@@ -4026,6 +4075,61 @@
                 "agentId"
               ]
             }
+          ]
+        }
+      }
+    },
+    "TaskChangesPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskChangesPage",
+      "type": "object",
+      "properties": {
+        "changes": {
+          "description": "Unique task IDs in ascending order of their last event in this page.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskChange"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "changes",
+        "nextAfter",
+        "throughSequence",
+        "hasMore"
+      ],
+      "$defs": {
+        "TaskChange": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "sequence": {
+              "description": "Last event for this task in the scanned page, not its current revision.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "sequence"
           ]
         }
       }

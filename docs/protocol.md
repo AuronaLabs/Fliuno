@@ -5,7 +5,7 @@
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
 - **建立连接**：[stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
-- **搭工作台**：[工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [批量读取任务摘要](#批量读取任务摘要) · [待审批快照](#待审批快照) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
+- **搭工作台**：[工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [轻量回放](#任务变动回放) · [批量读取任务摘要](#批量读取任务摘要) · [待审批快照](#待审批快照) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
 - **查方法**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [错误](#错误)
 - **配置能力**：[A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
@@ -105,6 +105,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `events/listModelUsage` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | 仅返回该任务的模型用量事件，沿用全局序号 |
 | `events/listSessionModelUsage` | `{sessionId,after?,through?,limit?,targetBytes?}` | 分页读取会话下各任务的模型用量 |
 | `events/listWorkspaceModelUsage` | `{workspaceId,after?,through?,limit?,targetBytes?}` | 分页读取工作区各会话的模型用量，包含已归档会话 |
+| `events/listTaskChanges` | `{taskId?,sessionId?,workspaceId?,after?,through?,limit?}` | 固定水位并回放发生变动的任务 ID，每页去重，不返回事件正文 |
 | `events/getWatermark` | `{}` | 当前已提交的全局 `throughSequence`，供多个回放读取方共用 |
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
 | `events/get` | `{sequence}` | 按全局序号读取一条持久事件 |
@@ -209,6 +210,20 @@ SQLite v42 从已有状态索引回填计数。平时只有创建任务或状态
 响应之前收到的持久通知仍属于旧订阅；通过响应拿到新水位后，再处理新订阅的通知。若使用批请求，同批只发一次切换订阅的调用。之后可通过 `events/setScope` 显式切换范围。遇到 `notifications/eventGap`，从最后已处理的事件游标重新建立同范围订阅并补读。
 
 Rust 的 `Client::subscribe_work` 返回 `WorkSubscription { snapshot, inbox, events }`。先展示 `snapshot`，用 `inbox.next_page()` 续读原审批列表，把后续 RPC 和 `read_notification()` 收到的通知传给 `events.observe()`。`events.next_page()` 从快照水位之后分页；收到缺口时会重新订阅同一范围。界面如果只需要刷新计数，仍可调用 `work/getSnapshot`，该方法不切换现有订阅。
+
+#### 任务变动回放
+
+声明 `taskChangeReplay:true` 后，可以用 `events/listTaskChanges` 补读变动的任务 ID，再用 `task/getSummaries` 刷新摘要。该接口不返回审批参数、工具输出或模型文本。它包括该范围内有任何持久事件的任务，摘要本身可能并未改变。只需要已知的任务 ID 和最新摘要时，适合用这个接口替代完整事件回放。
+
+```json
+{"jsonrpc":"2.0","id":10,"method":"events/listTaskChanges","params":{"workspaceId":"<workspace-id>","after":120,"limit":64}}
+```
+
+`taskId`、`sessionId`、`workspaceId` 最多选一个，均省略时查询全库。`after` 是不含式起点，省略时为 0；`through` 是含式上界，省略时固定到当前全局水位。游标倒置或超出当前水位返回 `-32602`，不存在的范围返回 `-32004`。`limit` 是去重前扫描的匹配事件数，默认 100，范围 1..1000。设置为 64 时，每页可直接交给一次批量任务摘要请求。
+
+响应的 `changes` 只包含 `{taskId,sequence}`，每个任务保留其在**本页**的最后一个事件序号，按序号递增；同一任务可能在下一页再次出现。`hasMore` 为真时，沿用 `throughSequence` 作为 `through`，将 `nextAfter` 用作下一页 `after`。尾页的 `nextAfter` 直接推进到 `throughSequence`，即使该范围没有匹配项。更新摘要后保存已消费的回放游标；批量摘要返回的较新水位不会跳过其他任务的更新。
+
+Rust 的 `EventReplay::next_task_changes` 可从保存的窗口继续。`work/subscribe` 返回的 `EventFeed` 也可调用 `next_task_changes`，共用水位跟踪和缺口恢复。它与完整事件的 `next_page` 共用同一个游标；若两种视图都需完整处理，应使用独立的回放游标。
 
 ### 审批收件箱与决定
 

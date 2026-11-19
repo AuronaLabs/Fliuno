@@ -525,3 +525,20 @@ fn task_summary_batch_rejects_shifted_or_foreign_response_items() {
         ));
     }
 }
+
+#[test]
+fn invalid_task_change_page_preserves_the_replay_cursor() {
+    let duplicate = json!({"changes":[{"taskId":"task","sequence":5},{"taskId":"task","sequence":6}],
+        "nextAfter":9,"throughSequence":9,"hasMore":false});
+    let wrong_watermark = json!({"changes":[],"nextAfter":10,"throughSequence":10,"hasMore":false});
+    for reply in [duplicate, wrong_watermark] {
+        let frame = json!({"jsonrpc":"2.0","id":2,"result":reply});
+        let mut client = fake_client(format!("{frame}\n").as_bytes());
+        let mut replay = EventReplay::new(ReplayScope::All, 4, 9).unwrap();
+        assert!(matches!(
+            replay.next_task_changes(&mut client, 10, |_| {}),
+            Err(Error::InvalidReplayPage)
+        ));
+        assert_eq!(replay.cursor(), 4);
+    }
+}
