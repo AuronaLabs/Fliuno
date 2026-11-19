@@ -30,6 +30,8 @@
 
 - [x] `events/listSessionModelUsage` 与 `events/listWorkspaceModelUsage` 按范围直接读取用量。SQLite v40 迁移旧用量索引；Rust 客户端能按固定事件水位续读。
 
+- [x] `modelUsage/getSummary` 一次读取任务、会话或工作区精确累计用量和事件水位。SQLite v43 根据已索引的报告回填固定大小计数。
+
 - [x] `approval/listPendingSnapshot` 固定待审批收件箱的事件水位和到期时间，支持范围分页、跨重启续读及事件回放交接。
 
 - [x] `work/getSnapshot` 一次读取同一事件水位的任务状态计数与待审批首页。SQLite v42 回填状态计数，Rust 客户端返回已定位到下一页的审批游标。

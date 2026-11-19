@@ -469,6 +469,7 @@ impl RpcServer {
             capabilities["modelUsageEvents"] = json!(true);
             capabilities["modelUsageEventReplay"] = json!(true);
             capabilities["modelUsageScopedReplay"] = json!(true);
+            capabilities["modelUsageSummary"] = json!(true);
             capabilities["maxWorkspaceTitleChars"] = json!(MAX_WORKSPACE_TITLE_CHARS);
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
@@ -891,6 +892,9 @@ impl RpcServer {
                     p.limit,
                     p.target_bytes
                 )?)
+            }
+            "modelUsage/getSummary" => {
+                json!(self.kernel()?.model_usage_summary(&decode(params)?)?)
             }
             "events/listModelUsage" => {
                 let p: EventsListParams = decode(params)?;

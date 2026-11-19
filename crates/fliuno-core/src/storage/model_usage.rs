@@ -1,6 +1,8 @@
 //! Scope indexes for model usage. The committed event log owns the payload.
+mod totals;
 use super::*;
 use rusqlite::Transaction;
+pub(super) use totals::migrate_totals;
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
@@ -47,13 +49,22 @@ pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn record(tx: &Transaction<'_>, task: &Task, sequence: i64) -> Result<()> {
-    tx.prepare_cached(
-        "INSERT INTO model_usage(sequence,task_id,session_id,workspace_id)
-         VALUES (?1,?2,?3,(SELECT workspace_id FROM sessions WHERE id=?3))",
-    )?
-    .execute(params![sequence, task.id, task.session_id])?;
-    Ok(())
+pub(super) fn record(
+    tx: &Transaction<'_>,
+    task: &Task,
+    sequence: i64,
+    usage: &ModelUsage,
+) -> Result<()> {
+    let workspace_id: String = tx
+        .prepare_cached(
+            "INSERT INTO model_usage(sequence,task_id,session_id,workspace_id)
+         VALUES (?1,?2,?3,(SELECT workspace_id FROM sessions WHERE id=?3))
+         RETURNING workspace_id",
+        )?
+        .query_row(params![sequence, task.id, task.session_id], |row| {
+            row.get(0)
+        })?;
+    totals::record(tx, [&task.id, &task.session_id, &workspace_id], usage)
 }
 
 #[derive(Clone, Copy)]

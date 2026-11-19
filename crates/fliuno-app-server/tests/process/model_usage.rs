@@ -263,7 +263,7 @@ fn scoped_model_usage_pages_keep_order_and_watermark_after_v39_upgrade() {
         db_conn
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        42
+        43
     );
     assert_eq!(
         db_conn
@@ -283,5 +283,141 @@ fn scoped_model_usage_pages_keep_order_and_watermark_after_v39_upgrade() {
         0
     );
     drop(db_conn);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn usage_summary_is_exact_and_scoped_after_v42_migration_and_new_reports() {
+    let root = std::env::temp_dir().join(format!("fliuno-usage-totals-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(root.join("foreign")).unwrap();
+    let endpoint = Fixture::start(|request| {
+        let last = request.body["input"].as_array().unwrap().last().unwrap();
+        let (input, output, cached, reasoning) = match last["content"].as_str().unwrap() {
+            "first" => (u64::MAX, 6, Some(0), None),
+            "archived" => (u64::MAX, 0, None, Some(0)),
+            "isolated" => (12, 1, Some(10), None),
+            "after upgrade" => (5, 8, Some(4), Some(3)),
+            other => panic!("unexpected fixture input: {other}"),
+        };
+        Response::json(
+            200,
+            json!({
+                "status":"completed",
+                "output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],
+                "usage":{"input_tokens":input,"output_tokens":output,
+                    "input_tokens_details":{"cached_tokens":cached},
+                    "output_tokens_details":{"reasoning_tokens":reasoning}}
+            }),
+        )
+    });
+    let db = root.join("kernel.db");
+    let url = endpoint.url("/v1/");
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&url));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let other_workspace = peer.call("workspace/open", json!({"root":root.join("foreign")}));
+    let first = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let archived = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let empty = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let isolated = peer.call(
+        "session/create",
+        json!({"workspaceId":other_workspace["id"]}),
+    );
+    let submit = |peer: &mut Peer, session: &Value, input| {
+        let task = peer.call(
+            "task/startSummary",
+            json!({
+                "sessionId":session["id"],"input":input,"context":{"mode":"isolated"}
+            }),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "completed");
+        task
+    };
+    let summary = |peer: &mut Peer, scope: &Value| {
+        let summary = peer.call("modelUsage/getSummary", json!({"scope":scope}));
+        assert_eq!(
+            summary["throughSequence"],
+            peer.call("events/getWatermark", json!({}))["throughSequence"]
+        );
+        summary
+    };
+    let totals = |reports: u64,
+                  input: u128,
+                  output: u64,
+                  cached: (u64, u64),
+                  reasoning: (u64, u64)| {
+        json!({"reportCount":reports.to_string(),"inputTokens":input.to_string(),"outputTokens":output.to_string(),
+            "cachedInputTokens":cached.0.to_string(),"cachedInputReportCount":cached.1.to_string(),
+            "reasoningOutputTokens":reasoning.0.to_string(),"reasoningOutputReportCount":reasoning.1.to_string()})
+    };
+    let scope = json!({"kind":"workspace","workspaceId":workspace["id"]});
+    let first_scope = json!({"kind":"session","sessionId":first["id"]});
+    let empty_scope = json!({"kind":"session","sessionId":empty["id"]});
+    assert_eq!(
+        summary(&mut peer, &empty_scope)["totals"],
+        totals(0, 0, 0, (0, 0), (0, 0))
+    );
+    let task = submit(&mut peer, &first, "first");
+    let isolated_summary = summary(&mut peer, &scope);
+    submit(&mut peer, &isolated, "isolated");
+    let next = summary(&mut peer, &scope);
+    assert_eq!(next["totals"], isolated_summary["totals"]);
+    assert!(
+        next["throughSequence"].as_u64().unwrap()
+            > isolated_summary["throughSequence"].as_u64().unwrap()
+    );
+    let first_use = totals(1, u64::MAX.into(), 6, (0, 1), (0, 0));
+    assert_eq!(
+        summary(&mut peer, &json!({"kind":"task","taskId":task["id"]}))["totals"],
+        first_use
+    );
+    assert_eq!(summary(&mut peer, &first_scope)["totals"], first_use);
+    submit(&mut peer, &archived, "archived");
+    peer.call(
+        "session/setArchived",
+        json!({"sessionId":archived["id"],"archived":true}),
+    );
+    let before = summary(&mut peer, &scope);
+    let doubled = u128::from(u64::MAX) * 2;
+    assert_eq!(before["totals"], totals(2, doubled, 6, (0, 1), (0, 1)));
+    let before_cursor = before["throughSequence"].as_u64().unwrap();
+    drop(peer);
+
+    // Remove only the new projection to reproduce an actual v42 database.
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch("DROP TABLE model_usage_totals; PRAGMA user_version=42;")
+        .unwrap();
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&url));
+    assert_eq!(summary(&mut peer, &scope), before);
+    assert_eq!(summary(&mut peer, &first_scope)["totals"], first_use);
+    let task_after = submit(&mut peer, &first, "after upgrade");
+    let after = summary(&mut peer, &scope);
+    assert_eq!(after["totals"], totals(3, doubled + 5, 14, (4, 2), (3, 2)));
+    assert_eq!(
+        summary(&mut peer, &first_scope)["totals"],
+        totals(2, u128::from(u64::MAX) + 5, 14, (4, 2), (3, 1))
+    );
+    let suffix = peer.call(
+        "events/listWorkspaceModelUsage",
+        json!({"workspaceId":workspace["id"],"after":before_cursor}),
+    );
+    assert_eq!(suffix["events"].as_array().unwrap().len(), 1);
+    assert_eq!(suffix["events"][0]["taskId"], task_after["id"]);
+    assert_eq!(
+        peer.request(
+            "modelUsage/getSummary",
+            json!({"scope":{"kind":"task","taskId":"missing"}})
+        )["error"]["code"],
+        -32004
+    );
+    assert_eq!(peer.request("modelUsage/getSummary", json!({"scope":{"kind":"session","sessionId":first["id"],"workspaceId":workspace["id"]}}))["error"]["code"], -32602);
+    drop(peer);
+    let mut peer = Peer::start(&db);
+    assert_eq!(summary(&mut peer, &scope), after);
+    assert_eq!(
+        summary(&mut peer, &empty_scope)["totals"],
+        totals(0, 0, 0, (0, 0), (0, 0))
+    );
+    drop(peer);
     fs::remove_dir_all(root).unwrap();
 }

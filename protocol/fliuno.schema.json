@@ -2108,6 +2108,77 @@
         "taskId"
       ]
     },
+    "modelUsage/getSummary": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelUsageSummaryParams",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/ModelUsageSummaryScope"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "$defs": {
+        "ModelUsageSummaryScope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "task"
+                },
+                "taskId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "taskId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "session"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "workspace"
+                },
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "workspaceId"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "events/listModelUsage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsListParams",
@@ -8880,6 +8951,72 @@
       "required": [
         "throughSequence"
       ]
+    },
+    "ModelUsageSummary": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelUsageSummary",
+      "type": "object",
+      "properties": {
+        "throughSequence": {
+          "description": "Global event watermark in the same read view as the totals.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "totals": {
+          "$ref": "#/$defs/ModelUsageTotals"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "throughSequence",
+        "totals"
+      ],
+      "$defs": {
+        "ModelUsageTotals": {
+          "type": "object",
+          "properties": {
+            "reportCount": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "inputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "outputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "cachedInputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "cachedInputReportCount": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "reasoningOutputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "reasoningOutputReportCount": {
+              "$ref": "#/$defs/UsageCount"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reportCount",
+            "inputTokens",
+            "outputTokens",
+            "cachedInputTokens",
+            "cachedInputReportCount",
+            "reasoningOutputTokens",
+            "reasoningOutputReportCount"
+          ]
+        },
+        "UsageCount": {
+          "description": "An exact integer exposed as a decimal string, including on JavaScript clients.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 39,
+          "pattern": "^(0|[1-9][0-9]*)$"
+        }
+      }
     },
     "ModelProgress": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

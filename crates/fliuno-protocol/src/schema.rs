@@ -72,6 +72,7 @@ pub fn schema_bundle() -> Value {
         "approval/cancelRun" => schema::<TaskRequestLookupParams>(),
         "events/get" => schema::<EventGetParams>(),
         "events/list" => schema::<EventsListParams>(),
+        "modelUsage/getSummary" => schema::<ModelUsageSummaryParams>(),
         "events/listModelUsage" => schema::<EventsListParams>(),
         "events/listSessionModelUsage" => schema::<EventsListSessionParams>(),
         "events/listWorkspaceModelUsage" => schema::<EventsListWorkspaceParams>(),
@@ -145,6 +146,7 @@ pub fn schema_bundle() -> Value {
         "Event" => schema::<Event>(),
         "EventSubscription" => schema::<EventSubscription>(),
         "EventWatermark" => schema::<EventWatermark>(),
+        "ModelUsageSummary" => schema::<ModelUsageSummary>(),
         "ModelProgress" => schema::<ModelProgress>(),
         "ModelBudget" => schema::<ModelBudget>(),
         "EventsPage" => schema::<EventsPage>()

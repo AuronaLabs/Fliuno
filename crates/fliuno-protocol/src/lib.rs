@@ -5,6 +5,8 @@ mod artifacts;
 pub use artifacts::*;
 mod context;
 pub use context::*;
+mod model_usage;
+pub use model_usage::*;
 mod schema;
 pub use schema::schema_bundle;
 mod session;

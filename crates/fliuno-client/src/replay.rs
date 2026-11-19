@@ -5,6 +5,7 @@ use super::{Client, Error, Notification};
 use fliuno_protocol::{
     Event, EventKind, EventSubscription, EventWatermark, EventsListAllParams, EventsListParams,
     EventsListSessionParams, EventsListWorkspaceParams, EventsPage, EventsSetScopeParams,
+    ModelUsageSummary, ModelUsageSummaryParams, ModelUsageSummaryScope,
 };
 use std::io::{BufRead, Write};
 
@@ -39,6 +40,30 @@ impl<R: BufRead, W: Write> Client<R, W> {
             return Err(Error::InvalidReplayWindow);
         }
         Ok(watermark.through_sequence)
+    }
+
+    /// Read exact lifetime totals and their event watermark in one request.
+    pub fn model_usage_summary(
+        &mut self,
+        scope: ModelUsageScope,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<ModelUsageSummary, Error> {
+        let scope = match scope {
+            ModelUsageScope::Task(task_id) => ModelUsageSummaryScope::Task { task_id },
+            ModelUsageScope::Session(session_id) => ModelUsageSummaryScope::Session { session_id },
+            ModelUsageScope::Workspace(workspace_id) => {
+                ModelUsageSummaryScope::Workspace { workspace_id }
+            }
+        };
+        let summary: ModelUsageSummary = self.call(
+            "modelUsage/getSummary",
+            &ModelUsageSummaryParams { scope },
+            on_notification,
+        )?;
+        if summary.through_sequence > i64::MAX as u64 {
+            return Err(Error::InvalidReplayWindow);
+        }
+        Ok(summary)
     }
 
     /// Install a live subscription and open the matching replay window. `after`
