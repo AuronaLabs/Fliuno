@@ -12,6 +12,9 @@ use std::{
 };
 use tokio::sync::mpsc;
 
+#[path = "acp/catalog.rs"]
+mod catalog;
+
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentsConfig {
@@ -31,6 +34,9 @@ pub struct AcpAgentConfig {
     /// Fixed workspace of a trusted Agent's own state store and process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
+    /// Permit the local RPC client to launch this trusted ACP catalog reader.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub session_catalog: bool,
     /// Environment names only. Values come from the trusted host environment.
     #[serde(default)]
     pub env_allow: Vec<String>,
@@ -82,6 +88,7 @@ struct AcpBackend {
     id: String,
     launch: fliuno_sandbox::LaunchSpec,
     trusted_cwd: Option<PathBuf>,
+    session_catalog: bool,
     options: ClientOptions,
 }
 
@@ -171,6 +178,9 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
                 Some(cwd.canonicalize().map_err(|_| "cannot resolve ACP cwd")?)
             }
         };
+        if config.session_catalog && trusted_cwd.is_none() {
+            return Err("ACP sessionCatalog requires trusted_host".into());
+        }
         let executable_digest = fliuno_sandbox::program_digest(&config.command)
             .map_err(|_| "cannot hash ACP executable")?;
         let mut identity = serde_json::json!({
@@ -197,6 +207,7 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             id: config.id,
             launch,
             trusted_cwd,
+            session_catalog: config.session_catalog,
             options: ClientOptions {
                 request_timeout: Duration::from_millis(config.request_timeout_ms),
                 prompt_timeout: Duration::from_millis(config.prompt_timeout_ms),
@@ -234,6 +245,18 @@ impl AgentBackend for AcpBackend {
 
     fn supports_agent_session_continuation(&self) -> bool {
         self.trusted_cwd.is_some()
+    }
+
+    fn supports_agent_session_listing(&self) -> bool {
+        self.session_catalog
+    }
+
+    fn list_agent_sessions(
+        &self,
+        cursor: Option<&str>,
+        cancellation: &CancellationToken,
+    ) -> Result<fliuno_protocol::AgentSessionPage, fliuno_protocol::AgentSessionListFailure> {
+        self.read_catalog(cursor, cancellation)
     }
 
     fn execute(

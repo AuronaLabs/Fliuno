@@ -1573,6 +1573,41 @@
       "required": [
         "agentId"
       ]
+    },
+    "agents/startSessionList": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentSessionListParams",
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "agentId"
+      ]
+    },
+    "agents/getSessionList": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentSessionListLookupParams",
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "requestId"
+      ]
     }
   },
   "types": {
@@ -3095,6 +3130,9 @@
       "description": "Locally available operations for one configured backend. A particular task\nand peer still have to meet the operation's protocol preconditions.",
       "type": "object",
       "properties": {
+        "agentSessionListing": {
+          "type": "boolean"
+        },
         "remoteTaskChecks": {
           "type": "boolean"
         },
@@ -3115,6 +3153,134 @@
         "remoteTaskContinuation",
         "agentSessionContinuation"
       ]
+    },
+    "AgentSessionListAccepted": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentSessionListAccepted",
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId"
+      ]
+    },
+    "AgentSessionListState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentSessionListState",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "pending"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "complete"
+            },
+            "page": {
+              "$ref": "#/$defs/AgentSessionPage"
+            }
+          },
+          "required": [
+            "status",
+            "page"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "failed"
+            },
+            "reason": {
+              "$ref": "#/$defs/AgentSessionListFailure"
+            }
+          },
+          "required": [
+            "status",
+            "reason"
+          ]
+        }
+      ],
+      "$defs": {
+        "AgentSessionPage": {
+          "type": "object",
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentSessionDescriptor"
+              }
+            },
+            "nextCursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "sessions"
+          ]
+        },
+        "AgentSessionDescriptor": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "additionalDirectories": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "updatedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "sessionId",
+            "cwd",
+            "additionalDirectories"
+          ]
+        },
+        "AgentSessionListFailure": {
+          "type": "string",
+          "enum": [
+            "unsupported",
+            "rejected",
+            "unavailable",
+            "invalid_page"
+          ]
+        }
+      }
     },
     "RemoteTaskCheckAccepted": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

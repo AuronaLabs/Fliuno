@@ -111,6 +111,14 @@ Windows Job 在启动前应用已配置的 `resources.memoryMaxBytes` 和 `resou
 
 收到 `session/resume` 确认后，内核先保存 `agentSessionContinuation.submissionStarted`，再发送新 prompt。Agent 使用自己的会话历史，Fliuno 只发送本轮输入。Agent 拒绝恢复时，本次任务失败并释放上一轮的续接名额。提交之后发生断连、取消或重启时，名额保留，结果可能未知。内核不会再次提交该轮。`initialize.capabilities.agentSessionContinuation` 指示当前是否注册了此类后端，具体 Agent 在握手时确认支持。
 
+## 发现已保存的 Agent 会话
+
+可信 ACP 注册可另行设置 `"sessionCatalog": true` 来允许本地 RPC 客户端查询已保存的会话。Fliuno 每页启动一个经过原有注册校验的 ACP 进程，在握手确认 `sessionCapabilities.list` 后向配置中的固定 `cwd` 发送一个 `session/list`。调用方可传不透明游标，不能指定程序、路径或目录范围。`native_scratch` 注册不能开启此选项。
+
+调用 `agents/startSessionList` 获得 `requestId`，再用 `agents/getSessionList` 查询结果。返回的标题、目录和会话 ID 来自代理，仅作为描述数据。Fliuno 不读取列表中的目录，不把会话导入本地历史，也不会凭列表 ID 自动打开或恢复会话。代理需能在新进程之间识别自己的分页游标。
+
+单独的后台工作器串行查询，握手和读取合计使用 15 秒预算，进程回收另计。每页最多 128 条、编码后最多 256 KiB。服务保留最多 16 份请求状态，满时从最早的已完成请求开始淘汰；服务重启后需要重新查询。
+
 ## 受控工作区文件代理
 
 `workspaceAccess:true` 在容器私有目录中创建空的 `workspace` 子目录并用作 ACP cwd。它只充当虚拟路径前缀；不复制宿主文件、不授予宿主目录 ACL。只接受此前缀下的普通路径组件，转为工作区相对路径后再经注册工具、策略与 `cap-std` 目录能力校验；Agent 直接进行 OS 文件读取仍不会得到宿主内容。

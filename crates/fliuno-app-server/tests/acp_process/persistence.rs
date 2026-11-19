@@ -1,7 +1,7 @@
 //! Explicitly trusted ACP turns retain one durable session across processes.
 use super::*;
 
-fn trusted_config(directory: &Directory) -> PathBuf {
+pub(super) fn trusted_config(directory: &Directory) -> PathBuf {
     let path = directory.0.join("state");
     fs::create_dir(&path).unwrap();
     let mut agent = json!({

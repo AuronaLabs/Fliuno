@@ -22,7 +22,7 @@ mod tool;
 
 pub use agent::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
-    PreparedAgentRun,
+    PreparedAgentRun, PreparedAgentSessionList,
 };
 pub use agent_remote::{CompletedRemoteTaskCheck, IncomingAgentArtifact, PreparedRemoteTaskCheck};
 pub use agent_tools::AgentToolObservation;

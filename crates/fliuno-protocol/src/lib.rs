@@ -110,11 +110,71 @@ pub struct AgentIdParams {
     pub agent_id: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentSessionListParams {
+    pub agent_id: String,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentSessionListLookupParams {
+    pub request_id: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionListAccepted {
+    pub request_id: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum AgentSessionListState {
+    Pending,
+    Complete { page: AgentSessionPage },
+    Failed { reason: AgentSessionListFailure },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentSessionListFailure {
+    Unsupported,
+    Rejected,
+    Unavailable,
+    InvalidPage,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionPage {
+    pub sessions: Vec<AgentSessionDescriptor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSessionDescriptor {
+    pub session_id: String,
+    pub cwd: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub additional_directories: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+}
+
 /// Locally available operations for one configured backend. A particular task
 /// and peer still have to meet the operation's protocol preconditions.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentCapabilities {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub agent_session_listing: bool,
     pub remote_task_checks: bool,
     pub remote_task_watch: bool,
     pub remote_task_continuation: bool,

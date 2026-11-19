@@ -1,4 +1,5 @@
 //! JSON-RPC 2.0 dispatch. Transport and domain errors never enter model messages.
+mod agent_catalog;
 mod scheduler;
 mod terminal_subscriptions;
 
@@ -23,6 +24,7 @@ enum EventScope {
 pub struct RpcServer {
     kernel: Arc<Mutex<Kernel>>,
     scheduler: TaskScheduler,
+    agent_catalog: Option<agent_catalog::Catalog>,
     event_receiver: Option<(u64, EventReceiver)>,
     event_scope: EventScope,
     event_stream_gap: bool,
@@ -86,6 +88,9 @@ impl RpcServer {
         provider_name: String,
         terminals: Option<fliuno_terminal::Service>,
     ) -> Self {
+        let agent_catalog = kernel
+            .agent_session_listing_supported()
+            .then(agent_catalog::Catalog::new);
         let event_receiver = kernel
             .subscribe_events()
             .expect("cannot subscribe app-server to kernel events");
@@ -97,6 +102,7 @@ impl RpcServer {
         Self {
             kernel,
             scheduler,
+            agent_catalog,
             event_receiver: Some((0, event_receiver)),
             event_scope: EventScope::All,
             event_stream_gap: false,
@@ -357,6 +363,11 @@ impl RpcServer {
             capabilities["workspaceById"] = json!(true);
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
+            if self.agent_catalog.is_some() {
+                capabilities["agentSessionListing"] = json!(true);
+                capabilities["maxQueuedAgentSessionLists"] = json!(agent_catalog::QUEUE_CAPACITY);
+                capabilities["maxRetainedAgentSessionLists"] = json!(agent_catalog::MAX_RETAINED);
+            }
             capabilities["pendingApprovalInbox"] = json!(true);
             capabilities["pendingApprovalListTargetBytes"] =
                 json!(fliuno_core::MAX_APPROVAL_LIST_TARGET_BYTES);
@@ -805,6 +816,29 @@ impl RpcServer {
             "artifacts/get" => {
                 let p: ArtifactGetParams = decode(params)?;
                 json!(self.kernel()?.get_artifact(&p.task_id, &p.artifact_id)?)
+            }
+            "agents/startSessionList" => {
+                let work = self.kernel()?.prepare_agent_session_list(decode(params)?)?;
+                let catalog = self.agent_catalog.as_ref().ok_or_else(|| {
+                    RpcError::from(Error::Conflict(
+                        "agent session listing is not configured".into(),
+                    ))
+                })?;
+                json!(catalog.start(work)?)
+            }
+            "agents/getSessionList" => {
+                let p: AgentSessionListLookupParams = decode(params)?;
+                if uuid::Uuid::parse_str(&p.request_id).is_err() || p.request_id.len() != 36 {
+                    return Err(RpcError::from(Error::Invalid(
+                        "invalid agent session list request ID".into(),
+                    )));
+                }
+                self.agent_catalog
+                    .as_ref()
+                    .and_then(|catalog| catalog.get(&p.request_id))
+                    .ok_or_else(|| {
+                        RpcError::from(Error::NotFound("agent session list request".into()))
+                    })?
             }
             "agents/getCapabilities" => {
                 let p: AgentIdParams = decode(params)?;

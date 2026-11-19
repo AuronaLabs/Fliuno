@@ -14,6 +14,8 @@ use std::{
 
 #[path = "acp_process/authority.rs"]
 mod authority;
+#[path = "acp_process/catalog.rs"]
+mod catalog;
 #[path = "acp_process/context.rs"]
 mod context;
 #[path = "acp_process/persistence.rs"]

@@ -284,6 +284,12 @@ MCP 客户端声明 `io.modelcontextprotocol/tasks`。现代对端声明该扩�
 
 随后增加独立审批的任务短轮询。Windows `cargo test -p fliuno-mcp --all-features --locked` 通过 60 项测试，同包严格 Clippy 通过。官方 Rust SDK 双端用例验证工作中任务进入待补答或终态、轮询间隔与次数边界，以及错误任务 ID、响应类型或创建句柄导致连接关闭。所有轮询用例核对远端未收到补答或任务取消请求。
 
+## ACP 会话目录 RPC（2026-11-19）
+
+3 项真实 app-server 和 ACP SDK stdio 进程测试通过。覆盖显式注册、拒绝调用方指定目录、跨进程分页、游标原样转交、远端错误净化与 256 KiB 页预算。阻塞对端期间本地查询可继续处理，队列填满后返回冲突，关闭 app-server 会打断读取并丢弃排队工作。重启后旧目录请求 ID 失效，代理保存的会话仍能重新发现。
+
+Windows `scripts/check.ps1` 退出码为 0：421 项 workspace 测试、26 个离线演示、rustfmt、两组严格 Clippy 与生成的 RPC Schema 均通过。此轮未在 Debian Linux 来宾或外部 Agent 服务上复验。
+
 ## Gemini Interactions 与 MCP 只读失败（2026-11-19）
 
 Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。

@@ -58,6 +58,8 @@
 | `tools/list` | `{}` | 工具名称、描述、效果类型、输入 Schema |
 | `agents/list` | `{}` | 注册 Agent 的 ID、协议、隔离类型和 `workspaceAccess` |
 | `agents/getCapabilities` | `{agentId}` | 单个注册项的 `AgentCapabilities`。见 `initialize.capabilities.agentCapabilitiesById` |
+| `agents/startSessionList` | `{agentId,cursor?}` | `{requestId}`，排队读取已启用目录的 Agent 的一页会话 |
+| `agents/getSessionList` | `{requestId}` | `AgentSessionListState`，读取进程内请求状态 |
 | `terminal/list` | `{sessionId}` | 此 session 的持久终端快照 |
 | `terminal/get` | `{sessionId,terminalId}` | 单个终端快照，独立于输出读取。live IPC 无响应时按最后持久状态返回 |
 | `terminal/output` | `{sessionId,terminalId,after?:0,limit?:32768}` | base64 原始字节、绝对游标、gap 标志与快照 |
@@ -218,7 +220,9 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 | -32009 | 状态冲突、重复审批等 |
 | -32010 | 不支持的协议版本 |
 
-`agents/getCapabilities` 直接读取本地注册项，返回 `remoteTaskChecks`、`remoteTaskWatch`、`remoteTaskContinuation` 和 `agentSessionContinuation`。这些标记表示适配器提供相应路径。单个任务能否调用还取决于记录的身份、状态和对端协议能力。不存在的 ID 返回 `-32004`。
+`agents/getCapabilities` 直接读取本地注册项，返回 `remoteTaskChecks`、`remoteTaskWatch`、`remoteTaskContinuation` 和 `agentSessionContinuation`，若注册已开启会话目录则额外返回 `agentSessionListing: true`。这些标记表示适配器提供相应路径，调用仍需满足相应的协议条件。不存在的 ID 返回 `-32004`。
+
+`initialize.capabilities.agentSessionListing` 为真时至少有一个注册启用目录。一个查询运行、最多四个排队；未启用或队列已满返回 `-32009`。查询结果状态为 `pending`、`complete`（含 `page.sessions` 和可选 `page.nextCursor`），或 `failed`（含 `unsupported`、`rejected`、`unavailable`、`invalid_page` 之一）。游标最多 4096 字节，按原样提交给同一个 Agent；服务不主动翻页。过期或重启前的请求 ID 返回 `-32004`。目录查询与本地 `session/list` 相互独立。
 
 ## A2A 远程 Agent 配置
 

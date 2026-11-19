@@ -10,6 +10,10 @@ mod tests;
 #[path = "agent_session.rs"]
 mod session;
 
+#[path = "agent_catalog.rs"]
+mod catalog;
+pub use catalog::PreparedAgentSessionList;
+
 pub(crate) const MAX_RECORDED_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_UPDATE_BYTES: usize = 256 * 1024;
@@ -101,6 +105,16 @@ pub trait AgentBackend: Send + Sync {
     }
     fn supports_agent_session_continuation(&self) -> bool {
         false
+    }
+    fn supports_agent_session_listing(&self) -> bool {
+        false
+    }
+    fn list_agent_sessions(
+        &self,
+        _cursor: Option<&str>,
+        _cancellation: &CancellationToken,
+    ) -> std::result::Result<AgentSessionPage, AgentSessionListFailure> {
+        Err(AgentSessionListFailure::Unsupported)
     }
     /// Read the current remote task using the frozen host registration. This
     /// hook may not send a prompt, cancel the task, or import content.
@@ -205,6 +219,7 @@ impl Kernel {
             .get(agent_id)
             .ok_or_else(|| Error::NotFound("agent".into()))?;
         Ok(AgentCapabilities {
+            agent_session_listing: backend.supports_agent_session_listing(),
             remote_task_checks: backend.supports_remote_task_check(),
             remote_task_watch: backend.supports_remote_task_watch(),
             remote_task_continuation: backend.supports_remote_continuation(),
