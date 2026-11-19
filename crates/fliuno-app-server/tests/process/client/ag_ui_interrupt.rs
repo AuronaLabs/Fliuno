@@ -42,18 +42,13 @@ async fn accepted(response: Response) -> String {
 
 struct EventPageProbe {
     stdin: ChildStdin,
-    cursors: Arc<SyncMutex<Vec<u64>>>,
+    requests: Arc<SyncMutex<Vec<Value>>>,
 }
 
 impl Write for EventPageProbe {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let request: Value = serde_json::from_slice(bytes).unwrap();
-        if request["method"] == "events/list" {
-            self.cursors
-                .lock()
-                .unwrap()
-                .push(request["params"]["after"].as_u64().unwrap());
-        }
+        self.requests.lock().unwrap().push(request);
         self.stdin.write_all(bytes)?;
         Ok(bytes.len())
     }
@@ -68,10 +63,10 @@ async fn ag_ui_http_interrupts_resume_with_a_new_run_and_replay_after_restart() 
     let root = std::env::temp_dir().join(format!("fliuno-http-interrupt-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
     let db = root.join("kernel.db");
-    let cursors = Arc::new(SyncMutex::new(Vec::new()));
+    let requests = Arc::new(SyncMutex::new(Vec::new()));
     let (server, mut client) = connect_with_writer(&db, |stdin| EventPageProbe {
         stdin,
-        cursors: cursors.clone(),
+        requests: requests.clone(),
     });
     let workspace: Workspace = client
         .call("workspace/open", &json!({"root":root}), |_| {})
@@ -219,10 +214,23 @@ async fn ag_ui_http_interrupts_resume_with_a_new_run_and_replay_after_restart() 
             .count(),
         1
     );
+    requests.lock().unwrap().clear();
     assert_eq!(
         accepted(get(&base, "runner", "parent").send().await.unwrap()).await,
         parent_sse
     );
+    let event_sequence =
+        |cursor: &str| -> u64 { cursor.split(':').nth(1).unwrap().parse().unwrap() };
+    {
+        let exchanges = requests.lock().unwrap();
+        assert_eq!(exchanges.len(), 2, "{exchanges:?}");
+        assert_eq!(exchanges[0]["method"], "approval/getRunReplay");
+        assert_eq!(exchanges[1]["method"], "events/list");
+        assert_eq!(
+            exchanges[1]["params"]["through"],
+            event_sequence(parent.last().unwrap().0)
+        );
+    }
     assert_eq!(
         http.delete(format!("{base}/runs/parent"))
             .bearer_auth("runner")
@@ -232,7 +240,7 @@ async fn ag_ui_http_interrupts_resume_with_a_new_run_and_replay_after_restart() 
             .status(),
         409
     );
-    cursors.lock().unwrap().clear();
+    requests.lock().unwrap().clear();
     for (id, cursor) in [("parent", child[0].0), ("child", parent[1].0)] {
         assert_eq!(
             get(&base, "runner", id)
@@ -244,11 +252,18 @@ async fn ag_ui_http_interrupts_resume_with_a_new_run_and_replay_after_restart() 
             400
         );
     }
-    assert!(cursors.lock().unwrap().is_empty());
+    {
+        let exchanges = requests.lock().unwrap();
+        assert_eq!(exchanges.len(), 2, "{exchanges:?}");
+        assert!(
+            exchanges
+                .iter()
+                .all(|request| request["method"] == "approval/getRunReplay")
+        );
+    }
     for (pos, (cursor, _)) in child.iter().enumerate() {
-        let (prefix, _) = cursor.rsplit_once(':').unwrap();
-        let sequence: u64 = prefix.split_once(':').unwrap().1.parse().unwrap();
-        cursors.lock().unwrap().clear();
+        let sequence = event_sequence(cursor);
+        requests.lock().unwrap().clear();
         let after = accepted(
             get(&base, "reviewer", "child")
                 .header("last-event-id", *cursor)
@@ -258,7 +273,15 @@ async fn ag_ui_http_interrupts_resume_with_a_new_run_and_replay_after_restart() 
         )
         .await;
         assert_eq!(frames(&after), child[pos + 1..]);
-        assert_eq!(*cursors.lock().unwrap(), [sequence - 1]);
+        let exchanges = requests.lock().unwrap();
+        assert_eq!(exchanges.len(), 2, "{exchanges:?}");
+        assert_eq!(exchanges[0]["method"], "approval/getRunReplay");
+        assert_eq!(exchanges[1]["method"], "events/list");
+        assert_eq!(exchanges[1]["params"]["after"], sequence - 1);
+        assert_eq!(
+            exchanges[1]["params"]["through"],
+            event_sequence(child.last().unwrap().0)
+        );
     }
     let (event, _) = child.last().unwrap().0.rsplit_once(':').unwrap();
     assert_eq!(

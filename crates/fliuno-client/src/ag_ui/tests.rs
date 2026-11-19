@@ -23,6 +23,21 @@ fn event(sequence: u64, data: EventKind) -> Event {
 }
 
 #[test]
+fn indexed_open_segment_rejects_a_cursor_past_its_committed_tail() {
+    let projector = AgUiProjector::for_external_run(&task(), "run", Some(0));
+    let mut stream = AgUiSseStream::with_projector(projector, Some("task-a:23:1")).unwrap();
+    let window = fliuno_protocol::ApprovalRunWindow {
+        task_id: "task-a".into(),
+        first_sequence: 5,
+        last_sequence: None,
+    };
+    assert!(matches!(
+        stream.set_window(window, 8),
+        Err(AgUiSseFeedError::Sse(AgUiSseError::UnknownResumeId))
+    ));
+}
+
+#[test]
 fn resume_after_interruption_projects_a_separate_run_with_stable_wire_ids() {
     fn replay() -> Vec<Value> {
         let mut projector = AgUiProjector::new(&task());

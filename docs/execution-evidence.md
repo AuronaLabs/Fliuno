@@ -877,3 +877,11 @@ Windows `scripts/check.ps1` 以退出码 0 完成：510 项测试、28 个离线
 真实回环供应商收到一次请求并返回不可用响应后，查询与未显式同意的恢复均不新增事件；同意后恰好再发一次并成功。用尽上限、启动过的 ACP Agent、A2A 远端续接及本机工具超时均返回对应阻止原因。Windows ACP 测试另外验证注册改变后恢复直接拒绝，原中断快照跨重启保持；按新配置创建的任务仍可运行。Debian Linux 6.12.107 来宾的 12 项进程测试通过。日志：`D:/Fliuno-Native-Test/guest-resume-status.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：512 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-task-resume-status-passed-check.log`。
+
+## 0.0.3 AG-UI 审批重连（2026-11-20）
+
+`approval/getRunReplay` 一次读取运行绑定、执行段范围和已提交水位。SQLite 查询计划使用请求绑定、执行段结束索引和 `events_task_sequence` 查找，没有扫描事件表。协议仍兼容旧服务；客户端测试核对旧请求顺序，并确认从指定帧之后输出。见 [审批中断与续跑](ag-ui.md#审批中断与续跑)。
+
+真实 HTTP 进程在已结束的父运行和子运行中各只发送一次 `approval/getRunReplay` 和一页 `events/list`。该页以各自的最后事件为上限；跨执行段的游标返回 `400`，不发送 `events/list`。环回流式供应商测试验证进行中的执行段取得任务最新水位，完成后以本段结束事件为上限。Debian Linux 6.12.107 来宾通过 15 项进程测试，覆盖这些重连行为及审批读写和迁移。日志：`D:/Fliuno-Native-Test/guest-ag-ui-run-replay.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：514 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-ag-ui-run-replay-check.log`。

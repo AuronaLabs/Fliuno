@@ -77,8 +77,8 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> Delivery<R, W> {
                     Some(watch) => self.gateway.tasks.poll(&self.gateway, watch).await?,
                     None => self.gateway.poll_watermark(self.through).await?,
                 };
-                // The first page used the global watermark. A task's current
-                // sequence may be lower until its next event commits.
+                // A replay initialized from the global watermark can be ahead
+                // of this task's latest sequence until its next event commits.
                 if through > self.through {
                     replay.advance_through(through).map_err(replay_status)?;
                     self.through = through;

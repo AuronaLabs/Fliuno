@@ -107,9 +107,26 @@ impl AgUiSseStream {
     }
 
     pub(super) fn seek(&mut self, window: ApprovalRunWindow) -> Result<(), AgUiSseFeedError> {
-        let Some(position) = self.resume else {
-            return Ok(());
-        };
+        self.validate_window(&window)?;
+        self.seek_valid_window(&window)
+    }
+
+    pub(super) fn set_window(
+        &mut self,
+        window: ApprovalRunWindow,
+        through: u64,
+    ) -> Result<(), AgUiSseFeedError> {
+        self.validate_window(&window)?;
+        if !(window.first_sequence..=i64::MAX as u64).contains(&through)
+            || window.last_sequence.is_some_and(|last| last != through)
+        {
+            return Err(crate::Error::InvalidResult.into());
+        }
+        self.check_watermark(through)?;
+        self.seek_valid_window(&window)
+    }
+
+    fn validate_window(&self, window: &ApprovalRunWindow) -> Result<(), AgUiSseFeedError> {
         let first = window.first_sequence;
         if window.task_id != self.task_id()
             || !(1..=i64::MAX as u64).contains(&first)
@@ -123,15 +140,17 @@ impl AgUiSseStream {
         {
             return Err(crate::Error::InvalidResult.into());
         }
-        if position.sequence < first
-            || window
-                .last_sequence
-                .is_some_and(|last| position.sequence > last)
-        {
+        Ok(())
+    }
+
+    fn seek_valid_window(&mut self, window: &ApprovalRunWindow) -> Result<(), AgUiSseFeedError> {
+        let first = window.first_sequence;
+        let sequence = self.resume.map_or(first, |position| position.sequence);
+        if sequence < first || window.last_sequence.is_some_and(|last| sequence > last) {
             return Err(AgUiSseError::UnknownResumeId.into());
         }
         // Leave the cursor unresolved until we verify the exact event and ordinal.
-        self.projector.seek_within_segment(first, position.sequence);
+        self.projector.seek_within_segment(first, sequence);
         Ok(())
     }
 

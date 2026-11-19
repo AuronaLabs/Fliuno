@@ -428,7 +428,7 @@ fn openai_stream_progress_reaches_stdio_and_final_result_stays_durable() {
     let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
     let task = peer.call(
         "task/start",
-        json!({"sessionId":session["id"],"input":"stream"}),
+        json!({"sessionId":session["id"],"input":"stream","clientRequestId":"stream-lookup"}),
     );
     let mut stream = accept_request(&listener);
     write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").unwrap();
@@ -444,6 +444,21 @@ fn openai_stream_progress_reaches_stdio_and_final_result_stays_durable() {
     assert_eq!(pending["status"], "running");
     assert_eq!(pending["modelOutcomeUnknown"], true);
     assert_eq!(pending["output"], Value::Null);
+    let binding = json!({"sessionId":session["id"],"clientRequestId":"stream-lookup"});
+    let open = peer.call("approval/getRunReplay", binding.clone());
+    assert_eq!(open["run"]["task"]["id"], task["id"]);
+    assert_eq!(open["run"]["task"]["status"], "running");
+    assert_eq!(open["run"]["startSequence"], Value::Null);
+    assert_eq!(open["window"]["lastSequence"], Value::Null);
+    let page = peer.call("events/list", json!({"taskId":task["id"]}));
+    assert_eq!(
+        open["window"]["firstSequence"],
+        page["events"][0]["sequence"]
+    );
+    assert_eq!(
+        open["throughSequence"],
+        page["events"].as_array().unwrap().last().unwrap()["sequence"]
+    );
     assert!(
         pending["messages"]
             .as_array()
@@ -463,6 +478,12 @@ fn openai_stream_progress_reaches_stdio_and_final_result_stays_durable() {
     stream.flush().unwrap();
     let completed = peer.wait_for_status(task["id"].as_str().unwrap(), "completed");
     assert_eq!(completed["output"], "Hello world");
+    let closed = peer.call("approval/getRunReplay", binding);
+    assert_eq!(closed["run"]["task"]["status"], "completed");
+    assert_eq!(closed["throughSequence"], closed["window"]["lastSequence"]);
+    assert!(
+        closed["throughSequence"].as_u64().unwrap() > open["throughSequence"].as_u64().unwrap()
+    );
     let deadline = Instant::now() + Duration::from_secs(5);
     while peer
         .notifications

@@ -11,6 +11,66 @@ fn fake_client(additional: &[u8]) -> Client<Cursor<Vec<u8>>, Vec<u8>> {
 }
 
 #[test]
+fn interrupt_replay_falls_back_to_the_legacy_index_and_resumes_after_the_frame() {
+    let replies = [
+        json!({"protocolVersion":"0.1","serverName":"test","serverVersion":"0",
+            "capabilities":{"approvalRunWindow":true}}),
+        json!({"startSequence":null,"task":{
+            "id":"task-a","sessionId":"session-a","status":"completed","backend":{"type":"model"},
+            "inputPreview":"preview","pendingApprovalCount":0,
+            "modelOutcomeUnknown":false,"agentOutcomeUnknown":false
+        }}),
+        json!({"throughSequence":20}),
+        json!({"taskId":"task-a","firstSequence":5,"lastSequence":8}),
+        json!({"events":[
+            {"sequence":5,"taskId":"task-a","data":{"type":"task_started"}},
+            {"sequence":8,"taskId":"task-a","data":{"type":"task_completed","text":"Done"}}
+        ],"nextAfter":8,"hasMore":false}),
+    ];
+    let mut frames = Vec::new();
+    for (index, result) in replies.into_iter().enumerate() {
+        serde_json::to_writer(
+            &mut frames,
+            &json!({"jsonrpc":"2.0","id":index+1,"result":result}),
+        )
+        .unwrap();
+        frames.push(b'\n');
+    }
+    let mut client = Client::connect(Cursor::new(frames), Vec::new(), "test", |_| {}).unwrap();
+    let (_, mut replay) = client
+        .attach_ag_ui_interrupt_replay("session-a", "run", Some("task-a:5:1"), |_| {})
+        .unwrap();
+    assert_eq!(replay.through(), 20);
+    let chunk =
+        String::from_utf8(replay.next_chunk(&mut client, |_| {}).unwrap().unwrap()).unwrap();
+    assert!(!chunk.contains("RUN_STARTED"));
+    assert!(chunk.contains("RUN_FINISHED"));
+    assert!(chunk.contains("Done"));
+    assert!(replay.next_chunk(&mut client, |_| {}).unwrap().is_none());
+    let (_, written) = client.into_parts();
+    let sent: Vec<Value> = written
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(
+        sent.iter()
+            .map(|frame| &frame["method"])
+            .collect::<Vec<_>>(),
+        [
+            "initialize",
+            "approval/getRun",
+            "events/getWatermark",
+            "approval/getRunWindow",
+            "events/list"
+        ]
+    );
+    assert_eq!(sent[1]["params"], sent[3]["params"]);
+    assert_eq!(sent[4]["params"]["after"], 4);
+    assert_eq!(sent[4]["params"]["through"], 20);
+}
+
+#[test]
 fn local_request_limit_does_not_write_or_consume_a_correlation_id() {
     let mut client = fake_client(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":true}\n");
     let large = json!({"payload":"x".repeat(fliuno_protocol::MAX_APP_REQUEST_BYTES)});

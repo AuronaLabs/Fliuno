@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
-    ApprovalDetails, ApprovalRun, ApprovalRunPendingParams, ApprovalRunWindow,
+    ApprovalDetails, ApprovalRun, ApprovalRunPendingParams, ApprovalRunReplay, ApprovalRunWindow,
     MAX_APP_REQUEST_BYTES, MAX_TASK_MODEL_STEPS, TaskIdParams, TaskRequestLookupParams,
     TaskStartParams, TaskStatus, TaskSummary,
 };
@@ -39,6 +39,8 @@ pub enum AgUiRunError {
     ModelStepLimitUnavailable,
     #[error(transparent)]
     Rpc(#[from] Error),
+    #[error(transparent)]
+    Replay(#[from] AgUiSseFeedError),
 }
 
 /// A host-selected bound for new model tasks. This is not an AG-UI input field.
@@ -316,6 +318,18 @@ impl AgUiRun {
             segment_start,
         })
     }
+
+    fn checked_interrupt(
+        found: ApprovalRun,
+        session_id: &str,
+        run_id: &str,
+    ) -> Result<Self, AgUiRunError> {
+        let start = found.start_sequence.unwrap_or(0);
+        if start > i64::MAX as u64 || found.start_sequence == Some(0) {
+            return Err(AgUiRunError::InvalidResult);
+        }
+        Self::checked(found.task, session_id, run_id.to_owned(), Some(start))
+    }
 }
 
 impl<R: BufRead, W: Write> Client<R, W> {
@@ -461,11 +475,42 @@ impl<R: BufRead, W: Write> Client<R, W> {
             &lookup(session_id, run_id, true),
             on_notification,
         )?;
-        let start = found.start_sequence.unwrap_or(0);
-        if start > i64::MAX as u64 || found.start_sequence == Some(0) {
-            return Err(AgUiRunError::InvalidResult);
+        AgUiRun::checked_interrupt(found, session_id, run_id)
+    }
+
+    /// Resolve an interrupt run and initialize its independent replay with a
+    /// single RPC on servers that advertise `approvalRunReplay`.
+    pub fn attach_ag_ui_interrupt_replay(
+        &mut self,
+        session_id: &str,
+        run_id: &str,
+        last_event_id: Option<&str>,
+        mut on_notification: impl FnMut(Notification),
+    ) -> Result<(AgUiRun, AgUiSseReplay), AgUiRunError> {
+        if self.info().capabilities.get("approvalRunReplay") != Some(&Value::Bool(true)) {
+            let run = self.attach_ag_ui_interrupt_run(session_id, run_id, &mut on_notification)?;
+            let through = self.event_watermark(&mut on_notification)?;
+            let replay = run.reconnect_sse(self, through, last_event_id, on_notification)?;
+            return Ok((run, replay));
         }
-        AgUiRun::checked(found.task, session_id, run_id.to_owned(), Some(start))
+        if session_id.is_empty() {
+            return Err(AgUiRunError::WrongThread);
+        }
+        validate_run_id(run_id)?;
+        let ApprovalRunReplay {
+            run,
+            window,
+            through_sequence,
+        } = self.call(
+            "approval/getRunReplay",
+            &lookup(session_id, run_id, true),
+            on_notification,
+        )?;
+        let run = AgUiRun::checked_interrupt(run, session_id, run_id)?;
+        let mut stream = run.sse(last_event_id).map_err(AgUiSseFeedError::from)?;
+        stream.set_window(window, through_sequence)?;
+        let replay = AgUiSseReplay::with_stream(stream, through_sequence)?;
+        Ok((run, replay))
     }
 }
 

@@ -68,6 +68,11 @@ impl AgUiSseReplay {
         (!self.failed).then(|| self.stream.run_phase())
     }
 
+    /// Highest committed sequence in this replay's current window.
+    pub fn through(&self) -> u64 {
+        self.replay.through()
+    }
+
     /// Encode a page. `Some` may be empty for skipped events. `None` confirms
     /// the current window is complete and any resume ID was found in it.
     pub fn next_chunk<R: BufRead, W: Write>(

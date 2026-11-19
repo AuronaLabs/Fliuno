@@ -126,6 +126,7 @@ staged.sync_all()?;
 | `approval/resumeRun` | `{sessionId,parentRequestId,clientRequestId,approvalId,decision}` | `ApprovalRun`；提交决定并创建同一任务的子运行。 |
 | `approval/getRun` | `{sessionId,clientRequestId}` | `ApprovalRun`；通过创建或续跑请求键查找当前任务摘要与执行段起点。 |
 | `approval/getRunWindow` | `{sessionId,clientRequestId}` | `ApprovalRunWindow`；返回 `taskId` 和执行段的起止事件序号。 |
+| `approval/getRunReplay` | `{sessionId,clientRequestId}` | `ApprovalRunReplay`；在同一快照读取 `run`、`window` 和 `throughSequence`。 |
 | `approval/getRunPending` | `{sessionId,clientRequestId,approvalId}` | `ApprovalDetails`；读取结束该执行段且仍未处理的审批。 |
 | `approval/cancelRun` | `{sessionId,clientRequestId}` | `TaskSummary`；仅允许当前运行键控制任务。已有新运行接管时返回 `-32009`。 |
 | `events/list` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
@@ -423,6 +424,8 @@ SQLite v41 在升级时记录可读取的最早水位，并保留待审批摘要
 `initialize.capabilities.approvalResumeRun` 表示支持 `approval/resumeRun`、`approval/getRun` 和 `approval/cancelRun`。续跑限于同一会话中模型任务执行段的第一项待审批工具调用。子请求键与审批决定一起提交到 SQLite；`ApprovalRun.startSequence` 为该决定的全局事件序号，初始运行则为 `null`。同一子请求键的相同答复返回原绑定和当前任务摘要；更换父请求键、审批或决定会冲突。`getRun` 可以补读绑定，避免把任务最新状态误当成历史执行段的状态。[AG-UI 审批中断](ag-ui.md#审批中断与续跑)
 
 `initialize.capabilities.approvalRunWindow` 表示可通过 `approval/getRunWindow` 读取执行段的边界。`firstSequence` 对初始运行指向 `task_started`，对子运行指向绑定它的 `approval_resolved`。`lastSequence` 包含首个审批请求、任务中断或任务终态事件；还没结束时为 `null`。这对序号用于定位事件，不能替代对具体帧的校验。SQLite v39 从已有事件回填执行段的结束索引。
+
+`initialize.capabilities.approvalRunReplay` 表示可用 `approval/getRunReplay` 一次取得 `ApprovalRun` 和 `ApprovalRunWindow`。同一 SQLite 语句还返回可传给 `events/list.through` 的 `throughSequence`：执行段已结束时等于 `window.lastSequence`，否则是该任务最新提交的事件序号。`run.task` 仍是当前任务摘要，可反映后续执行段的状态；回放范围由 `window` 和水位决定。调用不写入状态，也不改变订阅。旧 RPC 保持原响应形状，不需要数据库迁移。
 
 `initialize.capabilities.approvalRunPending` 表示可以用 `approval/getRunPending` 按运行读取待审批工具。只有在该审批是运行的结束事件且尚未处理时才返回详情；同一任务后续执行段的审批不会通过旧请求键返回。
 

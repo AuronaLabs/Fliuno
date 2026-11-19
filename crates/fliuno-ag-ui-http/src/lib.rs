@@ -310,7 +310,14 @@ async fn attach<R: BufRead + Send + 'static, W: Write + Send + 'static>(
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     let (replay, through, task) = gateway
         .rpc(move |client| {
-            let run = lookup_run(client, &session, &run_id, interrupt_profile)?;
+            if interrupt_profile {
+                let (run, replay) = client
+                    .attach_ag_ui_interrupt_replay(&session, &run_id, last_id.as_deref(), |_| {})
+                    .map_err(run_status)?;
+                let through = replay.through();
+                return Ok((replay, through, watched_task(client, &run)));
+            }
+            let run = lookup_run(client, &session, &run_id, false)?;
             let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
             let replay = run
                 .reconnect_sse(client, through, last_id.as_deref(), |_| {})
@@ -408,6 +415,7 @@ fn run_status(error: AgUiRunError) -> StatusCode {
         AgUiRunError::WrongThread => StatusCode::NOT_FOUND,
         AgUiRunError::InputTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         AgUiRunError::Rpc(error) => rpc_status(error),
+        AgUiRunError::Replay(error) => replay_status(error),
         AgUiRunError::InvalidResult | AgUiRunError::ModelStepLimitUnavailable => {
             StatusCode::BAD_GATEWAY
         }

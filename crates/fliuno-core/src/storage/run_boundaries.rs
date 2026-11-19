@@ -2,6 +2,40 @@
 use super::*;
 use rusqlite::Transaction;
 
+// Both readers use the same indexed segment definition, including the first
+// event of a root run and the approval decision that starts a continuation.
+macro_rules! run_bounds_query {
+    ($select:literal) => {
+        concat!(
+            "WITH bounds AS (
+                SELECT r.task_id, a.sequence AS start_sequence, COALESCE(a.sequence, (
+                    SELECT sequence FROM events e WHERE e.task_id=r.task_id ORDER BY sequence LIMIT 1
+                )) AS first_sequence
+                FROM task_requests r LEFT JOIN approval_runs a
+                  ON a.session_id=r.session_id AND a.request_key=r.request_key
+                WHERE r.session_id=?1 AND r.request_key=?2
+             ), segment AS (
+                SELECT b.*, (
+                    SELECT sequence FROM task_run_ends e
+                    WHERE e.task_id=b.task_id AND e.sequence>b.first_sequence ORDER BY sequence LIMIT 1
+                ) AS last_sequence FROM bounds b
+             ) ",
+            $select
+        )
+    };
+}
+
+fn read_window(row: &rusqlite::Row<'_>) -> Result<ApprovalRunWindow> {
+    let first: i64 = row
+        .get::<_, Option<i64>>(1)?
+        .ok_or_else(|| Error::NotFound("first event of task request".into()))?;
+    Ok(ApprovalRunWindow {
+        task_id: row.get(0)?,
+        first_sequence: first as u64,
+        last_sequence: row.get::<_, Option<i64>>(2)?.map(|value| value as u64),
+    })
+}
+
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
     tx.execute_batch(
@@ -44,26 +78,45 @@ impl Kernel {
     /// Resolve the inclusive durable bounds of one run, independent of current task state.
     pub fn get_approval_run_window(&self, session: &str, key: &str) -> Result<ApprovalRunWindow> {
         crate::task::validate_key(key)?;
-        let (task_id, first, last): (String, Option<i64>, Option<i64>) = self.db.prepare_cached(
-            "WITH binding AS (
-                SELECT r.task_id, COALESCE(a.sequence, (
-                    SELECT sequence FROM events e WHERE e.task_id=r.task_id ORDER BY sequence LIMIT 1
-                )) AS first_sequence
-                FROM task_requests r LEFT JOIN approval_runs a
-                  ON a.session_id=r.session_id AND a.request_key=r.request_key
-                WHERE r.session_id=?1 AND r.request_key=?2
-             )
-             SELECT b.task_id,b.first_sequence,(
-                 SELECT sequence FROM task_run_ends e
-                 WHERE e.task_id=b.task_id AND e.sequence>b.first_sequence ORDER BY sequence LIMIT 1
-             ) FROM binding b",
-        )?.query_row(params![session,key], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)))
-            .optional()?.ok_or_else(|| Error::NotFound("task request".into()))?;
-        let first = first.ok_or_else(|| Error::NotFound("first event of task request".into()))?;
-        Ok(ApprovalRunWindow {
-            task_id,
-            first_sequence: first as u64,
-            last_sequence: last.map(|value| value as u64),
+        let mut stmt = self.db.prepare_cached(run_bounds_query!(
+            "SELECT task_id,first_sequence,last_sequence FROM segment"
+        ))?;
+        let mut rows = stmt.query(params![session, key])?;
+        read_window(
+            rows.next()?
+                .ok_or_else(|| Error::NotFound("task request".into()))?,
+        )
+    }
+
+    pub fn get_approval_run_replay(&self, session: &str, key: &str) -> Result<ApprovalRunReplay> {
+        crate::task::validate_key(key)?;
+        // Only the open segment needs the task's latest event. Both the
+        // summary and the bounds are read by the same SQLite statement.
+        let mut stmt = self.db.prepare_cached(run_bounds_query!(
+            "SELECT b.task_id,b.first_sequence,b.last_sequence,b.start_sequence,s.data,
+                CASE WHEN b.last_sequence IS NULL THEN (
+                    SELECT MAX(sequence) FROM events e WHERE e.task_id=b.task_id
+                ) END
+              FROM segment b JOIN task_summaries s ON s.task_id=b.task_id"
+        ))?;
+        let mut rows = stmt.query(params![session, key])?;
+        let row = rows
+            .next()?
+            .ok_or_else(|| Error::NotFound("task request".into()))?;
+        let window = read_window(row)?;
+        let through_sequence = match window.last_sequence {
+            Some(last) => last,
+            None => row.get::<_, i64>(5)? as u64,
+        };
+        let start_sequence = row.get::<_, Option<i64>>(3)?.map(|value| value as u64);
+        let task = serde_json::from_str(row.get_ref(4)?.as_str().map_err(rusqlite::Error::from)?)?;
+        Ok(ApprovalRunReplay {
+            run: ApprovalRun {
+                task,
+                start_sequence,
+            },
+            window,
+            through_sequence,
         })
     }
 }

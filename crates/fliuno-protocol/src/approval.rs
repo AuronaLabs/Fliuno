@@ -29,6 +29,16 @@ pub struct ApprovalRunWindow {
     pub last_sequence: Option<u64>,
 }
 
+/// Run identity and the committed replay window from the same read snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalRunReplay {
+    pub run: ApprovalRun,
+    pub window: ApprovalRunWindow,
+    /// The segment's end, or the latest task event if the segment is still open.
+    pub through_sequence: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApprovalRunPendingParams {
