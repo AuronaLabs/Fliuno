@@ -77,4 +77,4 @@ HTTP wire 测试验证无工具服务、按需分页、主机文件/HTTP URI 不
 - https://modelcontextprotocol.io/specification/2026-07-28/server/prompts
 - 锁定的 `rmcp 3.11.0` 中 `service/client.rs` 的一次性请求、缓存和过期回退，以及 `model.rs` 的请求/结果类型。
 
-同一协商版本还根据 `resources.listChanged`、`prompts.listChanged` 和 `tools.listChanged` 独立注册 `mcp_<id>_resources_watch_list`、`mcp_<id>_prompts_watch_list` 和 `mcp_<id>_tools_watch_list`。每次调用接受 `{waitMs}` 并单独审批。收到一条对应目录的通知便关闭监听并返回 `updated`。服务拒绝、时间耗尽和正常结束分别返回 `declined`、`elapsed` 和 `ended`。资源和提示目录可再调用各自的列表工具获取内容。本机工具注册表在适配器启动时建立。
+同一协商版本还根据 `resources.listChanged`、`prompts.listChanged` 和 `tools.listChanged` 独立注册 `mcp_<id>_resources_watch_list`、`mcp_<id>_prompts_watch_list` 和 `mcp_<id>_tools_watch_list`。每次调用接受 `{waitMs}` 并单独审批。收到一条对应目录的通知便关闭监听并返回 `updated`。服务拒绝、时间耗尽和正常结束分别返回 `declined`、`elapsed` 和 `ended`。资源和提示目录可再调用各自的列表工具获取内容。支持 `tools.listChanged` 的服务也提供 `mcp_<id>_tools_list({cursor?})`，每次审批读取一页最新工具描述和 Schema。本机工具注册表在适配器启动时建立，远端目录只作为结果数据返回。

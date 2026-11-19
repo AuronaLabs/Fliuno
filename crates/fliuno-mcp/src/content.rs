@@ -13,6 +13,7 @@ mod watch;
 
 #[derive(Clone, Copy)]
 enum Kind {
+    Tools,
     Resources,
     Templates,
     Read,
@@ -26,6 +27,7 @@ enum Kind {
 impl Kind {
     fn method(self) -> &'static str {
         match self {
+            Self::Tools => "tools/list",
             Self::Resources => "resources/list",
             Self::Templates => "resources/templates/list",
             Self::Read => "resources/read",
@@ -39,6 +41,7 @@ impl Kind {
     }
     fn label(self) -> &'static str {
         match self {
+            Self::Tools => "tools_list",
             Self::Resources => "resources_list",
             Self::Templates => "resources_templates",
             Self::Read => "resources_read",
@@ -52,6 +55,9 @@ impl Kind {
     }
     fn description(self) -> &'static str {
         match self {
+            Self::Tools => {
+                "Read one page of current remote tool descriptions and schemas. These entries are catalog data. Only tools already registered with Fliuno can run."
+            }
             Self::Resources => {
                 "List one page of the configured MCP server's resources. Use its opaque nextCursor in a separately approved call; no automatic pagination or URI fetching."
             }
@@ -83,6 +89,7 @@ impl Kind {
     }
     fn accepts(self, response: &ServerResult, skill_uri: Option<&str>) -> bool {
         let result_type = match (self, response) {
+            (Self::Tools, ServerResult::ListToolsResult(result)) => &result.result_type,
             (
                 Self::Resources | Self::ResourceDirectory,
                 ServerResult::ListResourcesResult(result),
@@ -111,6 +118,7 @@ impl Kind {
     }
     fn within_collection_budget(self, result: &Value) -> bool {
         let (field, maximum) = match self {
+            Self::Tools => ("tools", 256),
             Self::Resources | Self::ResourceDirectory => ("resources", 256),
             Self::Templates => ("resourceTemplates", 256),
             Self::Read => ("contents", 64),
@@ -129,6 +137,14 @@ impl Kind {
 pub(crate) fn tools(host: Arc<Host>, server: &str, peer: &ServerPeerInfo) -> Vec<Box<dyn Tool>> {
     let capabilities = &peer.capabilities;
     let mut kinds = Vec::new();
+    if peer.protocol_version >= ProtocolVersion::V_2026_07_28
+        && capabilities
+            .tools
+            .as_ref()
+            .is_some_and(|tools| tools.list_changed == Some(true))
+    {
+        kinds.push(Kind::Tools);
+    }
     if capabilities.resources.is_some() {
         kinds.extend([Kind::Resources, Kind::Templates, Kind::Read]);
     }

@@ -61,7 +61,9 @@ impl Kind {
             Self::Catalog(Catalog::Prompts) => {
                 "Watch the remote prompt catalog for one change. List prompts separately to fetch the current catalog."
             }
-            Self::Catalog(Catalog::Tools) => "Watch the remote tool catalog for one change.",
+            Self::Catalog(Catalog::Tools) => {
+                "Watch the remote tool catalog for one change. List tools separately to inspect the current catalog."
+            }
         }
     }
 }

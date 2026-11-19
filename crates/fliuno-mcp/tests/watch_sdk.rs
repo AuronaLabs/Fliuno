@@ -4,9 +4,9 @@ use fliuno_protocol::{ToolCall, Workspace};
 use rmcp::{
     ErrorData, RoleServer, ServerHandler,
     model::{
-        DiscoverResult, ProtocolVersion, ResourceUpdatedNotification,
-        ResourceUpdatedNotificationParam, ServerCapabilities, ServerConfig, ServerNotification,
-        SubscriptionFilter,
+        DiscoverResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+        ResourceUpdatedNotification, ResourceUpdatedNotificationParam, ServerCapabilities,
+        ServerConfig, ServerNotification, SubscriptionFilter,
     },
     service::{RequestContext, SubscriptionContext},
     transport::streamable_http_server::{
@@ -27,6 +27,7 @@ use std::{
 struct Peer {
     started: Arc<AtomicUsize>,
     closed: Arc<AtomicUsize>,
+    listed: Arc<AtomicUsize>,
 }
 
 impl ServerHandler for Peer {
@@ -53,6 +54,23 @@ impl ServerHandler for Peer {
             self.supported_protocol_versions().into_owned(),
             self.get_info().capabilities,
         ))
+    }
+
+    async fn list_tools(
+        &self,
+        page: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        let call = self.listed.fetch_add(1, Ordering::Relaxed);
+        let result = match (call, page.and_then(|params| params.cursor)) {
+            (0, None) => json!({"tools":[]}),
+            (_, None) => {
+                json!({"tools":[{"name":"added_later","inputSchema":{"type":"object"}}],"nextCursor":"next"})
+            }
+            (_, Some(cursor)) if cursor == "next" => json!({"tools":[]}),
+            _ => return Err(ErrorData::invalid_params("unexpected page", None)),
+        };
+        Ok(serde_json::from_value(result).unwrap())
     }
 
     fn accepted_subscription_filter(
@@ -286,6 +304,36 @@ fn catalog_watches_observe_one_advertised_list_and_release_the_stream() {
     }
     wait_for(&peer.closed, 3);
     assert_eq!(peer.started.load(Ordering::Relaxed), 3);
+    drop(tools);
+    stop.cancel();
+    runtime.block_on(server).unwrap();
+}
+
+#[test]
+fn remote_tool_pages_are_data_and_leave_startup_registrations_unchanged() {
+    let peer = Peer::default();
+    let stop = CancellationToken::new();
+    let (runtime, server, tools) = connect(&peer, &stop);
+    let catalog = tools
+        .iter()
+        .find(|tool| tool.spec().name == "mcp_sdk_tools_list")
+        .unwrap();
+    assert_eq!(peer.listed.load(Ordering::Relaxed), 1);
+    let cancel = CancellationToken::new();
+    let first = call_watch(catalog.as_ref(), json!({}), &cancel).unwrap();
+    assert_eq!(peer.listed.load(Ordering::Relaxed), 2);
+    assert_eq!(first.output["method"], "tools/list");
+    assert_eq!(first.output["grantsPermissions"], false);
+    assert_eq!(first.output["result"]["tools"][0]["name"], "added_later");
+    assert_eq!(first.output["result"]["nextCursor"], "next");
+    assert!(
+        tools
+            .iter()
+            .all(|tool| !tool.spec().name.contains("added_later"))
+    );
+    let last = call_watch(catalog.as_ref(), json!({"cursor":"next"}), &cancel).unwrap();
+    assert_eq!(peer.listed.load(Ordering::Relaxed), 3);
+    assert_eq!(last.output["result"]["tools"], json!([]));
     drop(tools);
     stop.cancel();
     runtime.block_on(server).unwrap();

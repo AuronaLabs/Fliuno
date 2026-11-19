@@ -4,7 +4,7 @@ use super::Kind;
 use rmcp::model::{
     ClientRequest, GetPromptRequest, GetPromptRequestParams, GetSkillRequest,
     GetSkillRequestParams, ListPromptsRequest, ListResourceTemplatesRequest, ListResourcesRequest,
-    ListSkillsRequest, PaginatedRequestParams, ReadResourceDirectoryRequest,
+    ListSkillsRequest, ListToolsRequest, PaginatedRequestParams, ReadResourceDirectoryRequest,
     ReadResourceDirectoryRequestParams, ReadResourceRequest, ReadResourceRequestParams,
 };
 use serde::Deserialize;
@@ -57,7 +57,7 @@ pub(super) fn valid_uri(uri: &str) -> bool {
 impl Kind {
     pub(super) fn schema(self) -> Value {
         let (required, properties) = match self {
-            Self::Resources | Self::Templates | Self::Prompts | Self::SkillsList => (
+            Self::Tools | Self::Resources | Self::Templates | Self::Prompts | Self::SkillsList => (
                 vec![],
                 json!({
                     "cursor":{"type":"string","minLength":1,"maxLength":4096}
@@ -96,13 +96,16 @@ impl Kind {
             return Err(invalid());
         }
         Ok(match self {
-            Self::Resources | Self::Templates | Self::Prompts | Self::SkillsList => {
+            Self::Tools | Self::Resources | Self::Templates | Self::Prompts | Self::SkillsList => {
                 let args: Page = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
                 if !valid_optional_cursor(value, args.cursor.as_deref()) {
                     return Err(invalid());
                 }
                 let params = PaginatedRequestParams::default().with_cursor(args.cursor);
                 match self {
+                    Self::Tools => {
+                        ClientRequest::ListToolsRequest(ListToolsRequest::with_param(params))
+                    }
                     Self::Resources => ClientRequest::ListResourcesRequest(
                         ListResourcesRequest::with_param(params),
                     ),

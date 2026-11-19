@@ -219,3 +219,5 @@ Debian 另通过前台命令的 12 项执行测试，覆盖管道、超时、取
 Windows 和 Debian 各通过两项产物进程契约。测试覆盖旧版正文迁移、清单回填、跨作用域隔离、精确格式匹配，以及重启后从原分页位置继续。Debian 日志为 `D:/Fliuno-Native-Test/guest-artifact-types.log`。
 
 SQLite 3.49.1 内存数据库写入 10 万条模拟产物。两种查询都返回同一工作区的 51 条稀疏结果。复合索引可以同时定位工作区、类型和游标。61 轮交替采样中，首屏的中位数为 0.36 ms，使用仅工作区索引时为 7.59 ms。翻页查询分别为 0.32 ms 和 7.82 ms。日志为 `target/0.0.2-artifact-media-index-bench.log`。
+
+Windows 随后以 `target/0.0.2-native-exec-artifact-types-windows.log` 完成全量复验，包括 391 项测试和 26 个离线演示。此前一轮的测试已通过，但在重叠的构建中 Cargo 无法替换被占用的 Windows 可执行文件，演示因此中断。串行执行后通过。
