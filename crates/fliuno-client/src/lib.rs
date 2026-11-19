@@ -10,7 +10,7 @@ mod wire;
 pub use feed::EventFeed;
 pub use history::SessionHistory;
 pub use history_search::{HistorySearch, HistorySearchRequest};
-pub use replay::{EventReplay, ReplayScope};
+pub use replay::{EventReplay, ModelUsageScope, ReplayScope};
 
 use fliuno_protocol::{InitializeParams, PROTOCOL_VERSION};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};

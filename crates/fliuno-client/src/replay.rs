@@ -1,7 +1,7 @@
 //! Checked paging of durable events through an inclusive server watermark.
 use super::{Client, Error, Notification};
 use fliuno_protocol::{
-    Event, EventSubscription, EventWatermark, EventsListAllParams, EventsListParams,
+    Event, EventKind, EventSubscription, EventWatermark, EventsListAllParams, EventsListParams,
     EventsListSessionParams, EventsListWorkspaceParams, EventsPage, EventsSetScopeParams,
 };
 use std::io::{BufRead, Write};
@@ -9,6 +9,14 @@ use std::io::{BufRead, Write};
 #[derive(Debug, Clone)]
 pub enum ReplayScope {
     All,
+    Task(String),
+    Session(String),
+    Workspace(String),
+}
+
+/// Scopes that support indexed replay of reported model usage.
+#[derive(Debug, Clone)]
+pub enum ModelUsageScope {
     Task(String),
     Session(String),
     Workspace(String),
@@ -88,6 +96,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
 #[derive(Debug)]
 pub struct EventReplay {
     scope: ReplayScope,
+    model_usage_only: bool,
     through: u64,
     after: u64,
 }
@@ -99,9 +108,27 @@ impl EventReplay {
         }
         Ok(Self {
             scope,
+            model_usage_only: false,
             through,
             after,
         })
+    }
+
+    /// Replay only reported usage without reading the other events in the scope.
+    /// For a fresh window, obtain `through` with `Client::event_watermark`.
+    pub fn for_model_usage(
+        scope: ModelUsageScope,
+        after: u64,
+        through: u64,
+    ) -> Result<Self, Error> {
+        let scope = match scope {
+            ModelUsageScope::Task(id) => ReplayScope::Task(id),
+            ModelUsageScope::Session(id) => ReplayScope::Session(id),
+            ModelUsageScope::Workspace(id) => ReplayScope::Workspace(id),
+        };
+        let mut replay = Self::new(scope, after, through)?;
+        replay.model_usage_only = true;
+        Ok(replay)
     }
 
     /// Inclusive end of this replay window. Live events start after this value.
@@ -141,7 +168,11 @@ impl EventReplay {
                 on_notification,
             ),
             ReplayScope::Task(id) => client.call(
-                "events/list",
+                if self.model_usage_only {
+                    "events/listModelUsage"
+                } else {
+                    "events/list"
+                },
                 &EventsListParams {
                     task_id: id.clone(),
                     after,
@@ -152,7 +183,11 @@ impl EventReplay {
                 on_notification,
             ),
             ReplayScope::Session(id) => client.call(
-                "events/listSession",
+                if self.model_usage_only {
+                    "events/listSessionModelUsage"
+                } else {
+                    "events/listSession"
+                },
                 &EventsListSessionParams {
                     session_id: id.clone(),
                     after,
@@ -163,7 +198,11 @@ impl EventReplay {
                 on_notification,
             ),
             ReplayScope::Workspace(id) => client.call(
-                "events/listWorkspace",
+                if self.model_usage_only {
+                    "events/listWorkspaceModelUsage"
+                } else {
+                    "events/listWorkspace"
+                },
                 &EventsListWorkspaceParams {
                     workspace_id: id.clone(),
                     after,
@@ -179,6 +218,8 @@ impl EventReplay {
             if event.sequence <= last
                 || event.sequence > self.through
                 || matches!(&self.scope, ReplayScope::Task(task_id) if task_id != &event.task_id)
+                || (self.model_usage_only
+                    && !matches!(event.data, EventKind::ModelUsageReported { .. }))
             {
                 return Err(Error::InvalidReplayPage);
             }

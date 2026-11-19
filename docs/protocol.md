@@ -5,7 +5,7 @@
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
 - **建立连接**：[stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
-- **查接口**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [搜索历史](#查找历史任务) · [错误](#错误)
+- **查接口**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [模型用量](#模型用量) · [搜索历史](#查找历史任务) · [错误](#错误)
 - **配置能力**：[A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
 ## 传输
@@ -98,6 +98,8 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `approval/cancelRun` | `{sessionId,clientRequestId}` | `TaskSummary`；仅允许当前运行键控制任务。已有新运行接管时返回 `-32009`。 |
 | `events/list` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
 | `events/listModelUsage` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | 仅返回该任务的模型用量事件，沿用全局序号 |
+| `events/listSessionModelUsage` | `{sessionId,after?,through?,limit?,targetBytes?}` | 分页读取会话下各任务的模型用量 |
+| `events/listWorkspaceModelUsage` | `{workspaceId,after?,through?,limit?,targetBytes?}` | 分页读取工作区各会话的模型用量，包含已归档会话 |
 | `events/getWatermark` | `{}` | 当前已提交的全局 `throughSequence`，供多个回放读取方共用 |
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
 | `events/get` | `{sequence}` | 按全局序号读取一条持久事件 |
@@ -265,7 +267,7 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 `agentRun.hostTools` 保存宿主操作的 ID、不可替换的 call、status、可选 output/error；旧快照默认空数组。状态为 `awaiting_approval`、`approved`、`running`、`succeeded`、`denied`、`failed`、`outcome_unknown` 或 `closed`。`agent_host_tool_requested`、`agent_host_tool_started`、`agent_host_tool_completed` 写入同一事件日志。允许决定先提交，执行前另行提交 started；结果提交成功后才向 Agent 返回文件内容或写入成功。运行中操作在断线/重启时保留未知结果，Agent 的正常结束不能将其覆盖。
 
-主机配置 `workspaceAccess` 默认 false；开启时仅提供虚拟工作区内的文本读写代理，terminal 仍关闭。每个文件操作独立审批，单次文件/内容最大 256 KiB；每运行最多 8 个未完成文件请求、64 个累计宿主操作。写提案读取基线供客户端生成 diff，执行时复核；`baseSha256:null` 仅创建新文件。相关兼容字段在 v6 引入，当前数据库版本为 v10；可读取 v3 中缺少 `source`/`hostTools`、v4 中缺少 `context` 和 v5 中缺少后续事件兼容字段的记录，并事务回填已完成任务的历史索引；不改写旧输入和事件，旧二进制应拒绝新版本。
+主机配置 `workspaceAccess` 默认 false；开启时仅提供虚拟工作区内的文本读写代理，terminal 仍关闭。每个文件操作独立审批，单次文件/内容最大 256 KiB；每运行最多 8 个未完成文件请求、64 个累计宿主操作。写提案读取基线供客户端生成 diff，执行时复核；`baseSha256:null` 仅创建新文件。相关兼容字段最早在 v6 引入；可读取 v3 中缺少 `source`/`hostTools`、v4 中缺少 `context` 和 v5 中缺少后续事件兼容字段的记录，并事务回填已完成任务的历史索引；不改写旧输入和事件，旧二进制应拒绝新版本。
 
 已启动的 Agent 运行不支持 `task/resume`，即使结果已知或传入模型重试同意也不能重放。服务退出或重启使待审权限失效，活动 Agent 任务进入 interrupted；取消任务保持 cancelled。运行 ID、`outcomeUnknown`、`finished` 和 `stopReason` 区分结果未知、执行器结束和已知但不完整的响应。配置、预算及完整状态映射见 [ACP 文档](acp.md)。
 
@@ -277,11 +279,25 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 `workspaceEventReplay` 表示支持 `events/listWorkspace`。该方法使用相同的序号、包含式 `through` 和字节分页规则，跨会话读取整个工作区的持久事件。SQLite v27 回填工作区索引。
 
-客户端可用 `events/listModelUsage` 查本任务的用量，`initialize.capabilities.modelUsageEventReplay` 声明此能力。返回原始持久事件及序号。SQLite v37 从既有事件回填索引，分页不会读取其它事件的正文。
+### 模型用量
+
+`modelUsageEventReplay` 声明 `events/listModelUsage` 可按任务读取。`modelUsageScopedReplay` 为真时，也可以用 `events/listSessionModelUsage` 或 `events/listWorkspaceModelUsage` 按更大的范围读取，包括已归档会话。三种接口都返回原始用量事件及全局序号，按序号正序排列。
+
+先调用 `events/getWatermark`，再将返回的 `throughSequence` 作为每页共同的 `through`。以下示例在水位 `320` 处固定工作区视图：
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"events/listWorkspaceModelUsage","params":{"workspaceId":"<workspace-id>","through":320,"limit":32}}
+```
+
+`hasMore` 为真时沿用当前范围与 `through`，将 `nextAfter` 作为下一页的排他游标。Rust 调用方也可用 `EventReplay::for_model_usage(ModelUsageScope::Workspace(id), after, through)`，消费一页后保存 `cursor()`。翻完一轮后，Rust 客户端将游标推进到该轮的 `through`；下次用更新的水位发起回放即可只读新增报告。
+
+SQLite v40 为任务、会话和工作区建立用量索引。v37–v39 的数据库从旧用量索引迁移，无需重读所有事件正文；新用量和任务结果同事务提交。各范围的分页直接定位报告，不读取其他类型的事件。
 
 `initialize.capabilities.modelUsageEvents` 表示模型用量可作为 `model_usage_reported` 持久事件回放。OpenAI Responses、Anthropic Messages 和 Gemini Interactions 均支持 JSON 与 SSE。事件含 `step`、供应商及 `inputTokens`、`outputTokens`。`cachedInputTokens` 与 `reasoningOutputTokens` 可选，并包含在对应总数内。Anthropic 的输入总量包含创建与命中缓存的 token。Gemini 沿用 Interactions 报告的输入与输出总量，单独报告的思考计数未纳入 `reasoningOutputTokens`。
 
-内核在同一事务提交用量与该步结果。模型响应成功解析后，即使内核拒绝模型发出的工具调用，也会记录该步用量。缺失或无效的计数不影响模型结果。SQLite v36 标识新增的事件类型。
+内核在同一事务提交用量与该步结果。模型响应成功解析后，即使内核拒绝模型发出的工具调用，也会记录该步用量。缺失或无效的计数不影响模型结果。接口只回放供应商已返回且内核已保存的报告；缺少报告不能据此推断该步骤没有用量。SQLite v36 标识新增的事件类型。
+
+### 实时预览与事件通知
 
 实时 provider 可在模型响应完成前发送 `notifications/modelProgress`，参数为 `{progress}`。`progress` 是带 `type` 的联合类型：`text_delta` 包含 `taskId`、`step` 和文本片段，`reset` 清除该步骤尚未确认的预览。它不写入 SQLite、没有持久序号，且可能与 `notifications/event` 相对乱序。客户端应按 task/step 暂存增量；收到该步骤的审批请求或任务完成、失败、取消、中断等持久状态后，忽略迟到增量并以任务快照和持久事件为准。取消、错误、工具调用会清除预览。`initialize.capabilities.modelProgressNotifications` 表示当前 provider 是否支持此通知。慢订阅者被分离后会收到 `notifications/modelProgressGap`（参数为空）；预览不回放，客户端应清除预览并查询活动任务状态。如果 `capabilities.modelProgressResubscribe` 为 true，收到缺口通知后可用 `modelProgress/resubscribe({})` 在同一连接恢复，成功返回 `{subscribed:true}`。新订阅只接收注册之后开始的模型步骤。正在执行的步骤可通过持久事件或 `task/get` 查看结果。
 

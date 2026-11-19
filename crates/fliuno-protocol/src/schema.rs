@@ -69,6 +69,8 @@ pub fn schema_bundle() -> Value {
         "events/get" => schema::<EventGetParams>(),
         "events/list" => schema::<EventsListParams>(),
         "events/listModelUsage" => schema::<EventsListParams>(),
+        "events/listSessionModelUsage" => schema::<EventsListSessionParams>(),
+        "events/listWorkspaceModelUsage" => schema::<EventsListWorkspaceParams>(),
         "events/listAll" => schema::<EventsListAllParams>(),
         "events/listSession" => schema::<EventsListSessionParams>(),
         "events/listWorkspace" => schema::<EventsListWorkspaceParams>(),

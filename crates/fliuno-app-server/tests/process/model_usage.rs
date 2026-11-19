@@ -99,7 +99,7 @@ fn openai_usage_is_replayable_per_step_even_when_the_tool_call_is_rejected() {
     drop(peer);
     rusqlite::Connection::open(&db)
         .unwrap()
-        .execute_batch("DROP TABLE model_usage_index; PRAGMA user_version=36;")
+        .execute_batch("DROP TABLE model_usage; PRAGMA user_version=36;")
         .unwrap();
     // A different provider on restart can still replay the original source.
     let mut peer = Peer::start(&db);
@@ -134,5 +134,154 @@ fn openai_usage_is_replayable_per_step_even_when_the_tool_call_is_rejected() {
     }
     assert_eq!(endpoint.requests().len(), 5);
     drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn scoped_model_usage_pages_keep_order_and_watermark_after_v39_upgrade() {
+    let root = std::env::temp_dir().join(format!("fliuno-usage-scope-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(root.join("other")).unwrap();
+    let endpoint = Fixture::start(|_| {
+        Response::json(
+            200,
+            json!({
+                "status":"completed",
+                "output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],
+                "usage":{"input_tokens":21,"output_tokens":5}
+            }),
+        )
+    });
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&endpoint.url("/v1/")));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let foreign = peer.call("workspace/open", json!({"root":root.join("other")}));
+    let first = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let second = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let isolated = peer.call("session/create", json!({"workspaceId":foreign["id"]}));
+    let submit = |peer: &mut Peer, session: &Value| {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":"usage report"}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "completed");
+        let mut page = peer.call("events/listModelUsage", json!({"taskId":task["id"]}));
+        let reports = page["events"].as_array_mut().unwrap();
+        assert_eq!(reports.len(), 1);
+        reports.pop().unwrap()
+    };
+    let a = submit(&mut peer, &first);
+    let b = submit(&mut peer, &isolated);
+    let c = submit(&mut peer, &second);
+    let through = peer.call("events/getWatermark", json!({}))["throughSequence"].clone();
+    let method = "events/listWorkspaceModelUsage";
+    let mut query =
+        json!({"workspaceId":workspace["id"],"through":through,"limit":1,"targetBytes":1024});
+    let page = peer.call(method, query.clone());
+    assert_eq!(
+        page,
+        json!({"events":[a],"hasMore":true,"nextAfter":a["sequence"]})
+    );
+    let d = submit(&mut peer, &first);
+    assert_eq!(peer.call(method, query.clone()), page);
+    peer.call(
+        "session/setArchived",
+        json!({"sessionId":second["id"],"archived":true}),
+    );
+    drop(peer);
+
+    // Recreate the v37-v39 index layout, leaving the durable events unchanged.
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch(
+            "BEGIN;
+             CREATE TABLE model_usage_index(
+                task_id TEXT NOT NULL REFERENCES tasks(id),
+                sequence INTEGER NOT NULL REFERENCES events(sequence),
+                PRIMARY KEY(task_id,sequence)
+             ) WITHOUT ROWID;
+             INSERT INTO model_usage_index SELECT task_id,sequence FROM model_usage;
+             DROP TABLE model_usage;
+             PRAGMA user_version=39;
+             COMMIT;",
+        )
+        .unwrap();
+    let mut peer = Peer::start(&db);
+    query["after"] = a["sequence"].clone();
+    assert_eq!(
+        peer.call(method, query),
+        json!({"events":[c],"hasMore":false,"nextAfter":c["sequence"]})
+    );
+    assert_eq!(
+        peer.call(method, json!({"workspaceId":workspace["id"]}))["events"],
+        json!([a, c, d])
+    );
+    assert_eq!(
+        peer.call(method, json!({"workspaceId":foreign["id"]}))["events"],
+        json!([b])
+    );
+    let session_method = "events/listSessionModelUsage";
+    assert_eq!(
+        peer.call(
+            session_method,
+            json!({"sessionId":first["id"],"through":through})
+        )["events"],
+        json!([a])
+    );
+    assert_eq!(
+        peer.call(session_method, json!({"sessionId":first["id"]}))["events"],
+        json!([a, d])
+    );
+    assert_eq!(
+        peer.call(session_method, json!({"sessionId":second["id"]}))["events"],
+        json!([c])
+    );
+    assert_eq!(
+        peer.request(session_method, json!({"sessionId":"missing"}))["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request(method, json!({"workspaceId":"missing"}))["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request(
+            method,
+            json!({"workspaceId":workspace["id"],"through":u64::MAX})
+        )["error"]["code"],
+        -32602
+    );
+    assert_eq!(
+        peer.request(
+            session_method,
+            json!({"sessionId":first["id"],"targetBytes":1023})
+        )["error"]["code"],
+        -32602
+    );
+    drop(peer);
+    let db_conn = rusqlite::Connection::open(&db).unwrap();
+    assert_eq!(
+        db_conn
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .unwrap(),
+        40
+    );
+    assert_eq!(
+        db_conn
+            .query_row("SELECT COUNT(*) FROM model_usage", [], |row| row
+                .get::<_, i64>(0))
+            .unwrap(),
+        4
+    );
+    assert_eq!(
+        db_conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_schema WHERE name='model_usage_index'",
+                [],
+                |row| row.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    drop(db_conn);
     fs::remove_dir_all(root).unwrap();
 }

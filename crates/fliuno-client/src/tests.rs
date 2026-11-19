@@ -404,3 +404,40 @@ fn history_search_resumes_an_empty_window_and_retries_the_same_cursor() {
     assert_eq!(sent[2]["params"], checkpoint["params"]);
     assert_eq!(sent[2]["params"], sent[3]["params"]);
 }
+
+#[test]
+fn model_usage_replay_rejects_unfiltered_events_before_advancing() {
+    let mut client = fake_client(concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"events\":[{\"sequence\":5,\"taskId\":\"t\",\"data\":{\"type\":\"model_started\",\"step\":1}}],\"nextAfter\":5,\"hasMore\":false}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"events\":[{\"sequence\":6,\"taskId\":\"t\",\"data\":{\"type\":\"model_usage_reported\",\"step\":1,\"usage\":{\"provider\":\"fixture\",\"inputTokens\":3,\"outputTokens\":2}}}],\"nextAfter\":6,\"hasMore\":false}}\n"
+    ).as_bytes());
+    let mut replay =
+        EventReplay::for_model_usage(ModelUsageScope::Workspace("workspace".into()), 4, 9).unwrap();
+    assert!(matches!(
+        replay.next_page(&mut client, 1, None, |_| {}),
+        Err(Error::InvalidReplayPage)
+    ));
+    assert_eq!(replay.cursor(), 4);
+    let page = replay
+        .next_page(&mut client, 1, None, |_| {})
+        .unwrap()
+        .unwrap();
+    assert_eq!(page[0].sequence, 6);
+    assert_eq!(replay.cursor(), 9);
+    assert!(
+        replay
+            .next_page(&mut client, 1, None, |_| {})
+            .unwrap()
+            .is_none()
+    );
+    let (_, written) = client.into_parts();
+    let calls: Vec<Value> = written
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[1]["method"], "events/listWorkspaceModelUsage");
+    assert_eq!(calls[2]["params"], calls[1]["params"]);
+    assert_eq!(calls[2]["params"]["through"], 9);
+}

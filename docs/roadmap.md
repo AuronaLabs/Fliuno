@@ -28,6 +28,8 @@
 
 - [x] `events/listModelUsage` 按任务直接读取模型用量，支持有界分页和持久回放游标。SQLite v37 为旧事件回填索引。
 
+- [x] `events/listSessionModelUsage` 与 `events/listWorkspaceModelUsage` 按范围直接读取用量。SQLite v40 迁移旧用量索引；Rust 客户端能按固定事件水位续读。
+
 ## 0.0.2
 
 - [x] Rust 客户端一次调用建立实时订阅和历史回放。服务端原子检查本地游标，在游标超出数据库水位时拒绝切换并保留原订阅。

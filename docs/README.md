@@ -20,6 +20,7 @@
 | --- | --- |
 | [应用协议 0.1](protocol.md) · [JSON Schema](../protocol/fliuno.schema.json) | 握手、任务、审批、事件和产物的接口定义 |
 | [Rust 客户端](protocol.md#rust-调用方) | 类型化调用、订阅与回放交接、分段下载和摘要校验 |
+| [模型用量](protocol.md#模型用量) | 按任务、会话或工作区分页读取供应商报告的 token 用量 |
 | [AG-UI](ag-ui.md) · [本机 HTTP 演示](../examples/ag_ui_http_demo.py) | 提交文本任务、审批后续跑、通过 SSE 断线续传 |
 | [会话历史与检索](context.md#会话历史分页) · [搜索接口](protocol.md#查找历史任务) | 用固定水位读取已完成对话，按文本定位历史任务 |
 
