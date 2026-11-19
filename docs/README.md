@@ -1,21 +1,37 @@
 <p align="center">
-  <img src="assets/fliuno-docs.svg" alt="Fliuno 文档：上手、应用接入与内核开发" width="960">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="assets/fliuno-docs-light.svg">
+    <img src="assets/fliuno-docs.svg" alt="Fliuno 文档：上手、应用接入与内核开发" width="960">
+  </picture>
 </p>
 
 # Fliuno 文档中心
 
-[项目首页](../README.md)　·　[更新记录](../CHANGELOG.md)　·　[开发路线图](roadmap.md)
+[项目首页](../README.md) · [更新记录](../CHANGELOG.md) · [开发路线图](roadmap.md)
 
 ## 从这里开始
 
-1. **先跑起来**<br>
-   [离线任务演示](../README.md#跑一次离线任务) → [准备环境](setup.md#快速开始) → [接入真实模型](setup.md#真实模型)
-2. **接入应用**<br>
-   [stdio 握手](protocol.md#传输) → [Rust 客户端](protocol.md#rust-调用方) 或 [AG-UI HTTP](ag-ui.md#http-接入)
-3. **修改内核**<br>
-   [模块与依赖](architecture.md#领域与依赖) → [持久授权](authority.md) → [本地验证](setup.md#检查与演示)
+### 01 · 跑一次任务
 
-[接入客户端](#接入客户端)　·　[模型、工具与 Agent](#模型工具与-agent)　·　[本机执行与隔离](#本机执行与隔离)　·　[内核与开发](#内核与开发)
+先用离线演示走完审批和交付，再按需切换到自己的模型。
+
+**[运行离线演示](../README.md#跑一次离线任务)** · [准备环境](setup.md#快速开始) · [配置模型](setup.md#真实模型)
+
+### 02 · 接入应用
+
+让自己的应用提交任务、显示审批，并在重连后接上进度。
+
+**[完成 stdio 握手](protocol.md#传输)** · [Rust 客户端](protocol.md#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
+
+### 03 · 开发内核
+
+看清模块分工和授权边界，再用本地测试和演示验证改动。
+
+**[阅读内核架构](architecture.md#领域与依赖)** · [持久授权](authority.md) · [本地验证](setup.md#检查与演示)
+
+---
+
+**按主题查阅：** [接入客户端](#接入客户端) · [模型、工具与 Agent](#模型工具与-agent) · [本机执行与隔离](#本机执行与隔离) · [内核与开发](#内核与开发)
 
 ## 接入客户端
 

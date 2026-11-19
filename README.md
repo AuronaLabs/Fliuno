@@ -1,14 +1,17 @@
 <p align="center">
-  <img src="docs/assets/fliuno-cover.svg" alt="Fliuno：从提交任务、人工审批到交付产物的 Rust Agent 内核" width="960">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-light.svg">
+    <img src="docs/assets/fliuno-cover.svg" alt="Fliuno：从提交任务、人工审批到交付产物的 Rust Agent 内核" width="960">
+  </picture>
 </p>
 
-# 面向工作任务的 Rust Agent 内核
+# Fliuno · 面向工作任务的 Rust Agent 内核
 
-把一项工作交给 Agent：宿主提交任务，Agent 推进，需要权限的操作等待人工审批，最终把交付物和执行记录保存在本机。Fliuno 提供这套流程的 Rust 内核、应用协议和客户端库。
+把一项工作交给 Agent。任务可以暂停等待人工审批，完成后在本机留下交付物和执行记录。Fliuno 为宿主应用提供内核、协议和客户端库。
 
-**[快速开始](#快速开始)**　·　**[文档中心](docs/README.md)**　·　[应用协议](docs/protocol.md)　·　[更新记录](CHANGELOG.md)
+**[快速开始](#快速开始)** · **[文档中心](docs/README.md)** · [应用协议](docs/protocol.md) · [更新记录](CHANGELOG.md)
 
-> **`0.0.3` 开发中** · [已发布 `0.0.2`](CHANGELOG.md#002) · 应用协议 `0.1` · Windows / Linux
+> **当前开发 `0.0.3`** · [已发布 `0.0.2`](CHANGELOG.md#002) · 应用协议 `0.1` · Windows / Linux
 
 ## 快速开始
 
@@ -27,7 +30,14 @@ Result: completed
 Artifacts: 1
 ```
 
-脚本在审批前确认没有交付物，允许一次后再确认产物已保存。运行 `python examples/demo.py --deny` 可试另一条路径：任务以 `failed` 结束，产物为 `0`。
+脚本先确认审批前没有交付物，再批准一次调用，最后验证产物已保存。
+
+<details>
+<summary>试试拒绝审批</summary>
+
+运行 `python examples/demo.py --deny`。任务以 `failed` 结束，产物为 `0`。
+
+</details>
 
 [环境与配置](docs/setup.md) · [示例源码](examples/demo.py)
 
@@ -66,7 +76,7 @@ flowchart LR
 | **搭建工作台** | [任务状态与待审批](docs/protocol.md#工作台实时订阅)、[会话历史](docs/context.md#会话历史分页)、[历史搜索](docs/protocol.md#查找历史任务)、[任务摘要刷新](docs/protocol.md#任务变动摘要) |
 | **连接模型、工具或 Agent** | [OpenAI、Anthropic、Gemini](docs/setup.md#真实模型)，以及 [MCP、ACP、A2A](docs/README.md#模型工具与-agent) |
 | **执行本机操作** | [宿主注册的命令与 PTY](docs/README.md#本机执行与隔离)，支持按平台配置隔离和资源预算 |
-| **读取交付物** | [分段下载和 SHA-256 校验](docs/protocol.md#审批事件与产物) |
+| **收取交付物** | [订阅目录](docs/protocol.md#交付物目录订阅) · [分段下载和 SHA-256 校验](docs/protocol.md#审批事件与产物) |
 
 ## 开发与验证
 
