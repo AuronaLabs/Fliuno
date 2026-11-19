@@ -21,7 +21,13 @@ from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill, 
 from rpc_client import LocalKernel, build_server
 
 
+OBSERVED_PROMPT = "quarter two with observer"
+
+
 class Reports(AgentExecutor):
+    def __init__(self):
+        self.release_answer = threading.Event()
+
     async def execute(self, context, queue):
         if context.current_task is None:
             await queue.enqueue_event(new_task_from_user_message(context.message))
@@ -31,6 +37,10 @@ class Reports(AgentExecutor):
         if prompt == "prepare a report":
             await updater.requires_input(updater.new_agent_message([Part(text="Which quarter?")]))
             return
+        if prompt == OBSERVED_PROMPT:
+            # Keep an actual SDK task queue active while Fliuno opens a second stream.
+            if not await asyncio.to_thread(self.release_answer.wait, 15):
+                raise TimeoutError("observer did not release the report")
         await updater.add_artifact(
             [Part(text=f"Report: {prompt}")], name="report.txt", last_chunk=True,
         )
@@ -50,7 +60,23 @@ def finished(kernel, task):
     raise TimeoutError(f"{task['id']} did not finish")
 
 
-def check_conversation(executable, root, base_url, streaming):
+def observe(kernel, task_id, wait_ms=None):
+    request = {"taskId": task_id}
+    if wait_ms is not None:
+        request["waitMs"] = wait_ms
+    check_id = kernel.call("task/checkRemote", request)["checkId"]
+    deadline = time.monotonic() + 6
+    while time.monotonic() < deadline:
+        events = kernel.call("events/list", {"taskId": task_id})["events"]
+        for event in events:
+            data = event["data"]
+            if data["type"] == "agent_remote_task_checked" and data["checkId"] == check_id:
+                return data["outcome"]
+        time.sleep(0.02)
+    raise TimeoutError(f"no evidence for remote check {check_id}")
+
+
+def check_conversation(executable, root, base_url, streaming, reports):
     config = root / "a2a.json"
     config.write_text(json.dumps({"agents": [{
         "id": "sdk", "endpoint": base_url + "/rpc",
@@ -61,6 +87,7 @@ def check_conversation(executable, root, base_url, streaming):
     with LocalKernel(executable, arguments, dict(os.environ, FLIUNO_PROVIDER="demo")) as kernel:
         init = kernel.call("initialize", {"protocolVersion": "0.1", "clientName": "official-a2a-sdk"})
         assert init["capabilities"]["remoteTaskContinuation"]
+        assert init["capabilities"]["remoteTaskWatch"] is streaming
         workspace = kernel.call("workspace/open", {"root": str(root)})
         session = kernel.call("session/create", {"workspaceId": workspace["id"]})
         source = finished(kernel, kernel.call("task/start", {
@@ -70,8 +97,23 @@ def check_conversation(executable, root, base_url, streaming):
         assert source["agentRun"]["stopReason"] == "input_required", source
         assert source["agentRun"]["outcomeUnknown"] is False, source
         first_remote = source["agentRun"]["remoteTask"]
-        request = {"taskId": source["id"], "input": "quarter two", "clientRequestId": "answer"}
-        answer = finished(kernel, kernel.call("task/continueRemote", request))
+        prompt = OBSERVED_PROMPT if streaming else "quarter two"
+        request = {"taskId": source["id"], "input": prompt, "clientRequestId": "answer"}
+        answer = kernel.call("task/continueRemote", request)
+        if streaming:
+            try:
+                working = {"status": "observed", "state": "working"}
+                deadline = time.monotonic() + 6
+                while observe(kernel, source["id"]) != working:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("SDK task never reached working")
+                    time.sleep(0.02)
+                assert observe(kernel, source["id"], wait_ms=3000) == working
+                assert kernel.call("task/get", {"taskId": source["id"]}) == source
+                assert kernel.call("artifacts/list", {"taskId": source["id"]}) == []
+            finally:
+                reports.release_answer.set()
+        answer = finished(kernel, answer)
         assert answer["status"] == "completed", answer
         assert answer["agentRun"]["remoteTask"]["id"] == first_remote["id"], answer
         assert kernel.call("task/continueRemote", request)["id"] == answer["id"]
@@ -82,12 +124,13 @@ def check_conversation(executable, root, base_url, streaming):
         next_remote = next_turn["agentRun"]["remoteTask"]
         assert next_remote["id"] != first_remote["id"], next_turn
         assert next_remote["contextId"] == first_remote["contextId"], next_turn
-        for turn, prompt in [(answer, "quarter two"), (next_turn, "quarter three")]:
+        for turn, report_prompt in [(answer, prompt), (next_turn, "quarter three")]:
             artifacts = kernel.call("artifacts/list", {"taskId": turn["id"]})
             assert len(artifacts) == 1, artifacts
-            assert json.loads(artifacts[0]["content"])["parts"][0]["text"] == f"Report: {prompt}"
+            assert json.loads(artifacts[0]["content"])["parts"][0]["text"] == f"Report: {report_prompt}"
         assert kernel.call("task/get", {"taskId": source["id"]}) == source
-    print(f"A2A SDK {version('a2a-sdk')} {'SSE' if streaming else 'JSON polling'}: pause, answer, follow-up, artifacts")
+    transport = "SSE with SubscribeToTask" if streaming else "JSON polling"
+    print(f"A2A SDK {version('a2a-sdk')} {transport}: pause, answer, follow-up, artifacts")
 
 
 def main():
@@ -104,7 +147,8 @@ def main():
                 protocol_binding="JSONRPC", protocol_version="1.0", url=base_url + "/rpc",
             )],
         )
-        handler = DefaultRequestHandler(Reports(), InMemoryTaskStore(), card)
+        reports = Reports()
+        handler = DefaultRequestHandler(reports, InMemoryTaskStore(), card)
         app = Starlette(routes=[*create_agent_card_routes(agent_card=card),
                                 *create_jsonrpc_routes(handler, "/rpc")])
         server = uvicorn.Server(uvicorn.Config(
@@ -133,7 +177,7 @@ def main():
             for streaming in [False, True]:
                 root = Path(temp) / ("sse" if streaming else "poll")
                 root.mkdir()
-                check_conversation(executable, root, base_url, streaming)
+                check_conversation(executable, root, base_url, streaming, reports)
         except BaseException as error:
             if not shutdown():
                 error.add_note("SDK server did not exit")

@@ -113,7 +113,7 @@ python examples/a2a_demo.py --streaming --cancel
 
 `Task.backendAuthority` 在创建时冻结全部 A2A 配置及实际 bearer token 的摘要。相同 Agent ID 更换端点、凭据、卡片地址或执行预算，重启后旧排队任务不能启动；幂等提交仍返回原任务，不刷新摘要。该检查不认证远端代码，也不允许重发结果未知的提交，详见[注册身份](authority.md)。
 
-这些是独立契约 fixture 与本机进程验收。官方 Python SDK `a2a-sdk==1.3.1` 已通过回环验收，覆盖 Agent Card、JSON 轮询和 SSE 的暂停、补答、同一上下文的新任务、幂等与产物入库。真实外部 Agent 验收仍待执行。
+这些是独立契约 fixture 与本机进程验收。官方 Python SDK `a2a-sdk==1.3.1` 已通过回环验收，覆盖 Agent Card、JSON 轮询和 SSE 的暂停、补答、同一上下文的新任务、幂等与产物入库。SSE 用例在补答任务的队列仍活动时调用 `SubscribeToTask`，取得同一远端任务的 `working` 快照，并检查原本机运行和产物。该 SDK 的默认处理器要求活动队列，已结束的远端任务可用不带 `waitMs` 的 `task/checkRemote` 查询。真实外部 Agent 验收仍待执行。
 
 A2A 1.0 规定 `SendStreamingMessage` 以 `Task` 或 `Message` 开始。Python SDK 对已有任务补答时可能直接发 `statusUpdate`。Fliuno 仅在 `GetTask` 已核对暂停状态、请求显式携带 `taskId` 和 `contextId`、且首帧两项身份均匹配时兼容这一行为。未收到合法首帧时保留提交结果未知，也不会根据预检取得的旧状态写入本轮身份或产物。新任务和同一上下文的新一轮仍要求标准首帧。
 
