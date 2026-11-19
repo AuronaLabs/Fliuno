@@ -95,13 +95,15 @@ fn interrupted_reads_retry_but_other_errors_discard_the_snapshot() {
 struct Directory(std::path::PathBuf);
 impl Directory {
     fn new() -> Self {
+        static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
         let root = std::env::temp_dir().join(format!(
-            "fliuno-file-read-{}-{}",
+            "fliuno-file-read-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed),
         ));
         std::fs::create_dir(&root).unwrap();
         Self(root)
