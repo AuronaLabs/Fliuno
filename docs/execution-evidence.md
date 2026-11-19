@@ -259,3 +259,5 @@ Windows 和 Debian 通过真实 app-server 进程用例，按 ID 读取事件，
 ## 产物正文摘要（2026-11-19）
 
 Windows 和 Debian 各通过两项产物进程测试。已知摘要用例包含 108,000 个字节，覆盖多字节 UTF-8、NUL、换行和跨读取缓冲区边界。v20 正文迁移前后摘要一致。旧版空正文返回标准空 SHA-256 值，跨任务读取返回未找到。Debian 记录在 `D:/Fliuno-Native-Test/guest-artifact-digest.log`。
+
+Windows 全量 scripts/check.ps1 退出码为 0，包含 400 项测试、Schema 校验和 26 个离线演示。日志为 target/0.0.2-artifact-digest-windows.log。Windows 的大小边界探针确认 8 MiB 正文可读取摘要，超出 1 字节返回预算错误。
