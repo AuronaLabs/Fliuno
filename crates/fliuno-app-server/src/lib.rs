@@ -339,6 +339,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["sessionHistorySearch"] = json!(true);
+            capabilities["contextMatchRecent"] = json!(true);
             capabilities["artifactMediaTypeFilter"] = json!(true);
             capabilities["remoteTaskWatch"] = json!(self.kernel()?.remote_task_watch_supported());
             capabilities["remoteTaskCheckLookup"] = json!(true);

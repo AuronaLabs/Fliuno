@@ -171,6 +171,99 @@ fn fit_recent_skips_large_turns_and_keeps_the_selection_across_restart() {
 }
 
 #[test]
+fn match_recent_freezes_only_matching_history_with_a_role_and_byte_budget() {
+    let root = std::env::temp_dir().join(format!("fliuno-match-context-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let small = approve_report(&mut peer, &session, "Orion report", "matching");
+    approve_report(&mut peer, &session, "unrelated report", "unrelated");
+    approve_report(
+        &mut peer,
+        &session,
+        &format!("Orion {}", "long ".repeat(900)),
+        "oversized",
+    );
+    let other = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    approve_report(&mut peer, &other, "Orion other session", "outside");
+
+    let options = json!({"selection":"match_recent","historyQuery":{"query":"  ORION ","role":"user"},"maxBytes":2048});
+    let preview = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"options":options}),
+    );
+    assert_eq!(preview["options"]["historyQuery"]["query"], "ORION");
+    assert_eq!(preview["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(preview["turns"][0]["taskId"], small["id"]);
+    assert!(
+        preview["turns"][0]["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|message| message["role"] == "tool_result")
+    );
+    assert_eq!(preview["omittedTurns"], 2);
+    assert!(serde_json::to_vec(&preview).unwrap().len() <= 2048);
+
+    let mut assistant = options.clone();
+    assistant["historyQuery"]["role"] = json!("assistant");
+    assert_eq!(
+        peer.call(
+            "session/context",
+            json!({"sessionId":session["id"],"options":assistant})
+        )["turns"],
+        json!([])
+    );
+    let mut compact = options.clone();
+    compact["detail"] = json!("conversation");
+    let compact_preview = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"options":compact}),
+    );
+    assert_eq!(compact_preview["turns"][0]["taskId"], small["id"]);
+    assert_eq!(
+        compact_preview["turns"][0]["messages"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let mut request = json!({"sessionId":session["id"],"input":"follow up","clientRequestId":"match","context":options});
+    let follow = peer.call("task/start", request.clone());
+    assert_eq!(follow["context"], preview);
+    peer.wait_for_status(follow["id"].as_str().unwrap(), "waiting_approval");
+    let later = approve_report(&mut peer, &session, "Orion later", "later");
+    let current = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"options":options}),
+    );
+    assert!(
+        current["turns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|turn| turn["taskId"] == later["id"])
+    );
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    request["context"]["historyQuery"]["query"] = json!("ORION");
+    let retry = peer.call("task/start", request.clone());
+    assert_eq!(retry["id"], follow["id"]);
+    assert_eq!(retry["context"], preview);
+    request["context"]["historyQuery"]["query"] = json!("other topic");
+    assert_eq!(peer.request("task/start", request)["error"]["code"], -32009);
+    drop(peer);
+    for entry in fs::read_dir(&root).unwrap() {
+        fs::remove_file(entry.unwrap().path()).unwrap();
+    }
+    fs::remove_dir(root).unwrap();
+}
+
+#[test]
 fn conversation_history_fits_larger_tool_turns_and_backfills_without_rewriting_tasks() {
     let root = std::env::temp_dir()
         .canonicalize()

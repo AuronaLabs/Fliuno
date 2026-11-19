@@ -275,6 +275,17 @@
               "items": {
                 "type": "string"
               }
+            },
+            "historyQuery": {
+              "description": "Required in match_recent mode; searches only user and assistant text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextHistoryQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false
@@ -287,10 +298,19 @@
           ]
         },
         "ContextSelection": {
-          "type": "string",
-          "enum": [
-            "recent",
-            "fit_recent"
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "recent",
+                "fit_recent"
+              ]
+            },
+            {
+              "description": "Fit recent records whose conversation matches an explicit query.",
+              "type": "string",
+              "const": "match_recent"
+            }
           ]
         },
         "ContextDetail": {
@@ -307,6 +327,35 @@
               "type": "string",
               "const": "conversation"
             }
+          ]
+        },
+        "ContextHistoryQuery": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionHistoryRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
           ]
         }
       }
@@ -690,6 +739,17 @@
               "items": {
                 "type": "string"
               }
+            },
+            "historyQuery": {
+              "description": "Required in match_recent mode; searches only user and assistant text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextHistoryQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false
@@ -702,10 +762,19 @@
           ]
         },
         "ContextSelection": {
-          "type": "string",
-          "enum": [
-            "recent",
-            "fit_recent"
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "recent",
+                "fit_recent"
+              ]
+            },
+            {
+              "description": "Fit recent records whose conversation matches an explicit query.",
+              "type": "string",
+              "const": "match_recent"
+            }
           ]
         },
         "ContextDetail": {
@@ -722,6 +791,35 @@
               "type": "string",
               "const": "conversation"
             }
+          ]
+        },
+        "ContextHistoryQuery": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionHistoryRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
           ]
         }
       }
@@ -1967,6 +2065,17 @@
               "items": {
                 "type": "string"
               }
+            },
+            "historyQuery": {
+              "description": "Required in match_recent mode; searches only user and assistant text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextHistoryQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false
@@ -1979,10 +2088,19 @@
           ]
         },
         "ContextSelection": {
-          "type": "string",
-          "enum": [
-            "recent",
-            "fit_recent"
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "recent",
+                "fit_recent"
+              ]
+            },
+            {
+              "description": "Fit recent records whose conversation matches an explicit query.",
+              "type": "string",
+              "const": "match_recent"
+            }
           ]
         },
         "ContextDetail": {
@@ -1999,6 +2117,35 @@
               "type": "string",
               "const": "conversation"
             }
+          ]
+        },
+        "ContextHistoryQuery": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionHistoryRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
           ]
         },
         "ContextTurn": {
@@ -2768,6 +2915,17 @@
               "items": {
                 "type": "string"
               }
+            },
+            "historyQuery": {
+              "description": "Required in match_recent mode; searches only user and assistant text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextHistoryQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false
@@ -2780,10 +2938,19 @@
           ]
         },
         "ContextSelection": {
-          "type": "string",
-          "enum": [
-            "recent",
-            "fit_recent"
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "recent",
+                "fit_recent"
+              ]
+            },
+            {
+              "description": "Fit recent records whose conversation matches an explicit query.",
+              "type": "string",
+              "const": "match_recent"
+            }
           ]
         },
         "ContextDetail": {
@@ -2800,6 +2967,35 @@
               "type": "string",
               "const": "conversation"
             }
+          ]
+        },
+        "ContextHistoryQuery": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionHistoryRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
           ]
         },
         "ContextTurn": {

@@ -59,6 +59,18 @@
 
 该策略仅用于 `mode=session` 且未指定 `taskIds` 的任务。默认策略 `recent` 保留完整的近期连续后缀。任务创建时冻结所用策略及结果。SQLite v13 支持读取带新策略的快照，升级仅更新数据库版本号。
 
+### 按关键词选择近期历史
+
+`contextMatchRecent:true` 表示客户端可以在预览的 `options` 或任务的 `context` 中传入：
+
+```json
+{"selection":"match_recent","historyQuery":{"query":"项目代号","role":"user"},"detail":"conversation","maxTurns":8,"maxBytes":32768}
+```
+
+查询去掉首尾空白后须为 1 至 256 个 UTF-8 字节。匹配使用与 `session/searchHistory` 相同的 Unicode 小写字面子串规则；省略 `role` 时同时查用户和助手文本。每次最多从新到旧检查 128 条，只扫描不超过 128 KiB 的精简投影。命中的完整记录能放入剩余预算才会入选，最终按完成顺序返回。工具和产物内容不能触发命中，`detail` 仍决定入选记录包含哪些字段。
+
+仅限 `mode=session`，不能与 `taskIds` 并用。`omittedTurns` 包含未命中、超预算或扫描范围之外的已完成记录。预览和任务创建采用相同规则，快照冻结时保存去掉首尾空白的查询；相同请求键重试沿用原快照。SQLite v30 为新快照格式标记版本，不改写原有记录。
+
 ### 精简对话记录
 
 `contextConversationDetail:true` 表示 `session/context.options` 和 `task/start.context` 支持 `"detail":"conversation"`。该选项保留用户和助手文本、完成序号、来源后端与产物引用，省略工具调用参数、工具结果和 ACP 宿主操作明细。内核先选择记录格式，再按 `maxBytes` 计算预算。`maxTurns`、`taskIds` 和 `selection` 的规则同样适用。省略 `detail` 即使用默认的 `full`。精简格式仅适用于 `mode=session`。

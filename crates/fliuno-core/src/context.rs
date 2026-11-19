@@ -41,6 +41,19 @@ pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
             "context fit_recent requires session mode without taskIds".into(),
         ));
     }
+    match (&options.history_query, options.selection) {
+        (Some(history), ContextSelection::MatchRecent)
+            if options.mode == ContextMode::Session && options.task_ids.is_none() =>
+        {
+            search::validate_query(&history.query)?;
+        }
+        (None, ContextSelection::MatchRecent) | (Some(_), _) => {
+            return Err(Error::Invalid(
+                "context historyQuery requires match_recent in session mode without taskIds".into(),
+            ));
+        }
+        (None, _) => {}
+    }
     Ok(())
 }
 
@@ -48,6 +61,12 @@ pub(crate) fn normalize_options(mut options: ContextOptions) -> Result<ContextOp
     validate_options(&options)?;
     if let Some(ids) = &mut options.task_ids {
         ids.sort_unstable();
+    }
+    if let Some(history) = &mut options.history_query {
+        let trimmed = history.query.trim();
+        if trimmed.len() != history.query.len() {
+            history.query = trimmed.to_owned();
+        }
     }
     Ok(options)
 }
@@ -104,20 +123,47 @@ impl Kernel {
         let limit = snapshot.options.max_bytes as usize;
         let selection = snapshot.options.selection;
         let max_turns = snapshot.options.max_turns as usize;
-        self.visit_context_candidates(session, through_sequence, &snapshot.options, |turn| {
+        if envelope + omitted.max(1).ilog10() as usize > limit {
+            return Err(Error::Invalid("context options exceed maxBytes".into()));
+        }
+        let mut admit = |turn: Option<ContextTurn>| {
             let Some(turn) = turn else {
-                return Ok(selection == ContextSelection::FitRecent);
+                return Ok(selection != ContextSelection::Recent);
             };
             let next_bytes = array_bytes + json_size(&turn)? + usize::from(array_bytes > 0);
             let remaining = omitted - 1;
             if envelope + next_bytes + remaining.max(1).ilog10() as usize > limit {
-                return Ok(selection == ContextSelection::FitRecent);
+                return Ok(selection != ContextSelection::Recent);
             }
             array_bytes = next_bytes;
             omitted = remaining;
             snapshot.turns.push(turn);
             Ok(snapshot.turns.len() < max_turns)
-        })?;
+        };
+        if let Some(history) = &snapshot.options.history_query {
+            let query = history.query.to_lowercase();
+            self.scan_conversation(
+                session,
+                through_sequence,
+                |sequence, turn, has_compact_projection| {
+                    let Some(turn) = turn
+                        .filter(|turn| search::matches_query(&turn.messages, &query, history.role))
+                    else {
+                        return Ok(true);
+                    };
+                    let candidate = if snapshot.options.detail == ContextDetail::Full
+                        && has_compact_projection
+                    {
+                        self.full_context_candidate(session, sequence, limit as u32)?
+                    } else {
+                        Some(turn)
+                    };
+                    admit(candidate)
+                },
+            )?;
+        } else {
+            self.visit_context_candidates(session, through_sequence, &snapshot.options, admit)?;
+        }
         snapshot.turns.reverse();
         snapshot.omitted_turns = omitted;
         Ok(snapshot)

@@ -19,6 +19,8 @@ pub enum ContextSelection {
     #[default]
     Recent,
     FitRecent,
+    /// Fit recent records whose conversation matches an explicit query.
+    MatchRecent,
 }
 
 impl ContextSelection {
@@ -62,6 +64,17 @@ pub struct ContextOptions {
     /// their completion sequence. Selected records are never silently omitted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task_ids: Option<Vec<String>>,
+    /// Required in match_recent mode; searches only user and assistant text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_query: Option<ContextHistoryQuery>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextHistoryQuery {
+    pub query: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<SessionHistoryRole>,
 }
 
 fn default_turns() -> u32 {
@@ -80,6 +93,7 @@ impl Default for ContextOptions {
             selection: ContextSelection::Recent,
             detail: ContextDetail::Full,
             task_ids: None,
+            history_query: None,
         }
     }
 }

@@ -119,13 +119,17 @@ impl Kernel {
         &self,
         session: &str,
         upper: u64,
-        mut visit: impl FnMut(u64, Option<ContextTurn>) -> bool,
+        mut visit: impl FnMut(u64, Option<ContextTurn>, bool) -> Result<bool>,
     ) -> Result<Option<u64>> {
         use crate::context::search::{MAX_SEARCH_TURN_BYTES, MAX_SEARCH_TURNS};
 
         let sql = format!(
             "{} WHERE s.session_id=?1 AND s.sequence<=?2 ORDER BY s.sequence DESC LIMIT ?4",
-            projection(ContextDetail::Conversation, "?3", ", s.sequence")
+            projection(
+                ContextDetail::Conversation,
+                "?3",
+                ", s.sequence, c.task_id IS NOT NULL"
+            )
         );
         let mut statement = self.db.prepare_cached(&sql)?;
         let mut rows = statement.query(params![
@@ -140,13 +144,34 @@ impl Kernel {
             };
             let sequence = row.get::<_, i64>(1)? as u64;
             let data: Option<String> = row.get(0)?;
+            let has_compact_projection: bool = row.get(2)?;
             let turn = data.as_deref().map(serde_json::from_str).transpose()?;
-            if !visit(sequence, turn) || index + 1 == MAX_SEARCH_TURNS {
+            if !visit(sequence, turn, has_compact_projection)? || index + 1 == MAX_SEARCH_TURNS {
                 // Peek without decoding another turn to distinguish a full page from exhaustion.
                 return Ok(rows.next()?.is_some().then_some(sequence));
             }
         }
         Ok(None)
+    }
+
+    /// Only matched conversation records may load the full tool history.
+    pub(crate) fn full_context_candidate(
+        &self,
+        session: &str,
+        sequence: u64,
+        max_bytes: u32,
+    ) -> Result<Option<ContextTurn>> {
+        let data: Option<String> = self
+            .db
+            .prepare_cached(
+                "SELECT CASE WHEN octet_length(data)<=?3 THEN data END
+             FROM session_turns WHERE session_id=?1 AND sequence=?2",
+            )?
+            .query_row(
+                params![session, validate_event_cursor(sequence)?, max_bytes],
+                |row| row.get(0),
+            )?;
+        Ok(data.as_deref().map(serde_json::from_str).transpose()?)
     }
 
     /// Read only selected projections. A foreign, unfinished or absent ID has
@@ -225,6 +250,11 @@ impl Kernel {
         let candidates = match options.selection {
             ContextSelection::Recent => options.max_turns,
             ContextSelection::FitRecent => crate::MAX_CONTEXT_CANDIDATES,
+            ContextSelection::MatchRecent => {
+                return Err(Error::Invalid(
+                    "history matching requires the conversation scan".into(),
+                ));
+            }
         };
         let sql = format!(
             "{} WHERE s.session_id=?1 AND s.sequence<=?2 ORDER BY s.sequence DESC LIMIT ?4",

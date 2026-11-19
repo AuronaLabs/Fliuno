@@ -290,6 +290,12 @@ MCP 客户端声明 `io.modelcontextprotocol/tasks`。现代对端声明该扩�
 
 Windows `scripts/check.ps1` 退出码为 0：421 项 workspace 测试、26 个离线演示、rustfmt、两组严格 Clippy 与生成的 RPC Schema 均通过。此轮未在 Debian Linux 来宾或外部 Agent 服务上复验。
 
+## 关键词筛选近期上下文（2026-11-19）
+
+`match_recent` 复用历史搜索的字面匹配和有界扫描。同一会话的匹配记录按现有字节预算入选；扫描使用精简投影，只在命中且需要完整明细时加载完整版。进程测试覆盖角色筛选、跳过超预算记录、会话边界、预览与实际捕获一致、重启后相同幂等键返回原始快照；内核测试覆盖 128 条扫描上限与非法选项。
+
+Windows `scripts/check.ps1` 退出码为 0：423 项 workspace 测试、26 个离线演示、rustfmt、两组严格 Clippy 与生成的 RPC Schema 均通过。此轮未在 Debian Linux 来宾复验。
+
 ## Gemini Interactions 与 MCP 只读失败（2026-11-19）
 
 Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。

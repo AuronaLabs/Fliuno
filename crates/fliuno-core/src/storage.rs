@@ -14,7 +14,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 29;
+pub(crate) const SCHEMA_VERSION: u32 = 30;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -238,6 +238,10 @@ impl Kernel {
         }
         if version < 29 {
             remote_checks::migrate(&mut db)?;
+        }
+        if version < 30 {
+            // Older readers cannot decode match_recent in frozen task snapshots.
+            db.pragma_update(None, "user_version", 30)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
