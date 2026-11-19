@@ -19,6 +19,8 @@ mod a2a;
 mod approvals;
 #[path = "process/artifacts.rs"]
 mod artifacts;
+#[path = "process/client.rs"]
+mod client;
 #[path = "process/context.rs"]
 mod context;
 #[path = "process/event_stream.rs"]

@@ -16,6 +16,8 @@ use serde_json::Value;
 pub use terminal::*;
 
 pub const PROTOCOL_VERSION: &str = "0.1";
+/// Includes the line delimiter on the application stdio transport.
+pub const MAX_APP_REQUEST_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

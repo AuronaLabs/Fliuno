@@ -2,7 +2,7 @@
 mod configuration;
 use fliuno_app_server::RpcServer;
 use fliuno_core::Kernel;
-use fliuno_protocol::{Event, ModelProgress};
+use fliuno_protocol::{Event, MAX_APP_REQUEST_BYTES, ModelProgress};
 use serde::Serialize;
 use serde_json::json;
 use std::{
@@ -10,8 +10,6 @@ use std::{
     path::PathBuf,
     thread,
 };
-
-const MAX_FRAME_BYTES: usize = 1024 * 1024;
 
 fn main() {
     if std::env::args().nth(1).as_deref() == Some("--terminal-worker") {
@@ -232,7 +230,7 @@ fn read_input_frames(sender: crossbeam_channel::Sender<InputFrame>) {
                 .iter()
                 .position(|byte| *byte == b'\n')
                 .map_or(available.len(), |position| position + 1);
-            if frame.len() + count > MAX_FRAME_BYTES {
+            if frame.len() + count > MAX_APP_REQUEST_BYTES {
                 let _ = sender.send(InputFrame::TooLarge);
                 return;
             }

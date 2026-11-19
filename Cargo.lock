@@ -819,6 +819,7 @@ dependencies = [
  "crossbeam-channel",
  "fliuno-acp",
  "fliuno-agents",
+ "fliuno-client",
  "fliuno-core",
  "fliuno-exec",
  "fliuno-mcp",
@@ -833,6 +834,16 @@ dependencies = [
  "serde_json",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "fliuno-client"
+version = "0.0.2"
+dependencies = [
+ "fliuno-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

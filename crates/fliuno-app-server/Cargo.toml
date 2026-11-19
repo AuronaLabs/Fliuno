@@ -44,4 +44,5 @@ workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true
+fliuno-client = { path = "../fliuno-client" }
 fliuno-sandbox = { path = "../fliuno-sandbox" }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/fliuno-protocol", "crates/fliuno-core", "crates/fliuno-providers", "crates/fliuno-mcp", "crates/fliuno-tools", "crates/fliuno-skills", "crates/fliuno-app-server", "crates/fliuno-sandbox", "crates/fliuno-acp", "crates/fliuno-agents", "crates/fliuno-exec", "crates/fliuno-terminal", "crates/fliuno-a2a"]
+members = ["crates/fliuno-protocol", "crates/fliuno-core", "crates/fliuno-providers", "crates/fliuno-mcp", "crates/fliuno-tools", "crates/fliuno-skills", "crates/fliuno-app-server", "crates/fliuno-sandbox", "crates/fliuno-acp", "crates/fliuno-agents", "crates/fliuno-exec", "crates/fliuno-terminal", "crates/fliuno-a2a", "crates/fliuno-client"]
 resolver = "3"
 
 [workspace.package]

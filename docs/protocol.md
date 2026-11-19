@@ -10,6 +10,22 @@
 
 宿主命令行指定的 MCP/ACP/A2A/exec/terminal JSON 各最多 1 MiB，全部先经过有界读取与反序列化，再打开数据库和注册适配器。加载诊断只返回种类和 JSON 行列位置，不回显配置内容；语义校验仍由各适配器负责，见[启动配置边界](host-configuration.md)。
 
+## Rust 调用方
+
+`fliuno-client::Client` 接收调用方持有的 stdio 读写端，建立连接时执行 `initialize` 并校验协议版本。`info()` 返回服务版本和能力。`call()` 可直接使用 `fliuno-protocol` 的参数和结果类型。每条连接一次等待一个请求，期间到达的通知通过回调交给调用方，空闲时可用 `read_notification()` 阻塞读取一条通知。
+
+```rust
+use fliuno_client::Client;
+use fliuno_protocol::{Event, EventGetParams};
+
+let mut client = Client::connect(reader, writer, "workspace-client", |_| {})?;
+let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |notice| {
+    handle_notification(notice);
+})?;
+```
+
+请求与服务端共用 1 MiB 帧上限，客户端响应帧上限为 16 MiB，均包含换行。合法的 RPC 错误保留连接。读写失败、响应 ID 错位或无效帧会关闭客户端对该连接的使用权限。调用方管理子进程和阻塞 I/O 的生命周期。正常退出时可用 `into_parts()` 取回管道，关闭写端并把读端读到 EOF，再等待进程退出。重连后可用审批决定查询和事件游标核对状态。
+
 ## 方法
 
 | 方法 | params | result |

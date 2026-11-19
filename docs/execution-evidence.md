@@ -379,3 +379,9 @@ Windows 通过 433 项测试、26 个离线演示、rustfmt、两组严格 Clipp
 Windows 内存 SQLite 3.49.1 在 100,000 条模拟任务上使用既有工作区索引倒扫，带状态筛选时使用工作区与状态复合索引。两者都无临时排序。取 51 行含翻页探针的 61 轮查询中位数分别为 0.0588 ms（筛选）和 0.0797 ms（不筛选）。此测量只计 SQL 查询和取行。日志为 `target/0.0.2-newest-task-summaries-query.log`。
 
 Windows 通过 434 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema。Debian Linux 6.12.107 来宾通过 4 项任务摘要及完整任务分页进程测试。日志为 `target/0.0.2-newest-task-summaries-windows.log` 和 `D:/Fliuno-Native-Test/guest-newest-task-summaries.log`。
+
+## Rust stdio 客户端（2026-11-19）
+
+新 crate 通过真实 app-server 验证握手、能力发现、合法 RPC 错误后的继续调用、任务通知和已提交审批决定。定向单元测试覆盖请求超限时不写入也不消耗 ID、响应 ID 错位时停用连接和响应超限。Debian 首跑发现关闭两个管道可能撞上仍在发送的通知。修正测试为先关闭写端，再读到 EOF，随后 Debian Linux 6.12.107 进程测试通过，Windows 同一关闭流程也通过。
+
+Windows 全量检查通过 438 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema。关闭流程修正后，app-server 和客户端的严格 Clippy 与真实进程复验通过。日志分别为 `target/0.0.2-rust-client-windows.log`、`target/0.0.2-rust-client-final-windows.log` 和 `D:/Fliuno-Native-Test/guest-rust-client-final.log`。
