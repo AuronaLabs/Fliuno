@@ -198,6 +198,20 @@ impl Kernel {
         Ok(())
     }
 
+    /// Project the registered adapter's own capabilities without connecting to it.
+    pub fn agent_capabilities(&self, agent_id: &str) -> Result<AgentCapabilities> {
+        let backend = self
+            .agents
+            .get(agent_id)
+            .ok_or_else(|| Error::NotFound("agent".into()))?;
+        Ok(AgentCapabilities {
+            remote_task_checks: backend.supports_remote_task_check(),
+            remote_task_watch: backend.supports_remote_task_watch(),
+            remote_task_continuation: backend.supports_remote_continuation(),
+            agent_session_continuation: backend.supports_agent_session_continuation(),
+        })
+    }
+
     pub fn agent_specs(&self) -> Vec<AgentSpec> {
         self.agents.values().map(|a| a.spec()).collect()
     }

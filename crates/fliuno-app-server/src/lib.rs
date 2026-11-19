@@ -335,6 +335,7 @@ impl RpcServer {
             capabilities["sessionHistorySearch"] = json!(true);
             capabilities["artifactMediaTypeFilter"] = json!(true);
             capabilities["remoteTaskWatch"] = json!(self.kernel()?.remote_task_watch_supported());
+            capabilities["agentCapabilitiesById"] = json!(true);
             capabilities["workspaceEventReplay"] = json!(true);
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);
@@ -770,6 +771,10 @@ impl RpcServer {
             "artifacts/get" => {
                 let p: ArtifactGetParams = decode(params)?;
                 json!(self.kernel()?.get_artifact(&p.task_id, &p.artifact_id)?)
+            }
+            "agents/getCapabilities" => {
+                let p: AgentIdParams = decode(params)?;
+                json!(self.kernel()?.agent_capabilities(&p.agent_id)?)
             }
             "agents/list" => {
                 if params != json!({}) {

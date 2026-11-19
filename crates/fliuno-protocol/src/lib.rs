@@ -104,6 +104,23 @@ pub struct AgentSpec {
     pub workspace_access: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentIdParams {
+    pub agent_id: String,
+}
+
+/// Locally available operations for one configured backend. A particular task
+/// and peer still have to meet the operation's protocol preconditions.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentCapabilities {
+    pub remote_task_checks: bool,
+    pub remote_task_watch: bool,
+    pub remote_task_continuation: bool,
+    pub agent_session_continuation: bool,
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentApprovalSource {

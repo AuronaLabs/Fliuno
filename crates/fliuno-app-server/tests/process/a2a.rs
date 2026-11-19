@@ -295,6 +295,10 @@ fn remote_watch_after_restart_records_only_changed_status_without_resubmitting()
     let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
     let session = directory.session(&mut peer);
     let submission = start(&mut peer, &session, "watch-after-restart");
+    assert_eq!(
+        peer.call("agents/getCapabilities", json!({"agentId":"remote"}))["remoteTaskWatch"],
+        true
+    );
     let id = &submission["id"];
     let before = wait_finished(&mut peer, id);
     assert_eq!(before["status"], "interrupted");
@@ -428,6 +432,16 @@ fn task_polling_artifact_parts_history_idempotency_and_restart_are_durable() {
     assert_eq!(specs[0]["protocol"], "a2a_v1_jsonrpc");
     assert_eq!(specs[0]["isolation"], "remote");
     assert_eq!(specs[0]["workspaceAccess"], false);
+    assert_eq!(
+        peer.call("agents/getCapabilities", json!({"agentId":"remote"})),
+        json!({"remoteTaskChecks":true,"remoteTaskWatch":false,
+            "remoteTaskContinuation":true,"agentSessionContinuation":false})
+    );
+    assert_eq!(
+        peer.request("agents/getCapabilities", json!({"agentId":"absent"}))["error"]["code"],
+        -32004
+    );
+    assert!(wire.requests().is_empty());
     let session = directory.session(&mut peer);
     let first = start(&mut peer, &session, "one");
     let completed = peer.wait_for_status(first["id"].as_str().unwrap(), "completed");

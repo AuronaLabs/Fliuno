@@ -36,6 +36,11 @@ fn resuming_a_session_after_restart_never_replays_an_uncertain_turn() {
     let source = peer.wait(&source["id"], |task| task["status"] == "completed");
     let agent_session = source["agentRun"]["sessionId"].as_str().unwrap();
     let state_file = cwd.join(format!("fixture-{agent_session}.json"));
+    assert_eq!(
+        peer.call("agents/getCapabilities", json!({"agentId":"fixture"})),
+        json!({"remoteTaskChecks":false,"remoteTaskWatch":false,
+            "remoteTaskContinuation":false,"agentSessionContinuation":true})
+    );
     drop(peer);
 
     let mut peer = Peer::start(&directory);

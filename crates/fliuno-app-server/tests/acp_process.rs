@@ -193,6 +193,11 @@ fn durable_agent_approval_stream_and_completion_survive_reopen() {
     let agents = peer.call("agents/list", json!({}));
     assert_eq!(agents[0]["id"], "fixture");
     assert!(agents[0].get("command").is_none());
+    assert_eq!(
+        peer.call("agents/getCapabilities", json!({"agentId":"fixture"})),
+        json!({"remoteTaskChecks":false,"remoteTaskWatch":false,
+            "remoteTaskContinuation":false,"agentSessionContinuation":false})
+    );
     let session = peer.session(&directory);
     let task = peer.start_task(&session, "permission", "once");
     let waiting = peer.wait(&task["id"], |t| t["status"] == "waiting_approval");

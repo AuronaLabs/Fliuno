@@ -237,3 +237,7 @@ Windows 的全量 `scripts/check.ps1` 通过 397 项测试和 26 个离线演示
 ## SQLite 读取语句复用（2026-11-19）
 
 工作区、会话和任务的存在性检查、事件水位和会话读取使用 SQLite 连接已有的语句缓存。会话 JSON 从查询行借用，省去解析前的一次字符串复制。Windows 内存 SQLite 微基准将会话存在性检查、水位查询和会话内容读取作为一组，交替执行 11 组，每组 2 万轮。中位耗时从 30.23 µs 降至 10.94 µs，覆盖 SQLite 调用和行访问，不包括 JSON 解析或 RPC。基准记录为 `target/0.0.2-read-statement-bench.log`。`fliuno-core` 的 Clippy 和全部 73 项测试通过。
+
+## Agent 注册能力查询（2026-11-19）
+
+Windows 和 Debian 各通过 4 项实际进程用例。覆盖轮询 A2A、流式 A2A、隔离 ACP 和支持跨重启续接的可信 ACP。A2A 测试验证查询没有向对端发送请求，未知 Agent 返回 `-32004`。Debian 记录为 `D:/Fliuno-Native-Test/guest-agent-capabilities.log`。

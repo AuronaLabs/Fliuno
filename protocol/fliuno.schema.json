@@ -1470,6 +1470,20 @@
       "type": "object",
       "properties": {},
       "additionalProperties": false
+    },
+    "agents/getCapabilities": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentIdParams",
+      "type": "object",
+      "properties": {
+        "agentId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "agentId"
+      ]
     }
   },
   "types": {
@@ -2984,6 +2998,33 @@
         "id",
         "protocol",
         "isolation"
+      ]
+    },
+    "AgentCapabilities": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentCapabilities",
+      "description": "Locally available operations for one configured backend. A particular task\nand peer still have to meet the operation's protocol preconditions.",
+      "type": "object",
+      "properties": {
+        "remoteTaskChecks": {
+          "type": "boolean"
+        },
+        "remoteTaskWatch": {
+          "type": "boolean"
+        },
+        "remoteTaskContinuation": {
+          "type": "boolean"
+        },
+        "agentSessionContinuation": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "remoteTaskChecks",
+        "remoteTaskWatch",
+        "remoteTaskContinuation",
+        "agentSessionContinuation"
       ]
     },
     "RemoteTaskCheckAccepted": {

@@ -63,7 +63,8 @@ pub fn schema_bundle() -> Value {
         "artifacts/getSummary" => schema::<ArtifactGetParams>(),
         "artifacts/read" => schema::<ArtifactReadParams>(),
         "tools/list" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
-        "agents/list" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false})
+        "agents/list" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
+        "agents/getCapabilities" => schema::<AgentIdParams>()
     };
     let types = schemas! {
         "Workspace" => schema::<Workspace>(),
@@ -74,6 +75,7 @@ pub fn schema_bundle() -> Value {
         "TaskContext" => schema::<TaskContext>(),
         "SessionHistorySearchPage" => schema::<SessionHistorySearchPage>(),
         "AgentSpec" => schema::<AgentSpec>(),
+        "AgentCapabilities" => schema::<AgentCapabilities>(),
         "RemoteTaskCheckAccepted" => schema::<RemoteTaskCheckAccepted>(),
         "TerminalSnapshot" => schema::<TerminalSnapshot>(),
         "TerminalOutput" => schema::<TerminalOutput>(),
