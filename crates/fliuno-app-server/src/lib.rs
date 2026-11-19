@@ -501,6 +501,7 @@ impl RpcServer {
             capabilities["approvalRunWindow"] = json!(true);
             capabilities["approvalRunPending"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
+            capabilities["sessionListOrdering"] = json!(true);
             capabilities["sessionArchiveBatch"] = json!(true);
             capabilities["maxSessionArchiveBatch"] =
                 json!(fliuno_protocol::MAX_SESSION_ARCHIVE_BATCH);
@@ -647,11 +648,12 @@ impl RpcServer {
             }
             "session/list" => {
                 let p: SessionListParams = decode(params)?;
-                json!(self.kernel()?.list_sessions_filtered(
+                json!(self.kernel()?.list_sessions_ordered(
                     &p.workspace_id,
                     p.after,
                     p.limit,
-                    p.archived
+                    p.archived,
+                    p.order.unwrap_or_default(),
                 )?)
             }
             "task/list" => {

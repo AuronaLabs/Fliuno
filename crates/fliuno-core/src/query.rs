@@ -45,23 +45,66 @@ impl Kernel {
         limit: u32,
         archived: Option<bool>,
     ) -> Result<ObjectPage<Session>> {
+        self.list_sessions_ordered(
+            workspace,
+            after,
+            limit,
+            archived,
+            SessionListOrder::OldestFirst,
+        )
+    }
+
+    /// Catalogue position is by creation row, independent of titles and archive changes.
+    pub fn list_sessions_ordered(
+        &self,
+        workspace: &str,
+        after: u64,
+        limit: u32,
+        archived: Option<bool>,
+        order: SessionListOrder,
+    ) -> Result<ObjectPage<Session>> {
+        use SessionListOrder::{NewestFirst, OldestFirst};
         self.require_workspace(workspace)?;
-        // Filtered reads use sessions_workspace_archive, including the rowid range.
-        let sql = match archived {
-            None => {
+        let (cursor, fetch) = page_range(after, limit)?;
+        let bound = match (order, cursor) {
+            (OldestFirst, _) => cursor,
+            (NewestFirst, 0) => i64::MAX,
+            (NewestFirst, _) => cursor - 1,
+        };
+        if let Some(archived) = archived {
+            // The equality on the indexed expression lets SQLite seek to the
+            // rowid bound within just this workspace and archive status.
+            let sql = match order {
+                OldestFirst => {
+                    "SELECT rowid,data FROM sessions WHERE workspace_id=?1
+                    AND COALESCE(json_extract(data,'$.archived'),0)=?4 AND rowid>?2
+                    ORDER BY rowid LIMIT ?3"
+                }
+                NewestFirst => {
+                    "SELECT rowid,data FROM sessions WHERE workspace_id=?1
+                    AND COALESCE(json_extract(data,'$.archived'),0)=?4 AND rowid<=?2
+                    ORDER BY rowid DESC LIMIT ?3"
+                }
+            };
+            return self.query_object_page(
+                sql,
+                params![workspace, bound, fetch, i64::from(archived)],
+                after,
+                limit,
+                None,
+            );
+        }
+        let sql = match order {
+            OldestFirst => {
                 "SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid>?2
-                 ORDER BY rowid LIMIT ?3"
+                ORDER BY rowid LIMIT ?3"
             }
-            Some(true) => {
-                "SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid>?2
-                 AND COALESCE(json_extract(data,'$.archived'),0)=1 ORDER BY rowid LIMIT ?3"
-            }
-            Some(false) => {
-                "SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid>?2
-                 AND COALESCE(json_extract(data,'$.archived'),0)=0 ORDER BY rowid LIMIT ?3"
+            NewestFirst => {
+                "SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid<=?2
+                ORDER BY rowid DESC LIMIT ?3"
             }
         };
-        self.object_page(sql, Some(workspace), after, limit)
+        self.query_object_page(sql, params![workspace, bound, fetch], after, limit, None)
     }
 
     pub fn list_tasks(&self, session: &str, after: u64, limit: u32) -> Result<ObjectPage<Task>> {

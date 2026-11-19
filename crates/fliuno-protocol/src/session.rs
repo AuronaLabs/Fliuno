@@ -1,4 +1,5 @@
 //! Wire types for organizing and retrieving workspace sessions.
+use super::default_limit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +16,29 @@ pub struct Session {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionListParams {
+    pub workspace_id: String,
+    #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
+    pub after: u64,
+    #[serde(default = "default_limit")]
+    pub limit: u32,
+    /// Omit for the original ascending catalog order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<SessionListOrder>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionListOrder {
+    #[default]
+    OldestFirst,
+    NewestFirst,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

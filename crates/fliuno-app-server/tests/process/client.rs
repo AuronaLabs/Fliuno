@@ -29,6 +29,8 @@ mod artifact_digest;
 mod artifact_download;
 #[path = "client/feed.rs"]
 mod feed;
+#[path = "client/session_catalog.rs"]
+mod session_catalog;
 #[path = "client/task_cancel.rs"]
 mod task_cancel;
 #[path = "client/task_changes.rs"]

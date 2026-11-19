@@ -9,7 +9,7 @@
 <details>
 <summary>展开协议索引</summary>
 
-- **任务与工作台**：[工作区、会话与任务](#工作区会话与任务) · [工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照) · [批量取消任务](#批量取消任务)
+- **任务与工作台**：[工作区、会话与任务](#工作区会话与任务) · [会话目录](#会话目录) · [工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照) · [批量取消任务](#批量取消任务)
 - **恢复与查询**：[变动摘要](#任务变动摘要) · [轻量回放](#任务变动回放) · [批量读取任务摘要](#批量读取任务摘要) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
 - **事件与交付物**：[审批、事件与产物](#审批事件与产物) · [交付物目录订阅](#交付物目录订阅) · [批量校验摘要](#批量读取交付物摘要)
 - **工具与宿主**：[工具、Agent 与终端](#工具agent-与终端) · [A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
@@ -70,7 +70,7 @@ staged.sync_all()?;
 | --- | --- | --- |
 | `initialize` | `{protocolVersion, clientName}` | 服务身份与能力 |
 | `workspace/list` | `{after?:0,limit?:100}` | Workspace ObjectPage |
-| `session/list` | `{workspaceId,archived?,after?:0,limit?:100}` | Session ObjectPage，可按归档状态筛选 |
+| `session/list` | `{workspaceId,archived?,order?,after?:0,limit?:100}` | Session ObjectPage，可按归档状态筛选及按创建顺序倒序分页 |
 | `task/list` | `{sessionId,after?:0,limit?:100,targetBytes?}` | Task ObjectPage |
 | `task/listSummaries` | `{sessionId,status?,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,order?,after?,limit?,targetBytes?}` | 跨会话分页读取同一工作区的任务摘要，可按创建顺序正序或倒序返回 |
@@ -170,8 +170,6 @@ staged.sync_all()?;
 
 `initialize.capabilities.sessionCreateIdempotency` 表示 `session/create` 接受 `clientRequestId`。键由 1 到 128 个可打印且不含空格的 ASCII 字符组成，在工作区内唯一。连接中断后用原键和原始标题重试会返回同一个会话的当前信息。复用键并更改原始标题会返回 `-32009`。创建记录和键同事务保存，重启后仍可重试。
 
-`initialize.capabilities.sessionArchiving` 表示支持会话归档。`session/list` 省略 `archived` 时列出全部会话，传 `true` 或 `false` 可按状态筛选。会话对象省略 `archived` 字段时视为 `false`。`session/setArchived` 可以重试；它只更新显示状态，任务、历史和会话 ID 都可照常使用。`sessionArchiveBatch` 和 `maxSessionArchiveBatch` 表示支持最多 32 个 ID 的原子批量更新；无效 ID、重复 ID 或事务失败不会提交任何更新。翻页期间应沿用相同筛选条件。归档状态变动后，从 `after:0` 重拉列表即可反映当前状态。
-
 `taskSummaryStatusFilter` 表示 `task/listSummaries` 可以按一个 `status` 筛选。筛选沿用原清单的任务创建顺序和游标。翻页应保持相同条件。任务状态改变后，从 `after:0` 重拉列表即可看到当前结果。SQLite v23 从已保存的任务摘要回填状态索引。
 
 `workspaceTaskSummaries` 表示支持 `task/listWorkspaceSummaries`。它查询同一工作区所有会话的任务，支持与 `task/listSummaries` 相同的状态筛选、创建游标和分页上限，每页最多 100 条。归档会话中的任务仍属于其工作区。需要继续按会话查询时，可沿用 `task/listSummaries`。
@@ -199,6 +197,20 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 下载方仍需对自己实际收到的字节计算 SHA-256 并比对。摘要描述提交时的内容（旧产物为首次计算时的内容）；它不表示服务刚刚校验了磁盘上的正文。
 
 `initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
+
+### 会话目录
+
+`initialize.capabilities.sessionListOrdering` 为真时，可对 `session/list` 传 `order:"newest_first"`，按创建顺序从最近的会话向前翻页。省略 `order` 或传 `"oldest_first"` 保持原先的正序。`limit` 为 1..100。
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"session/list","params":{"workspaceId":"WORKSPACE","archived":false,"order":"newest_first","after":0,"limit":20}}
+```
+
+首轮传 `after:0`。若 `hasMore` 为真，下页传 `nextAfter`，工作区、排序和归档筛选保持一致。倒序游标是排他的；首轮之后新建的会话不会混入续页。每页读取的是当前标题和归档状态；重命名不会改变位置，归档筛选变动时可从 `after:0` 刷新。现有数据库和索引可直接使用。
+
+Rust 宿主可以用 `fliuno_client::SessionCatalog` 读取并校验页。应用消费页面后保存 `next_request()`，重连或重启后把它传给 `SessionCatalog::new`。如果服务还没有 `sessionListOrdering`，可不传 `order`，沿用旧版正序。
+
+`initialize.capabilities.sessionArchiving` 表示支持会话归档。`session/list` 省略 `archived` 时列出全部会话，传 `true` 或 `false` 可按状态筛选。会话对象省略 `archived` 字段时视为 `false`。`session/setArchived` 可以重试；它只更新显示状态，任务、历史和会话 ID 都可照常使用。`sessionArchiveBatch` 和 `maxSessionArchiveBatch` 表示支持最多 32 个 ID 的原子批量更新；无效 ID、重复 ID 或事务失败不会提交任何更新。翻页期间应沿用相同筛选条件。归档状态变动后，从 `after:0` 重拉列表即可反映当前状态。
 
 ### 交付物目录订阅
 

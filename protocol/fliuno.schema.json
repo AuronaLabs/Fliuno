@@ -397,12 +397,32 @@
           "format": "uint32",
           "minimum": 0,
           "default": 100
+        },
+        "order": {
+          "description": "Omit for the original ascending catalog order.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionListOrder"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
       "required": [
         "workspaceId"
-      ]
+      ],
+      "$defs": {
+        "SessionListOrder": {
+          "type": "string",
+          "enum": [
+            "oldest_first",
+            "newest_first"
+          ]
+        }
+      }
     },
     "session/context": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

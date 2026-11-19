@@ -722,18 +722,6 @@ pub struct ListParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SessionListParams {
-    pub workspace_id: String,
-    #[serde(default)]
-    pub archived: Option<bool>,
-    #[serde(default)]
-    pub after: u64,
-    #[serde(default = "default_limit")]
-    pub limit: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskListParams {
     pub session_id: String,
     #[serde(default)]

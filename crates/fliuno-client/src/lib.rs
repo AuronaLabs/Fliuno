@@ -7,6 +7,7 @@ mod feed;
 mod history;
 mod history_search;
 mod replay;
+mod session_catalog;
 mod task_cancel;
 mod task_summaries;
 mod terminal;
@@ -19,6 +20,7 @@ pub use feed::EventFeed;
 pub use history::SessionHistory;
 pub use history_search::{HistorySearch, HistorySearchRequest};
 pub use replay::{EventReplay, ModelUsageScope, ReplayScope};
+pub use session_catalog::SessionCatalog;
 pub use terminal::{TerminalFeed, TerminalFeedEvent, TerminalOutputPage};
 pub use work::WorkSubscription;
 
@@ -51,6 +53,8 @@ pub enum Error {
     InvalidReplayPage,
     #[error("invalid conversation history page")]
     InvalidHistoryPage,
+    #[error("session catalog page violates its requested scope, filter or cursor order")]
+    InvalidSessionCatalogPage,
     #[error("invalid approval inbox snapshot page")]
     InvalidApprovalInboxPage,
     #[error("invalid artifact catalog page")]
