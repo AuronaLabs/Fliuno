@@ -1,4 +1,5 @@
 //! Blocking stdio client for Fliuno's local application protocol.
+pub mod ag_ui;
 mod download;
 mod replay;
 mod wire;

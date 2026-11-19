@@ -1,8 +1,8 @@
 use super::*;
-use fliuno_client::{Client, Error, Notification, ReplayScope};
+use fliuno_client::{Client, Error, Notification, ReplayScope, ag_ui::AgUiProjector};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalGetParams, ApprovalRespondParams, ArtifactGetParams, ArtifactSummary,
-    Event, EventKind, Task, TaskIdParams, TaskStatus, Workspace, WorkspaceOpenParams,
+    Event, EventKind, Task, TaskIdParams, TaskStatus, TaskSummary, Workspace, WorkspaceOpenParams,
 };
 
 #[test]
@@ -137,6 +137,11 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
         .download_artifact(&artifact, &expected, &mut output, &mut observe)
         .unwrap();
     assert_eq!(output, content.as_bytes());
+    let completed: TaskSummary = client
+        .call("task/getSummary", &task_params, &mut observe)
+        .unwrap();
+    let mut projector = AgUiProjector::new(&completed);
+    let mut ag_ui = Vec::new();
     let mut replay = client
         .subscribe_events(ReplayScope::Session(session.id.clone()), 0, &mut observe)
         .unwrap();
@@ -177,11 +182,37 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].task_id, task.id);
         historical.push(page[0].sequence);
+        for event in page {
+            ag_ui.extend(
+                projector
+                    .project(event)
+                    .unwrap()
+                    .into_iter()
+                    .map(|event| serde_json::to_value(event).unwrap()),
+            );
+        }
     }
     assert!(historical.contains(&event.sequence));
     assert!(historical.windows(2).all(|pair| pair[0] < pair[1]));
     assert_eq!(historical.last(), Some(&through));
     assert_eq!(replay.cursor(), through);
+    assert_eq!(ag_ui[0]["type"], "RUN_STARTED");
+    assert_eq!(ag_ui[0]["threadId"], session.id);
+    assert!(
+        ag_ui
+            .iter()
+            .any(|event| event["name"] == "fliuno.approval_requested")
+    );
+    assert!(
+        ag_ui
+            .iter()
+            .any(|event| event["name"] == "fliuno.artifact_created")
+    );
+    assert_eq!(ag_ui[ag_ui.len() - 4]["type"], "TEXT_MESSAGE_START");
+    assert_eq!(ag_ui[ag_ui.len() - 3]["type"], "TEXT_MESSAGE_CONTENT");
+    assert_eq!(ag_ui[ag_ui.len() - 2]["type"], "TEXT_MESSAGE_END");
+    assert_eq!(ag_ui.last().unwrap()["type"], "RUN_FINISHED");
+    assert_eq!(ag_ui.last().unwrap()["runId"], ag_ui[0]["runId"]);
 
     let deadline = Instant::now() + Duration::from_secs(10);
     while !live

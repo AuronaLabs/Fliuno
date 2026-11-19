@@ -447,3 +447,10 @@ Windows `scripts/check.ps1` 以退出码 0 完成。446 项测试、26 个离线
 SQLite 3.49.1 内存库中，使用 100,000 条模拟事件，其中 400 条报告用量。读取固定窗口中的 50 条及翻页探针，61 轮交替样本的查询中位数从逐条解析 JSON 扫描的 49.21 ms 降至索引查询的 0.259 ms。两种结果一致，索引路线只读命中的事件正文。一次回填用时 347.19 ms。该对照只计 SQLite 查询和取行。日志为 `target/0.0.3-usage-replay-bench.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成。446 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.3-usage-replay-windows.log`。
+
+
+## 0.0.3 AG-UI 持久事件转换（2026-11-19）
+
+真实 app-server 进程测试通过 Rust 客户端分页回放带审批和产物的已完成任务，验证运行开始、审批引用、产物引用、提交文本和运行完成依序生成。单元测试覆盖中断、显式恢复、稳定 ID、乱序及跨任务输入。与 Rust 序列化结果逐项相等的八个事件样例通过 `@ag-ui/core@1.0.5` 的运行时 Schema 检查。SDK 验证日志为 `target/0.0.3-ag-ui-sdk-contract.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成。448 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.3-ag-ui-windows.log`。
