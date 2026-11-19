@@ -1,8 +1,8 @@
 //! Maps bounded remote A2A tasks to the neutral core. URLs, credentials and
 //! deadlines are host-owned; cards/messages never confer local tool authority.
 use fliuno_a2a::{
-    Client, Message, MessageTarget, Options, SendResponse, StreamEvent, Task, TaskState,
-    decode_raw_part,
+    ArtifactPayload, Client, Message, MessageTarget, Options, SendResponse, StreamEvent, Task,
+    TaskState, decode_raw_part,
 };
 use fliuno_core::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
@@ -354,64 +354,37 @@ fn record_message(observer: &dyn AgentObserver, message: Message) -> Result<Agen
     Ok(known(AgentStopReason::EndTurn))
 }
 
-#[derive(Clone)]
 struct StreamArtifact {
-    raw: Value,
+    payload: ArtifactPayload,
     complete: bool,
 }
 
 fn add_stream_artifact(
     artifacts: &mut BTreeMap<String, StreamArtifact>,
-    artifact: Value,
+    artifact: ArtifactPayload,
     append: bool,
     last_chunk: Option<bool>,
 ) -> Result<(), ()> {
-    let id = artifact["artifactId"].as_str().ok_or(())?.to_owned();
-    let complete = if append {
-        last_chunk.unwrap_or(false)
-    } else {
-        last_chunk.unwrap_or(true)
-    };
+    let complete = last_chunk.unwrap_or(!append);
     if append {
-        let current = artifacts.get_mut(&id).ok_or(())?;
+        let current = artifacts.get_mut(artifact.id()).ok_or(())?;
         if current.complete {
             return Err(());
         }
-        let new_parts = artifact["parts"].as_array().ok_or(())?;
-        current
-            .raw
-            .get_mut("parts")
-            .and_then(Value::as_array_mut)
-            .ok_or(())?
-            .extend(new_parts.iter().cloned());
-        for key in ["name", "description", "metadata"] {
-            if let Some(value) = artifact.get(key) {
-                current.raw[key] = value.clone();
-            }
-        }
+        current.payload.append(artifact).map_err(|_| ())?;
         current.complete = complete;
     } else {
-        if !artifacts.contains_key(&id) && artifacts.len() >= 64 {
+        if !artifacts.contains_key(artifact.id()) && artifacts.len() >= 64 {
             return Err(());
         }
         artifacts.insert(
-            id.clone(),
+            artifact.id().to_owned(),
             StreamArtifact {
-                raw: artifact,
+                payload: artifact,
                 complete,
             },
         );
     }
-    let current = artifacts.get(&id).ok_or(())?;
-    if serde_json::to_vec(&current.raw).map_err(|_| ())?.len() > 262_144 {
-        return Err(());
-    }
-    Task::parse(json!({
-        "id":"stream-validation",
-        "status":{"state":"TASK_STATE_WORKING"},
-        "artifacts":[current.raw],
-    }))
-    .map_err(|_| ())?;
     Ok(())
 }
 
@@ -428,7 +401,7 @@ fn finish_stream_snapshot(
         }
         task.artifacts = artifacts
             .into_values()
-            .map(|artifact| artifact.raw)
+            .map(|artifact| artifact.payload)
             .collect();
     } else {
         // A pause can interrupt an artifact mid-stream. Its content remains
@@ -499,8 +472,9 @@ fn finish_snapshot_with_status_text(
     if task.state.is_terminal() && !task.artifacts.is_empty() {
         let mut incoming = Vec::new();
         let mut text = Vec::new();
-        for raw in task.artifacts {
-            let source_id = raw["artifactId"].as_str().ok_or(())?.to_owned();
+        for payload in task.artifacts {
+            let source_id = payload.id().to_owned();
+            let raw = payload.as_json();
             let title = raw
                 .get("name")
                 .and_then(Value::as_str)
@@ -515,7 +489,7 @@ fn finish_snapshot_with_status_text(
                     .filter_map(|p| p["text"].as_str())
                     .map(str::to_owned),
             );
-            incoming.push(artifact(source_id, title, &raw)?);
+            incoming.push(artifact(source_id, title, raw)?);
         }
         observer
             .observe(AgentObservation::Artifacts(incoming))
@@ -729,18 +703,17 @@ impl A2aBackend {
             };
             let Some(event) = event else { return Err(()) };
             match event.map_err(|_| ())? {
-                StreamEvent::Task(initial) => {
+                StreamEvent::Task(mut initial) => {
                     if task.is_some() {
                         return Err(());
                     }
                     verify_initial_task(continuation, &initial)?;
                     let settled = initial.state.is_settled();
-                    for raw in &initial.artifacts {
-                        let id = raw["artifactId"].as_str().ok_or(())?.to_owned();
+                    for payload in initial.artifacts.drain(..) {
                         artifacts.insert(
-                            id,
+                            payload.id().to_owned(),
                             StreamArtifact {
-                                raw: raw.clone(),
+                                payload,
                                 complete: true,
                             },
                         );
@@ -846,7 +819,7 @@ impl A2aBackend {
                     if current.id != task_id || current.context_id != context_id {
                         return Err(());
                     }
-                    let artifact_id = artifact["artifactId"].as_str().ok_or(())?.to_owned();
+                    let artifact_id = artifact.id().to_owned();
                     add_stream_artifact(&mut artifacts, artifact, append, last_chunk)?;
                     observer
                         .observe(AgentObservation::Update {

@@ -560,8 +560,8 @@ fn streaming_status_and_chunked_artifacts_are_persisted_without_polling() {
         let id = request.body["id"].as_str().unwrap();
         let results = [
             json!({"task":task("TASK_STATE_WORKING")}),
-            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","name":"report.txt","parts":[{"text":"stream "},{"raw":"AAE"}]},"append":false,"lastChunk":false}}),
-            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","parts":[{"text":"result"},{"raw":"AgM=","filename":"second.bin"}]},"append":true,"lastChunk":true}}),
+            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","name":"draft.txt","metadata":{"stage":"draft"},"parts":[{"text":"stream "},{"raw":"AAE"}]},"append":false,"lastChunk":false}}),
+            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","name":"report.txt","metadata":{"stage":"final"},"parts":[{"text":"result"},{"raw":"AgM=","filename":"second.bin"}]},"append":true,"lastChunk":true}}),
             json!({"statusUpdate":{"taskId":"remote-task","contextId":"remote-context","status":{"state":"TASK_STATE_COMPLETED","message":{"messageId":"stream-final","taskId":"remote-task","contextId":"remote-context","role":"ROLE_AGENT","parts":[{"text":"done"}]}}}}),
         ];
         let body: String = results
@@ -591,6 +591,8 @@ fn streaming_status_and_chunked_artifacts_are_persisted_without_polling() {
     assert_eq!(stored.as_array().unwrap().len(), 3);
     let raw: Value = serde_json::from_str(stored[0]["content"].as_str().unwrap()).unwrap();
     assert_eq!(raw["artifactId"], "stream-report");
+    assert_eq!(stored[0]["title"], "report.txt");
+    assert_eq!(raw["metadata"], json!({"stage":"final"}));
     assert_eq!(
         raw["parts"],
         json!([{"text":"stream "},{"raw":"AAE"},{"text":"result"},{"raw":"AgM=","filename":"second.bin"}])
@@ -608,6 +610,57 @@ fn streaming_status_and_chunked_artifacts_are_persisted_without_polling() {
     let requests = wire.requests();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].body["method"], "SendStreamingMessage");
+}
+
+#[test]
+fn oversized_stream_append_does_not_persist_a_partial_artifact() {
+    let wire = Fixture::start(|request| {
+        let id = &request.body["id"];
+        assert_eq!(request.body["method"], "SendStreamingMessage");
+        let part = json!({"raw":"AAEC".repeat(33_000)});
+        let mut body = format!(
+            "data: {}\n\n",
+            json!({"jsonrpc":"2.0","id":id,"result":{"task":task("TASK_STATE_WORKING")}})
+        );
+        for append in [false, true] {
+            let update = json!({"taskId":"remote-task","contextId":"remote-context",
+                "artifact":{"artifactId":"too-big","parts":[part]},"append":append,"lastChunk":append});
+            body.push_str(&format!(
+                "data: {}\n\n",
+                json!({"jsonrpc":"2.0","id":id,"result":{"artifactUpdate":update}})
+            ));
+        }
+        body.push_str(&format!("data: {}\n\n", json!({"jsonrpc":"2.0","id":id,"result":{"statusUpdate":{
+            "taskId":"remote-task","contextId":"remote-context","status":{"state":"TASK_STATE_COMPLETED"}
+        }}})));
+        Response::sse(body)
+    });
+    let directory = Directory::new(&wire, 10_000, false).with_streaming();
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let submitted = start(&mut peer, &session, "oversized-append");
+    let interrupted = wait_finished(&mut peer, &submitted["id"]);
+    assert_eq!(interrupted["status"], "interrupted");
+    assert_eq!(interrupted["agentRun"]["outcomeUnknown"], true);
+    assert_eq!(
+        peer.call("artifacts/list", json!({"taskId":submitted["id"]})),
+        json!([])
+    );
+    let events = peer.call("events/list", json!({"taskId":submitted["id"]}));
+    assert_eq!(
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event["data"]["type"] == "agent_update"
+                    && event["data"]["update"]["type"] == "a2a_artifact_update"
+            })
+            .count(),
+        1,
+        "the first chunk fit; only the assembled payload exceeded the budget"
+    );
+    assert_eq!(wire.requests().len(), 1);
 }
 
 #[test]

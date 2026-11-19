@@ -87,6 +87,8 @@ cargo run -p fliuno-app-server -- --a2a-config C:/absolute/path/to/agents.json
 
 ## 产物保存
 
+SSE 追加只校验新片段，并增量计算合并正文的紧凑 JSON 字节数。不重复解析已接收的 Part。合并仍受同一字节及 Part 数量限制。
+
 最终 Task 快照中的产物一次性导入：源 `artifactId` 与新生成的本地 Artifact ID 分开保存到 `agentRun.artifacts`，产物、链接、预算及 `artifact_created` 事件在同一事务提交。重复源 ID、重复导入、数量/字节超限会拒绝。运行可能在导入后、完成前中断；已提交的产物保留供检查，任务不会因此被自动标记完成。
 
 每个 A2A Artifact 或立即 Message 保留一份 `application/json` 产物，包括 Part、文件名、媒体类型和 metadata。每个 `raw` Part 另外解码为一个二进制产物，可通过 `artifacts/read` 分段读取，或通过 `artifacts/digest` 校验。链接的 `sourceId` 是原 `artifactId` 或 `messageId`，`partIndex` 是原件 `parts` 数组中从 0 开始的索引；原件链接省略 `partIndex`。SSE 追加保留各 Part 的边界。文件名只用作标题，缺失或不符合本地显示限制时使用默认标题；缺失或不符合限制的媒体类型使用 `application/octet-stream`。附件字节入库，不写为工作区文件；`url` 只随 JSON 保存，不下载或打开。文本 Part 也投影到任务输出。Task 产物只在终态导入。SQLite v32 拒绝旧版内核读取包含新链接字段的数据库；已有原件链接无需回填。

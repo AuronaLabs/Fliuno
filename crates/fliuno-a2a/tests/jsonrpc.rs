@@ -130,7 +130,7 @@ async fn streaming_submission_decodes_status_and_artifact_events_with_backpressu
         matches!(received[1], StreamEvent::StatusUpdate { ref task_id, state: TaskState::Working, .. } if task_id == "remote-task")
     );
     assert!(
-        matches!(received[2], StreamEvent::ArtifactUpdate { ref artifact, last_chunk: Some(true), .. } if artifact["artifactId"] == "report")
+        matches!(received[2], StreamEvent::ArtifactUpdate { ref artifact, last_chunk: Some(true), .. } if artifact.id() == "report")
     );
     assert!(matches!(
         received[3],

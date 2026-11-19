@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
 
+mod artifact;
+pub use artifact::ArtifactPayload;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TaskState {
@@ -102,7 +105,7 @@ fn parts(value: &Value) -> Result<&[Value]> {
         .get("parts")
         .and_then(Value::as_array)
         .ok_or(Error::Protocol)?;
-    if parts.is_empty() || parts.len() > 256 {
+    if parts.is_empty() || parts.len() > artifact::MAX_PARTS {
         return Err(Error::Protocol);
     }
     for part in parts {
@@ -172,10 +175,10 @@ pub struct Task {
     pub context_id: Option<String>,
     pub state: TaskState,
     pub status_message: Option<Message>,
-    pub artifacts: Vec<Value>,
+    pub artifacts: Vec<ArtifactPayload>,
 }
 impl Task {
-    pub fn parse(raw: Value) -> Result<Self> {
+    pub fn parse(mut raw: Value) -> Result<Self> {
         let id = required_id(&raw, "id")?;
         let context_id = optional_id(&raw, "contextId")?;
         let state = serde_json::from_value(
@@ -199,28 +202,18 @@ impl Task {
         {
             return Err(Error::Protocol);
         }
-        let artifacts = match raw.get("artifacts") {
+        let artifacts = match raw.get_mut("artifacts").map(Value::take) {
             None | Some(Value::Null) => Vec::new(),
-            Some(Value::Array(v)) if v.len() <= 64 => v.clone(),
+            Some(Value::Array(v)) if v.len() <= 64 => v,
             _ => return Err(Error::Protocol),
-        };
+        }
+        .into_iter()
+        .map(ArtifactPayload::parse)
+        .collect::<Result<Vec<_>>>()?;
         let mut ids = BTreeSet::new();
         for artifact in &artifacts {
-            let id = required_id(artifact, "artifactId")?;
-            if !ids.insert(id)
-                || serde_json::to_vec(artifact)
-                    .map_err(|_| Error::Protocol)?
-                    .len()
-                    > 262_144
-            {
+            if !ids.insert(artifact.id()) {
                 return Err(Error::Budget);
-            }
-            parts(artifact)?;
-            if artifact
-                .get("name")
-                .is_some_and(|n| !n.is_null() && n.as_str().is_none_or(|s| s.len() > 256))
-            {
-                return Err(Error::Protocol);
             }
         }
         Ok(Self {
@@ -244,10 +237,11 @@ pub enum SendResponse {
     Message(Message),
 }
 impl SendResponse {
-    pub(crate) fn parse(raw: Value) -> Result<Self> {
-        match (raw.get("task"), raw.get("message")) {
-            (Some(task), None) => Task::parse(task.clone()).map(Self::Task),
-            (None, Some(message)) => Message::parse(message.clone()).map(Self::Message),
+    pub(crate) fn parse(mut raw: Value) -> Result<Self> {
+        let object = raw.as_object_mut().ok_or(Error::Protocol)?;
+        match (object.remove("task"), object.remove("message")) {
+            (Some(task), None) => Task::parse(task).map(Self::Task),
+            (None, Some(message)) => Message::parse(message).map(Self::Message),
             _ => Err(Error::Protocol),
         }
     }
@@ -266,15 +260,15 @@ pub enum StreamEvent {
     ArtifactUpdate {
         task_id: String,
         context_id: Option<String>,
-        artifact: Value,
+        artifact: ArtifactPayload,
         append: bool,
         last_chunk: Option<bool>,
     },
 }
 
 impl StreamEvent {
-    pub(crate) fn parse(raw: Value) -> Result<Self> {
-        let object = raw.as_object().ok_or(Error::Protocol)?;
+    pub(crate) fn parse(mut raw: Value) -> Result<Self> {
+        let object = raw.as_object_mut().ok_or(Error::Protocol)?;
         let variants = ["task", "message", "statusUpdate", "artifactUpdate"];
         let present = variants
             .iter()
@@ -283,11 +277,11 @@ impl StreamEvent {
         if present != 1 {
             return Err(Error::Protocol);
         }
-        if let Some(task) = object.get("task") {
-            return Task::parse(task.clone()).map(Self::Task);
+        if let Some(task) = object.remove("task") {
+            return Task::parse(task).map(Self::Task);
         }
-        if let Some(message) = object.get("message") {
-            return Message::parse(message.clone()).map(Self::Message);
+        if let Some(message) = object.remove("message") {
+            return Message::parse(message).map(Self::Message);
         }
         if let Some(status) = object.get("statusUpdate") {
             let task_id = required_id(status, "taskId")?;
@@ -305,22 +299,21 @@ impl StreamEvent {
                 message: task.status_message,
             });
         }
-        let update = object.get("artifactUpdate").ok_or(Error::Protocol)?;
-        let task_id = required_id(update, "taskId")?;
-        let context_id = optional_id(update, "contextId")?;
-        let artifact = update.get("artifact").cloned().ok_or(Error::Protocol)?;
-        Task::parse(serde_json::json!({
-            "id":task_id,
-            "contextId":context_id,
-            "status":{"state":"TASK_STATE_WORKING"},
-            "artifacts":[artifact],
-        }))?;
+        let mut update = object.remove("artifactUpdate").ok_or(Error::Protocol)?;
+        let task_id = required_id(&update, "taskId")?;
+        let context_id = optional_id(&update, "contextId")?;
+        let artifact = ArtifactPayload::parse(
+            update
+                .get_mut("artifact")
+                .map(Value::take)
+                .ok_or(Error::Protocol)?,
+        )?;
         Ok(Self::ArtifactUpdate {
             task_id,
             context_id,
             artifact,
-            append: optional_bool(update, "append")?.unwrap_or(false),
-            last_chunk: optional_bool(update, "lastChunk")?,
+            append: optional_bool(&update, "append")?.unwrap_or(false),
+            last_chunk: optional_bool(&update, "lastChunk")?,
         })
     }
 }

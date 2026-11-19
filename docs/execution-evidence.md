@@ -314,6 +314,12 @@ Windows 内存 SQLite 3.49.1 微基准使用 100,000 条模拟历史，其中 20
 
 包含工作区历史搜索及 A2A 附件的 Windows `scripts/check.ps1` 退出码为 0：426 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和生成的 RPC Schema 均通过。日志为 `target/0.0.2-workspace-history-windows.log`。本轮未在 Debian Linux 来宾复验。
 
+## A2A 增量附件组装（2026-11-19）
+
+Windows 21 项 A2A 进程测试通过。合并超限的用例先收到合法分片，再因合并后的大小超限中断；只保存首个分片事件，无正文入库或远端重发。单元测试覆盖 256 KiB 精确边界、转义与元数据替换、256 个 Part 限制及失败后的原件完整性。
+
+Windows 调试构建使用 96 段、197,697 字节的最终 JSON，先校验输入分片，再对比增量合并与每次完整序列化并重新验证的旧流程。21 轮交替采样中位数分别为 5.61 ms 和 699.19 ms，最终 JSON 相同。该探针只测 Rust 内存组装，不含 HTTP 或入库。日志为 `target/0.0.2-a2a-assembly-benchmark.log`。
+
 ## Gemini Interactions 与 MCP 只读失败（2026-11-19）
 
 Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。
