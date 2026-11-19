@@ -737,6 +737,9 @@ pub struct TaskListParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskSummaryListParams {
     pub session_id: String,
+    /// The after cursor follows this ordering. Omit for ascending creation order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<TaskSummaryOrder>,
     #[serde(default)]
     pub status: Option<TaskStatus>,
     #[serde(default)]
@@ -754,7 +757,7 @@ pub struct WorkspaceTaskSummaryListParams {
     pub workspace_id: String,
     /// The after cursor follows this ordering. Omit for ascending creation order.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub order: Option<WorkspaceTaskSummaryOrder>,
+    pub order: Option<TaskSummaryOrder>,
     #[serde(default)]
     pub status: Option<TaskStatus>,
     #[serde(default)]
@@ -766,13 +769,17 @@ pub struct WorkspaceTaskSummaryListParams {
     pub target_bytes: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum WorkspaceTaskSummaryOrder {
+#[schemars(rename = "WorkspaceTaskSummaryOrder")]
+pub enum TaskSummaryOrder {
     #[default]
     OldestFirst,
     NewestFirst,
 }
+
+// Retain the existing public name for workspace-only callers.
+pub use TaskSummaryOrder as WorkspaceTaskSummaryOrder;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

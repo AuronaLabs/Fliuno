@@ -33,6 +33,8 @@ mod feed;
 mod session_catalog;
 #[path = "client/task_cancel.rs"]
 mod task_cancel;
+#[path = "client/task_catalog.rs"]
+mod task_catalog;
 #[path = "client/task_changes.rs"]
 mod task_changes;
 #[path = "client/task_start_receipts.rs"]

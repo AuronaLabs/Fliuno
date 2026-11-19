@@ -779,3 +779,13 @@ Windows 本机 stdio 调试服务基准使用同一项已完成任务。提交�
 在应用服务创建的 SQLite v44 库上，`EXPLAIN QUERY PLAN` 确认会话使用 `tasks_session`，工作区使用 `task_summary_workspace_cursor`，全局逆向访问任务行；三种查询都按主键取紧凑摘要，无临时排序和数据库迁移。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：495 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-work-preview-check.log`。
+
+## 0.0.3 会话任务目录与 Rust 续页（2026-11-20）
+
+`task/listSummaries` 增加 `order`，默认保持创建正序，倒序以任务行位置向前定位。服务以 `sessionTaskSummaryOrdering` 声明功能；已有的工作区排序能力和响应契约不变。Rust `TaskSummaryCatalog` 统一浏览两种范围，把状态、顺序、预算和游标一起保存；无效页或 RPC 错误不会推进位置。见 [任务目录](protocol.md#任务目录)。
+
+真实进程测试保存一个受字节预算限制的倒序检查点，在服务重启后创建更新的任务并取消一个尚未展示的任务。续页跳过新创建及不再符合筛选的任务，刷新首页能看到新任务。另验证默认正序、两种范围的成员隔离及无效排序和游标。Debian Linux 6.12.107 来宾的 8 项相关进程测试通过，覆盖任务目录、旧任务摘要、会话目录和工作台。日志：`D:/Fliuno-Native-Test/guest-task-catalog.log`。
+
+SQLite 3.49.1 使用实际 v44 结构的内存副本，填充 16 万条任务分到 4 条会话。筛选时使用 `task_summary_status_cursor`，未筛选时使用 `tasks_session`；均直接定位游标并按主键读紧凑摘要，无临时排序或迁移。对比倒序第 8,000 条之后同样的 20 条，先核对结果一致，预热 20 对后交替测量 200 对。筛选中位耗时为 95.40 µs 对 `OFFSET` 的 5,211.45 µs；未筛选为 94.60 µs 对 6,281.90 µs。此合成基准只测本机 SQL，不含服务和磁盘开销。日志：`D:/Fliuno-Native-Test/task-catalog-query-plan.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：497 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-task-catalog-check.log`。

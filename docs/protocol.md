@@ -9,7 +9,7 @@
 <details>
 <summary>展开协议索引</summary>
 
-- **任务与工作台**：[工作区、会话与任务](#工作区会话与任务) · [会话目录](#会话目录) · [任务提交与重试](#任务提交与重试) · [工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照) · [批量取消任务](#批量取消任务)
+- **任务与工作台**：[工作区、会话与任务](#工作区会话与任务) · [会话目录](#会话目录) · [任务目录](#任务目录) · [任务提交与重试](#任务提交与重试) · [工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照) · [批量取消任务](#批量取消任务)
 - **恢复与查询**：[变动摘要](#任务变动摘要) · [轻量回放](#任务变动回放) · [批量读取任务摘要](#批量读取任务摘要) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
 - **事件与交付物**：[审批、事件与产物](#审批事件与产物) · [交付物目录订阅](#交付物目录订阅) · [批量校验摘要](#批量读取交付物摘要)
 - **工具与宿主**：[工具、Agent 与终端](#工具agent-与终端) · [A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
@@ -72,7 +72,7 @@ staged.sync_all()?;
 | `workspace/list` | `{after?:0,limit?:100}` | Workspace ObjectPage |
 | `session/list` | `{workspaceId,archived?,order?,after?:0,limit?:100}` | Session ObjectPage，可按归档状态筛选及按创建顺序倒序分页 |
 | `task/list` | `{sessionId,after?:0,limit?:100,targetBytes?}` | Task ObjectPage |
-| `task/listSummaries` | `{sessionId,status?,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
+| `task/listSummaries` | `{sessionId,status?,order?,after?:0,limit?:100,targetBytes?}` | 会话内的 TaskSummary ObjectPage；游标来自完整任务列表使用的创建行位置 |
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,order?,after?,limit?,targetBytes?}` | 跨会话分页读取同一工作区的任务摘要，可按创建顺序正序或倒序返回 |
 | `work/getSnapshot` | `{workspaceId?,sessionId?,approvalLimit?,approvalTargetBytes?,recentTaskLimit?}` | 同一水位的任务状态计数、待审批首页和可选的最近任务 |
 | `work/subscribe` | 同 `work/getSnapshot` | 同一快照，并将本连接切换为该范围的事件水位订阅 |
@@ -170,12 +170,6 @@ staged.sync_all()?;
 
 `initialize.capabilities.sessionCreateIdempotency` 表示 `session/create` 接受 `clientRequestId`。键由 1 到 128 个可打印且不含空格的 ASCII 字符组成，在工作区内唯一。连接中断后用原键和原始标题重试会返回同一个会话的当前信息。复用键并更改原始标题会返回 `-32009`。创建记录和键同事务保存，重启后仍可重试。
 
-`taskSummaryStatusFilter` 表示 `task/listSummaries` 可以按一个 `status` 筛选。筛选沿用原清单的任务创建顺序和游标。翻页应保持相同条件。任务状态改变后，从 `after:0` 重拉列表即可看到当前结果。SQLite v23 从已保存的任务摘要回填状态索引。
-
-`workspaceTaskSummaries` 表示支持 `task/listWorkspaceSummaries`。它查询同一工作区所有会话的任务，支持与 `task/listSummaries` 相同的状态筛选、创建游标和分页上限，每页最多 100 条。归档会话中的任务仍属于其工作区。需要继续按会话查询时，可沿用 `task/listSummaries`。
-
-`workspaceTaskSummaryOrdering` 表示支持 `order:"oldest_first"` 和 `order:"newest_first"`。省略 `order` 时按创建顺序正序查询。倒序查询也从 `after:0` 开始，用同一查询范围、状态和排序的 `nextAfter` 续页。倒序翻页只读取游标之前创建的任务，摘要反映查询时的任务状态。
-
 `eventBySequence` 表示支持 `events/get`。`sequence` 取自实时通知或回放，范围为 1 到 SQLite 的最大 64 位有符号整数。序号不存在时返回 `-32004`。
 
 客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和原始字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。`artifactSummaryById` 表示可以用同样的参数调用 `artifacts/getSummary` 单独读取元数据。
@@ -217,6 +211,25 @@ SQLite v44 将普通有键提交的输入 SHA-256、后端和规范化后的上�
 Rust 宿主可以用 `fliuno_client::SessionCatalog` 读取并校验页。应用消费页面后保存 `next_request()`，重连或重启后把它传给 `SessionCatalog::new`。如果服务还没有 `sessionListOrdering`，可不传 `order`，沿用旧版正序。
 
 `initialize.capabilities.sessionArchiving` 表示支持会话归档。`session/list` 省略 `archived` 时列出全部会话，传 `true` 或 `false` 可按状态筛选。会话对象省略 `archived` 字段时视为 `false`。`session/setArchived` 可以重试；它只更新显示状态，任务、历史和会话 ID 都可照常使用。`sessionArchiveBatch` 和 `maxSessionArchiveBatch` 表示支持最多 32 个 ID 的原子批量更新；无效 ID、重复 ID 或事务失败不会提交任何更新。翻页期间应沿用相同筛选条件。归档状态变动后，从 `after:0` 重拉列表即可反映当前状态。
+
+### 任务目录
+
+`task/listSummaries` 浏览一条会话的任务；声明 `workspaceTaskSummaries` 时，`task/listWorkspaceSummaries` 可跨会话浏览整个工作区，包括归档会话。两者均读取精简的 `TaskSummary`，每页最多 100 条。
+
+| 查询选项 | 客户端能力 |
+| --- | --- |
+| 会话状态筛选 `status` | `taskSummaryStatusFilter` |
+| 会话创建顺序 `order` | `sessionTaskSummaryOrdering` |
+| 工作区创建顺序 `order` | `workspaceTaskSummaryOrdering` |
+| 响应字节目标 `targetBytes` | `taskSummaryListTargetBytes`（最大值） |
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"task/listSummaries","params":{"sessionId":"<session-id>","order":"newest_first","status":"waiting_approval","limit":20}}
+```
+
+始终从 `after:0` 开始，随后用 `nextAfter` 续页。默认 `oldest_first`，倒序 `newest_first` 只读上页游标之前创建的任务。续页须使用同一数据库、范围、状态筛选和顺序。重启不改变创建位置；摘要和筛选取每次查询时的当前状态。要看到首页之后创建的任务，或游标另一侧刚进入筛选的任务，重新拉取首页。
+
+Rust 的 `TaskSummaryCatalog` 接受 `TaskSummaryCatalogRequest::Session` 或 `::Workspace`。每消费一页，可把 `next_request()` 序列化并保存；`None` 表示当前目录已到末尾。客户端校验游标方向、状态、重复 ID 和会话归属，收到无效页时保留原请求。正序请求会省略 `order`，便于兼容旧服务。
 
 ### 交付物目录订阅
 
@@ -284,7 +297,7 @@ Rust 的 `Client::get_task_summaries` 返回类型化结果，校验项数、ID 
 
 结果的 `taskCounts` 始终包含 `running`、`waitingApproval`、`interrupted`、`completed`、`cancelled` 和 `failed`。`waitingApproval` 是任务数：一个任务可能同时有多项审批，审批首页也会排除已到期项。`approvals` 是[待审批快照](#待审批快照)，其 `snapshot.throughSequence` 也是计数的事件水位。审批首页的条数和字节限制与原接口相同。
 
-当 `initialize.capabilities.workRecentTasks` 为 `true` 时，两种快照请求都可传 `recentTaskLimit`（`1` 到 `50`）。`recentTasks` 按任务创建顺序从新到旧返回 `TaskSummary`，和计数、审批首页使用相同范围及事件水位。请求了预览但没有任务时返回 `[]`；省略参数时，服务不查询摘要，响应也省略 `recentTasks`。预览用于首屏；浏览更多任务可使用 [`task/listWorkspaceSummaries`](#工作区会话与任务)。
+当 `initialize.capabilities.workRecentTasks` 为 `true` 时，两种快照请求都可传 `recentTaskLimit`（`1` 到 `50`）。`recentTasks` 按任务创建顺序从新到旧返回 `TaskSummary`，和计数、审批首页使用相同范围及事件水位。请求了预览但没有任务时返回 `[]`；省略参数时，服务不查询摘要，响应也省略 `recentTasks`。预览用于首屏；浏览更多任务可使用 [任务目录](#任务目录)。
 
 Rust 的 `Client::work_snapshot` 返回 `(WorkSnapshot, ApprovalInbox)`。首页已经在 `WorkSnapshot.approvals` 中，`ApprovalInbox` 从下一页开始；也可以从 `throughSequence` 接上同范围的事件。需要刷新首屏时重新调用 `work/getSnapshot`，旧审批游标仍可继续读取原来的列表。Rust 客户端会向不声明 `workRecentTasks` 的服务省略该参数，此时 `recent_tasks` 为 `None`。
 
@@ -628,7 +641,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `initialize.capabilities.taskListTargetBytes` 给出 `task/list` 支持的最大字节目标。传入 `targetBytes`（1024～8388608）时，`items` 按紧凑 JSON 的 UTF-8 长度分页。单项已超过目标时仍完整返回该项。字节目标和行数上限共用原始 `nextAfter` 游标，可用 `task/listSummaries` 在相同位置读取摘要。
 
-`initialize.capabilities.taskSummaryListTargetBytes` 给出 `task/listSummaries` 和 `task/listWorkspaceSummaries` 支持的最大字节目标。两种清单的 `targetBytes` 使用相同范围和紧凑 JSON 数组字节计数，过滤条件和 `after` 游标保持不变；被状态筛选排除的任务不会成为页面结果。
+`initialize.capabilities.taskSummaryListTargetBytes` 给出 `task/listSummaries` 和 `task/listWorkspaceSummaries` 支持的最大字节目标。两种清单的 `targetBytes` 使用相同范围和紧凑 JSON 数组字节计数，配合 [任务目录](#任务目录) 的排序和状态筛选使用；第一项即使超过目标也完整返回。
 
 ### 查找历史任务
 

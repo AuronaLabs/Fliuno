@@ -183,28 +183,70 @@ impl Kernel {
         status: Option<TaskStatus>,
         target_bytes: Option<u32>,
     ) -> Result<ObjectPage<TaskSummary>> {
+        self.list_task_summaries_ordered(
+            session,
+            after,
+            limit,
+            status,
+            target_bytes,
+            TaskSummaryOrder::OldestFirst,
+        )
+    }
+
+    /// Page compact summaries within a session using its task creation positions.
+    pub fn list_task_summaries_ordered(
+        &self,
+        session: &str,
+        after: u64,
+        limit: u32,
+        status: Option<TaskStatus>,
+        target_bytes: Option<u32>,
+        order: TaskSummaryOrder,
+    ) -> Result<ObjectPage<TaskSummary>> {
+        use TaskSummaryOrder::{NewestFirst, OldestFirst};
         validate_task_list_target(target_bytes)?;
         self.require_session(session)?;
+        let (cursor, fetch) = page_range(after, limit)?;
+        let bound = task_catalog_bound(order, cursor);
         if let Some(status) = status {
-            let (cursor, fetch) = page_range(after, limit)?;
-            return self.query_object_page(
-                "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
-                 JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
+            let sql = match order {
+                OldestFirst => {
+                    "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+                 CROSS JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
                  WHERE scoped.session_id=?1 AND scoped.status=?2 AND scoped.task_row>?3
-                 ORDER BY scoped.task_row LIMIT ?4",
-                params![session, status.as_str(), cursor, fetch],
+                 ORDER BY scoped.task_row LIMIT ?4"
+                }
+                NewestFirst => {
+                    "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+                 CROSS JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
+                 WHERE scoped.session_id=?1 AND scoped.status=?2 AND scoped.task_row<=?3
+                 ORDER BY scoped.task_row DESC LIMIT ?4"
+                }
+            };
+            return self.query_object_page(
+                sql,
+                params![session, status.as_str(), bound, fetch],
                 after,
                 limit,
                 target_bytes,
             );
         }
-        // Keep the row cursor shared with task/list and load only the summary.
-        let (cursor, fetch) = page_range(after, limit)?;
+        // The session index includes rowid, so both orders seek to the cursor.
+        let sql = match order {
+            OldestFirst => {
+                "SELECT tasks.rowid,summaries.data FROM tasks
+             CROSS JOIN task_summaries AS summaries ON summaries.task_id=tasks.id
+             WHERE tasks.session_id=?1 AND tasks.rowid>?2 ORDER BY tasks.rowid LIMIT ?3"
+            }
+            NewestFirst => {
+                "SELECT tasks.rowid,summaries.data FROM tasks
+             CROSS JOIN task_summaries AS summaries ON summaries.task_id=tasks.id
+             WHERE tasks.session_id=?1 AND tasks.rowid<=?2 ORDER BY tasks.rowid DESC LIMIT ?3"
+            }
+        };
         self.query_object_page(
-            "SELECT tasks.rowid,summaries.data FROM tasks
-             JOIN task_summaries AS summaries ON summaries.task_id=tasks.id
-             WHERE tasks.session_id=?1 AND tasks.rowid>?2 ORDER BY tasks.rowid LIMIT ?3",
-            params![session, cursor, fetch],
+            sql,
+            params![session, bound, fetch],
             after,
             limit,
             target_bytes,
@@ -237,7 +279,7 @@ impl Kernel {
             limit,
             status,
             target_bytes,
-            WorkspaceTaskSummaryOrder::OldestFirst,
+            TaskSummaryOrder::OldestFirst,
         )
     }
 
@@ -248,19 +290,13 @@ impl Kernel {
         limit: u32,
         status: Option<TaskStatus>,
         target_bytes: Option<u32>,
-        order: WorkspaceTaskSummaryOrder,
+        order: TaskSummaryOrder,
     ) -> Result<ObjectPage<TaskSummary>> {
         validate_task_list_target(target_bytes)?;
         self.require_workspace(workspace)?;
         let (cursor, fetch) = page_range(after, limit)?;
-        use WorkspaceTaskSummaryOrder::{NewestFirst, OldestFirst};
-        // Reverse scans use an inclusive ceiling one below the last row. For
-        // the first page, a zero cursor means start at the end of the index.
-        let bound = match (order, cursor) {
-            (OldestFirst, _) => cursor,
-            (NewestFirst, 0) => i64::MAX,
-            (NewestFirst, _) => cursor - 1,
-        };
+        use TaskSummaryOrder::{NewestFirst, OldestFirst};
+        let bound = task_catalog_bound(order, cursor);
         if let Some(status) = status {
             let sql = match order {
                 OldestFirst => {
@@ -357,6 +393,16 @@ impl Kernel {
             next_after,
             has_more,
         })
+    }
+}
+
+// Reverse scans use an inclusive ceiling one below the last row. A zero
+// cursor starts from the end of the index.
+fn task_catalog_bound(order: TaskSummaryOrder, cursor: i64) -> i64 {
+    match (order, cursor) {
+        (TaskSummaryOrder::OldestFirst, _) => cursor,
+        (TaskSummaryOrder::NewestFirst, 0) => i64::MAX,
+        (TaskSummaryOrder::NewestFirst, _) => cursor - 1,
     }
 }
 

@@ -478,6 +478,7 @@ impl RpcServer {
             capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["workspaceTaskSummaries"] = json!(true);
             capabilities["workspaceTaskSummaryOrdering"] = json!(true);
+            capabilities["sessionTaskSummaryOrdering"] = json!(true);
             capabilities["workspaceById"] = json!(true);
             capabilities["workspaceProfiles"] = json!(true);
             capabilities["modelUsageEvents"] = json!(true);
@@ -669,12 +670,13 @@ impl RpcServer {
             }
             "task/listSummaries" => {
                 let p: TaskSummaryListParams = decode(params)?;
-                json!(self.kernel()?.list_task_summaries_with_target(
+                json!(self.kernel()?.list_task_summaries_ordered(
                     &p.session_id,
                     p.after,
                     p.limit,
                     p.status,
                     p.target_bytes,
+                    p.order.unwrap_or_default(),
                 )?)
             }
             "task/listWorkspaceSummaries" => {
