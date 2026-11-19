@@ -89,3 +89,25 @@ fn replay_rejects_an_inconsistent_page_and_advances_across_an_empty_scoped_tail(
     assert_eq!(sent[1]["params"], sent[2]["params"]);
     assert_eq!(sent[2]["params"]["through"], 10);
 }
+
+#[test]
+fn borrowed_envelopes_preserve_null_results_and_reject_conflicting_fields() {
+    let mut client = fake_client(
+        concat!(
+            "{\"jsonrpc\":\"2.0\",\"method\":\"test/notice\",\"params\":null}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":null}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":null,\"error\":null}\n",
+        )
+        .as_bytes(),
+    );
+    let notification = client.read_notification().unwrap();
+    assert_eq!(notification.method, "test/notice");
+    assert_eq!(notification.params, Value::Null);
+    let result: Option<u32> = client.call("probe", &json!({}), |_| {}).unwrap();
+    assert_eq!(result, None);
+    assert!(matches!(
+        client.call::<_, Value>("probe", &json!({}), |_| {}),
+        Err(Error::InvalidFrame(_))
+    ));
+    assert!(matches!(client.read_notification(), Err(Error::Closed)));
+}

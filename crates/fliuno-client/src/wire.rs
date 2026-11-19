@@ -1,7 +1,8 @@
 //! Line framing and JSON-RPC correlation shared by the client entry points.
 use super::{DEFAULT_RESPONSE_BYTES, Error, Notification};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+use serde_json::value::RawValue;
+use std::borrow::Cow;
 use std::io::{self, BufRead, Write};
 
 #[derive(Serialize)]
@@ -71,7 +72,32 @@ pub(super) fn send<P: Serialize + ?Sized>(
     Ok(())
 }
 
-pub(super) fn read(reader: &mut impl BufRead, buffer: &mut Vec<u8>) -> Result<Value, Error> {
+#[derive(Deserialize)]
+pub(super) struct Frame<'a> {
+    #[serde(borrow)]
+    jsonrpc: Cow<'a, str>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    method: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    id: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    result: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    error: Option<&'a RawValue>,
+    #[serde(borrow)]
+    params: Option<&'a RawValue>,
+}
+
+// Presence matters even when the JSON field is null. In particular, a null
+// result is valid and a null ID cannot identify a notification.
+fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<&'de RawValue>, D::Error> {
+    <&RawValue>::deserialize(deserializer).map(Some)
+}
+
+pub(super) fn read<'a>(
+    reader: &mut impl BufRead,
+    buffer: &'a mut Vec<u8>,
+) -> Result<Frame<'a>, Error> {
     buffer.clear();
     loop {
         let available = reader.fill_buf()?;
@@ -93,22 +119,33 @@ pub(super) fn read(reader: &mut impl BufRead, buffer: &mut Vec<u8>) -> Result<Va
             break;
         }
     }
-    let frame: Value =
-        serde_json::from_slice(buffer).map_err(|_| Error::InvalidFrame("invalid JSON"))?;
-    if frame.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+    if buffer.iter().find(|byte| !byte.is_ascii_whitespace()) != Some(&b'{') {
+        return Err(Error::InvalidFrame("expected an object"));
+    }
+    let frame: Frame<'a> = serde_json::from_slice(buffer)
+        .map_err(|_| Error::InvalidFrame("invalid JSON or envelope"))?;
+    if frame.jsonrpc != "2.0" {
         return Err(Error::InvalidFrame("invalid JSON-RPC version"));
     }
     Ok(frame)
 }
 
-pub(super) fn notification(frame: Value) -> Result<Notification, Error> {
-    if ["id", "result", "error"]
-        .iter()
-        .any(|key| frame.get(key).is_some())
-    {
+pub(super) fn notification(frame: Frame<'_>) -> Result<Notification, Error> {
+    if frame.id.is_some() || frame.result.is_some() || frame.error.is_some() {
         return Err(Error::InvalidFrame("expected a notification"));
     }
-    serde_json::from_value(frame).map_err(|_| Error::InvalidFrame("invalid notification"))
+    let method = frame
+        .method
+        .ok_or(Error::InvalidFrame("missing notification method"))?;
+    let params = frame
+        .params
+        .map(|raw| serde_json::from_str(raw.get()))
+        .transpose()
+        .map_err(|_| Error::InvalidFrame("invalid notification params"))?
+        .unwrap_or_default();
+    let method = serde_json::from_str(method.get())
+        .map_err(|_| Error::InvalidFrame("invalid notification method"))?;
+    Ok(Notification { method, params })
 }
 
 #[derive(Deserialize)]
@@ -119,29 +156,32 @@ struct RpcError {
 
 // The outer Result concerns framing and correlation. The inner Result is the
 // server's reply and can contain a valid RPC error without losing the stream.
-pub(super) fn reply(
+pub(super) fn reply<T: DeserializeOwned>(
     reader: &mut impl BufRead,
     buffer: &mut Vec<u8>,
     id: u64,
     mut on_notification: impl FnMut(Notification),
-) -> Result<Result<Value, Error>, Error> {
+) -> Result<Result<T, Error>, Error> {
     loop {
-        let Value::Object(mut frame) = read(reader, buffer)? else {
-            return Err(Error::InvalidFrame("expected an object"));
-        };
-        if frame.contains_key("method") {
-            on_notification(notification(Value::Object(frame))?);
+        let frame = read(reader, buffer)?;
+        if frame.method.is_some() {
+            on_notification(notification(frame)?);
             continue;
         }
-        if frame.get("id").and_then(Value::as_u64) != Some(id) {
+        let correlated = frame
+            .id
+            .and_then(|raw| serde_json::from_str::<u64>(raw.get()).ok());
+        if correlated != Some(id) {
             return Err(Error::InvalidFrame(
                 "response ID does not match the request",
             ));
         }
-        return match (frame.remove("result"), frame.remove("error")) {
-            (Some(result), None) => Ok(Ok(result)),
+        return match (frame.result, frame.error) {
+            (Some(result), None) => {
+                Ok(serde_json::from_str(result.get()).map_err(|_| Error::InvalidResult))
+            }
             (None, Some(error)) => {
-                let RpcError { code, message } = serde_json::from_value(error)
+                let RpcError { code, message } = serde_json::from_str(error.get())
                     .map_err(|_| Error::InvalidFrame("invalid RPC error"))?;
                 Ok(Err(Error::Rpc { code, message }))
             }

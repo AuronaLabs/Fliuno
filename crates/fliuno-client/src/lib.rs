@@ -75,9 +75,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         };
         let mut frame = Vec::new();
         wire::send(&mut writer, 1, "initialize", &params)?;
-        let info: ServerInfo =
-            serde_json::from_value(wire::reply(&mut reader, &mut frame, 1, on_notification)??)
-                .map_err(|_| Error::InvalidResult)?;
+        let info: ServerInfo = wire::reply(&mut reader, &mut frame, 1, on_notification)??;
         if info.protocol_version != PROTOCOL_VERSION {
             return Err(Error::InvalidFrame(
                 "server selected another protocol version",
@@ -116,7 +114,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         self.last_id = id;
         let reply = wire::reply(&mut self.reader, &mut self.frame, id, on_notification)?;
         self.usable = true;
-        serde_json::from_value(reply?).map_err(|_| Error::InvalidResult)
+        reply
     }
 
     /// Wait for one notification when no application request is pending.

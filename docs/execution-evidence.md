@@ -397,3 +397,11 @@ Windows 客户端 4 项单元测试、app-server 真实进程用例、两包严�
 真实 app-server 进程测试验证拒绝及超限都无产物，恰好 256 KiB 的文件可以持久保存，模型仅收到四个引用与校验字段。删除原文件并重启后，从目录快照找到产物，分四段下载并与原始字节核对，独立 SHA-256 相同。
 
 Windows `scripts/check.ps1` 退出码为 0。440 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 通过。Debian Linux 6.12.107 来宾复验通过。日志为 `target/0.0.2-workspace-import-windows.log` 和 `D:/Fliuno-Native-Test/guest-workspace-import.log`。
+
+## Rust 客户端直接解码应答（2026-11-19）
+
+客户端借用行缓冲区内的 JSON-RPC 字段，直接将 `result` 解码为调用方请求的类型。回归测试覆盖合法的 `result:null`、同时携带 `result` 和 `error` 时拒绝，以及错误后的连接状态。
+
+Windows `scripts/check.ps1` 退出码为 0。441 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 校验通过。Debian 来宾的真实 stdio 客户端进程测试通过。日志分别为 `target/0.0.2-client-raw-reply-windows.log` 和 `D:/Fliuno-Native-Test/guest-client-raw-reply.log`。
+
+Windows Release 内存帧基准按新旧构建各交替测量七轮，每轮 61 帧。123,470 字节的 100 项事件页从 1.063 ms 降至 0.4728 ms，87,488 字节的产物应答从 0.1866 ms 降至 0.1048 ms，均为各轮中位数的中位数。测量覆盖客户端帧处理，不含子进程 I/O。日志为 `target/0.0.2-raw-reply-benchmark.log`。
