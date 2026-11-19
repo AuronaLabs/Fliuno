@@ -30,6 +30,8 @@
 
 - [x] `events/listSessionModelUsage` 与 `events/listWorkspaceModelUsage` 按范围直接读取用量。SQLite v40 迁移旧用量索引；Rust 客户端能按固定事件水位续读。
 
+- [x] `approval/listPendingSnapshot` 固定待审批收件箱的事件水位和到期时间，支持范围分页、跨重启续读及事件回放交接。
+
 ## 0.0.2
 
 - [x] Rust 客户端一次调用建立实时订阅和历史回放。服务端原子检查本地游标，在游标超出数据库水位时拒绝切换并保留原订阅。

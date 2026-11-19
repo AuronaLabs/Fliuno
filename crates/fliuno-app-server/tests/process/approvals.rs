@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "approvals/snapshot.rs"]
+mod snapshot;
+
 #[test]
 fn approval_run_binding_migrates_and_replays_one_decision_after_restart() {
     let root = std::env::temp_dir().join(format!("fliuno-approval-run-{}", uuid::Uuid::new_v4()));
@@ -147,7 +150,7 @@ fn pending_approval_inbox_migrates_preserves_cursors_and_tracks_resolution() {
     {
         let legacy = rusqlite::Connection::open(&db).unwrap();
         legacy
-            .execute_batch("DROP TABLE pending_approvals; PRAGMA user_version=19;")
+            .execute_batch("DROP TABLE pending_approvals; DROP TABLE closed_approvals; DROP TABLE approval_inbox_meta; PRAGMA user_version=19;")
             .unwrap();
     }
 

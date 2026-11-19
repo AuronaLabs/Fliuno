@@ -54,6 +54,30 @@ pub struct ApprovalListParams {
     pub target_bytes: Option<u32>,
 }
 
+/// The event and expiry-time boundaries of a read-only inbox snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalInboxSnapshot {
+    pub through_sequence: u64,
+    pub captured_at_unix_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalInboxListParams {
+    pub page: ApprovalListParams,
+    /// Reuse the first response's snapshot when continuing a page.
+    #[serde(default)]
+    pub snapshot: Option<ApprovalInboxSnapshot>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalInboxPage {
+    pub snapshot: ApprovalInboxSnapshot,
+    pub page: super::ObjectPage<ApprovalSummary>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalKind {

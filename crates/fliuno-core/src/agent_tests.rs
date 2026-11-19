@@ -794,6 +794,19 @@ fn restart_expires_waiting_permissions_and_preserves_tool_approval_semantics() {
     let (agent, run) = start(&mut kernel, &session);
     let approval = permission(&mut kernel, &agent, &run, "one", true);
     let tool = kernel.start_task(&session.id, "artifact").unwrap();
+    let mut request = ApprovalInboxListParams {
+        page: ApprovalListParams {
+            workspace_id: None,
+            session_id: Some(session.id.clone()),
+            after: 0,
+            limit: 10,
+            target_bytes: None,
+        },
+        snapshot: None,
+    };
+    let captured = kernel.list_pending_approval_snapshot(&request).unwrap();
+    assert_eq!(captured.page.items[0].id, approval.id);
+    assert_eq!(captured.page.items.len(), 2);
     // Re-open the same SQLite connection through startup recovery. No external
     // process or permission sender survives the reconstructed Kernel.
     let db = std::mem::replace(
@@ -812,6 +825,17 @@ fn restart_expires_waiting_permissions_and_preserves_tool_approval_semantics() {
             .is_err()
     );
     assert!(reopened.prepare_resume_task(&agent.id, true).is_err());
+    let live = reopened.list_pending_approval_snapshot(&request).unwrap();
+    assert_eq!(live.page.items.len(), 1);
+    assert_eq!(live.page.items[0].task_id, tool.id);
+    request.snapshot = Some(captured.snapshot);
+    let historical = reopened.list_pending_approval_snapshot(&request).unwrap();
+    assert_eq!(historical.page.items.len(), 2);
+    assert_eq!(historical.page.items[0].id, approval.id);
+    request.snapshot.as_mut().unwrap().captured_at_unix_ms = approval.expires_at_unix_ms;
+    let expired = reopened.list_pending_approval_snapshot(&request).unwrap();
+    assert_eq!(expired.page.items.len(), 1);
+    assert_eq!(expired.page.items[0].task_id, tool.id);
     assert_eq!(
         reopened.get_task(&tool.id).unwrap().status,
         TaskStatus::WaitingApproval

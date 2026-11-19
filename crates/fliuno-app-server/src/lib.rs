@@ -408,6 +408,7 @@ impl RpcServer {
                 capabilities["maxRetainedAgentSessionLists"] = json!(agent_catalog::MAX_RETAINED);
             }
             capabilities["pendingApprovalInbox"] = json!(true);
+            capabilities["pendingApprovalInboxSnapshot"] = json!(true);
             capabilities["pendingApprovalListTargetBytes"] =
                 json!(fliuno_core::MAX_APPROVAL_LIST_TARGET_BYTES);
             capabilities["pendingApprovalDetails"] = json!(true);
@@ -750,6 +751,10 @@ impl RpcServer {
             "approval/listPending" => {
                 let p: ApprovalListParams = decode(params)?;
                 json!(self.kernel()?.list_pending_approvals(p)?)
+            }
+            "approval/listPendingSnapshot" => {
+                let p: ApprovalInboxListParams = decode(params)?;
+                json!(self.kernel()?.list_pending_approval_snapshot(&p)?)
             }
             "approval/get" => {
                 let p: ApprovalGetParams = decode(params)?;

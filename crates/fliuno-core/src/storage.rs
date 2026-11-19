@@ -19,7 +19,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 40;
+pub(crate) const SCHEMA_VERSION: u32 = 41;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -278,6 +278,9 @@ impl Kernel {
         if version < 40 {
             model_usage::migrate(&mut db)?;
         }
+        if version < 41 {
+            approvals::migrate_snapshots(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         tools.insert(
@@ -383,7 +386,6 @@ impl Kernel {
             serde_json::to_string(task)?
         ])?;
         task_summaries::record(&tx, task)?;
-        approvals::record(&tx, task)?;
         if let Some(continuation) = &task.remote_continuation
             && continuation.expected.state == AgentTaskState::InputRequired
         {
@@ -445,6 +447,8 @@ impl Kernel {
                 sequences.push(sequence as u64);
             }
         }
+        // Inbox transitions are stamped with the final event in this transaction.
+        approvals::record(&tx, task)?;
         tx.commit()?;
         self.publish_task_events(&task.id, &task.session_id, &sequences, events);
         Ok(())

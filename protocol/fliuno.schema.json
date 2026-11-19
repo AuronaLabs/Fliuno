@@ -1631,6 +1631,98 @@
       },
       "additionalProperties": false
     },
+    "approval/listPendingSnapshot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalInboxListParams",
+      "type": "object",
+      "properties": {
+        "page": {
+          "$ref": "#/$defs/ApprovalListParams"
+        },
+        "snapshot": {
+          "description": "Reuse the first response's snapshot when continuing a page.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalInboxSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "page"
+      ],
+      "$defs": {
+        "ApprovalListParams": {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "sessionId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "after": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 0
+            },
+            "limit": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 100
+            },
+            "targetBytes": {
+              "description": "Compact items array byte target. A larger first approval still advances the cursor.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0,
+              "default": null
+            }
+          },
+          "additionalProperties": false
+        },
+        "ApprovalInboxSnapshot": {
+          "description": "The event and expiry-time boundaries of a read-only inbox snapshot.",
+          "type": "object",
+          "properties": {
+            "throughSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "capturedAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "throughSequence",
+            "capturedAtUnixMs"
+          ]
+        }
+      }
+    },
     "approval/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ApprovalGetParams",
@@ -6179,6 +6271,116 @@
         "hasMore"
       ],
       "$defs": {
+        "ApprovalSummary": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/ApprovalKind"
+            },
+            "allowOnceAvailable": {
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "sessionId",
+            "kind",
+            "allowOnceAvailable"
+          ]
+        },
+        "ApprovalKind": {
+          "type": "string",
+          "enum": [
+            "tool_call",
+            "agent_permission",
+            "host_tool"
+          ]
+        }
+      }
+    },
+    "ApprovalInboxPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalInboxPage",
+      "type": "object",
+      "properties": {
+        "snapshot": {
+          "$ref": "#/$defs/ApprovalInboxSnapshot"
+        },
+        "page": {
+          "$ref": "#/$defs/ObjectPage"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "snapshot",
+        "page"
+      ],
+      "$defs": {
+        "ApprovalInboxSnapshot": {
+          "description": "The event and expiry-time boundaries of a read-only inbox snapshot.",
+          "type": "object",
+          "properties": {
+            "throughSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "capturedAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "throughSequence",
+            "capturedAtUnixMs"
+          ]
+        },
+        "ObjectPage": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ApprovalSummary"
+              }
+            },
+            "nextAfter": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "hasMore": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "items",
+            "nextAfter",
+            "hasMore"
+          ]
+        },
         "ApprovalSummary": {
           "type": "object",
           "properties": {

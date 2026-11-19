@@ -441,3 +441,59 @@ fn model_usage_replay_rejects_unfiltered_events_before_advancing() {
     assert_eq!(calls[2]["params"], calls[1]["params"]);
     assert_eq!(calls[2]["params"]["through"], 9);
 }
+
+#[test]
+fn approval_inbox_preserves_the_checkpoint_when_the_snapshot_changes() {
+    use fliuno_protocol::{ApprovalInboxListParams, ApprovalListParams};
+    let item = json!({"id":"approve","taskId":"task","sessionId":"session","kind":"tool_call","allowOnceAvailable":true,"expiresAtUnixMs":null});
+    let stamp = json!({"throughSequence":41,"capturedAtUnixMs":9001});
+    let replies = [
+        json!({"snapshot":stamp,"page":{"items":[item],"nextAfter":4,"hasMore":true}}),
+        json!({"snapshot":{"throughSequence":41,"capturedAtUnixMs":9002},"page":{"items":[],"nextAfter":4,"hasMore":false}}),
+        json!({"snapshot":stamp,"page":{"items":[],"nextAfter":4,"hasMore":false}}),
+    ];
+    let mut wire = Vec::new();
+    for (index, result) in replies.into_iter().enumerate() {
+        serde_json::to_writer(
+            &mut wire,
+            &json!({"jsonrpc":"2.0","id":index+2,"result":result}),
+        )
+        .unwrap();
+        wire.push(b'\n');
+    }
+    let mut client = fake_client(&wire);
+    let mut inbox = ApprovalInbox::new(ApprovalInboxListParams {
+        page: ApprovalListParams {
+            workspace_id: None,
+            session_id: Some("session".into()),
+            after: 0,
+            limit: 1,
+            target_bytes: None,
+        },
+        snapshot: None,
+    });
+    let first = inbox.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert_eq!(first.page.items[0].id, "approve");
+    let saved = serde_json::to_value(inbox.next_request().unwrap()).unwrap();
+    assert_eq!(saved["snapshot"], stamp);
+    assert_eq!(saved["page"]["after"], 4);
+    let mut resumed = ApprovalInbox::new(serde_json::from_value(saved.clone()).unwrap());
+    assert!(matches!(
+        resumed.next_page(&mut client, |_| {}),
+        Err(Error::InvalidApprovalInboxPage)
+    ));
+    assert_eq!(
+        serde_json::to_value(resumed.next_request().unwrap()).unwrap(),
+        saved
+    );
+    assert!(
+        resumed
+            .next_page(&mut client, |_| {})
+            .unwrap()
+            .unwrap()
+            .page
+            .items
+            .is_empty()
+    );
+    assert!(resumed.next_page(&mut client, |_| {}).unwrap().is_none());
+}

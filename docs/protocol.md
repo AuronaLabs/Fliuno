@@ -5,7 +5,7 @@
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
 - **建立连接**：[stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
-- **查接口**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [模型用量](#模型用量) · [搜索历史](#查找历史任务) · [错误](#错误)
+- **查接口**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [待审批快照](#待审批快照) · [模型用量](#模型用量) · [搜索历史](#查找历史任务) · [错误](#错误)
 - **配置能力**：[A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
 ## 传输
@@ -87,6 +87,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | 方法 | params | result |
 | --- | --- | --- |
 | `approval/listPending` | `{workspaceId?,sessionId?,after?:0,limit?:100,targetBytes?}` | `{items,nextAfter,hasMore}`，只包含当前待审批的摘要 |
+| `approval/listPendingSnapshot` | `{page:{workspaceId?,sessionId?,after?,limit?,targetBytes?},snapshot?}` | `{snapshot,page}`，在固定事件水位和到期判断时间读取待审批摘要 |
 | `approval/get` | `{taskId,approvalId}` | `{kind,approval}`，包含指定待审批项的完整请求 |
 | `approval/getDecision` | `{taskId,approvalId}` | 已提交决定对应的 `Event`，用于重连核对 |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
@@ -169,11 +170,29 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 
 `initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
 
+### 审批收件箱与决定
+
 `initialize.capabilities.pendingApprovalInbox` 表示客户端可以读取待审批列表。省略两个范围参数时列出整个数据库的待审批项，传 `workspaceId` 或 `sessionId` 可缩小范围，两者只能选一个。每页最多 100 项，按加入列表的顺序返回。可沿用同一范围的 `nextAfter` 翻页或在重连后读取新项。从 `after:0` 读取可以重新核对整份当前列表。
 
 每项包含 `id`、`taskId`、`sessionId`、`kind`、`allowOnceAvailable` 和 `expiresAtUnixMs`。`kind` 为 `tool_call`、`agent_permission` 或 `host_tool`。工具审批没有到期时间。若 `initialize.capabilities.pendingApprovalDetails` 为 `true`，客户端可通过 `approval/get` 查看单项原请求，再用 `approval/respond` 提交决定。已解决、过期或属于其他任务的项返回 `-32004`。提交时仍以当时的任务状态、审批期限、工具注册和策略为准。已撤销、解决或过期的审批会从列表移除。服务重启后保留模型工具审批，已丢失的 Agent 运行结束时清除相应审批。
 
 `initialize.capabilities.pendingApprovalListTargetBytes` 给出审批列表的最大字节目标。`targetBytes` 接受 1024～8388608，按紧凑 JSON 数组 UTF-8 字节分页；首次遇到的单个大条目仍完整返回，`nextAfter` 可在同一 workspace 或 session 范围内续读。
+
+#### 待审批快照
+
+`pendingApprovalInboxSnapshot` 声明 `approval/listPendingSnapshot`。首次传 `page`，省略 `snapshot` 和 `page.after`。结果中的 `snapshot` 包含全局事件水位 `throughSequence` 和到期判断时间 `capturedAtUnixMs`，`page` 沿用待审批列表的 `items`、`nextAfter` 和 `hasMore`。
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"approval/listPendingSnapshot","params":{"page":{"workspaceId":"<workspace-id>","limit":20}}}
+```
+
+续页保留原范围，带回原 `snapshot`，并将 `page.nextAfter` 作为 `page.after`。该游标是收件箱位置，与全局事件水位不同。翻页期间，新审批不进入快照；在原水位待处理的审批即使随后关闭或到期，仍按原水位和原时间读取。Rust 调用方可以用 `ApprovalInbox::new(params)` 逐页读取，并将 `next_request()` 与已消费的页一起保存。
+
+若要接上实时更新，可在读完快照后用 `events/setScope` 建立相同范围的订阅，从快照的 `throughSequence` 补读至订阅响应中的水位，再处理实时事件。快照只用于展示与对账；`approval/get` 和 `approval/respond` 始终校验当前状态和期限。
+
+SQLite v41 在升级时记录可读取的最早水位，并保留待审批摘要的打开和关闭边界，不复制工具参数。早于该水位、超过当前水位或续页时缺少快照会返回 `-32602`。原 `approval/listPending` 继续返回实时列表。
+
+#### 决定与运行
 
 `initialize.capabilities.approvalDecisionLookup` 表示支持 `approval/getDecision`。SQLite v34 从历史事件回填任务 ID、审批 ID 和事件序号。模型工具审批返回 `approval_resolved`，ACP 权限和宿主工具审批返回 `agent_approval_resolved`。事件中的 `decision` 记录已提交的用户决定。实际执行、投递和结果仍查各自的任务与事件。尚无已提交决定的审批、仅关闭的审批或任务与审批 ID 不匹配时返回 `-32004`。
 

@@ -2,6 +2,9 @@
 use super::*;
 use rusqlite::Transaction;
 
+mod snapshot;
+pub(super) use snapshot::migrate_snapshots;
+
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
     tx.execute_batch(
@@ -151,36 +154,13 @@ impl Kernel {
         &self,
         options: ApprovalListParams,
     ) -> Result<ObjectPage<ApprovalSummary>> {
+        let (scope, filter) = self.approval_page_scope(&options)?;
         let ApprovalListParams {
-            workspace_id,
-            session_id,
             after,
             limit,
             target_bytes,
+            ..
         } = options;
-        if after > i64::MAX as u64
-            || !(1..=100).contains(&limit)
-            || target_bytes
-                .is_some_and(|bytes| !(1024..=MAX_APPROVAL_LIST_TARGET_BYTES).contains(&bytes))
-        {
-            return Err(Error::Invalid(
-                "approval cursor, limit, or targetBytes is out of range".into(),
-            ));
-        }
-        let (scope, filter) = match (workspace_id.as_deref(), session_id.as_deref()) {
-            (Some(_), Some(_)) => {
-                return Err(Error::Invalid("choose only one approval list scope".into()));
-            }
-            (Some(id), None) => {
-                self.require_workspace(id)?;
-                (Some(id), "AND workspace_id=?1")
-            }
-            (None, Some(id)) => {
-                self.require_session(id)?;
-                (Some(id), "AND session_id=?1")
-            }
-            (None, None) => (None, "AND ?1 IS NULL"),
-        };
         // Scope clauses are fixed strings. Session and workspace index entries
         // carry the sequence as the implicit rowid and already provide the order.
         let sql = format!(
@@ -190,48 +170,88 @@ impl Kernel {
              ORDER BY sequence LIMIT ?4"
         );
         let mut select = self.db.prepare_cached(&sql)?;
-        let mut rows = select.query(params![
+        let rows = select.query(params![
             scope,
             after as i64,
             sql_timestamp(agent::now_ms()?)?,
             limit + 1
         ])?;
-        let mut items = Vec::with_capacity(limit as usize);
-        let mut next_after = after;
-        let mut has_more = false;
-        let mut bytes = 2;
-        while let Some(row) = rows.next()? {
-            if items.len() == limit as usize
-                || target_bytes.is_some_and(|target| bytes >= target as usize)
-            {
+        read_approval_page(rows, after, limit, target_bytes)
+    }
+
+    fn approval_page_scope<'a>(
+        &self,
+        options: &'a ApprovalListParams,
+    ) -> Result<(Option<&'a str>, &'static str)> {
+        if options.after > i64::MAX as u64
+            || !(1..=100).contains(&options.limit)
+            || options
+                .target_bytes
+                .is_some_and(|bytes| !(1024..=MAX_APPROVAL_LIST_TARGET_BYTES).contains(&bytes))
+        {
+            return Err(Error::Invalid(
+                "approval cursor, limit, or targetBytes is out of range".into(),
+            ));
+        }
+        match (
+            options.workspace_id.as_deref(),
+            options.session_id.as_deref(),
+        ) {
+            (Some(_), Some(_)) => Err(Error::Invalid("choose only one approval list scope".into())),
+            (Some(id), None) => {
+                self.require_workspace(id)?;
+                Ok((Some(id), "AND workspace_id=?1"))
+            }
+            (None, Some(id)) => {
+                self.require_session(id)?;
+                Ok((Some(id), "AND session_id=?1"))
+            }
+            (None, None) => Ok((None, "AND ?1 IS NULL")),
+        }
+    }
+}
+
+fn read_approval_page(
+    mut rows: rusqlite::Rows<'_>,
+    after: u64,
+    limit: u32,
+    target_bytes: Option<u32>,
+) -> Result<ObjectPage<ApprovalSummary>> {
+    let mut items = Vec::with_capacity(limit as usize);
+    let mut next_after = after;
+    let mut has_more = false;
+    let mut bytes = 2;
+    while let Some(row) = rows.next()? {
+        if items.len() == limit as usize
+            || target_bytes.is_some_and(|target| bytes >= target as usize)
+        {
+            has_more = true;
+            break;
+        }
+        let kind = decode_kind(row.get(4)?)?;
+        let item = ApprovalSummary {
+            id: row.get(1)?,
+            task_id: row.get(2)?,
+            session_id: row.get(3)?,
+            kind,
+            allow_once_available: row.get(5)?,
+            expires_at_unix_ms: row
+                .get::<_, Option<i64>>(6)?
+                .map(|timestamp| timestamp as u64),
+        };
+        if let Some(target) = target_bytes {
+            bytes += crate::json_size(&item)? + usize::from(!items.is_empty());
+            if bytes > target as usize && !items.is_empty() {
                 has_more = true;
                 break;
             }
-            let kind = decode_kind(row.get(4)?)?;
-            let item = ApprovalSummary {
-                id: row.get(1)?,
-                task_id: row.get(2)?,
-                session_id: row.get(3)?,
-                kind,
-                allow_once_available: row.get(5)?,
-                expires_at_unix_ms: row
-                    .get::<_, Option<i64>>(6)?
-                    .map(|timestamp| timestamp as u64),
-            };
-            if let Some(target) = target_bytes {
-                bytes += crate::json_size(&item)? + usize::from(!items.is_empty());
-                if bytes > target as usize && !items.is_empty() {
-                    has_more = true;
-                    break;
-                }
-            }
-            next_after = row.get::<_, i64>(0)? as u64;
-            items.push(item);
         }
-        Ok(ObjectPage {
-            items,
-            next_after,
-            has_more,
-        })
+        next_after = row.get::<_, i64>(0)? as u64;
+        items.push(item);
     }
+    Ok(ObjectPage {
+        items,
+        next_after,
+        has_more,
+    })
 }
