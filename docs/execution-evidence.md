@@ -267,3 +267,5 @@ Windows 全量 scripts/check.ps1 退出码为 0，包含 400 项测试、Schema 
 任务摘要清单支持紧凑 JSON 字节目标，覆盖会话、工作区和状态筛选，并沿用 task/list 的创建游标。待审批收件箱也支持同一预算范围，可在 workspace/session 范围间沿用各自游标。两项真实 app-server 测试覆盖精确字节边界、状态筛选、重启续读和非法预算拒绝。
 
 Windows 全量 scripts/check.ps1 通过 402 项测试、Schema 一致性和 26 个离线演示。摘要与审批分页进程用例各自通过，核心库 74 项测试通过，Clippy 和 rustfmt 检查通过。完整日志为 target/0.0.2-byte-paging-windows.log。
+
+Debian Linux 6.12.107 来宾通过 3 项 task_status 与 2 项 approval app-server 进程测试。覆盖两种列表的字节边界、原始游标、workspace/session 过滤和 app-server 重启续读。构建与运行日志为 D:/Fliuno-Native-Test/guest-byte-pages-build.log 和 D:/Fliuno-Native-Test/guest-byte-pages.log。
