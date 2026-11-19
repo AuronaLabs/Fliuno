@@ -722,3 +722,45 @@ fn artifact_catalog_rejects_rewritten_windows_and_invalid_continuations() {
     assert!(catalog.begin_next_window());
     assert_eq!(catalog.next_request().unwrap().after, 9);
 }
+
+#[test]
+fn decision_batch_rejects_unbound_and_inconsistent_receipts() {
+    use fliuno_protocol::ApprovalDecisionBatchParams;
+
+    let key = json!({"taskId":"task","approvalId":"approval"});
+    let request: ApprovalDecisionBatchParams =
+        serde_json::from_value(json!({"approvals":[key,key]})).unwrap();
+    let receipt =
+        json!({"taskId":"task","approvalId":"approval","decision":"allow_once","sequence":7});
+    let mut foreign = receipt.clone();
+    foreign["approvalId"] = json!("other-approval");
+    let bad_replies = [
+        json!({"items":[receipt],"throughSequence":9}),
+        json!({"items":[foreign,foreign],"throughSequence":9}),
+        json!({"items":[receipt,receipt],"throughSequence":6}),
+        json!({"items":[receipt,null],"throughSequence":9}),
+    ];
+    let good_reply = json!({"items":[receipt,receipt],"throughSequence":9});
+    let mut frames = Vec::new();
+    for (i, result) in bad_replies
+        .iter()
+        .chain(std::iter::once(&good_reply))
+        .enumerate()
+    {
+        serde_json::to_writer(
+            &mut frames,
+            &json!({"jsonrpc":"2.0","id":i+2,"result":result}),
+        )
+        .unwrap();
+        frames.push(b'\n');
+    }
+    let mut client = fake_client(&frames);
+    for _ in bad_replies {
+        assert!(matches!(
+            client.get_approval_decisions(&request, |_| {}),
+            Err(Error::InvalidResult)
+        ));
+    }
+    let actual = client.get_approval_decisions(&request, |_| {}).unwrap();
+    assert_eq!(serde_json::to_value(actual).unwrap(), good_reply);
+}

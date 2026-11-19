@@ -1,4 +1,4 @@
-//! Read-only summaries for the pending approval inbox.
+//! Read-only approval inbox, decision receipts, and run bindings.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -110,4 +110,48 @@ pub enum ApprovalDetails {
     ToolCall { approval: super::Approval },
     AgentPermission { approval: super::AgentApproval },
     HostTool { approval: super::AgentApproval },
+}
+
+/// Upper bounds for a receipt batch and each of its opaque identifiers.
+pub const MAX_APPROVAL_DECISION_BATCH: usize = 64;
+pub const MAX_APPROVAL_DECISION_ID_BYTES: usize = 128;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalDecisionKey {
+    #[schemars(length(min = 1, max = MAX_APPROVAL_DECISION_ID_BYTES), regex(pattern = "^[!-~]+$"))]
+    pub task_id: String,
+    #[schemars(length(min = 1, max = MAX_APPROVAL_DECISION_ID_BYTES), regex(pattern = "^[!-~]+$"))]
+    pub approval_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalDecisionBatchParams {
+    #[schemars(length(min = 1, max = MAX_APPROVAL_DECISION_BATCH))]
+    pub approvals: Vec<ApprovalDecisionKey>,
+}
+
+/// A committed decision, without the original approval request or tool data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalDecisionReceipt {
+    pub task_id: String,
+    pub approval_id: String,
+    pub decision: super::ApprovalDecision,
+    pub sequence: u64,
+    /// Present for an Agent decision. This records intent, not peer delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalDecisionBatch {
+    /// One position per requested key. Pending, closed without a decision,
+    /// and unknown keys have no receipt.
+    #[schemars(length(min = 1, max = MAX_APPROVAL_DECISION_BATCH))]
+    pub items: Vec<Option<ApprovalDecisionReceipt>>,
+    /// Global event watermark from the same SQLite read snapshot.
+    pub through_sequence: u64,
 }

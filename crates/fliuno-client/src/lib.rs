@@ -1,5 +1,6 @@
 //! Blocking stdio client for Fliuno's local application protocol.
 pub mod ag_ui;
+mod approval_decisions;
 mod approval_inbox;
 mod artifact_catalog;
 mod download;

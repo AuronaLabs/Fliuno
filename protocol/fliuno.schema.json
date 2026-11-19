@@ -1993,6 +1993,49 @@
         "approvalId"
       ]
     },
+    "approval/getDecisions": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalDecisionBatchParams",
+      "type": "object",
+      "properties": {
+        "approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ApprovalDecisionKey"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "approvals"
+      ],
+      "$defs": {
+        "ApprovalDecisionKey": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[!-~]+$"
+            },
+            "approvalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[!-~]+$"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "approvalId"
+          ]
+        }
+      }
+    },
     "approval/respond": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ApprovalRespondParams",
@@ -8019,6 +8062,83 @@
           "enum": [
             "agent_permission",
             "host_tool"
+          ]
+        }
+      }
+    },
+    "ApprovalDecisionBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalDecisionBatch",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "One position per requested key. Pending, closed without a decision,\nand unknown keys have no receipt.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ApprovalDecisionReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "throughSequence": {
+          "description": "Global event watermark from the same SQLite read snapshot.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "throughSequence"
+      ],
+      "$defs": {
+        "ApprovalDecisionReceipt": {
+          "description": "A committed decision, without the original approval request or tool data.",
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "approvalId": {
+              "type": "string"
+            },
+            "decision": {
+              "$ref": "#/$defs/ApprovalDecision"
+            },
+            "sequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "runId": {
+              "description": "Present for an Agent decision. This records intent, not peer delivery.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "approvalId",
+            "decision",
+            "sequence"
+          ]
+        },
+        "ApprovalDecision": {
+          "type": "string",
+          "enum": [
+            "allow_once",
+            "deny"
           ]
         }
       }

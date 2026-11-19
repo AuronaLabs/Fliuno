@@ -16,7 +16,7 @@
 - **任务提交**：[任务摘要重试回执](#003-任务摘要重试回执2026-11-20)
 - **会话目录**：[倒序分页与续读](#003-会话目录倒序分页2026-11-20)
 - **终端**：[Rust 终端续读](#003-rust-终端续读2026-11-20)
-- **AG-UI 与审批**：[AG-UI SSE 续传](#003-ag-ui-sse-续传2026-11-19) · [HTTP 宿主演示](#003-ag-ui-http-宿主演示2026-11-19) · [审批中断与续跑](#003-ag-ui-审批中断与续跑2026-11-19)
+- **AG-UI 与审批**：[AG-UI SSE 续传](#003-ag-ui-sse-续传2026-11-19) · [HTTP 宿主演示](#003-ag-ui-http-宿主演示2026-11-19) · [审批中断与续跑](#003-ag-ui-审批中断与续跑2026-11-19) · [批量审批回执](#003-批量审批回执2026-11-20)
 
 </details>
 
@@ -819,3 +819,13 @@ SQLite 3.49.1 的查询计划确认，全局读取走序号主键范围，任务
 真实进程测试从 SQLite v44 升级，覆盖带预算的跨边界分页、四种范围、归档、跳过没有修改摘要的工具事件，以及服务重启后从历史回放接上实时订阅。Debian Linux 6.12.107 来宾共通过 12 项相关进程测试，另覆盖启动回执、审批、取消和工作台。日志：`D:/Fliuno-Native-Test/guest-task-revisions.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：500 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-task-revisions-check.log`。
+
+## 0.0.3 批量审批回执（2026-11-20）
+
+`approval/getDecisions` 在同一读事务内取得事件水位和最多 64 个回执。复用 SQLite v34 的任务与审批联合主键索引，不改变数据库 v45。重复键只查询一次；未记录决定的项保留为空位。Agent 回执是本地已提交决定的证据，不能证明对端已收到。见 [批量读取审批决定](protocol.md#批量读取审批决定)。
+
+真实服务测试覆盖允许、拒绝、待审批、取消后无决定、跨任务错配、重复位置、边界和重启，验证查询不推进事件水位或重复产生交付物。Rust 客户端拒绝绑定、水位或重复项不一致的回包。Windows 的定向检查和 Debian Linux 6.12.107 来宾的 7 项对应进程测试通过，包括真实隔离 ACP 进程的回执验证。Linux 日志：`D:/Fliuno-Native-Test/guest-approval-decision-batch.log`。
+
+SQLite 3.49.1 的查询计划按联合主键定位决定，再按事件序号直读事件表。Windows 本机调试服务对 32 条不同的真实持久回执比较一次批量 RPC 和 32 次顺序调用，先核对投影字段完全相等。预热 20 对后交替测量 200 对，中位耗时分别为 1.12 ms 和 8.20 ms；结果包含本机 stdio 与编解码开销。日志：`D:/Fliuno-Native-Test/approval-decision-batch-benchmark.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：502 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-approval-decision-batch-check.log`。

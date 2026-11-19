@@ -114,6 +114,7 @@ staged.sync_all()?;
 | `approval/listPendingSnapshot` | `{page:{workspaceId?,sessionId?,after?,limit?,targetBytes?},snapshot?}` | `{snapshot,page}`，在固定事件水位和到期判断时间读取待审批摘要 |
 | `approval/get` | `{taskId,approvalId}` | `{kind,approval}`，包含指定待审批项的完整请求 |
 | `approval/getDecision` | `{taskId,approvalId}` | 已提交决定对应的 `Event`，用于重连核对 |
+| `approval/getDecisions` | `{approvals:[{taskId,approvalId},...]}` | [按请求顺序读取持久回执](#批量读取审批决定) |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
 | `approval/respondDecision` | 与 `approval/respond` 相同 | 提交决定并返回已持久化的 `Event`。 |
 | `approval/resumeRun` | `{sessionId,parentRequestId,clientRequestId,approvalId,decision}` | `ApprovalRun`；提交决定并创建同一任务的子运行。 |
@@ -393,6 +394,18 @@ SQLite v41 在升级时记录可读取的最早水位，并保留待审批摘要
 `initialize.capabilities.approvalRunWindow` 表示可通过 `approval/getRunWindow` 读取执行段的边界。`firstSequence` 对初始运行指向 `task_started`，对子运行指向绑定它的 `approval_resolved`。`lastSequence` 包含首个审批请求、任务中断或任务终态事件；还没结束时为 `null`。这对序号用于定位事件，不能替代对具体帧的校验。SQLite v39 从已有事件回填执行段的结束索引。
 
 `initialize.capabilities.approvalRunPending` 表示可以用 `approval/getRunPending` 按运行读取待审批工具。只有在该审批是运行的结束事件且尚未处理时才返回详情；同一任务后续执行段的审批不会通过旧请求键返回。
+
+#### 批量读取审批决定
+
+服务声明 `approvalDecisionBatch:true` 时，可用 `approval/getDecisions` 一次核对 1～64 对任务和审批 ID，客户端重连后无需逐项请求。`maxApprovalDecisionBatch` 提供服务端上限。每个 ID 接受 1～128 个可见 ASCII 字符，任一键无效会拒绝整个请求。
+
+```json
+{"jsonrpc":"2.0","id":21,"method":"approval/getDecisions","params":{"approvals":[{"taskId":"<task-id>","approvalId":"<approval-id>"}]}}
+```
+
+`items` 与请求一一对应，保留顺序和重复项。回执有 `taskId`、`approvalId`、`decision` 与全局事件 `sequence`；Agent 的审批回执另有 `runId`，表示本地已保存决定，无法证明对端已收到。仍待审批、关闭时未留下决定、键不匹配或从未存在的项均返回 `null`。没有回执不授予任何权限，也不能据此判断某项工作是否已执行。
+
+响应的 `throughSequence` 来自同一 SQLite 读快照，只表示查询水位。读取不产生事件，不应据此推进已消费的事件游标。Rust 使用 `Client::get_approval_decisions`；旧服务可以逐项调用 `approval/getDecision`。需要完整的持久事件时，用返回的 `sequence` 调用 `events/get`。
 
 ### 主机注册的命令执行
 

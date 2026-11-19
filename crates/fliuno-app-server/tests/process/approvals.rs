@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "approvals/decisions.rs"]
+mod decisions;
+
 #[path = "approvals/snapshot.rs"]
 mod snapshot;
 

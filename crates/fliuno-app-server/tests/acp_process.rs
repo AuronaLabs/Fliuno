@@ -273,6 +273,17 @@ fn durable_agent_approval_stream_and_completion_survive_reopen() {
         json!({"taskId":task["id"],"approvalId":approval["id"]}),
     );
     assert_eq!(decision["data"]["decision"], "allow_once");
+    let receipts = reopened.call(
+        "approval/getDecisions",
+        json!({"approvals":[{"taskId":task["id"],"approvalId":approval["id"]}]}),
+    );
+    assert_eq!(
+        receipts["items"],
+        json!([{
+            "taskId":task["id"],"approvalId":approval["id"],"decision":"allow_once",
+            "sequence":decision["sequence"],"runId":decision["data"]["runId"]
+        }])
+    );
     assert_eq!(
         &decision,
         events
