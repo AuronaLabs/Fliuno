@@ -1,5 +1,8 @@
 use crate::{CancellationToken, new_id};
-use fliuno_protocol::{Artifact, ToolCall, Workspace};
+use fliuno_protocol::{Artifact, ArtifactBody, ToolCall, Workspace};
+
+mod binary_artifact;
+pub(crate) use binary_artifact::CreateBinaryArtifact;
 use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Copy, serde::Serialize)]
@@ -143,7 +146,9 @@ impl Tool for CreateArtifact {
             task_id: context.task_id.into(),
             title: args.title,
             media_type: "text/plain; charset=utf-8".into(),
-            content: args.content,
+            body: ArtifactBody::Text {
+                content: args.content,
+            },
         };
         Ok(ToolOutput {
             output: json!({"artifactId": artifact.id}),

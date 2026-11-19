@@ -24,7 +24,9 @@ fn approved_task_creates_one_artifact_and_replays_events() {
     assert_eq!(done.status, TaskStatus::Completed);
     let artifacts = kernel.list_artifacts(&task.id).unwrap();
     assert_eq!(artifacts.len(), 1);
-    assert_eq!(artifacts[0].content, "hello world");
+    assert!(
+        matches!(&artifacts[0].body, ArtifactBody::Text { content } if content == "hello world")
+    );
     assert!(
         kernel
             .respond_approval(&task.id, &approval.id, ApprovalDecision::AllowOnce)

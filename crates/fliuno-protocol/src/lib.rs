@@ -427,13 +427,14 @@ pub struct TaskSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Artifact {
     pub id: String,
     pub task_id: String,
     pub title: String,
     pub media_type: String,
-    pub content: String,
+    #[serde(flatten)]
+    pub body: ArtifactBody,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -444,6 +445,8 @@ pub struct ArtifactSummary {
     pub title: String,
     pub media_type: String,
     pub content_bytes: u64,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub binary: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

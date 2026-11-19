@@ -296,6 +296,12 @@ Windows `scripts/check.ps1` 退出码为 0：421 项 workspace 测试、26 个�
 
 Windows `scripts/check.ps1` 退出码为 0：423 项 workspace 测试、26 个离线演示、rustfmt、两组严格 Clippy 与生成的 RPC Schema 均通过。此轮未在 Debian Linux 来宾复验。
 
+## 二进制产物（2026-11-19）
+
+内核新增逐次审批的 `artifact_create_binary`。Windows 进程测试以本机 HTTP 模型替身发起工具调用，验证审批拒绝时无产物，允许后 SQLite 保存 150,003 个原始字节，重启后完整读取、跨块续读与独立计算的 SHA-256 一致，并拒绝用其他任务 ID 读取。内核测试覆盖 256 KiB 边界和无效参数，旧文本产物迁移测试仍通过。
+
+Windows `scripts/check.ps1` 退出码为 0：425 项 workspace 测试、26 个离线演示、rustfmt、两组严格 Clippy 与生成的 RPC Schema 均通过。此轮未在 Debian Linux 来宾复验。
+
 ## Gemini Interactions 与 MCP 只读失败（2026-11-19）
 
 Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。

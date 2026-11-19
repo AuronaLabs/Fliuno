@@ -1,6 +1,6 @@
 //! Metadata catalogs and incremental reads of immutable artifact bodies.
 use super::*;
-use rusqlite::{Transaction, blob::Blob};
+use rusqlite::{Transaction, blob::Blob, types::ValueRef};
 use sha2::{Digest, Sha256};
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
@@ -98,17 +98,18 @@ pub(super) fn record(tx: &Transaction<'_>, task_id: &str, artifact: &Artifact) -
     // separately so paging and context projection never touch the body pages.
     tx.prepare_cached(
         "INSERT INTO artifacts(id,task_id,data) VALUES(?1,?2,
-            json_object('title',?3,'mediaType',?4,'contentBytes',?5))",
+            json_object('title',?3,'mediaType',?4,'contentBytes',?5,'binary',?6))",
     )?
     .execute(params![
         artifact.id,
         task_id,
         artifact.title,
         artifact.media_type,
-        artifact.content.len() as i64
+        artifact.body.as_bytes().len() as i64,
+        matches!(artifact.body, ArtifactBody::Binary { .. }),
     ])?;
     tx.prepare_cached("INSERT INTO artifact_bodies(artifact_id,body) VALUES(?1,?2)")?
-        .execute(params![artifact.id, artifact.content.as_bytes()])?;
+        .execute(params![artifact.id, artifact.body.as_bytes()])?;
     Ok(())
 }
 
@@ -118,17 +119,25 @@ fn artifact_row(row: &rusqlite::Row<'_>, task_id: &str) -> rusqlite::Result<Arti
         task_id: task_id.into(),
         title: row.get(1)?,
         media_type: row.get(2)?,
-        content: row.get(3)?,
+        body: match row.get_ref(3)? {
+            ValueRef::Blob(bytes) => ArtifactBody::Binary {
+                bytes: bytes.to_vec(),
+            },
+            _ => ArtifactBody::Text {
+                content: row.get(3)?,
+            },
+        },
     })
 }
 
-fn summary_row(row: &rusqlite::Row<'_>, task_id: &str) -> rusqlite::Result<ArtifactSummary> {
+fn summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactSummary> {
     Ok(ArtifactSummary {
         id: row.get(0)?,
-        task_id: task_id.into(),
+        task_id: row.get(5)?,
         title: row.get(1)?,
         media_type: row.get(2)?,
         content_bytes: row.get::<_, i64>(3)? as u64,
+        binary: row.get(6)?,
     })
 }
 
@@ -136,7 +145,8 @@ impl Kernel {
     pub fn list_artifacts(&self, task_id: &str) -> Result<Vec<Artifact>> {
         self.require_task(task_id)?;
         let mut statement = self.db.prepare_cached(
-            "SELECT a.id,json_extract(a.data,'$.title'),json_extract(a.data,'$.mediaType'),CAST(b.body AS TEXT)
+            "SELECT a.id,json_extract(a.data,'$.title'),json_extract(a.data,'$.mediaType'),
+             CASE WHEN json_extract(a.data,'$.binary') THEN b.body ELSE CAST(b.body AS TEXT) END
              FROM artifacts a JOIN artifact_bodies b ON b.artifact_id=a.id
              WHERE a.task_id=?1 ORDER BY a.rowid",
         )?;
@@ -154,7 +164,8 @@ impl Kernel {
         self.require_task(task_id)?;
         self.query_catalog_page(
             "SELECT id,json_extract(data,'$.title'),json_extract(data,'$.mediaType'),
-             json_extract(data,'$.contentBytes'),rowid,task_id FROM artifacts
+             json_extract(data,'$.contentBytes'),rowid,task_id,
+             COALESCE(json_extract(data,'$.binary'),0) FROM artifacts
              WHERE task_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3",
             params![task_id, cursor, limit + 1],
             cursor,
@@ -204,7 +215,8 @@ impl Kernel {
         };
         let sql = format!(
             "SELECT a.id,json_extract(a.data,'$.title'),c.media_type,
-             json_extract(a.data,'$.contentBytes'),c.sequence,a.task_id
+             json_extract(a.data,'$.contentBytes'),c.sequence,a.task_id,
+             COALESCE(json_extract(a.data,'$.binary'),0)
              FROM artifact_catalog c JOIN artifacts a ON a.id=c.artifact_id
              WHERE c.{column}=?1 AND c.sequence>?2 {media_predicate} ORDER BY c.sequence LIMIT ?3"
         );
@@ -238,10 +250,7 @@ impl Kernel {
                 break;
             }
             next_after = row.get::<_, i64>(4)? as u64;
-            items.push(summary_row(
-                row,
-                row.get_ref(5)?.as_str().map_err(rusqlite::Error::from)?,
-            )?);
+            items.push(summary_row(row)?);
         }
         Ok(ObjectPage {
             items,
@@ -258,11 +267,10 @@ impl Kernel {
         self.db
             .prepare_cached(
                 "SELECT id,json_extract(data,'$.title'),json_extract(data,'$.mediaType'),
-             json_extract(data,'$.contentBytes') FROM artifacts WHERE task_id=?1 AND id=?2",
+             json_extract(data,'$.contentBytes'),rowid,task_id,
+             COALESCE(json_extract(data,'$.binary'),0) FROM artifacts WHERE task_id=?1 AND id=?2",
             )?
-            .query_row(params![task_id, artifact_id], |row| {
-                summary_row(row, task_id)
-            })
+            .query_row(params![task_id, artifact_id], summary_row)
             .optional()?
             .ok_or_else(|| Error::NotFound("artifact".into()))
     }
@@ -336,11 +344,17 @@ impl Kernel {
     }
 
     pub fn get_artifact(&self, task_id: &str, artifact_id: &str) -> Result<Artifact> {
-        self.db.prepare_cached(
-            "SELECT a.id,json_extract(a.data,'$.title'),json_extract(a.data,'$.mediaType'),CAST(b.body AS TEXT)
+        self.db
+            .prepare_cached(
+                "SELECT a.id,json_extract(a.data,'$.title'),json_extract(a.data,'$.mediaType'),
+             CASE WHEN json_extract(a.data,'$.binary') THEN b.body ELSE CAST(b.body AS TEXT) END
              FROM artifacts a JOIN artifact_bodies b ON b.artifact_id=a.id
              WHERE a.task_id=?1 AND a.id=?2",
-        )?.query_row(params![task_id, artifact_id], |row| artifact_row(row, task_id)).optional()?
+            )?
+            .query_row(params![task_id, artifact_id], |row| {
+                artifact_row(row, task_id)
+            })
+            .optional()?
             .ok_or_else(|| Error::NotFound("artifact".into()))
     }
 }

@@ -138,6 +138,7 @@ fn successful_and_empty_batches_publish_complete_sorted_sets_without_executing_t
             "Alpha_2".to_owned(),
             longest,
             "artifact_create".to_owned(),
+            "artifact_create_binary".to_owned(),
             "zeta-1".to_owned()
         ]
     );

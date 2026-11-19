@@ -30,6 +30,47 @@ pub struct ArtifactCatalogParams {
 
 pub const MAX_ARTIFACT_READ_BYTES: u32 = 64 * 1024;
 pub const MAX_ARTIFACT_DIGEST_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_BINARY_ARTIFACT_BYTES: usize = 256 * 1024;
+
+/// Text keeps its original wire field. Binary bytes are encoded only at the
+/// JSON boundary; callers can also fetch raw ranges using artifacts/read.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ArtifactBody {
+    Text {
+        content: String,
+    },
+    Binary {
+        #[serde(rename = "contentBase64", with = "base64_body")]
+        #[schemars(with = "String")]
+        bytes: Vec<u8>,
+    },
+}
+
+impl ArtifactBody {
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            Self::Text { content } => content.as_bytes(),
+            Self::Binary { bytes } => bytes,
+        }
+    }
+}
+
+mod base64_body {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    pub(super) fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&base64::display::Base64Display::new(bytes, &STANDARD))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        let text = std::borrow::Cow::<str>::deserialize(deserializer)?;
+        STANDARD.decode(text.as_bytes()).map_err(D::Error::custom)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

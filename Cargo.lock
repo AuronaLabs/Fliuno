@@ -839,8 +839,10 @@ dependencies = [
 name = "fliuno-core"
 version = "0.0.2"
 dependencies = [
+ "base64 0.22.1",
  "crossbeam-channel",
  "fliuno-protocol",
+ "mime",
  "rusqlite",
  "serde",
  "serde_json",
@@ -889,6 +891,7 @@ dependencies = [
 name = "fliuno-protocol"
 version = "0.0.2"
 dependencies = [
+ "base64 0.22.1",
  "schemars 1.2.3",
  "serde",
  "serde_json",

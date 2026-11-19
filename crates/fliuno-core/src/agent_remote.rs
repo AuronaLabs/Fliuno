@@ -119,7 +119,9 @@ impl Kernel {
                 task_id: task_id.into(),
                 title: source.title,
                 media_type: source.media_type,
-                content: source.content,
+                body: ArtifactBody::Text {
+                    content: source.content,
+                },
             };
             links.push(AgentArtifactLink {
                 source_id: source.source_id,

@@ -14,7 +14,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 30;
+pub(crate) const SCHEMA_VERSION: u32 = 31;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -243,8 +243,16 @@ impl Kernel {
             // Older readers cannot decode match_recent in frozen task snapshots.
             db.pragma_update(None, "user_version", 30)?;
         }
+        if version < 31 {
+            // Older readers cast all artifact bodies to UTF-8.
+            db.pragma_update(None, "user_version", 31)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
+        tools.insert(
+            "artifact_create_binary".into(),
+            Arc::new(crate::tool::CreateBinaryArtifact),
+        );
         let mut kernel = Self {
             db,
             provider: std::sync::Arc::from(provider),

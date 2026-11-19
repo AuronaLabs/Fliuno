@@ -82,13 +82,15 @@
 
 `eventBySequence` 表示支持 `events/get`。`sequence` 取自实时通知或回放，范围为 1 到 SQLite 的最大 64 位有符号整数。序号不存在时返回 `-32004`。
 
-客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和正文的 UTF-8 字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。`artifactSummaryById` 表示可以用同样的参数调用 `artifacts/getSummary` 单独读取元数据。
+客户端可通过 `initialize.capabilities.artifactSummaries` 探测轻量产物接口。清单项包含 `id`、`taskId`、`title`、`mediaType` 和原始字节数 `contentBytes`。首次请求使用 `after:0`，之后以同一任务的 `nextAfter` 翻页。每页最多 100 项。使用 `artifacts/get` 按任务和产物 ID 读取正文。`artifactSummaryById` 表示可以用同样的参数调用 `artifacts/getSummary` 单独读取元数据。
+
+`initialize.capabilities.binaryArtifacts` 为真时，二进制产物的清单项包含 `binary:true`，完整响应以 `contentBase64` 返回标准 Base64。文本产物沿用 `content`，清单省略 `binary`。SQLite v31 为二进制正文标记版本；旧产物及游标无需迁移。
 
 `scopedArtifactSummaries` 表示支持 `artifacts/listScopedSummaries`。每页最多 100 项，包含归档会话中的产物。从 `after:0` 开始，使用同一查询范围的 `nextAfter` 翻页。SQLite v26 为此清单新增索引并回填已有产物。任务级清单的游标独立于此接口。
 
 `artifactMediaTypeFilter` 表示 `artifacts/listScopedSummaries` 支持 `mediaType`。筛选条件和已有产物的值完全匹配，包含大小写和参数。筛选词最多 256 个 UTF-8 字节，须包含可见内容。翻页时沿用相同筛选条件和作用域。SQLite v28 为会话和工作区分别建立类型索引，并保留原有游标。
 
-客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节后，再按 UTF-8 解码正文，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。SQLite v21 将已有正文移到独立 BLOB 表，保留产物 ID、清单游标和字节偏移。升级在一个事务内完成，迁移中数据库需要空间写入新正文。
+客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节。若产物是文本，再按 UTF-8 解码，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。SQLite v21 将已有正文移到独立 BLOB 表，保留产物 ID、清单游标和字节偏移。升级在一个事务内完成，迁移中数据库需要空间写入新正文。
 
 `artifacts/digest` 对分块读取的原始字节计算 SHA-256。客户端可将拼接后的内容与 `{contentBytes,sha256}` 比对。`initialize.capabilities.maxArtifactDigestBytes` 公布整次摘要的上限，目前为 8 MiB。正文分块读入固定上限的缓冲区。
 
@@ -287,6 +289,8 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 ## 内置工具与作用域
 
 `tools/list` 的效果分类包括 `artifact_write`、`workspace_read`、`workspace_write`、`skill_read`、`process_execution`、`terminal_control`、`external`。分类由主机工具实现提供；默认所有调用都请求一次审批。客户端审批只提交审批 ID 和决策，不提交新的工具参数或工作区。
+
+- `artifact_create_binary({title,mediaType,contentBase64})`：逐次审批后保存二进制产物。媒体类型须是具体的 `type/subtype`，不带参数。输入使用标准有填充的 Base64，按解码后的大小限额 256 KiB（`maxBinaryArtifactBytes`）。只写 SQLite 产物库，不接受文件路径，也不打开或执行内容。工具结果只返回产物 ID、字节数和媒体类型。
 
 - `workspace_list({path})`：工作区内目录，根目录用 `.`；返回最多 256 项及 truncated。
 - `workspace_list_page({path,after?,limit?:128})` 按文件名的 UTF-8 字节顺序返回 `{entries,nextAfter,hasMore,omittedNames}`，每页 1..256 项。目录不变时，按 `nextAfter` 续页可浏览全部可寻址条目。文件名无法作为工作区相对路径片段时，计入 `omittedNames`。每次扫描最多 16,384 项，超限返回错误。分页期间目录可以变化，游标只表示名称边界。每页按工作区读取工具走审批。

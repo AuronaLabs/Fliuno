@@ -472,8 +472,8 @@ fn roundtrip(provider: Box<dyn ModelProvider>) -> (Kernel, Session, Task) {
         .unwrap();
     assert_eq!(done.status, TaskStatus::Completed);
     assert_eq!(
-        kernel.list_artifacts(&task.id).unwrap()[0].content,
-        "report body"
+        kernel.list_artifacts(&task.id).unwrap()[0].body.as_bytes(),
+        b"report body"
     );
     (kernel, session, done)
 }

@@ -10,6 +10,8 @@ name = "json_size"
 harness = false
 
 [dependencies]
+base64 = "0.22"
+mime = "0.3"
 fliuno-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true

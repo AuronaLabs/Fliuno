@@ -162,6 +162,8 @@ impl Peer {
         assert_eq!(init["capabilities"]["agentCapabilitiesById"], true);
         assert_eq!(init["capabilities"]["artifactSummaryById"], true);
         assert_eq!(init["capabilities"]["artifactByteReads"], true);
+        assert_eq!(init["capabilities"]["binaryArtifacts"], true);
+        assert_eq!(init["capabilities"]["maxBinaryArtifactBytes"], 262_144);
         assert_eq!(init["capabilities"]["maxArtifactReadBytes"], 65_536);
         assert_eq!(init["capabilities"]["eventResubscribe"], true);
         assert_eq!(init["capabilities"]["sessionEventReplay"], true);

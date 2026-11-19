@@ -1,6 +1,9 @@
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
+#[path = "artifact_binary.rs"]
+mod binary;
+
 #[test]
 fn artifact_byte_reads_and_catalog_cursors_survive_v20_migration() {
     let root = std::env::temp_dir()

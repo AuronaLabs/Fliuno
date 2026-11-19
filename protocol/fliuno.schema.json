@@ -4854,6 +4854,7 @@
     "Artifact": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Artifact",
+      "description": "Text keeps its original wire field. Binary bytes are encoded only at the\nJSON boundary; callers can also fetch raw ranges using artifacts/read.",
       "type": "object",
       "properties": {
         "id": {
@@ -4867,18 +4868,37 @@
         },
         "mediaType": {
           "type": "string"
-        },
-        "content": {
-          "type": "string"
         }
       },
-      "additionalProperties": false,
       "required": [
         "id",
         "taskId",
         "title",
-        "mediaType",
-        "content"
+        "mediaType"
+      ],
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "content"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "contentBase64": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "contentBase64"
+          ]
+        }
       ]
     },
     "ArtifactChunk": {
@@ -4979,6 +4999,9 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
+            },
+            "binary": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false,
