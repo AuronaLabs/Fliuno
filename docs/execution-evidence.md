@@ -488,3 +488,9 @@ Windows `scripts/check.ps1` 以退出码 0 完成。457 项测试、26 个离线
 真实 stdio 进程测试先完成一条历史任务，再用 AG-UI 文本请求创建新任务。重复提交绑定同一任务，跨会话查找请求键失败，外部传入的对话正文未进入冻结上下文。关闭并重启应用服务后，用原运行 ID 找回任务，确认 SSE 输出保留首次执行的运行 ID。客户端单元测试验证不支持的输入在发出 RPC 前被拒绝。
 
 Windows `scripts/check.ps1` 以退出码 0 完成。459 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。接入文档的 JSON 示例通过 `@ag-ui/core@1.0.5` 的 `RunAgentInputSchema` 验证。日志为 `target/0.0.3-ag-ui-run-windows.log`。
+
+## 0.0.3 AG-UI SSE 订阅（2026-11-19）
+
+真实 stdio 进程测试使用同一条连接回放待审批事件、处理审批并追上持久完成事件。重启应用服务后，从完成文本帧的 ID 续传，剩余帧逐字节一致。测试还覆盖超出订阅水位的游标，以及写入端失效后必须重建 feed 的行为。
+
+Windows `scripts/check.ps1` 通过 460 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-sse-feed-windows.log`。

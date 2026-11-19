@@ -1,9 +1,11 @@
 //! Bind AG-UI requests to tasks and project committed events.
 mod run;
 mod sse;
+mod stream;
 
 pub use run::{AgUiRun, AgUiRunError};
 pub use sse::{AG_UI_SSE_CONTENT_TYPE, AgUiSseError, AgUiSseStream};
+pub use stream::{AgUiSseFeed, AgUiSseFeedError};
 
 use fliuno_protocol::{Event, EventKind, TaskSummary};
 use serde::Serialize;

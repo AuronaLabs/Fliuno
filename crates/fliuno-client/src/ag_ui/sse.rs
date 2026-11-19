@@ -98,6 +98,16 @@ impl AgUiSseStream {
         })
     }
 
+    pub(super) fn check_watermark(&self, through: u64) -> Result<(), AgUiSseError> {
+        if self
+            .resume
+            .is_some_and(|position| position.sequence > through)
+        {
+            return Err(AgUiSseError::UnknownResumeId);
+        }
+        Ok(())
+    }
+
     /// Verify that replay located the resume frame before handing off to live
     /// events. Use the watermark from the task's event subscription.
     pub fn finish_replay(&mut self) -> Result<(), AgUiSseError> {

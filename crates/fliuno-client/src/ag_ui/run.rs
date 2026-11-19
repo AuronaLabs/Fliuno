@@ -1,5 +1,5 @@
 //! Bind the AG-UI text input profile to a durable local task request.
-use super::{AgUiProjector, AgUiSseError, AgUiSseStream};
+use super::{AgUiProjector, AgUiSseError, AgUiSseFeed, AgUiSseFeedError, AgUiSseStream};
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
     MAX_APP_REQUEST_BYTES, TaskRequestLookupParams, TaskStartParams, TaskSummary,
@@ -170,6 +170,17 @@ impl AgUiRun {
 
     pub fn sse(&self, last_event_id: Option<&str>) -> Result<AgUiSseStream, AgUiSseError> {
         AgUiSseStream::with_projector(self.projector(), last_event_id)
+    }
+
+    /// Drive this run's SSE output through one connection's task subscription.
+    pub fn subscribe_sse<R: BufRead, W: Write>(
+        &self,
+        client: &mut Client<R, W>,
+        last_event_id: Option<&str>,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<AgUiSseFeed, AgUiSseFeedError> {
+        let stream = self.sse(last_event_id)?;
+        AgUiSseFeed::with_stream(client, &self.task.id, stream, on_notification)
     }
 
     fn checked(task: TaskSummary, session_id: &str, run_id: String) -> Result<Self, AgUiRunError> {

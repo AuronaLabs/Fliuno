@@ -30,7 +30,7 @@
 | `protocolVersion` | 可省略。提供时使用 `1.0`。 |
 | 其余输入 | JSON 正文最多 1 MiB。`state` 和 `forwardedProps` 可省略、设为 `null` 或空对象。`tools`、`context` 和 `resume` 可省略或使用空数组。当前不支持 `parentRunId`、工具调用、加密消息或非文本内容。 |
 
-用返回值的 `task()` 取得已创建的任务摘要。连接中断后，可以调用 `Client::attach_ag_ui_run(session_id, run_id, on_notification)`，从数据库找回同一个任务。用 `run.projector()` 或 `run.sse(last_event_id)` 输出事件，即可沿用首次执行的 `runId`。后续显式恢复的执行段仍使用各自派生的 ID。
+用返回值的 `task()` 取得已创建的任务摘要。连接中断后，可以调用 `Client::attach_ag_ui_run(session_id, run_id, on_notification)`，从数据库找回同一个任务。用 `run.subscribe_sse(...)` 输出事件，即可沿用首次执行的 `runId`。后续显式恢复的执行段仍使用各自派生的 ID。
 
 ## 投影内核事件
 
@@ -69,7 +69,22 @@ while let Some(page) = replay.next_page(&mut client, 64, Some(64 * 1024), &mut b
 
 ## SSE 输出与续传
 
-`fliuno_client::ag_ui::AgUiSseStream` 可以把投影写入实现 `Write` 的响应体。由宿主提供 HTTP 路由和连接，响应使用 `AG_UI_SSE_CONTENT_TYPE`（`text/event-stream`）。每条消息有一行 `id` 和一行 `data`。`data` 是 AG-UI 事件 JSON，`id` 由任务 ID、内核事件序号和该事件内从 1 开始的消息编号组成。
+一条连接可以使用 `run.subscribe_sse` 订阅任务并输出 SSE。`AgUiSseFeed` 按页读取持久事件，接收实时水位通知，发现缺口时自动补读。对于通过应用协议创建的任务，也可以用 `AgUiSseFeed::subscribe` 从任务摘要建立订阅。
+
+```rust
+let mut feed = run.subscribe_sse(&mut client, last_event_id, &mut handle_other)?;
+while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &mut handle_other)? {
+    if frames > 0 {
+        response_body.flush()?;
+    }
+}
+```
+
+`None` 表示已读到当前已知的水位。宿主继续读取通知，将它们交给 `feed.observe(note)`，再调用 `write_next_page`。宿主可以在两次读取之间执行审批等 RPC，并把期间到达的通知走同一个 `observe`。该连接同一时间只能维护一个事件订阅。连接中断或写入失败时，用消费端最后完整收到的事件 ID 建立新 feed。
+
+### 帧格式和底层接口
+
+`fliuno_client::ag_ui::AgUiSseStream` 可以把单个持久事件的投影写入实现 `Write` 的响应体。由宿主提供 HTTP 路由和连接，响应使用 `AG_UI_SSE_CONTENT_TYPE`（`text/event-stream`）。每条消息有一行 `id` 和一行 `data`。`data` 是 AG-UI 事件 JSON，`id` 由任务 ID、内核事件序号和该事件内从 1 开始的消息编号组成。
 
 重连时，读取客户端发送的 `Last-Event-ID`。通过 AG-UI 提交的任务用 `run.sse(last_event_id)` 创建输出流。直接投影内核任务时，使用 `AgUiSseStream::new(&summary, last_event_id)`。将上文回放循环中的 `projection.project(event)` 换成 `stream.write_event(event, &mut response_body)`。和首次连接一样从 `TaskStarted` 回放，以重建执行段状态。输出从指定消息之后开始，即使它位于一个任务事件产生的多条消息中间。
 

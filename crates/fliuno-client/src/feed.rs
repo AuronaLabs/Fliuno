@@ -59,6 +59,10 @@ impl EventFeed {
         self.replay.cursor()
     }
 
+    pub(crate) fn through(&self) -> u64 {
+        self.replay.through()
+    }
+
     /// Record event or gap notifications and return other notifications unchanged.
     pub fn observe(&mut self, notification: Notification) -> Option<Notification> {
         self.signals.observe(notification)

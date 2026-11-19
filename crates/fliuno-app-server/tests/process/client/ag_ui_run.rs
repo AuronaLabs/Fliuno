@@ -1,5 +1,5 @@
 use super::*;
-use fliuno_client::{EventFeed, ag_ui::AgUiRunError};
+use fliuno_client::ag_ui::{AgUiRunError, AgUiSseError, AgUiSseFeedError};
 use fliuno_protocol::Session;
 use std::process::ChildStdout;
 
@@ -145,15 +145,12 @@ fn ag_ui_run_preserves_request_identity_and_authoritative_history_across_restart
     ));
 
     let mut output = Vec::new();
-    let mut stream = attached.sse(None).unwrap();
-    let mut feed =
-        EventFeed::subscribe(&mut client, ReplayScope::Task(task_id), 0, |_| {}).unwrap();
-    while let Some(page) = feed.next_page(&mut client, 2, Some(4096), |_| {}).unwrap() {
-        for event in page {
-            stream.write_event(event, &mut output).unwrap();
-        }
-    }
-    stream.finish_replay().unwrap();
+    let mut feed = attached.subscribe_sse(&mut client, None, |_| {}).unwrap();
+    while feed
+        .write_next_page(&mut client, &mut output, |_| {})
+        .unwrap()
+        .is_some()
+    {}
     let output = String::from_utf8(output).unwrap();
     let payloads: Vec<Value> = output
         .strip_suffix("\n\n")
@@ -176,6 +173,146 @@ fn ag_ui_run_preserves_request_identity_and_authoritative_history_across_restart
             .count(),
         1
     );
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn ag_ui_sse_feed_delivers_live_approval_and_resumes_inside_completion() {
+    let root = std::env::temp_dir().join(format!("fliuno-ag-ui-feed-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let (server, mut client) = connect(&db);
+    let workspace: Workspace = client
+        .call("workspace/open", &json!({"root":root}), |_| {})
+        .unwrap();
+    let session: Session = client
+        .call(
+            "session/create",
+            &json!({"workspaceId":workspace.id}),
+            |_| {},
+        )
+        .unwrap();
+    let body = serde_json::to_vec(&json!({
+        "threadId":session.id,"runId":"feed-run",
+        "messages":[{"id":"u","role":"user","content":"stream this result"}]
+    }))
+    .unwrap();
+    let run = client.start_ag_ui_run(&session.id, &body, |_| {}).unwrap();
+    let id = &run.task().id;
+    let waiting = wait_for_task(&mut client, id, TaskStatus::WaitingApproval);
+
+    let future_id = format!("{id}:{}:1", i64::MAX);
+    assert!(matches!(
+        run.subscribe_sse(&mut client, Some(&future_id), |_| {}),
+        Err(AgUiSseFeedError::Sse(AgUiSseError::UnknownResumeId))
+    ));
+    let mut feed = run.subscribe_sse(&mut client, None, |_| {}).unwrap();
+    let mut bytes = Vec::new();
+    while feed
+        .write_next_page(&mut client, &mut bytes, |_| {})
+        .unwrap()
+        .is_some()
+    {}
+    let before_approval = String::from_utf8_lossy(&bytes);
+    assert!(before_approval.contains("fliuno.approval_requested"));
+    assert!(!before_approval.contains("RUN_FINISHED"));
+    let _: Task = client
+        .call(
+            "approval/respond",
+            &ApprovalRespondParams {
+                task_id: id.clone(),
+                approval_id: waiting.pending_approval.unwrap().id,
+                decision: ApprovalDecision::AllowOnce,
+            },
+            |notification| {
+                feed.observe(notification);
+            },
+        )
+        .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        // Drain queued notifications while sharing one stdio connection with RPCs.
+        let _: TaskSummary = client
+            .call(
+                "task/getSummary",
+                &TaskIdParams {
+                    task_id: id.clone(),
+                },
+                |notification| {
+                    feed.observe(notification);
+                },
+            )
+            .unwrap();
+        while feed
+            .write_next_page(&mut client, &mut bytes, |_| {})
+            .unwrap()
+            .is_some()
+        {}
+        if String::from_utf8_lossy(&bytes).contains("RUN_FINISHED") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "missing live completion");
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    let frames: Vec<_> = std::str::from_utf8(&bytes)
+        .unwrap()
+        .split_terminator("\n\n")
+        .collect();
+    let [content, end, finished] = &frames[frames.len() - 3..] else {
+        unreachable!()
+    };
+    assert!(content.contains("TEXT_MESSAGE_CONTENT"));
+    assert!(end.contains("TEXT_MESSAGE_END"));
+    assert!(finished.contains("RUN_FINISHED"));
+    assert!(finished.contains(r#""runId":"feed-run""#));
+    let last_id = content
+        .lines()
+        .next()
+        .unwrap()
+        .strip_prefix("id: ")
+        .unwrap();
+
+    drop(client);
+    drop(server);
+    let (server, mut client) = connect(&db);
+    let run = client
+        .attach_ag_ui_run(&session.id, "feed-run", |_| {})
+        .unwrap();
+    let mut resumed = run
+        .subscribe_sse(&mut client, Some(last_id), |_| {})
+        .unwrap();
+    let mut resumed_bytes = Vec::new();
+    while resumed
+        .write_next_page(&mut client, &mut resumed_bytes, |_| {})
+        .unwrap()
+        .is_some()
+    {}
+    assert_eq!(resumed_bytes, format!("{end}\n\n{finished}\n\n").as_bytes());
+
+    // A failed write can have delivered a partial frame. The adapter must not
+    // let the host retry from the next page and skip the rest of this one.
+    struct BrokenOutput;
+    impl std::io::Write for BrokenOutput {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut failed = run.subscribe_sse(&mut client, None, |_| {}).unwrap();
+    assert!(matches!(
+        failed.write_next_page(&mut client, &mut BrokenOutput, |_| {}),
+        Err(AgUiSseFeedError::Sse(AgUiSseError::Output(_)))
+    ));
+    assert!(matches!(
+        failed.write_next_page(&mut client, &mut Vec::new(), |_| {}),
+        Err(AgUiSseFeedError::Sse(AgUiSseError::Closed))
+    ));
     drop(client);
     drop(server);
     fs::remove_dir_all(root).unwrap();
