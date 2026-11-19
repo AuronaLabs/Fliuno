@@ -133,3 +133,61 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
     .execute(params![task.id, serde_json::to_string(&summary)?])?;
     Ok(())
 }
+
+impl Kernel {
+    /// Read only the compact summary projection, in one SQLite read view.
+    pub fn get_task_summaries(&self, request: &TaskSummaryBatchParams) -> Result<TaskSummaryBatch> {
+        if request.task_ids.is_empty() || request.task_ids.len() > MAX_TASK_SUMMARY_BATCH {
+            return Err(Error::Invalid(format!(
+                "taskIds must contain 1 to {MAX_TASK_SUMMARY_BATCH} entries"
+            )));
+        }
+        if request.task_ids.iter().any(|id| {
+            id.is_empty()
+                || id.len() > MAX_TASK_SUMMARY_ID_BYTES
+                || !id.bytes().all(|byte| byte.is_ascii_graphic())
+        }) {
+            return Err(Error::Invalid(format!(
+                "task IDs must be 1 to {MAX_TASK_SUMMARY_ID_BYTES} visible ASCII bytes"
+            )));
+        }
+        match (&request.workspace_id, &request.session_id) {
+            (Some(_), Some(_)) => {
+                return Err(Error::Invalid("select one task summary scope".into()));
+            }
+            (Some(id), None) => self.require_workspace(id)?,
+            (None, Some(id)) => self.require_session(id)?,
+            (None, None) => {}
+        }
+        // Drive indexed lookups from the bounded input array. Scope is checked
+        // before joining the summary, so an excluded row's body is never read.
+        // The array index restores request order without a SQL sort.
+        let mut stmt = self.db.prepare_cached(
+            "SELECT requested.key, summary.data, (SELECT COALESCE(MAX(sequence),0) FROM events)
+             FROM json_each(?1) AS requested
+             LEFT JOIN task_summary_status AS owner ON owner.task_id=requested.value
+                AND (?2 IS NULL OR owner.workspace_id=?2)
+                AND (?3 IS NULL OR owner.session_id=?3)
+             LEFT JOIN task_summaries AS summary ON summary.task_id=owner.task_id",
+        )?;
+        let ids = serde_json::to_string(&request.task_ids)?;
+        let mut rows = stmt.query(params![ids, request.workspace_id, request.session_id])?;
+        let mut items = vec![None; request.task_ids.len()];
+        let mut through_sequence = None;
+        while let Some(row) = rows.next()? {
+            if through_sequence.is_none() {
+                through_sequence = Some(row.get::<_, i64>(2)? as u64);
+            }
+            let index = usize::from(row.get::<_, u16>(0)?);
+            let data: Option<&str> = row
+                .get_ref(1)?
+                .as_str_or_null()
+                .map_err(rusqlite::Error::from)?;
+            items[index] = data.map(serde_json::from_str).transpose()?;
+        }
+        Ok(TaskSummaryBatch {
+            items,
+            through_sequence: through_sequence.ok_or(rusqlite::Error::QueryReturnedNoRows)?,
+        })
+    }
+}

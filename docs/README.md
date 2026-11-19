@@ -22,6 +22,7 @@
 | --- | --- |
 | 建立连接并调用接口 | [应用协议 0.1](protocol.md) · [JSON Schema](../protocol/fliuno.schema.json) |
 | 打开工作台并处理审批 | [工作台实时订阅](protocol.md#工作台实时订阅) · [待审批快照与续页](protocol.md#待审批快照) |
+| 刷新有变化的任务卡片 | [批量读取任务摘要](protocol.md#批量读取任务摘要) |
 | 订阅事件或断线后追上进度 | [Rust 客户端](protocol.md#rust-调用方) · [AG-UI SSE 续传](ag-ui.md#sse-输出与续传) |
 | 通过 HTTP 提交任务、审批并续跑 | [AG-UI 宿主接入](ag-ui.md#http-接入) · [本机 HTTP 演示](../examples/ag_ui_http_demo.py) |
 | 浏览会话历史和查找任务 | [历史分页](context.md#会话历史分页) · [搜索接口](protocol.md#查找历史任务) |

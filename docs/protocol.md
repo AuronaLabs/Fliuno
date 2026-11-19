@@ -5,7 +5,7 @@
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
 - **建立连接**：[stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
-- **搭工作台**：[工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
+- **搭工作台**：[工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [批量读取任务摘要](#批量读取任务摘要) · [待审批快照](#待审批快照) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
 - **查方法**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [错误](#错误)
 - **配置能力**：[A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
@@ -77,6 +77,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `task/getSummaryByRequest` | `{sessionId,clientRequestId}` | 通过会话和请求键读取当前 `TaskSummary` |
 | `task/get` | `{taskId}` | Task |
 | `task/getSummary` | `{taskId}` | 单条 `TaskSummary`，可以轻量轮询任务状态 |
+| `task/getSummaries` | `{taskIds,workspaceId?,sessionId?}` | 从同一查询快照按请求顺序返回摘要或 `null`，附上事件水位 |
 | `task/checkRemote` | `{taskId,waitMs?}` | `{checkId}`；后台只读核对，结果经事件返回，见 [A2A](a2a.md#显式核对远端状态) |
 | `task/getRemoteCheck` | `{taskId,checkId}` | 指定核对的持久 `Event`。见 `initialize.capabilities.remoteTaskCheckLookup` |
 | `task/continueRemote` | `{taskId,input,clientRequestId}` | 独立的本机 Task；后台复核后向原远端任务或上下文提交，见 [A2A](a2a.md#显式续接远端任务) |
@@ -172,6 +173,20 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 `artifacts/digest` 对分块读取的原始字节计算 SHA-256。客户端可将拼接后的内容与 `{contentBytes,sha256}` 比对。`initialize.capabilities.maxArtifactDigestBytes` 公布整次摘要的上限，目前为 8 MiB。正文分块读入固定上限的缓冲区。
 
 `initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
+
+### 批量读取任务摘要
+
+`initialize.capabilities.taskSummaryBatch` 表示支持 `task/getSummaries`，`maxTaskSummaryBatch` 公布上限（目前 64 项）。宿主可以收集一页事件涉及的任务 ID，再一次查询这些任务的当前摘要。该调用只读摘要和作用域索引，不加载完整任务、对话或工具参数。
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"task/getSummaries","params":{"workspaceId":"<workspace-id>","taskIds":["<task-id>","<another-task-id>"]}}
+```
+
+传 `workspaceId` 或 `sessionId` 限定范围，均省略时按整个数据库查询。工作区范围包含已归档会话。`taskIds` 不能为空，每个 ID 必须为 1 到 128 个不含空格的可打印 ASCII 字符。两个范围同时传入或参数不合法时返回 `-32602`，范围不存在时返回 `-32004`。
+
+响应为 `{items,throughSequence}`。`items` 与 `taskIds` 一一对应，重复 ID 保留重复位置。不存在和不在请求范围内的任务均为 `null`。`throughSequence` 是与这些摘要同一快照的全局事件水位，可能比触发读取的事件更新。继续回放时沿用事件订阅自己的游标；批量查询的水位不代表其余任务的事件已经处理。
+
+Rust 的 `Client::get_task_summaries` 返回类型化结果，校验项数、ID 和会话范围。与工作台实时订阅搭配时，仍把查询期间收到的通知传给 `EventFeed::observe()`。
 
 ### 工作台快照
 

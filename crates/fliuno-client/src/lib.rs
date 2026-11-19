@@ -6,6 +6,7 @@ mod feed;
 mod history;
 mod history_search;
 mod replay;
+mod task_summaries;
 mod wire;
 mod work;
 

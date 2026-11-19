@@ -497,3 +497,31 @@ fn approval_inbox_preserves_the_checkpoint_when_the_snapshot_changes() {
     );
     assert!(resumed.next_page(&mut client, |_| {}).unwrap().is_none());
 }
+
+#[test]
+fn task_summary_batch_rejects_shifted_or_foreign_response_items() {
+    let summary = |id: &str, session: &str| {
+        json!({
+            "id":id, "sessionId":session, "status":"running", "backend":{"type":"model"},
+            "inputPreview":"preview", "pendingApprovalCount":0,
+            "modelOutcomeUnknown":false, "agentOutcomeUnknown":false
+        })
+    };
+    let request = fliuno_protocol::TaskSummaryBatchParams {
+        task_ids: vec!["first".into(), "second".into()],
+        workspace_id: None,
+        session_id: Some("session".into()),
+    };
+    for items in [
+        json!([summary("second", "session"), null]),
+        json!([null, summary("second", "foreign")]),
+        json!([null]),
+    ] {
+        let frame = json!({"jsonrpc":"2.0","id":2,"result":{"throughSequence":7,"items":items}});
+        let mut client = fake_client(format!("{frame}\n").as_bytes());
+        assert!(matches!(
+            client.get_task_summaries(&request, |_| {}),
+            Err(Error::InvalidResult)
+        ));
+    }
+}

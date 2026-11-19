@@ -423,6 +423,8 @@ impl RpcServer {
             capabilities["taskSummaryListTargetBytes"] =
                 json!(fliuno_core::MAX_TASK_LIST_TARGET_BYTES);
             capabilities["taskSummaryById"] = json!(true);
+            capabilities["taskSummaryBatch"] = json!(true);
+            capabilities["maxTaskSummaryBatch"] = json!(MAX_TASK_SUMMARY_BATCH);
             capabilities["workSnapshot"] = json!(true);
             capabilities["workSubscription"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
@@ -716,6 +718,10 @@ impl RpcServer {
             "task/getSummary" => {
                 let p: TaskIdParams = decode(params)?;
                 json!(self.kernel()?.get_task_summary(&p.task_id)?)
+            }
+            "task/getSummaries" => {
+                let p: TaskSummaryBatchParams = decode(params)?;
+                json!(self.kernel()?.get_task_summaries(&p)?)
             }
             "task/get" => {
                 let p: TaskIdParams = decode(params)?;
