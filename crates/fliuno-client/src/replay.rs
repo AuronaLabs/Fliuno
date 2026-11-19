@@ -5,10 +5,13 @@ use super::{Client, Error, Notification};
 use fliuno_protocol::{
     Event, EventKind, EventSubscription, EventWatermark, EventsListAllParams, EventsListParams,
     EventsListSessionParams, EventsListWorkspaceParams, EventsPage, EventsSetScopeParams,
-    ModelUsageSummary, ModelUsageSummaryParams, ModelUsageSummaryScope, TaskWatermarks,
-    TaskWatermarksParams,
+    ModelUsageSummary, ModelUsageSummaryBatch, ModelUsageSummaryBatchParams,
+    ModelUsageSummaryParams, ModelUsageSummaryScope, TaskWatermarks, TaskWatermarksParams,
 };
-use std::io::{BufRead, Write};
+use std::{
+    collections::HashMap,
+    io::{BufRead, Write},
+};
 
 #[derive(Debug, Clone)]
 pub enum ReplayScope {
@@ -86,6 +89,30 @@ impl<R: BufRead, W: Write> Client<R, W> {
             return Err(Error::InvalidReplayWindow);
         }
         Ok(summary)
+    }
+
+    /// Read totals for multiple scopes in one view. Check `modelUsageSummaryBatch`
+    /// before calling. Missing owners stay in their original positions as `None`.
+    pub fn model_usage_summaries(
+        &mut self,
+        request: &ModelUsageSummaryBatchParams,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<ModelUsageSummaryBatch, Error> {
+        let batch: ModelUsageSummaryBatch =
+            self.call("modelUsage/getSummaries", request, on_notification)?;
+        if batch.through_sequence > i64::MAX as u64 || batch.items.len() != request.scopes.len() {
+            return Err(Error::InvalidResult);
+        }
+        let mut seen = HashMap::with_capacity(batch.items.len());
+        for (scope, item) in request.scopes.iter().zip(&batch.items) {
+            if seen
+                .insert(scope, item)
+                .is_some_and(|previous| previous != item)
+            {
+                return Err(Error::InvalidResult);
+            }
+        }
+        Ok(batch)
     }
 
     /// Install a live subscription and open the matching replay window. `after`

@@ -126,6 +126,7 @@ staged.sync_all()?;
 | `events/listSessionModelUsage` | `{sessionId,after?,through?,limit?,targetBytes?}` | 分页读取会话下各任务的模型用量 |
 | `events/listWorkspaceModelUsage` | `{workspaceId,after?,through?,limit?,targetBytes?}` | 分页读取工作区各会话的模型用量，包含已归档会话 |
 | `modelUsage/getSummary` | `{scope:{kind:"task",taskId}}`、`{scope:{kind:"session",sessionId}}` 或 `{scope:{kind:"workspace",workspaceId}}` | `{throughSequence,totals}`，读取该范围内已保存报告的累计值 |
+| `modelUsage/getSummaries` | `{scopes:[scope,...]}` | `{throughSequence,items}`，按输入顺序返回同一读视图中的累计值 |
 | `events/listTaskChanges` | `{taskId?,sessionId?,workspaceId?,after?,through?,limit?}` | 固定水位并回放发生变动的任务 ID，每页去重，不返回事件正文 |
 | `events/getWatermark` | `{}` | 当前已提交的全局 `throughSequence`，供多个回放读取方共用 |
 | `events/getTaskWatermarks` | `{taskIds}` | 按输入顺序返回每个任务的最新事件序号；没有持久事件的项为 `null` |
@@ -493,7 +494,17 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 所有计数是十进制字符串，避免大整数在 JavaScript 中丢精度。不同供应商的已报告用量会合计，此结果不估计缺失用量或换算费用。`throughSequence` 是该快照同一读视图的全局事件水位，不是最近一条用量事件的序号。若调用方用事件维护增量，可从该水位继续[回放用量报告](#回放用量报告)，不要再次计入快照已覆盖的事件。
 
-SQLite v43 从已有用量索引回填汇总；新报告和三个范围的计数在同一事务中保存。查询时只读范围计数与当前水位。Rust 调用方可用 `Client::model_usage_summary`。 首次启动会完成回填后再接受请求；如需退回旧二进制，应保留升级前的数据库备份。
+SQLite v43 从已有用量索引回填汇总；新报告和三个范围的计数在同一事务中保存。查询时只读范围计数与当前水位。Rust 调用方可用 `Client::model_usage_summary`。首次启动会完成回填后再接受请求；如需退回旧二进制，应保留升级前的数据库备份。
+
+#### 批量用量汇总
+
+`initialize.capabilities.modelUsageSummaryBatch` 声明 `modelUsage/getSummaries` 可用，`maxModelUsageSummaryBatch` 给出支持的上限（当前 64）。一次请求可以混合任务、会话和工作区。`scopes` 至少有一项；ID 长度为 1 到 128 个可见 ASCII 字节。无效参数会拒绝整次请求。
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"modelUsage/getSummaries","params":{"scopes":[{"kind":"workspace","workspaceId":"<workspace-id>"},{"kind":"session","sessionId":"<session-id>"}]}}
+```
+
+`items` 和请求一一对应，保留重复位置。范围不存在时返回 `null`，范围存在但暂无报告时返回一组十进制字符串 `"0"`。所有项均对应同一个全局 `throughSequence`。单独比较不同层级的用量时，注意同一份报告可能同时计入任务、会话和工作区，不能将重叠范围的值相加。Rust 客户端可用 `Client::model_usage_summaries`；旧服务仍可逐条调用 `Client::model_usage_summary`，每条有独立水位。
 
 #### 回放用量报告
 

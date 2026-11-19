@@ -1,12 +1,31 @@
 //! Fixed-size sums maintained in the same transaction as indexed usage events.
 use super::*;
 
-#[derive(Clone, Copy)]
-#[repr(u8)]
-enum Scope {
-    Task = 0,
-    Session = 1,
-    Workspace = 2,
+use std::collections::{HashMap, hash_map::Entry};
+
+fn owner(scope: &ModelUsageSummaryScope) -> (&'static str, &str, &'static str) {
+    // Select from the owner table so a missing row differs from a present
+    // owner with no aggregate. Both lookups use their existing primary keys.
+    match scope {
+        ModelUsageSummaryScope::Task { task_id } => (
+            "task",
+            task_id,
+            "SELECT u.totals FROM tasks t LEFT JOIN model_usage_totals u
+             ON u.scope=0 AND u.owner=t.id WHERE t.id=?1",
+        ),
+        ModelUsageSummaryScope::Session { session_id } => (
+            "session",
+            session_id,
+            "SELECT u.totals FROM sessions s LEFT JOIN model_usage_totals u
+             ON u.scope=1 AND u.owner=s.id WHERE s.id=?1",
+        ),
+        ModelUsageSummaryScope::Workspace { workspace_id } => (
+            "workspace",
+            workspace_id,
+            "SELECT u.totals FROM workspaces w LEFT JOIN model_usage_totals u
+             ON u.scope=2 AND u.owner=w.id WHERE w.id=?1",
+        ),
+    }
 }
 
 pub(in crate::storage) fn migrate_totals(db: &mut Connection) -> Result<()> {
@@ -95,36 +114,73 @@ impl Kernel {
         &self,
         request: &ModelUsageSummaryParams,
     ) -> Result<ModelUsageSummary> {
-        let (scope, owner) = match &request.scope {
-            ModelUsageSummaryScope::Task { task_id } => {
-                self.require_task(task_id)?;
-                (Scope::Task, task_id)
-            }
-            ModelUsageSummaryScope::Session { session_id } => {
-                self.require_session(session_id)?;
-                (Scope::Session, session_id)
-            }
-            ModelUsageSummaryScope::Workspace { workspace_id } => {
-                self.require_workspace(workspace_id)?;
-                (Scope::Workspace, workspace_id)
-            }
-        };
-        let mut query = self.db.prepare_cached(
-            "SELECT (SELECT COALESCE(MAX(sequence),0) FROM events),
-                    (SELECT totals FROM model_usage_totals WHERE scope=?1 AND owner=?2)",
-        )?;
-        let mut rows = query.query(params![scope as u8, owner])?;
-        let row = rows.next()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
-        let data = row
-            .get_ref(1)?
-            .as_str_or_null()
-            .map_err(rusqlite::Error::from)?;
+        let (kind, id, sql) = owner(&request.scope);
+        let tx = self.db.unchecked_transaction()?;
+        let totals = read_totals(&tx, id, sql)?.ok_or_else(|| Error::NotFound(kind.into()))?;
+        let through_sequence = self.event_watermark()?;
+        tx.commit()?;
         Ok(ModelUsageSummary {
-            through_sequence: row.get::<_, i64>(0)? as u64,
-            totals: data
-                .map(serde_json::from_str)
-                .transpose()?
-                .unwrap_or_default(),
+            through_sequence,
+            totals,
         })
     }
+
+    pub fn model_usage_summaries(
+        &self,
+        request: &ModelUsageSummaryBatchParams,
+    ) -> Result<ModelUsageSummaryBatch> {
+        let scopes = &request.scopes;
+        if !(1..=MAX_MODEL_USAGE_SUMMARY_BATCH).contains(&scopes.len()) {
+            return Err(Error::Invalid(format!(
+                "scopes must contain 1 to {MAX_MODEL_USAGE_SUMMARY_BATCH} entries"
+            )));
+        }
+        if scopes.iter().any(|scope| {
+            let (_, id, _) = owner(scope);
+            id.is_empty()
+                || id.len() > MAX_MODEL_USAGE_OWNER_ID_BYTES
+                || !id.bytes().all(|byte| byte.is_ascii_graphic())
+        }) {
+            return Err(Error::Invalid(format!(
+                "owner IDs must be 1 to {MAX_MODEL_USAGE_OWNER_ID_BYTES} visible ASCII bytes"
+            )));
+        }
+        // Pin all reads to the watermark view. Do one lookup per distinct
+        // scope, but keep each requested position in the response.
+        let tx = self.db.unchecked_transaction()?;
+        let through_sequence = self.event_watermark()?;
+        let mut seen = HashMap::with_capacity(scopes.len());
+        let mut items = Vec::with_capacity(scopes.len());
+        for scope in scopes {
+            let totals = match seen.entry(scope) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    let (_, id, sql) = owner(scope);
+                    entry.insert(read_totals(&tx, id, sql)?)
+                }
+            };
+            items.push(totals.clone());
+        }
+        tx.commit()?;
+        Ok(ModelUsageSummaryBatch {
+            through_sequence,
+            items,
+        })
+    }
+}
+
+fn read_totals(db: &Connection, id: &str, sql: &str) -> Result<Option<ModelUsageTotals>> {
+    let mut query = db.prepare_cached(sql)?;
+    let mut rows = query.query([id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let totals = row
+        .get_ref(0)?
+        .as_str_or_null()
+        .map_err(rusqlite::Error::from)?
+        .map(serde_json::from_str)
+        .transpose()?
+        .unwrap_or_default();
+    Ok(Some(totals))
 }

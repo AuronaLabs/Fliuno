@@ -2303,6 +2303,83 @@
         }
       }
     },
+    "modelUsage/getSummaries": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelUsageSummaryBatchParams",
+      "type": "object",
+      "properties": {
+        "scopes": {
+          "description": "Owner IDs must be 1 to 128 visible ASCII bytes.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelUsageSummaryScope"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "scopes"
+      ],
+      "$defs": {
+        "ModelUsageSummaryScope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "task"
+                },
+                "taskId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "taskId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "session"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "workspace"
+                },
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "workspaceId"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "events/listModelUsage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsListParams",
@@ -9374,6 +9451,85 @@
       "required": [
         "throughSequence",
         "totals"
+      ],
+      "$defs": {
+        "ModelUsageTotals": {
+          "type": "object",
+          "properties": {
+            "reportCount": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "inputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "outputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "cachedInputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "cachedInputReportCount": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "reasoningOutputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "reasoningOutputReportCount": {
+              "$ref": "#/$defs/UsageCount"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reportCount",
+            "inputTokens",
+            "outputTokens",
+            "cachedInputTokens",
+            "cachedInputReportCount",
+            "reasoningOutputTokens",
+            "reasoningOutputReportCount"
+          ]
+        },
+        "UsageCount": {
+          "description": "An exact integer exposed as a decimal string, including on JavaScript clients.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 39,
+          "pattern": "^(0|[1-9][0-9]*)$"
+        }
+      }
+    },
+    "ModelUsageSummaryBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelUsageSummaryBatch",
+      "type": "object",
+      "properties": {
+        "throughSequence": {
+          "description": "Global event watermark shared by all returned totals.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "items": {
+          "description": "Entries align with the request. Missing owners are null; existing\nowners with no reports get zero totals. Duplicate scopes are retained.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ModelUsageTotals"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "throughSequence",
+        "items"
       ],
       "$defs": {
         "ModelUsageTotals": {

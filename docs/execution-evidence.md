@@ -799,3 +799,13 @@ AG-UI HTTP 仍用全局水位校验起始回放和重连位置。空闲时，每
 真实进程测试让三条 SSE 响应观察两个任务，向另一个会话提交四组任务启动与取消。记录的 stdio 请求显示，每个空闲样本只查询这两个任务，没有全局轮询，也没有 `events/list` 调用；审批后两条运行仍正确结束，指定 SSE 帧可续传。协议测试验证请求顺序、重复和缺失 ID、边界拒绝、仅匹配事件推进及跨重启结果一致。Debian Linux 6.12.107 来宾的 7 项进程测试通过，覆盖工作台、事件流、AG-UI HTTP 和审批中断。日志：`D:/Fliuno-Native-Test/guest-task-watermarks.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：498 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-task-watermarks-check.log`。
+
+## 0.0.3 批量模型用量汇总（2026-11-20）
+
+`modelUsage/getSummaries` 从同一 SQLite 读视图返回最多 64 个混合范围的累计值及全局事件水位。重复范围只读取一次，响应保留各个位置；未知范围为 `null`，存在且没有报告的范围返回零计数。复用 v43 累计表和既有主键，不改变数据库 v44，也不加载任务或事件正文。见 [批量用量汇总](protocol.md#批量用量汇总)。
+
+进程测试用回环 HTTP 模型夹具生成超过 64 位的累计值，混合工作区、会话和任务范围，区分未知、空范围、重复和另一个工作区。验证 64 项上限、非法参数整体拒绝、v42 回填后结果相同及重启后新报告可见。Rust 客户端测试验证回包长度、水位及重复项不一致会被拒绝，下一次调用仍可成功。Debian Linux 6.12.107 来宾的 7 项用量、工作台和任务回放进程测试通过。日志：`D:/Fliuno-Native-Test/guest-usage-summary-batch.log`。
+
+SQLite 3.49.1 查询计划确认三类范围均走主键索引，无扫描。Windows 本机调试服务用 32 个不同范围，预填固定累计记录，对比一次批量 RPC 与 32 次顺序 RPC。先核对计数及水位一致，预热 20 对后交替测量 200 对，往返中位耗时为 3.48 ms 对 10.59 ms。结果包含本机 stdio 和序列化开销，不含模型请求。日志：`D:/Fliuno-Native-Test/usage-summary-batch-benchmark.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：499 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-usage-summary-batch-check.log`。

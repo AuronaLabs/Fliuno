@@ -382,6 +382,38 @@ fn usage_summary_is_exact_and_scoped_after_v42_migration_and_new_reports() {
     let doubled = u128::from(u64::MAX) * 2;
     assert_eq!(before["totals"], totals(2, doubled, 6, (0, 1), (0, 1)));
     let before_cursor = before["throughSequence"].as_u64().unwrap();
+    let task_scope = json!({"kind":"task","taskId":task["id"]});
+    let missing = json!({"kind":"session","sessionId":task["id"]});
+    let foreign_scope = json!({"kind":"workspace","workspaceId":other_workspace["id"]});
+    let batch_params = json!({"scopes":[scope, missing, task_scope, empty_scope, scope, first_scope, foreign_scope]});
+    let batch = |peer: &mut Peer| peer.call("modelUsage/getSummaries", batch_params.clone());
+    let zero = totals(0, 0, 0, (0, 0), (0, 0));
+    let foreign_totals = totals(1, 12, 1, (10, 1), (0, 0));
+    let before_batch = batch(&mut peer);
+    let bound = fliuno_protocol::MAX_MODEL_USAGE_SUMMARY_BATCH;
+    assert_eq!(
+        before_batch,
+        json!({"throughSequence":before_cursor,"items":[before["totals"],null,first_use,zero,before["totals"],first_use,foreign_totals]})
+    );
+    let full = peer.call(
+        "modelUsage/getSummaries",
+        json!({"scopes":vec![&task_scope;bound]}),
+    );
+    assert_eq!(full["items"], json!(vec![&first_use; bound]));
+    for invalid in [
+        json!({"scopes":[]}),
+        json!({"scopes":vec![&scope;bound+1]}),
+        json!({"scopes":[scope,{"kind":"task","taskId":""}]}),
+        json!({"scopes":[{"kind":"task","taskId":"with space"}]}),
+        json!({"scopes":[{"kind":"task","taskId":"x".repeat(129)}]}),
+        json!({"scopes":[{"kind":"session","sessionId":first["id"],"taskId":task["id"]}]}),
+    ] {
+        assert_eq!(
+            peer.request("modelUsage/getSummaries", invalid)["error"]["code"],
+            -32602
+        );
+    }
+    assert_eq!(batch(&mut peer), before_batch);
     drop(peer);
 
     // Remove only the new projection to reproduce an actual v42 database.
@@ -392,6 +424,7 @@ fn usage_summary_is_exact_and_scoped_after_v42_migration_and_new_reports() {
     let mut peer = Peer::start_with_model_fixture(&db, Some(&url));
     assert_eq!(summary(&mut peer, &scope), before);
     assert_eq!(summary(&mut peer, &first_scope)["totals"], first_use);
+    assert_eq!(batch(&mut peer), before_batch);
     let task_after = submit(&mut peer, &first, "after upgrade");
     let after = summary(&mut peer, &scope);
     assert_eq!(after["totals"], totals(3, doubled + 5, 14, (4, 2), (3, 2)));
@@ -416,6 +449,11 @@ fn usage_summary_is_exact_and_scoped_after_v42_migration_and_new_reports() {
     drop(peer);
     let mut peer = Peer::start(&db);
     assert_eq!(summary(&mut peer, &scope), after);
+    let after_batch = batch(&mut peer);
+    assert_eq!(
+        after_batch,
+        json!({"throughSequence":after["throughSequence"],"items":[after["totals"],null,first_use,zero,after["totals"],totals(2,u128::from(u64::MAX)+5,14,(4,2),(3,1)),foreign_totals]})
+    );
     assert_eq!(
         summary(&mut peer, &empty_scope)["totals"],
         totals(0, 0, 0, (0, 0), (0, 0))

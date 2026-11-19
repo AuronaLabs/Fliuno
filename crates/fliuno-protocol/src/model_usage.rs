@@ -1,8 +1,8 @@
-//! Lifetime totals over the committed model-usage reports in a single scope.
+//! Lifetime totals over committed model-usage reports.
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "kind",
     rename_all = "snake_case",
@@ -19,6 +19,28 @@ pub enum ModelUsageSummaryScope {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelUsageSummaryParams {
     pub scope: ModelUsageSummaryScope,
+}
+
+pub const MAX_MODEL_USAGE_SUMMARY_BATCH: usize = 64;
+pub const MAX_MODEL_USAGE_OWNER_ID_BYTES: usize = 128;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelUsageSummaryBatchParams {
+    /// Owner IDs must be 1 to 128 visible ASCII bytes.
+    #[schemars(length(min = 1, max = MAX_MODEL_USAGE_SUMMARY_BATCH))]
+    pub scopes: Vec<ModelUsageSummaryScope>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelUsageSummaryBatch {
+    /// Global event watermark shared by all returned totals.
+    pub through_sequence: u64,
+    /// Entries align with the request. Missing owners are null; existing
+    /// owners with no reports get zero totals. Duplicate scopes are retained.
+    #[schemars(length(min = 1, max = MAX_MODEL_USAGE_SUMMARY_BATCH))]
+    pub items: Vec<Option<ModelUsageTotals>>,
 }
 
 /// An exact integer exposed as a decimal string, including on JavaScript clients.

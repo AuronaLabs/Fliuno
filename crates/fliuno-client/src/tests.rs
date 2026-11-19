@@ -566,6 +566,49 @@ fn task_summary_batch_rejects_shifted_or_foreign_response_items() {
 }
 
 #[test]
+fn usage_summary_batch_checks_positions_watermark_and_duplicate_totals() {
+    use fliuno_protocol::{ModelUsageSummaryBatchParams, ModelUsageSummaryScope, ModelUsageTotals};
+    let task = ModelUsageSummaryScope::Task {
+        task_id: "t1".into(),
+    };
+    let request = ModelUsageSummaryBatchParams {
+        scopes: vec![
+            task.clone(),
+            ModelUsageSummaryScope::Session {
+                session_id: "s1".into(),
+            },
+            task,
+        ],
+    };
+    let zero = ModelUsageTotals::default();
+    let expected = json!([zero, null, zero]);
+    let samples = [
+        json!({"throughSequence":7,"items":[zero,null]}),
+        json!({"throughSequence":u64::MAX,"items":expected}),
+        json!({"throughSequence":7,"items":[zero,null,null]}),
+        json!({"throughSequence":7,"items":expected}),
+    ];
+    let replies = samples
+        .into_iter()
+        .enumerate()
+        .map(|(index, result)| {
+            let frame = json!({"jsonrpc":"2.0","id":index+2,"result":result});
+            format!("{frame}\n")
+        })
+        .collect::<String>();
+    let mut client = fake_client(replies.as_bytes());
+    for _ in 0..3 {
+        assert!(matches!(
+            client.model_usage_summaries(&request, |_| {}),
+            Err(Error::InvalidResult)
+        ));
+    }
+    let batch = client.model_usage_summaries(&request, |_| {}).unwrap();
+    assert_eq!(batch.through_sequence, 7);
+    assert_eq!(batch.items, vec![Some(zero.clone()), None, Some(zero)]);
+}
+
+#[test]
 fn invalid_task_change_page_preserves_the_replay_cursor() {
     let duplicate = json!({"changes":[{"taskId":"task","sequence":5},{"taskId":"task","sequence":6}],
         "nextAfter":9,"throughSequence":9,"hasMore":false});

@@ -59,7 +59,7 @@
 | **刷新变动任务** | [一次读取变动摘要](protocol.md#任务变动摘要) · [仅回放任务 ID](protocol.md#任务变动回放) · [按 ID 读取摘要](protocol.md#批量读取任务摘要) |
 | **浏览会话或定位任务** | [最近会话与归档目录](protocol.md#会话目录) · [历史分页](context.md#会话历史分页) · [搜索接口](protocol.md#查找历史任务) |
 | **浏览并下载交付物** | [目录订阅](protocol.md#交付物目录订阅) · [批量校验摘要](protocol.md#批量读取交付物摘要) · [分段读取](protocol.md#审批事件与产物) |
-| **查看模型用量** | [累计用量](protocol.md#用量汇总) · [逐次报告](protocol.md#回放用量报告) |
+| **查看模型用量** | [累计用量](protocol.md#用量汇总) · [批量汇总](protocol.md#批量用量汇总) · [逐次报告](protocol.md#回放用量报告) |
 
 ## 模型、工具与 Agent
 
