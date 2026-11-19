@@ -1,5 +1,5 @@
 //! Page-by-page SSE delivery over a task-scoped durable subscription.
-use super::{AgUiSseError, AgUiSseStream};
+use super::{AgUiRunPhase, AgUiSseError, AgUiSseStream};
 use crate::{Client, Error, EventFeed, Notification, ReplayScope};
 use fliuno_protocol::TaskSummary;
 use std::io::{BufRead, Write};
@@ -60,6 +60,12 @@ impl AgUiSseFeed {
             stream,
             failed: false,
         })
+    }
+
+    /// Return the latest projected phase, or `None` after an output or replay error.
+    /// The phase changes only as pages are processed, including on reconnect.
+    pub fn run_phase(&self) -> Option<AgUiRunPhase> {
+        (!self.failed).then(|| self.stream.run_phase())
     }
 
     /// Record a durable notification and return any other notification unchanged.

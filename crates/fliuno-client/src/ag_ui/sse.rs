@@ -1,5 +1,5 @@
 //! SSE framing for a task's durable AG-UI projection.
-use super::{AgUiProjectionError, AgUiProjector};
+use super::{AgUiProjectionError, AgUiProjector, AgUiRunPhase};
 use fliuno_protocol::{Event, TaskSummary};
 use std::{
     cmp::Ordering,
@@ -96,6 +96,10 @@ impl AgUiSseStream {
             closed: false,
             frame: Vec::new(),
         })
+    }
+
+    pub(super) fn run_phase(&self) -> AgUiRunPhase {
+        self.projector.run_phase()
     }
 
     pub(super) fn check_watermark(&self, through: u64) -> Result<(), AgUiSseError> {

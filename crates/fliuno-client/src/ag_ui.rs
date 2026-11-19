@@ -25,6 +25,8 @@ pub enum AgUiEvent {
     RunFinished {
         thread_id: String,
         run_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        outcome: Option<AgUiRunOutcome>,
     },
     RunError {
         message: String,
@@ -45,6 +47,21 @@ pub enum AgUiEvent {
         name: &'static str,
         value: Value,
     },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgUiRunOutcome {
+    Cancelled,
+}
+
+/// The phase of the latest execution segment in this task's projected history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgUiRunPhase {
+    AwaitingStart,
+    Running,
+    Interrupted,
+    Finished,
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
@@ -91,6 +108,15 @@ impl AgUiProjector {
         Self {
             external_run_id: Some(run_id.to_owned()),
             ..Self::new(task)
+        }
+    }
+
+    pub fn run_phase(&self) -> AgUiRunPhase {
+        match self.state {
+            RunState::Pending => AgUiRunPhase::AwaitingStart,
+            RunState::Running { .. } => AgUiRunPhase::Running,
+            RunState::Interrupted => AgUiRunPhase::Interrupted,
+            RunState::Finished => AgUiRunPhase::Finished,
         }
     }
 
@@ -143,6 +169,7 @@ impl AgUiProjector {
                 output.push(AgUiEvent::RunFinished {
                     thread_id: self.thread_id.clone(),
                     run_id: self.run_id(start_sequence, initial),
+                    outcome: None,
                 });
                 output
             }
@@ -160,11 +187,18 @@ impl AgUiProjector {
                     code: "fliuno.task_interrupted",
                 }]
             }
-            (EventKind::TaskCancelled, RunState::Running { .. }) => {
+            (
+                EventKind::TaskCancelled,
+                RunState::Running {
+                    start_sequence,
+                    initial,
+                },
+            ) => {
                 self.state = RunState::Finished;
-                vec![AgUiEvent::RunError {
-                    message: "Task cancelled".into(),
-                    code: "fliuno.task_cancelled",
+                vec![AgUiEvent::RunFinished {
+                    thread_id: self.thread_id.clone(),
+                    run_id: self.run_id(start_sequence, initial),
+                    outcome: Some(AgUiRunOutcome::Cancelled),
                 }]
             }
             (EventKind::TaskCancelled, RunState::Interrupted) => {

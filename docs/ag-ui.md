@@ -61,7 +61,8 @@ while let Some(page) = replay.next_page(&mut client, 64, Some(64 * 1024), &mut b
 | --- | --- |
 | 任务启动或显式恢复 | `RUN_STARTED`。`threadId` 使用会话 ID，`runId` 由任务 ID 和本段开始序号派生。 |
 | 任务完成 | 提交后的文本作为 `TEXT_MESSAGE_START`、`TEXT_MESSAGE_CONTENT`、`TEXT_MESSAGE_END`，随后是 `RUN_FINISHED`。空文本直接结束。 |
-| 任务失败、中断或取消 | `RUN_ERROR`。先中断再取消的任务已结束前一个执行段，取消另发 `fliuno.task_cancelled`。 |
+| 任务失败或进程中断 | `RUN_ERROR`。本机中断后的显式恢复会开启新的执行段。 |
+| 取消活动任务 | `RUN_FINISHED`，`outcome` 为 `{"type":"cancelled"}`。若前一个执行段已中断，取消只发 `fliuno.task_cancelled` 自定义事件。 |
 | 审批请求、决定和关闭 | `CUSTOM`，名称分别为 `fliuno.approval_requested`、`fliuno.approval_resolved` 和 `fliuno.approval_closed`。值包含任务 ID 与审批 ID。审批细节可从原 RPC 按 ID 查询。 |
 | 产物和模型用量 | `CUSTOM`，名称为 `fliuno.artifact_created` 和 `fliuno.model_usage_reported`。产物内容通过现有产物 RPC 读取。 |
 
@@ -81,6 +82,8 @@ while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &
 ```
 
 `None` 表示已读到当前已知的水位。宿主继续读取通知，将它们交给 `feed.observe(note)`，再调用 `write_next_page`。宿主可以在两次读取之间执行审批等 RPC，并把期间到达的通知走同一个 `observe`。该连接同一时间只能维护一个事件订阅。连接中断或写入失败时，用消费端最后完整收到的事件 ID 建立新 feed。
+
+读完当前可用的页后，宿主可用 `feed.run_phase()` 决定是否结束响应。`Finished` 表示任务已结束，`Interrupted` 表示当前执行段因本机中断而结束。恢复后，新的执行段会回到 `Running`。宿主主动取消时，对已绑定的任务调用 `task/cancel`，然后用同一订阅输出取消结果。
 
 ### 帧格式和底层接口
 

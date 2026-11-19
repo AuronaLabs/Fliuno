@@ -1,5 +1,5 @@
 use super::*;
-use fliuno_client::ag_ui::{AgUiRunError, AgUiSseError, AgUiSseFeedError};
+use fliuno_client::ag_ui::{AgUiRunError, AgUiRunPhase, AgUiSseError, AgUiSseFeedError};
 use fliuno_protocol::Session;
 use std::process::ChildStdout;
 
@@ -251,7 +251,7 @@ fn ag_ui_sse_feed_delivers_live_approval_and_resumes_inside_completion() {
             .unwrap()
             .is_some()
         {}
-        if String::from_utf8_lossy(&bytes).contains("RUN_FINISHED") {
+        if feed.run_phase() == Some(AgUiRunPhase::Finished) {
             break;
         }
         assert!(Instant::now() < deadline, "missing live completion");
@@ -313,6 +313,98 @@ fn ag_ui_sse_feed_delivers_live_approval_and_resumes_inside_completion() {
         failed.write_next_page(&mut client, &mut Vec::new(), |_| {}),
         Err(AgUiSseFeedError::Sse(AgUiSseError::Closed))
     ));
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn ag_ui_sse_projects_cancelled_run_and_reports_the_closed_phase() {
+    let root = std::env::temp_dir().join(format!("fliuno-ag-ui-cancel-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let (server, mut client) = connect(&root.join("kernel.db"));
+    let workspace: Workspace = client
+        .call("workspace/open", &json!({"root":root}), |_| {})
+        .unwrap();
+    let session: Session = client
+        .call(
+            "session/create",
+            &json!({"workspaceId":workspace.id}),
+            |_| {},
+        )
+        .unwrap();
+    let body = serde_json::to_vec(&json!({
+        "threadId":session.id,"runId":"cancel-run",
+        "messages":[{"id":"u","role":"user","content":"wait for approval"}]
+    }))
+    .unwrap();
+    let run = client.start_ag_ui_run(&session.id, &body, |_| {}).unwrap();
+    let id = &run.task().id;
+    wait_for_task(&mut client, id, TaskStatus::WaitingApproval);
+    let mut feed = run.subscribe_sse(&mut client, None, |_| {}).unwrap();
+    assert_eq!(feed.run_phase(), Some(AgUiRunPhase::AwaitingStart));
+    let mut output = Vec::new();
+    while feed
+        .write_next_page(&mut client, &mut output, |_| {})
+        .unwrap()
+        .is_some()
+    {}
+    assert_eq!(feed.run_phase(), Some(AgUiRunPhase::Running));
+
+    let task: Task = client
+        .call(
+            "task/cancel",
+            &TaskIdParams {
+                task_id: id.clone(),
+            },
+            |note| {
+                feed.observe(note);
+            },
+        )
+        .unwrap();
+    assert_eq!(task.status, TaskStatus::Cancelled);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while feed.run_phase() == Some(AgUiRunPhase::Running) {
+        // The response and watermark can arrive in either order.
+        let _: TaskSummary = client
+            .call(
+                "task/getSummary",
+                &TaskIdParams {
+                    task_id: id.clone(),
+                },
+                |note| {
+                    feed.observe(note);
+                },
+            )
+            .unwrap();
+        while feed
+            .write_next_page(&mut client, &mut output, |_| {})
+            .unwrap()
+            .is_some()
+        {}
+        assert!(Instant::now() < deadline, "missing live cancellation");
+    }
+    assert_eq!(feed.run_phase(), Some(AgUiRunPhase::Finished));
+    let wire = std::str::from_utf8(&output).unwrap();
+    let last = wire.split_terminator("\n\n").last().unwrap();
+    let data: Value = serde_json::from_str(last.split_once("\ndata: ").unwrap().1).unwrap();
+    assert_eq!(
+        data,
+        json!({"type":"RUN_FINISHED", "threadId":session.id, "runId":"cancel-run", "outcome":{"type":"cancelled"}})
+    );
+    assert!(!wire.contains("RUN_ERROR"));
+    let last_id = last.lines().next().unwrap().strip_prefix("id: ").unwrap();
+    let mut resumed = run
+        .subscribe_sse(&mut client, Some(last_id), |_| {})
+        .unwrap();
+    let mut tail = Vec::new();
+    while resumed
+        .write_next_page(&mut client, &mut tail, |_| {})
+        .unwrap()
+        .is_some()
+    {}
+    assert_eq!(resumed.run_phase(), Some(AgUiRunPhase::Finished));
+    assert!(tail.is_empty());
     drop(client);
     drop(server);
     fs::remove_dir_all(root).unwrap();

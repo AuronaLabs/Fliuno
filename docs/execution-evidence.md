@@ -494,3 +494,9 @@ Windows `scripts/check.ps1` 以退出码 0 完成。459 项测试、26 个离线
 真实 stdio 进程测试使用同一条连接回放待审批事件、处理审批并追上持久完成事件。重启应用服务后，从完成文本帧的 ID 续传，剩余帧逐字节一致。测试还覆盖超出订阅水位的游标，以及写入端失效后必须重建 feed 的行为。
 
 Windows `scripts/check.ps1` 通过 460 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-sse-feed-windows.log`。
+
+## 0.0.3 AG-UI 执行段结束与取消（2026-11-19）
+
+真实 stdio 进程测试回放任务启动和待审批事件，再通过应用协议取消任务。SSE 以原运行 ID 输出带 `cancelled` 结果的 `RUN_FINISHED`，订阅报告已结束。从取消帧的 ID 续传时，执行段状态仍恢复到已结束，输出不会重复。`@ag-ui/core@1.0.5` 的事件 Schema 保留该取消结果。
+
+Windows `scripts/check.ps1` 通过 461 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-lifecycle-windows.log`。
