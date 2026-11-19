@@ -107,6 +107,7 @@ while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &
 | --- | --- |
 | `POST /run` | 接收 `application/json` 的文本任务请求，要求 `threadId` 与授权会话一致。返回 `text/event-stream`。 |
 | `GET /runs/{run_id}` | 在授权会话中找回运行。可发送 `Last-Event-ID`，从指定帧之后续传。不存在或不属于该会话的运行返回 `404`。 |
+| `DELETE /runs/{run_id}` | 取消授权会话中的运行，成功返回 `204`。重复取消仍返回 `204`。已经完成或失败的任务返回 `409`。 |
 
 路由每次读取一页持久事件，释放客户端后再把编码好的页交给响应体。当前限制同时 16 条响应或待解析请求，POST 正文最多 1 MiB，读取超时 10 秒。空闲响应共享约每 150 毫秒一次的水位查询。水位没有推进时不读取事件页，并定期发送 SSE 保活注释。执行段结束后关闭响应。
 

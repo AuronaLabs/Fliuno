@@ -4,7 +4,8 @@ use super::{
 };
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
-    MAX_APP_REQUEST_BYTES, TaskRequestLookupParams, TaskStartParams, TaskSummary,
+    MAX_APP_REQUEST_BYTES, TaskIdParams, TaskRequestLookupParams, TaskStartParams, TaskStatus,
+    TaskSummary,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -172,6 +173,29 @@ impl AgUiRun {
 
     pub fn sse(&self, last_event_id: Option<&str>) -> Result<AgUiSseStream, AgUiSseError> {
         AgUiSseStream::with_projector(self.projector(), last_event_id)
+    }
+
+    /// Cancel the task bound to this run. Repeated cancellations are idempotent.
+    pub fn cancel<R: BufRead, W: Write>(
+        &self,
+        client: &mut Client<R, W>,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<TaskSummary, AgUiRunError> {
+        let task: TaskSummary = client.call(
+            "task/cancelSummary",
+            &TaskIdParams {
+                task_id: self.task.id.clone(),
+            },
+            on_notification,
+        )?;
+        if task.id != self.task.id
+            || task.session_id != self.task.session_id
+            || task.backend != self.task.backend
+            || task.status != TaskStatus::Cancelled
+        {
+            return Err(AgUiRunError::InvalidResult);
+        }
+        Ok(task)
     }
 
     /// Replay this run through a committed watermark without changing the subscription.

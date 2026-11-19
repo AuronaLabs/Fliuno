@@ -34,11 +34,11 @@ struct Gateway<R, W> {
     authorize: Box<Authorize>,
     streams: Arc<Semaphore>,
     reviewer: Option<Box<Authorize>>,
-    reviews: Arc<Semaphore>,
+    controls: Arc<Semaphore>,
     watermark: Mutex<Option<(Instant, u64)>>,
 }
 
-/// Mount `POST /run` and `GET /runs/{run_id}` on the host's HTTP listener.
+/// Mount `POST /run`, `GET /runs/{run_id}` and `DELETE /runs/{run_id}`.
 /// The authorization callback authenticates each request and selects its local
 /// session. Return `None` to reject the request. It runs before any kernel RPC.
 /// Share the client with the host's approval handler through the same mutex.
@@ -83,12 +83,12 @@ where
         authorize,
         streams: Arc::new(Semaphore::new(16)),
         reviewer,
-        reviews: Arc::new(Semaphore::new(8)),
+        controls: Arc::new(Semaphore::new(8)),
         watermark: Mutex::new(None),
     });
     let routes = Router::new()
         .route("/run", post(start::<R, W>))
-        .route("/runs/{run_id}", get(attach::<R, W>));
+        .route("/runs/{run_id}", get(attach::<R, W>).delete(cancel::<R, W>));
     let routes = if has_reviewer {
         routes.route(
             "/runs/{run_id}/approvals/{approval_id}",
@@ -194,6 +194,29 @@ async fn attach<R: BufRead + Send + 'static, W: Write + Send + 'static>(
         })
         .await?;
     respond(gateway, replay, through, permit).await
+}
+
+async fn cancel<R: BufRead + Send + 'static, W: Write + Send + 'static>(
+    State(gateway): State<Arc<Gateway<R, W>>>,
+    Path(run_id): Path<String>,
+    headers: HeaderMap,
+) -> Status<StatusCode> {
+    let session = (gateway.authorize)(&headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    // Cancellation must remain available while all SSE slots are occupied.
+    let _permit = gateway
+        .controls
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    gateway
+        .rpc(move |client| {
+            let run = client
+                .attach_ag_ui_run(&session, &run_id, |_| {})
+                .map_err(run_status)?;
+            run.cancel(client, |_| {}).map_err(run_status)?;
+            Ok(StatusCode::NO_CONTENT)
+        })
+        .await
 }
 
 async fn respond<R: BufRead + Send + 'static, W: Write + Send + 'static>(

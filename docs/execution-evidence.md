@@ -532,3 +532,9 @@ Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt�
 真实 app-server 进程测试验证 `approval/respondDecision` 与事件查询返回相同的决定。重复提交相同决定或尝试提交相反决定都不会推进事件水位。重启并从 v33 回填索引后，旧审批仍可按原决定重试。HTTP 审批继续通过会话和任务绑定检查。
 
 Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。Debian Linux 6.12.107 来宾通过审批决定和 HTTP 路由两项进程测试。日志为 `target/0.0.3-approval-respond-decision-windows.log` 和 `D:/Fliuno-Native-Test/guest-approval-respond-decision.log`。
+
+## 0.0.3 AG-UI HTTP 取消（2026-11-19）
+
+真实回环测试通过 `DELETE /runs/{run_id}` 取消任务。未登录和其他会话的调用失败。授权用户连续取消两次都收到 HTTP 204，SSE 只输出一次 `cancelled` 结果。已完成任务返回 HTTP 409。
+
+Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-http-cancel-windows.log`。

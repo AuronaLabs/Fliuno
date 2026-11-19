@@ -120,7 +120,7 @@ fn review_access<R, W>(
         return Err(StatusCode::BAD_REQUEST);
     }
     let permit = gateway
-        .reviews
+        .controls
         .clone()
         .try_acquire_owned()
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;

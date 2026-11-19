@@ -309,6 +309,57 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
         resumed.text().await.unwrap(),
         format!("{end}\n\n{finished}\n\n")
     );
+    let finished_path = format!("{base}/runs/http-run-1");
+    assert_eq!(
+        http.delete(finished_path)
+            .bearer_auth("local-test")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        409
+    );
+    let cancel = http
+        .post(format!("{base}/run"))
+        .bearer_auth("local-test")
+        .json(&new_run("http-cancel"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cancel.status(), 200);
+    let cancel_path = format!("{base}/runs/http-cancel");
+    assert_eq!(
+        http.delete(&cancel_path).send().await.unwrap().status(),
+        401
+    );
+    assert_eq!(
+        http.delete(&cancel_path)
+            .bearer_auth("other-test")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    for _ in 0..2 {
+        let response = http
+            .delete(&cancel_path)
+            .bearer_auth("local-test")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 204);
+        assert!(response.bytes().await.unwrap().is_empty());
+    }
+    let cancelled = cancel.text().await.unwrap();
+    let frame = cancelled.split_terminator("\n\n").last().unwrap();
+    let event: Value = serde_json::from_str(frame.split_once("\ndata: ").unwrap().1).unwrap();
+    assert_eq!(
+        event,
+        json!({"type":"RUN_FINISHED","threadId":session.id,"runId":"http-cancel","outcome":{"type":"cancelled"}})
+    );
+    assert_eq!(cancelled.matches("RUN_FINISHED").count(), 1);
+
     listener.abort();
     let _ = listener.await;
     drop(shared);

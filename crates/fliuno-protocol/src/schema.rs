@@ -53,6 +53,7 @@ pub fn schema_bundle() -> Value {
         "task/checkRemote" => schema::<RemoteTaskCheckParams>(),
         "task/getRemoteCheck" => schema::<RemoteTaskCheckLookupParams>(),
         "task/cancel" => schema::<TaskIdParams>(),
+        "task/cancelSummary" => schema::<TaskIdParams>(),
         "task/resume" => schema::<TaskResumeParams>(),
         "approval/listPending" => schema::<ApprovalListParams>(),
         "approval/get" => schema::<ApprovalGetParams>(),

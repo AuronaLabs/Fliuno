@@ -360,6 +360,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["taskStartSummary"] = json!(true);
+            capabilities["taskCancelSummary"] = json!(true);
             capabilities["taskSummaryByRequest"] = json!(true);
             capabilities["sessionHistoryList"] = json!(true);
             capabilities["maxSessionHistoryBytes"] = json!(MAX_SESSION_HISTORY_BYTES);
@@ -714,7 +715,7 @@ impl RpcServer {
                         .get_remote_task_check(&p.task_id, &p.check_id)?
                 )
             }
-            "task/cancel" => {
+            "task/cancel" | "task/cancelSummary" => {
                 let p: TaskIdParams = decode(params)?;
                 self.scheduler
                     .cancel(&p.task_id)
@@ -722,7 +723,13 @@ impl RpcServer {
                         code: -32603,
                         message: message.into(),
                     })?;
-                json!(self.kernel()?.cancel_task(&p.task_id)?)
+                let mut kernel = self.kernel()?;
+                let task = kernel.cancel_task(&p.task_id)?;
+                if method == "task/cancelSummary" {
+                    json!(kernel.get_task_summary(&task.id)?)
+                } else {
+                    json!(task)
+                }
             }
             "task/resume" => {
                 let p: TaskResumeParams = decode(params)?;
