@@ -1013,3 +1013,113 @@ fn stat_reports_metadata_without_the_file_read_limit() {
     );
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn stat_batch_checks_all_paths_and_preserves_order_under_one_approval() {
+    use fliuno_core::{ModelDecision, ModelTurn};
+    use fliuno_protocol::{ApprovalDecision, Message, Task, TaskStatus};
+
+    struct Provider;
+    impl fliuno_core::ModelProvider for Provider {
+        fn next(
+            &self,
+            task: &Task,
+            _tools: &[ToolSpec],
+            _cancellation: &CancellationToken,
+        ) -> Result<ModelTurn, String> {
+            if task
+                .messages
+                .iter()
+                .any(|message| matches!(message, Message::ToolResult { .. }))
+            {
+                return Ok(ModelDecision::Complete("inspected metadata".into()).into());
+            }
+            let paths =
+                if task.messages.iter().any(
+                    |message| matches!(message, Message::User { text } if text == "invalid paths"),
+                ) {
+                    json!(["data.bin", "../outside"])
+                } else {
+                    json!(["absent", "data.bin", "."])
+                };
+            Ok(ModelDecision::Call(ToolCall {
+                id: "stat-batch".into(),
+                name: "workspace_stat_batch".into(),
+                arguments: json!({"paths":paths}),
+            })
+            .into())
+        }
+    }
+
+    let tool = stat::StatBatch;
+    for invalid in [
+        json!({"paths":[]}),
+        json!({"paths":["same","same"]}),
+        json!({"paths":(0..17).map(|i| i.to_string()).collect::<Vec<_>>()}),
+        json!({"paths":["a".repeat(4096),"b".repeat(4096),"c"]}),
+    ] {
+        assert!(tool.validate(&invalid).is_err());
+    }
+
+    let directory = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("fliuno-stat-batch-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&directory).unwrap();
+    fs::write(directory.join("data.bin"), [0, 1, 0xff]).unwrap();
+    let mut kernel = Kernel::in_memory(Box::new(Provider)).unwrap();
+    register(&mut kernel).unwrap();
+    let workspace = kernel.open_workspace(directory.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let invalid = kernel.start_task(&session.id, "invalid paths").unwrap();
+    assert!(invalid.pending_approval.is_none());
+    assert_eq!(invalid.status, TaskStatus::Failed);
+
+    let denied = kernel.start_task(&session.id, "deny batch").unwrap();
+    let denied = kernel
+        .respond_approval(
+            &denied.id,
+            &denied.pending_approval.as_ref().unwrap().id,
+            ApprovalDecision::Deny,
+        )
+        .unwrap();
+    assert_eq!(denied.status, TaskStatus::Failed);
+    assert!(
+        denied
+            .messages
+            .iter()
+            .all(|message| !matches!(message, Message::ToolResult { .. }))
+    );
+
+    let waiting = kernel.start_task(&session.id, "inspect batch").unwrap();
+    let approval = waiting.pending_approval.as_ref().unwrap();
+    assert_eq!(
+        approval.call.arguments,
+        json!({"paths":["absent", "data.bin", "."]})
+    );
+    let done = kernel
+        .respond_approval(&waiting.id, &approval.id, ApprovalDecision::AllowOnce)
+        .unwrap();
+    assert_eq!(done.status, TaskStatus::Completed);
+    let outputs: Vec<_> = done
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::ToolResult { output, .. } => Some(output),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(outputs.len(), 1);
+    let entries = outputs[0]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0], json!({"path":"absent","status":"unavailable"}));
+    assert_eq!(entries[1]["path"], "data.bin");
+    assert_eq!(entries[1]["kind"], "file");
+    assert_eq!(entries[1]["status"], "found");
+    assert_eq!(entries[1]["bytes"], 3);
+    assert_eq!(entries[2]["path"], ".");
+    assert_eq!(entries[2]["kind"], "directory");
+    assert!(entries.iter().all(|entry| entry.get("content").is_none()));
+    assert!(kernel.list_artifacts(&done.id).unwrap().is_empty());
+    fs::remove_dir_all(directory).unwrap();
+}

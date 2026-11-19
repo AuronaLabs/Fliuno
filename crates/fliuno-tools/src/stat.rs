@@ -1,4 +1,7 @@
 //! Inspect one workspace entry through the directory capability.
+mod batch;
+pub(super) use batch::StatBatch;
+
 use super::*;
 use std::time::UNIX_EPOCH;
 
@@ -39,33 +42,48 @@ impl Tool for Stat {
         }
         let directory = Dir::open_ambient_dir(&context.workspace.root, ambient_authority())
             .map_err(|_| "cannot open workspace capability")?;
-        let metadata = if args.path == "." {
-            directory.dir_metadata()
-        } else {
-            directory.symlink_metadata(&args.path)
-        }
-        .map_err(|_| "cannot inspect workspace path")?;
-        let kind = if metadata.is_symlink() {
-            "symlink"
-        } else if metadata.is_dir() {
-            "directory"
-        } else if metadata.is_file() {
-            "file"
-        } else {
-            "other"
-        };
-        let modified_unix_ms = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.into_std().duration_since(UNIX_EPOCH).ok())
-            .and_then(|duration| u64::try_from(duration.as_millis()).ok());
         Ok(ToolOutput {
-            output: json!({
-                "path":args.path, "kind":kind,
-                "bytes":metadata.is_file().then(|| metadata.len()),
-                "modifiedUnixMs":modified_unix_ms
-            }),
+            output: json!(
+                inspect(&directory, &args.path).map_err(|_| "cannot inspect workspace path")?
+            ),
             artifacts: Vec::new(),
         })
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Entry<'a> {
+    path: &'a str,
+    kind: &'static str,
+    bytes: Option<u64>,
+    modified_unix_ms: Option<u64>,
+}
+
+fn inspect<'a>(directory: &Dir, path: &'a str) -> std::io::Result<Entry<'a>> {
+    let metadata = if path == "." {
+        directory.dir_metadata()
+    } else {
+        directory.symlink_metadata(path)
+    }?;
+    let kind = if metadata.is_symlink() {
+        "symlink"
+    } else if metadata.is_dir() {
+        "directory"
+    } else if metadata.is_file() {
+        "file"
+    } else {
+        "other"
+    };
+    let modified_unix_ms = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.into_std().duration_since(UNIX_EPOCH).ok())
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok());
+    Ok(Entry {
+        path,
+        kind,
+        bytes: metadata.is_file().then(|| metadata.len()),
+        modified_unix_ms,
+    })
 }

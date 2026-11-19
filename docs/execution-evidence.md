@@ -413,3 +413,9 @@ Windows Release 内存帧基准按新旧构建各交替测量七轮，每轮 61 
 工作区进程测试覆盖从 SQLite v34 迁移、同名目录的独立名称、重复更新、重启后沿用清单游标，以及原目录不可用时读取和清除名称。原工作区对象在更新前后相同。
 
 Windows `scripts/check.ps1` 退出码为 0，444 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 校验通过。Debian Linux 6.12.107 来宾通过上述两项进程测试。日志为 `target/0.0.2-workspace-profiles-windows.log` 和 `D:/Fliuno-Native-Test/guest-workspace-profiles.log`。
+
+## 工作区批量元数据（2026-11-19）
+
+内核验收覆盖 16 项和 8 KiB 路径上限、遍历路径拒绝、拒绝审批没有结果、一次允许后按请求顺序报告文件、目录和不可用项。单路径查询沿用同一元数据读取函数。
+
+Windows `scripts/check.ps1` 退出码为 0，445 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 校验通过。Debian 来宾通过单路径及批量元数据两项测试。日志为 `target/0.0.2-batch-stat-windows.log` 和 `D:/Fliuno-Native-Test/guest-batch-stat.log`。
