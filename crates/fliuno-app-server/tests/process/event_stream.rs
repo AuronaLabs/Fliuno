@@ -281,12 +281,16 @@ fn task_subscription_ignores_sibling_tasks_and_can_replay_to_its_watermark() {
     );
     // A single stdio batch can outfill the 64-event queue. Sibling tasks
     // should contribute neither events nor an overflow signal to this scope.
-    let siblings: Vec<_> = (0..72).map(|i| json!({"jsonrpc":"2.0","method":"task/start","params":{
+    let mut batch: Vec<_> = (0..72).map(|i| json!({"jsonrpc":"2.0","method":"task/start","params":{
         "sessionId":session["id"],"input":format!("sibling {i}"),"context":{"mode":"isolated"}
     }})).collect();
-    writeln!(peer.input, "{}", json!(siblings)).unwrap();
+    batch.push(json!({"jsonrpc":"2.0","id":"selected-cancel","method":"task/cancel","params":{"taskId":task_id}}));
+    writeln!(peer.input, "{}", json!(batch)).unwrap();
     peer.input.flush().unwrap();
-    peer.call("task/cancel", json!({"taskId":task_id}));
+    // This reply waits for all 73 dispatches and their database commits.
+    let reply = peer.output.recv_timeout(Duration::from_secs(20)).unwrap();
+    assert_eq!(reply[0]["id"], "selected-cancel", "{reply}");
+    assert_eq!(reply[0]["result"]["status"], "cancelled", "{reply}");
     let live = peer.wait_for_event(task_id, "task_cancelled");
     let sequence = live["params"]["event"]["sequence"].as_u64().unwrap();
     assert!(sequence > through);
