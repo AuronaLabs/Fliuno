@@ -14,9 +14,13 @@ def attempt(operation):
 
 def inspect(host_path, endpoint):
     host, port = endpoint.split(':')
-    with socket.socket() as connection:
-        connection.settimeout(1)
-        network = attempt(lambda: connection.connect((host, int(port))))
+
+    def connect():
+        with socket.socket() as connection:
+            connection.settimeout(1)
+            connection.connect((host, int(port)))
+
+    network = attempt(connect)
     with open(os.path.join(os.path.dirname(__file__), 'data.json'), encoding='utf-8') as source:
         data = json.load(source)
 

@@ -44,7 +44,9 @@ Node 在 Windows 的默认 CommonJS realpath 会查询沙箱外的磁盘根，�
 
 Windows Python 演示使用已有 CPython 3.12，明确复制对应 DLL、两个扩展模块，以及为 fixture 构建的无压缩标准库 ZIP；`python312._pth` 只列出 ZIP 和私有根，不导入 site，不继承注册表或环境里的模块路径。依赖清单见 `examples/python_runtime.py`，未打包 pip、venv、第三方包或整套安装目录。其他版本与任意 Python 项目的依赖收集尚未实现。
 
-Node 三分支加入 Windows/Linux CI；Python 三分支和 ACP 伴随文件原生探针目前只在 Windows 验收。Linux 资源暂存与 exec/MCP SDK 探针已加入相应 runner，但本机仅完成交叉检查；CI 配置不代表 Linux 行为已经通过。Linux 自定义 Python 安装位置还需明确打包其运行库，不能假设已有只读系统目录规则覆盖任意安装。
+2026 年 11 月 19 日，Debian x86_64 来宾使用 Node 24.4.1 与系统 CPython 3.13.5，分别通过 默认允许流程、`--deny` 和 `--tamper`。使用 `--app-server /path/to/fliuno-app-server` 可直接测试预编译的 app-server。两种运行时都从私有目录加载已固定的脚本、模块和数据。App-server 通过真实 stdio 搭配本机模型夹具处理审批。来宾无外网，探针先在无隔离对照中连接本机端口，再验证隔离进程被拒绝。
+
+Linux 演示把 CPython 标准库和动态扩展放在来宾的系统只读运行库目录。位于其他位置的安装仍需显式提供依赖。Windows 演示对 CPython 3.12 使用上面列出的显式暂存清单。
 
 官方参考：
 

@@ -43,7 +43,7 @@ HTTP `lifecycle` 默认 `auto`：首先使用 `2026-07-28` 的 `server/discover`
 
 ## 当前范围
 
-隔离 stdio server 可配置 `assets`，在启动前把宿主列举的脚本、DLL 和数据复制到私有根并检查 SHA-256。工具审批另存完整注册摘要，绑定传输、端点、原生程序内容、参数、实际环境/凭据、预算与远端 Schema；即使展示别名不变，重启后的配置变化也不能复用旧审批。环境和凭据在注册时冻结，传输使用同一份值，见[注册身份](authority.md)。Windows 已通过真实 Node/CPython 多文件 MCP 的允许、拒绝、篡改流程，命令与局限见[解释器清单](runtime-bundles.md)。MCP 不借此获得工作区代理或网络能力。
+隔离 stdio server 可配置 `assets`，在启动前把宿主列举的脚本、DLL 和数据复制到私有根并检查 SHA-256。工具审批另存完整注册摘要，绑定传输、端点、原生程序内容、参数、实际环境/凭据、预算与远端 Schema；即使展示别名不变，重启后的配置变化也不能复用旧审批。环境和凭据在注册时冻结，传输使用同一份值，见[注册身份](authority.md)。Windows 和 Debian Linux 来宾都已通过真实 Node/CPython 多文件 MCP 的允许、拒绝、篡改流程，命令与局限见[解释器清单](runtime-bundles.md)。MCP 不借此获得工作区代理或网络能力。
 
 除 MCP tools/list 和 tools/call 外，内核也按服务声明接入资源、资源模板和提示，详见[内容通道](mcp-content.md)。这些操作均逐次审批，不处理 MCP server-to-client sampling、elicitation 或通知订阅。工具继续使用 SDK 的一次性 `call_tool_once`，内容操作用原始 SDK 请求绕过自动 MRTR 和旧缓存回退；二者共享排队、取消与失败关闭逻辑。MRTR/Tasks 的可靠继续、OAuth、旧版独立 HTTP+SSE 传输、热重连和外部真实服务验收都仍在后续计划中。stdio Windows AppContainer/Linux Landlock 隔离不适用于 HTTP 网络服务器；远程服务器访问由宿主网络身份和凭据决定。
 

@@ -89,7 +89,8 @@
    - [x] Windows AppContainer 与 Linux Landlock/seccomp MCP 子进程边界；以宿主对照和隔离探针验证文件/TCP 拒绝，策略缺失时强制失败。
    - [x] Windows 隔离 ACP 的宿主文件代理：虚拟路径、逐操作审批、写入 diff/基线核验、按行读取和真实进程探针。
    - [x] exec/MCP/ACP 的伴随文件清单、SHA-256 复制核验、路径/容量边界、资源变更后的待批身份回归；Windows 真实 Node/CPython 多文件 MCP 允许/拒绝/篡改验收。
-   - [ ] MCP 宿主工具代理；Linux 上的 Node/CPython 等解释器打包及实际执行。Rust MCP 伴随文件与隔离进程契约已在 Debian 来宾通过。
+   - [x] Linux 真实 Node/CPython 多文件 MCP 允许、拒绝、篡改均已通过。Python 演示使用系统只读标准库，自定义 Python 安装的依赖打包仍待实现。
+   - [ ] MCP 宿主工具代理。
    - [x] MCP/Agent 全配置注册摘要：端点/程序/参数/实际环境/凭据/schema 与旧待批/排队任务绑定，v8 不替旧记录补造授权；隔离启动核验实际复制的 executable pin。
    - [x] 跨轮次 PTY preset、独立 supervisor/actor、逐操作审批、字节 spool、幂等输入、app-server 重启观察、Windows Job 预算与硬崩溃进程树回收。
    - [x] 终端输出事件订阅：认证 IPC 长连接、字节游标回放、状态通知、取消、队列溢出与公平调度、离线收尾和 app-server 重连。
