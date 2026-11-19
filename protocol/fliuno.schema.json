@@ -2887,6 +2887,43 @@
         "artifactId"
       ]
     },
+    "artifacts/getDigests": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactDigestBatchParams",
+      "type": "object",
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactGetParams"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "artifacts"
+      ],
+      "$defs": {
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
+          ]
+        }
+      }
+    },
     "tools/list": {
       "type": "object",
       "properties": {},
@@ -7653,6 +7690,99 @@
         "contentBytes",
         "sha256"
       ]
+    },
+    "ArtifactDigestBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactDigestBatch",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "One entry per request, preserving order and duplicates.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactDigestEntry"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "$defs": {
+        "ArtifactDigestEntry": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "ready"
+                },
+                "digest": {
+                  "$ref": "#/$defs/ArtifactDigest"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "digest"
+              ]
+            },
+            {
+              "description": "No checksum was stored; the batch does not open or hash the body.",
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "unrecorded"
+                },
+                "contentBytes": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "contentBytes"
+              ]
+            },
+            {
+              "description": "The artifact ID is absent or belongs to a different task.",
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "missing"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "ArtifactDigest": {
+          "type": "object",
+          "properties": {
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "contentBytes",
+            "sha256"
+          ]
+        }
+      }
     },
     "ArtifactSummariesPage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

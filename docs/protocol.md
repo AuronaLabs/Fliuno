@@ -11,7 +11,7 @@
 
 - **任务与工作台**：[工作区、会话与任务](#工作区会话与任务) · [工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照)
 - **恢复与查询**：[变动摘要](#任务变动摘要) · [轻量回放](#任务变动回放) · [批量读取任务摘要](#批量读取任务摘要) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
-- **事件与交付物**：[审批、事件与产物](#审批事件与产物) · [交付物目录订阅](#交付物目录订阅)
+- **事件与交付物**：[审批、事件与产物](#审批事件与产物) · [交付物目录订阅](#交付物目录订阅) · [批量校验摘要](#批量读取交付物摘要)
 - **工具与宿主**：[工具、Agent 与终端](#工具agent-与终端) · [A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
 </details>
@@ -140,6 +140,7 @@ staged.sync_all()?;
 | `artifacts/getSummary` | `{taskId,artifactId}` | 单份 ArtifactSummary |
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
 | `artifacts/digest` | `{taskId,artifactId}` | 正文的 `contentBytes` 与小写十六进制 `sha256` |
+| `artifacts/getDigests` | `{artifacts:[{taskId,artifactId},…]}` | 同顺序的 `{items}`，只读取已保存的摘要 |
 | `artifacts/read` | `{taskId,artifactId,after?,limit?}` | 返回 `{offset,nextOffset,contentBytes,dataBase64}` |
 
 ### 工具、Agent 与终端
@@ -208,6 +209,22 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 响应为 `{catalog,eventThroughSequence}`。`catalog` 是 [固定水位的元数据页](#审批事件与产物)。目录还有下一页时，以它的 `nextAfter` 和 `throughSequence` 继续调用 `artifacts/listSnapshot`。当前窗口读完后，用 `throughSequence` 作为下个目录窗口的 `after`，包括最后一页没有匹配条目的情况。`eventThroughSequence` 是事件流的起点，用于 `events/listSession`、`events/listWorkspace` 或 Rust `EventFeed`，不能拿来翻目录。
 
 媒体类型只筛选目录页。收到匹配事件范围的 `artifact_created` 后，客户端可将其作为刷新目录的信号。Rust 的 `Client::subscribe_artifacts` 同时返回首页、`ArtifactCatalog` 和 `EventFeed`；把日常 RPC 的通知交给 `events.observe`。保存 `ArtifactCatalog::next_request()` 可在重启后继续读固定窗口，窗口读完后保存 `completed_through()`，同一进程内也可调用 `begin_next_window()` 读取新增产物。事件消费进度单独以 `EventFeed::cursor()` 保存。
+
+### 批量读取交付物摘要
+
+从目录拿到若干交付物后，可通过 `artifacts/getDigests` 一次查到用于下载校验的 SHA-256。`initialize.capabilities.artifactDigestBatch` 声明支持，`maxArtifactDigestBatch` 公布上限 64 项。每项的两个 ID 各须为 1 至 128 个可见 ASCII 字节。请求形状错误时整体拒绝。
+
+```json
+{"artifacts":[{"taskId":"task-id","artifactId":"artifact-id"}]}
+```
+
+| `items` 中的状态 | 含义 |
+| --- | --- |
+| `ready` | `digest` 包含该产物提交时保存的 `contentBytes` 和 `sha256`，或此前补算后保存的值。 |
+| `unrecorded` | 只返回 `contentBytes`。若长度在支持范围内，可用 `artifacts/digest` 单独补算并保存。 |
+| `missing` | ID 不存在或不属于所给任务。 |
+
+响应逐项对应请求并保留重复项。不打开正文、不补算摘要、不新增事件，也不需要数据库迁移。Rust 调用方使用 `Client::artifact_digests`，可把 `ready` 的摘要直接交给 `download_artifact` 或 `resume_artifact_download` 校验收到的字节。旧服务可继续逐份使用 `artifacts/digest`。
 
 ### 批量读取任务摘要
 

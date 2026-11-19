@@ -1,5 +1,8 @@
 use super::*;
-use fliuno_protocol::MAX_ARTIFACT_DIGEST_BYTES;
+use fliuno_protocol::{
+    ArtifactDigestBatchParams, ArtifactDigestEntry, MAX_ARTIFACT_DIGEST_BATCH,
+    MAX_ARTIFACT_DIGEST_BYTES, MAX_ARTIFACT_DIGEST_ID_BYTES,
+};
 
 #[test]
 fn stored_digests_cover_both_new_and_legacy_artifact_bytes_across_restart() {
@@ -59,6 +62,49 @@ fn stored_digests_cover_both_new_and_legacy_artifact_bytes_across_restart() {
 
     let mut peer = Peer::start(&db);
     let pinned = peer.call("events/getWatermark", json!({}));
+    let wrong_task = ArtifactGetParams {
+        task_id: old.task_id.clone(),
+        artifact_id: new.artifact_id.clone(),
+    };
+    let missing = ArtifactGetParams {
+        task_id: old.task_id.clone(),
+        artifact_id: "absent-artifact".into(),
+    };
+    let oversized = ArtifactGetParams {
+        task_id: new.task_id.clone(),
+        artifact_id: "oversized-fixture".into(),
+    };
+    let ready = json!({"status":"ready","digest":expected});
+    let lookup = json!({"artifacts":[old, wrong_task, new, missing, new, oversized]});
+    let expected_batch = json!({"items":[
+        {"status":"unrecorded","contentBytes":content.len()},
+        {"status":"missing"}, ready, {"status":"missing"}, ready,
+        {"status":"unrecorded","contentBytes":MAX_ARTIFACT_DIGEST_BYTES+1},
+    ]});
+    for _ in 0..2 {
+        assert_eq!(
+            peer.call("artifacts/getDigests", lookup.clone()),
+            expected_batch
+        );
+    }
+    assert_eq!(peer.call("events/getWatermark", json!({})), pinned);
+    let max = vec![&new; MAX_ARTIFACT_DIGEST_BATCH];
+    assert_eq!(
+        peer.call("artifacts/getDigests", json!({"artifacts":max}))["items"],
+        json!(vec![&ready; max.len()])
+    );
+    for invalid in [
+        json!({"artifacts":[]}),
+        json!({"artifacts":vec![&new; MAX_ARTIFACT_DIGEST_BATCH+1]}),
+        json!({"artifacts":[new,{"taskId":"","artifactId":new.artifact_id}]}),
+        json!({"artifacts":[{"taskId":new.task_id,"artifactId":"x".repeat(MAX_ARTIFACT_DIGEST_ID_BYTES+1)}]}),
+        json!({"artifacts":[{"taskId":new.task_id,"artifactId":"invalid id"}]}),
+    ] {
+        assert_eq!(
+            peer.request("artifacts/getDigests", invalid)["error"]["code"],
+            -32602
+        );
+    }
     let old_key = serde_json::to_value(&old).unwrap();
     assert_eq!(peer.call("artifacts/digest", old_key), expected);
     assert_eq!(peer.call("events/getWatermark", json!({})), pinned);
@@ -89,8 +135,19 @@ fn stored_digests_cover_both_new_and_legacy_artifact_bytes_across_restart() {
 
     let (server, mut client) = super::ag_ui_run::connect(&db);
     assert_eq!(client.info().capabilities["storedArtifactDigests"], true);
-    for artifact in [&new, &old] {
-        let digest = client.artifact_digest(artifact, |_| {}).unwrap();
+    assert_eq!(client.info().capabilities["artifactDigestBatch"], true);
+    assert_eq!(
+        client.info().capabilities["maxArtifactDigestBatch"],
+        MAX_ARTIFACT_DIGEST_BATCH
+    );
+    let request = ArtifactDigestBatchParams {
+        artifacts: vec![old.clone(), new.clone()],
+    };
+    let batch = client.artifact_digests(&request, |_| {}).unwrap();
+    for (artifact, item) in request.artifacts.iter().zip(batch.items) {
+        let ArtifactDigestEntry::Ready { digest } = item else {
+            panic!("expected stored digest")
+        };
         assert_eq!(serde_json::to_value(&digest).unwrap(), expected);
         let mut destination = Vec::new();
         assert!(matches!(
@@ -99,10 +156,6 @@ fn stored_digests_cover_both_new_and_legacy_artifact_bytes_across_restart() {
         ));
         assert_eq!(destination.len(), content.len());
     }
-    let wrong_task = ArtifactGetParams {
-        task_id: old.task_id,
-        artifact_id: new.artifact_id,
-    };
     assert!(matches!(
         client.artifact_digest(&wrong_task, |_| {}),
         Err(Error::Rpc { code: -32004, .. })

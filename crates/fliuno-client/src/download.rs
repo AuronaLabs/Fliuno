@@ -2,7 +2,8 @@
 use crate::{Client, Error, Notification};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use fliuno_protocol::{
-    ArtifactChunk, ArtifactDigest, ArtifactGetParams, ArtifactReadParams, MAX_ARTIFACT_READ_BYTES,
+    ArtifactChunk, ArtifactDigest, ArtifactDigestBatch, ArtifactDigestBatchParams,
+    ArtifactDigestEntry, ArtifactGetParams, ArtifactReadParams, MAX_ARTIFACT_READ_BYTES,
 };
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
@@ -16,6 +17,26 @@ impl<R: BufRead, W: Write> Client<R, W> {
         on_notification: impl FnMut(Notification),
     ) -> Result<ArtifactDigest, Error> {
         self.call("artifacts/digest", artifact, on_notification)
+    }
+
+    /// Fetch recorded digests in request order without hashing legacy bodies.
+    /// Use `artifact_digest` for an unrecorded item before downloading it.
+    pub fn artifact_digests(
+        &mut self,
+        request: &ArtifactDigestBatchParams,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<ArtifactDigestBatch, Error> {
+        let batch: ArtifactDigestBatch =
+            self.call("artifacts/getDigests", request, on_notification)?;
+        if batch.items.len() != request.artifacts.len() {
+            return Err(Error::InvalidResult);
+        }
+        for item in &batch.items {
+            if let ArtifactDigestEntry::Ready { digest } = item {
+                validate_sha256(&digest.sha256)?;
+            }
+        }
+        Ok(batch)
     }
 
     /// Stream the artifact into `output` and verify its final SHA-256.
@@ -57,6 +78,13 @@ impl<R: BufRead, W: Write> Client<R, W> {
     }
 }
 
+fn validate_sha256(sha256: &str) -> Result<(), Error> {
+    if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Error::InvalidArtifactDigest);
+    }
+    Ok(())
+}
+
 struct Download<'a> {
     expected: &'a ArtifactDigest,
     after: u64,
@@ -66,9 +94,7 @@ struct Download<'a> {
 
 impl<'a> Download<'a> {
     fn new(expected: &'a ArtifactDigest) -> Result<Self, Error> {
-        if expected.sha256.len() != 64 || !expected.sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(Error::InvalidArtifactDigest);
-        }
+        validate_sha256(&expected.sha256)?;
         let buffer_bytes = expected
             .content_bytes
             .min(u64::from(MAX_ARTIFACT_READ_BYTES)) as usize;

@@ -127,6 +127,43 @@ pub struct ArtifactDigest {
     pub content_bytes: u64,
     pub sha256: String,
 }
+/// A bounded metadata-only lookup. Every entry is paired with its owning task.
+pub const MAX_ARTIFACT_DIGEST_BATCH: usize = 64;
+pub const MAX_ARTIFACT_DIGEST_ID_BYTES: usize = 128;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactDigestBatchParams {
+    #[schemars(length(min = 1, max = MAX_ARTIFACT_DIGEST_BATCH))]
+    pub artifacts: Vec<super::ArtifactGetParams>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ArtifactDigestEntry {
+    Ready {
+        digest: ArtifactDigest,
+    },
+    /// No checksum was stored; the batch does not open or hash the body.
+    Unrecorded {
+        content_bytes: u64,
+    },
+    /// The artifact ID is absent or belongs to a different task.
+    Missing,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactDigestBatch {
+    /// One entry per request, preserving order and duplicates.
+    pub items: Vec<ArtifactDigestEntry>,
+}
+
 const fn default_artifact_read_bytes() -> u32 {
     32 * 1024
 }

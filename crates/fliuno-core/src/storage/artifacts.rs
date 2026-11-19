@@ -1,4 +1,5 @@
 //! Metadata catalogs and incremental reads of immutable artifact bodies.
+mod digests;
 use super::*;
 use rusqlite::{Transaction, blob::Blob, types::ValueRef};
 use sha2::{Digest, Sha256};
