@@ -269,3 +269,9 @@ Windows 全量 scripts/check.ps1 退出码为 0，包含 400 项测试、Schema 
 Windows 全量 scripts/check.ps1 通过 402 项测试、Schema 一致性和 26 个离线演示。摘要与审批分页进程用例各自通过，核心库 74 项测试通过，Clippy 和 rustfmt 检查通过。完整日志为 target/0.0.2-byte-paging-windows.log。
 
 Debian Linux 6.12.107 来宾通过 3 项 task_status 与 2 项 approval app-server 进程测试。覆盖两种列表的字节边界、原始游标、workspace/session 过滤和 app-server 重启续读。构建与运行日志为 D:/Fliuno-Native-Test/guest-byte-pages-build.log 和 D:/Fliuno-Native-Test/guest-byte-pages.log。
+
+## 会话批量归档（2026-11-19）
+
+新增最多 32 项的原子批量归档/恢复。真实 app-server 进程测试验证请求顺序、重复请求、空/重复/缺失/超额 ID 的拒绝、SQLite 写入故障回滚和重启后的持久状态。Windows 全量 scripts/check.ps1 通过 403 项测试、Schema 一致性和 26 个离线演示；Clippy 与 rustfmt 检查通过。日志为 target/0.0.2-session-archive-batch-windows.log。
+
+Debian Linux 6.12.107 来宾通过 5 项 sessions app-server 真实进程测试，包含同一事务触发器故障回滚探针。日志为 D:/Fliuno-Native-Test/guest-session-batch-build.log 和 D:/Fliuno-Native-Test/guest-session-batch.log。
