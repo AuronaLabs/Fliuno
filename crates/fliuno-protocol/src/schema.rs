@@ -16,6 +16,7 @@ pub fn schema_bundle() -> Value {
     let methods = schemas! {
         "initialize" => schema::<InitializeParams>(),
         "work/getSnapshot" => schema::<WorkSnapshotParams>(),
+        "work/subscribe" => schema::<WorkSnapshotParams>(),
         "workspace/open" => schema::<WorkspaceOpenParams>(),
         "workspace/searchHistory" => schema::<WorkspaceHistorySearchParams>(),
         "workspace/get" => schema::<WorkspaceIdParams>(),

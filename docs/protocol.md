@@ -5,7 +5,7 @@
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
 - **建立连接**：[stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
-- **搭工作台**：[工作台快照](#工作台快照) · [待审批快照](#待审批快照) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
+- **搭工作台**：[工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
 - **查方法**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [错误](#错误)
 - **配置能力**：[A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
@@ -56,6 +56,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `task/listSummaries` | `{sessionId,status?,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,order?,after?,limit?,targetBytes?}` | 跨会话分页读取同一工作区的任务摘要，可按创建顺序正序或倒序返回 |
 | `work/getSnapshot` | `{workspaceId?,sessionId?,approvalLimit?,approvalTargetBytes?}` | 同一水位的任务状态计数与待审批首页 |
+| `work/subscribe` | 同 `work/getSnapshot` | 同一快照，并将本连接切换为该范围的事件水位订阅 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `workspace/get` | `{workspaceId}` | 按 ID 读取已保存的 Workspace。查看 `initialize.capabilities.workspaceById` |
 | `workspace/getProfile` | `{workspaceId}` | 当前 WorkspaceProfile，包含原工作区和可选的显示名称 |
@@ -185,6 +186,14 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 Rust 的 `Client::work_snapshot` 返回 `(WorkSnapshot, ApprovalInbox)`。首页已经在 `WorkSnapshot.approvals` 中，`ApprovalInbox` 从下一页开始；也可以从 `throughSequence` 接上同范围的事件。需要刷新当前计数时重新调用 `work/getSnapshot`，旧审批游标仍可继续读取原来的列表。
 
 SQLite v42 从已有状态索引回填计数。平时只有创建任务或状态变化才改动对应范围的计数，读取时不扫描任务列表。
+
+#### 工作台实时订阅
+
+当 `initialize.capabilities.workSubscription` 为 `true` 时，`work/subscribe` 使用相同参数，返回相同的 `WorkSnapshot`，并一次建立同范围的事件订阅。内核在同一提交锁下读取快照、挂接订阅。快照水位以内的状态已经计入首屏；后续只发出序号大于该水位的 `notifications/eventWatermark`，由客户端按相同范围补读正文。参数或范围无效时，当前订阅保持不变。
+
+响应之前收到的持久通知仍属于旧订阅；通过响应拿到新水位后，再处理新订阅的通知。若使用批请求，同批只发一次切换订阅的调用。之后可通过 `events/setScope` 显式切换范围。遇到 `notifications/eventGap`，从最后已处理的事件游标重新建立同范围订阅并补读。
+
+Rust 的 `Client::subscribe_work` 返回 `WorkSubscription { snapshot, inbox, events }`。先展示 `snapshot`，用 `inbox.next_page()` 续读原审批列表，把后续 RPC 和 `read_notification()` 收到的通知传给 `events.observe()`。`events.next_page()` 从快照水位之后分页；溢出时会重新订阅同一范围。界面如果只需要刷新计数，仍可调用 `work/getSnapshot`，该方法不切换现有订阅。
 
 ### 审批收件箱与决定
 

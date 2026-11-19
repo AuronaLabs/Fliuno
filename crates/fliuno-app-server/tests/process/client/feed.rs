@@ -1,6 +1,5 @@
 use super::*;
-use fliuno_client::EventFeed;
-use fliuno_protocol::EventsPage;
+use fliuno_protocol::{EventsPage, WorkSnapshotParams};
 use std::{cell::RefCell, io, rc::Rc};
 
 // Submit one notification batch in front of a normal RPC request. The batch
@@ -24,7 +23,7 @@ impl Write for BatchWriter {
 }
 
 #[test]
-fn event_feed_repairs_real_server_overflow_in_the_same_scope() {
+fn work_feed_repairs_real_server_overflow_in_the_same_scope() {
     let root = std::env::temp_dir().join(format!("fliuno-rust-feed-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
     let mut server = Server(
@@ -61,13 +60,19 @@ fn event_feed_repairs_real_server_overflow_in_the_same_scope() {
             |_| {},
         )
         .unwrap();
-    let mut feed = EventFeed::subscribe(
-        &mut client,
-        ReplayScope::Session(session.id.clone()),
-        0,
-        |_| {},
-    )
-    .unwrap();
+    let mut feed = client
+        .subscribe_work(
+            &WorkSnapshotParams {
+                workspace_id: None,
+                session_id: Some(session.id.clone()),
+                approval_limit: 10,
+                approval_target_bytes: None,
+            },
+            |_| {},
+        )
+        .unwrap()
+        .events;
+    assert_eq!(feed.cursor(), 0);
     assert!(
         feed.next_page(&mut client, 10, None, |_| {})
             .unwrap()

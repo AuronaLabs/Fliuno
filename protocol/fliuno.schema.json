@@ -57,6 +57,44 @@
       },
       "additionalProperties": false
     },
+    "work/subscribe": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkSnapshotParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "approvalLimit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        },
+        "approvalTargetBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "workspace/open": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "WorkspaceOpenParams",

@@ -33,6 +33,11 @@ pub struct RpcServer {
     terminal_subscriptions: terminal_subscriptions::Subscriptions,
 }
 
+enum EventDelivery {
+    Events(EventReceiver),
+    Watermarks(EventWatermarkReceiver),
+}
+
 #[derive(Debug)]
 struct RpcError {
     code: i32,
@@ -138,7 +143,7 @@ impl RpcServer {
         after: Option<u64>,
         watermark_only: bool,
     ) -> Result<EventSubscription, RpcError> {
-        let (through_sequence, events, watermarks) = {
+        let (through_sequence, delivery) = {
             // Committing workers hold this lock. The watermark and
             // subscription therefore cover adjacent event ranges.
             let kernel = self.kernel()?;
@@ -149,28 +154,55 @@ impl RpcServer {
                 )
                 .into());
             }
-            if watermark_only {
-                (
-                    through_sequence,
-                    None,
-                    Some(kernel.subscribe_event_watermarks(scope.clone())?),
-                )
+            let delivery = if watermark_only {
+                EventDelivery::Watermarks(kernel.subscribe_event_watermarks(scope.clone())?)
             } else {
-                let receiver = match &scope {
+                EventDelivery::Events(match &scope {
                     EventScope::Task(id) => kernel.subscribe_task_events(id)?,
                     EventScope::Session(id) => kernel.subscribe_session_events(id)?,
                     EventScope::Workspace(id) => kernel.subscribe_workspace_events(id)?,
                     EventScope::All => kernel.subscribe_events()?,
-                };
-                (through_sequence, Some(receiver), None)
-            }
+                })
+            };
+            (through_sequence, delivery)
         };
-        self.event_receiver = events.map(|receiver| (through_sequence, receiver));
-        self.watermark_receiver = watermarks.map(|receiver| (through_sequence, receiver));
-        self.event_scope = scope;
-        self.watermark_only = watermark_only;
-        self.event_stream_gap = false;
+        self.install_event_delivery(scope, through_sequence, delivery);
         Ok(EventSubscription { through_sequence })
+    }
+
+    fn subscribe_work(&mut self, request: &WorkSnapshotParams) -> Result<WorkSnapshot, RpcError> {
+        let (snapshot, scope, receiver) = {
+            let kernel = self.kernel()?;
+            // Read first: on a rejected snapshot the current subscription stays intact.
+            // Workers cannot commit between this snapshot and registering its receiver.
+            let snapshot = kernel.work_snapshot(request)?;
+            let scope = match (&request.session_id, &request.workspace_id) {
+                (Some(id), _) => EventScope::Session(id.clone()),
+                (None, Some(id)) => EventScope::Workspace(id.clone()),
+                _ => EventScope::All,
+            };
+            let receiver = kernel.subscribe_event_watermarks(scope.clone())?;
+            (snapshot, scope, receiver)
+        };
+        self.install_event_delivery(
+            scope,
+            snapshot.approvals.snapshot.through_sequence,
+            EventDelivery::Watermarks(receiver),
+        );
+        Ok(snapshot)
+    }
+
+    fn install_event_delivery(&mut self, scope: EventScope, through: u64, delivery: EventDelivery) {
+        (
+            self.event_receiver,
+            self.watermark_receiver,
+            self.watermark_only,
+        ) = match delivery {
+            EventDelivery::Events(receiver) => (Some((through, receiver)), None, false),
+            EventDelivery::Watermarks(receiver) => (None, Some((through, receiver)), true),
+        };
+        self.event_scope = scope;
+        self.event_stream_gap = false;
     }
 
     pub fn mark_event_stream_gap(&mut self) {
@@ -392,6 +424,7 @@ impl RpcServer {
                 json!(fliuno_core::MAX_TASK_LIST_TARGET_BYTES);
             capabilities["taskSummaryById"] = json!(true);
             capabilities["workSnapshot"] = json!(true);
+            capabilities["workSubscription"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["workspaceTaskSummaries"] = json!(true);
             capabilities["workspaceTaskSummaryOrdering"] = json!(true);
@@ -527,6 +560,10 @@ impl RpcServer {
             "work/getSnapshot" => {
                 let p: WorkSnapshotParams = decode(params)?;
                 json!(self.kernel()?.work_snapshot(&p)?)
+            }
+            "work/subscribe" => {
+                let p: WorkSnapshotParams = decode(params)?;
+                json!(self.subscribe_work(&p)?)
             }
             "workspace/open" => {
                 let p: WorkspaceOpenParams = decode(params)?;

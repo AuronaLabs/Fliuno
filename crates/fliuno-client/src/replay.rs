@@ -131,6 +131,10 @@ impl EventReplay {
         Ok(replay)
     }
 
+    pub(crate) fn scope(&self) -> &ReplayScope {
+        &self.scope
+    }
+
     /// Inclusive end of this replay window. Live events start after this value.
     pub fn through(&self) -> u64 {
         self.through

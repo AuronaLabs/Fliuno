@@ -105,7 +105,12 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
         approval_limit: 1,
         approval_target_bytes: Some(1024),
     };
-    let (snapshot, inbox) = client.work_snapshot(&request, |_| {}).unwrap();
+    assert_eq!(client.info().capabilities["workSubscription"], true);
+    let fliuno_client::WorkSubscription {
+        snapshot,
+        inbox,
+        mut events,
+    } = client.subscribe_work(&request, |_| {}).unwrap();
     assert_eq!(
         snapshot.task_counts,
         TaskStatusCounts {
@@ -119,16 +124,54 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     );
     assert_eq!(snapshot.approvals.page.items[0].task_id, waiting["id"]);
     let through = snapshot.approvals.snapshot.through_sequence;
+    assert_eq!(events.cursor(), through);
+    assert!(
+        events
+            .next_page(&mut client, 10, None, |_| {})
+            .unwrap()
+            .is_none()
+    );
     let stamp = client.event_watermark(|_| {}).unwrap();
     assert_eq!(through, stamp);
     let checkpoint = serde_json::to_vec(inbox.next_request().unwrap()).unwrap();
-    let _: Value = client.call("approval/respond",&json!({"taskId":later["id"],"approvalId":later["pendingApproval"]["id"],"decision":"deny"}), |_| {}).unwrap();
+    // Keep processing notices from this connection while reading the pinned inbox.
+    let mut observe = |notice| {
+        let _ = events.observe(notice);
+    };
+    let _: Value = client.call("approval/respond",&json!({"taskId":later["id"],"approvalId":later["pendingApproval"]["id"],"decision":"deny"}), &mut observe).unwrap();
     let saved: ApprovalInboxListParams = serde_json::from_slice(&checkpoint).unwrap();
     let mut resumed = fliuno_client::ApprovalInbox::new(saved);
-    let page = resumed.next_page(&mut client, |_| {}).unwrap().unwrap();
+    let page = resumed
+        .next_page(&mut client, &mut observe)
+        .unwrap()
+        .unwrap();
     assert_eq!(page.snapshot, snapshot.approvals.snapshot);
     assert_eq!(page.page.items[0].task_id, later["id"]);
-    assert!(resumed.next_page(&mut client, |_| {}).unwrap().is_none());
+    assert!(
+        resumed
+            .next_page(&mut client, &mut observe)
+            .unwrap()
+            .is_none()
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut resolved = false;
+    while !resolved {
+        let _ = client
+            .event_watermark(|notice| {
+                let _ = events.observe(notice);
+            })
+            .unwrap();
+        while let Some(batch) = events.next_page(&mut client, 1, None, |_| {}).unwrap() {
+            resolved |= batch.iter().any(|event| {
+                event.task_id == later["id"]
+                    && matches!(event.data, EventKind::ApprovalResolved { .. })
+            });
+        }
+        assert!(
+            resolved || Instant::now() < deadline,
+            "approval change missing from the work feed"
+        );
+    }
     let (current, _) = client.work_snapshot(&request, |_| {}).unwrap();
     assert_eq!(current.task_counts.waiting_approval, 1);
     assert_eq!(current.task_counts.failed, 2);
@@ -165,5 +208,88 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     );
     drop(client);
     drop(server);
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// A later request in the same frame commits before the snapshot response is
+/// written. Its notification must still follow that response in the new scope.
+#[test]
+fn work_subscription_delivers_only_post_snapshot_events_in_scope() {
+    let root = std::env::temp_dir().join(format!("fliuno-work-handoff-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let selected = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let foreign = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let start = |peer: &mut Peer, session: &Value| {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":"create an artifact"}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval")
+    };
+    let selected_task = start(&mut peer, &selected);
+    let foreign_task = start(&mut peer, &foreign);
+    let old_watermark = peer.call("events/getWatermark", json!({}))["throughSequence"].clone();
+    let first_id = peer.id + 1;
+    peer.id += 4;
+    writeln!(peer.input, "{}", json!([
+        {"jsonrpc":"2.0","id":first_id,"method":"work/subscribe","params":{"sessionId":selected["id"]}},
+        {"jsonrpc":"2.0","id":first_id+1,"method":"work/subscribe","params":{"sessionId":selected["id"],"workspaceId":workspace["id"]}},
+        {"jsonrpc":"2.0","id":first_id+2,"method":"work/subscribe","params":{"workspaceId":"missing"}},
+        {"jsonrpc":"2.0","id":first_id+3,"method":"work/subscribe","params":{"approvalTargetBytes":1023}},
+        {"jsonrpc":"2.0","method":"task/cancel","params":{"taskId":foreign_task["id"]}},
+        {"jsonrpc":"2.0","method":"task/cancel","params":{"taskId":selected_task["id"]}}
+    ])).unwrap();
+    peer.input.flush().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let reply = loop {
+        let frame = peer
+            .output
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap();
+        if frame.is_array() {
+            break frame;
+        }
+        // Any queued event before the batch response still belongs to the old stream.
+        assert_ne!(frame["method"], "notifications/eventWatermark");
+    };
+    assert_eq!(reply.as_array().unwrap().len(), 4);
+    assert_eq!(reply[0]["id"], first_id);
+    let snapshot: WorkSnapshot = serde_json::from_value(reply[0]["result"].clone()).unwrap();
+    let through = snapshot.approvals.snapshot.through_sequence;
+    assert_eq!(through, old_watermark.as_u64().unwrap());
+    assert_eq!(snapshot.task_counts.waiting_approval, 1);
+    assert_eq!(snapshot.task_counts.cancelled, 0);
+    assert_eq!(
+        snapshot.approvals.page.items[0].task_id,
+        selected_task["id"]
+    );
+    for (i, code) in [-32602, -32004, -32602].into_iter().enumerate() {
+        assert_eq!(reply[i + 1]["error"]["code"], code);
+    }
+    let sequence = loop {
+        let frame = peer
+            .output
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap();
+        assert_ne!(
+            frame["method"], "notifications/event",
+            "the old full event stream was not detached"
+        );
+        if frame["method"] == "notifications/eventWatermark" {
+            break frame["params"]["throughSequence"].as_u64().unwrap();
+        }
+    };
+    assert_eq!(sequence, through + 2); // first commit was outside the scope
+    let cancel_event = peer.call("events/get", json!({"sequence":sequence}));
+    assert_eq!(cancel_event["taskId"], selected_task["id"]);
+    assert_eq!(cancel_event["data"]["type"], "task_cancelled");
+    let current = peer.call("work/getSnapshot", json!({"sessionId":selected["id"]}));
+    assert_eq!(current["taskCounts"]["waitingApproval"], 0);
+    assert_eq!(current["taskCounts"]["cancelled"], 1);
+    assert_eq!(current["approvals"]["page"]["items"], json!([]));
+    drop(peer);
     fs::remove_dir_all(root).unwrap();
 }

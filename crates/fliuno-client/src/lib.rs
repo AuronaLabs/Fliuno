@@ -7,12 +7,14 @@ mod history;
 mod history_search;
 mod replay;
 mod wire;
+mod work;
 
 pub use approval_inbox::ApprovalInbox;
 pub use feed::EventFeed;
 pub use history::SessionHistory;
 pub use history_search::{HistorySearch, HistorySearchRequest};
 pub use replay::{EventReplay, ModelUsageScope, ReplayScope};
+pub use work::WorkSubscription;
 
 use fliuno_protocol::{InitializeParams, PROTOCOL_VERSION};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};

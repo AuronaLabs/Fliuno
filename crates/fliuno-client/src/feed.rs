@@ -6,7 +6,6 @@ use std::io::{BufRead, Write};
 /// Bounded event delivery over a connection's current subscription scope.
 /// Route notifications from other RPC calls through `observe` while it is active.
 pub struct EventFeed {
-    scope: ReplayScope,
     replay: EventReplay,
     signals: Signals,
 }
@@ -46,12 +45,14 @@ impl EventFeed {
         after: u64,
         on_notification: impl FnMut(Notification),
     ) -> Result<Self, Error> {
-        let replay = subscribe(client, &scope, after, on_notification)?;
-        Ok(Self {
-            scope,
+        subscribe(client, &scope, after, on_notification).map(Self::from_replay)
+    }
+
+    pub(crate) fn from_replay(replay: EventReplay) -> Self {
+        Self {
             replay,
             signals: Signals::default(),
-        })
+        }
     }
 
     /// The current durable cursor. Commit it together with each consumed page.
@@ -92,10 +93,11 @@ impl EventFeed {
             }
             let after = self.replay.cursor();
             if self.signals.gap {
-                self.replay = subscribe(client, &self.scope, after, &mut on_notification)?;
+                self.replay = subscribe(client, self.replay.scope(), after, &mut on_notification)?;
                 self.signals = Signals::default();
             } else if self.signals.through > after {
-                self.replay = EventReplay::new(self.scope.clone(), after, self.signals.through)?;
+                self.replay =
+                    EventReplay::new(self.replay.scope().clone(), after, self.signals.through)?;
             } else {
                 return Ok(None);
             }
