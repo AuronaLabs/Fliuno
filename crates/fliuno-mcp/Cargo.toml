@@ -9,9 +9,11 @@ publish.workspace = true
 test-fixtures = ["rmcp/server", "rmcp/transport-io"]
 
 [dependencies]
+base64 = "0.22"
 fliuno-core.workspace = true
 fliuno-protocol.workspace = true
 fliuno-sandbox = { path = "../fliuno-sandbox", features = ["async-io"] }
+mime = "0.3"
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
@@ -19,6 +21,7 @@ rmcp = { version = "3.11", default-features = false, features = ["client", "tran
 reqwest.workspace = true
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process", "fs", "sync"] }
 jsonschema = { version = "0.61", default-features = false }
+uuid.workspace = true
 
 
 [target.'cfg(all(unix, not(target_os = "linux")))'.dependencies]

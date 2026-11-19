@@ -25,7 +25,7 @@ fn content_only_stdio_process_interoperates_in_host_and_isolated_modes() {
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 9);
         for (label, arguments, expected) in [
             (
                 "resources_watch",

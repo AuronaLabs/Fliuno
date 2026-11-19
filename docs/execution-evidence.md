@@ -328,6 +328,12 @@ Windows 调试版 app-server 在同一份种子库上交替执行旧版和新版
 
 包含 A2A 组装和任务恢复改动的 Windows `scripts/check.ps1` 退出码为 0：429 项测试、26 个离线演示、rustfmt、两组严格 Clippy 与 RPC Schema 均通过。日志为 `target/0.0.2-stream-assembly-recovery-windows.log`。本轮未在 Debian Linux 来宾复验。
 
+## MCP 资源导入（2026-11-19）
+
+HTTP 契约测试覆盖无效 Base64、无效返回 URI、数量限制、256 KiB 单项边界和 512 KiB 合计边界。超限或无效内容返回失败，后续正常读取仍复用连接。SQLite 进程内验收覆盖换源后旧审批失效、拒绝时零次读取、允许时一次读取，以及重启后从本地取回文本和二进制字节。
+
+真实 app-server 离线演示验证 MCP SDK 附带标准 `_meta` 时，业务参数只有获批的 URI；导入标题不发送给服务。模型续轮只收到产物引用，重启后分段读取和独立 SHA-256 一致。Windows `scripts/check.ps1` 退出码为 0：430 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 均通过。日志为 `target/0.0.2-mcp-resource-import-final-windows.log`。本轮未在 Debian Linux 来宾或外部 MCP 服务复验。
+
 ## Gemini Interactions 与 MCP 只读失败（2026-11-19）
 
 Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。

@@ -5,6 +5,8 @@ endpoint during a pending read and checks that old consent cannot move with it.
 Both model and MCP peers are deterministic loopback fixtures.
 """
 import argparse
+import base64
+from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -21,8 +23,11 @@ STEPS = [
     ("resources_read", {"uri": "fixture:report/工作"}),
     ("prompts_list", {}),
     ("prompts_get", {"name": "draft", "arguments": {"topic": "工作成果"}}),
+    ("resources_import", {"uri": "fixture:report/附件", "title": "Quarterly report"}),
 ]
 PROMPT = "UNTRUSTED_REMOTE_PROMPT_STAYS_IN_TOOL_RESULT"
+ATTACHMENT_TEXT = "IMPORTED_BODY_STAYS_OUT_OF_MODEL_CONTEXT"
+ATTACHMENT_BYTES = b"\x00\x01\x02\xff\xfe"
 
 
 class Peer(BaseHTTPRequestHandler):
@@ -80,6 +85,14 @@ class Peer(BaseHTTPRequestHandler):
             assert messages[0]["role"] == "user"
             assert messages[0]["content"]["text"] == PROMPT
             assert messages[1]["content"]["text"] == "工作成果"
+        if len(results) >= 7:
+            imported = results[6]["result"]
+            assert imported["uri"] == "fixture:report/附件"
+            contents = imported["contents"]
+            assert len(contents) == 2 and all(item["artifactId"] for item in contents)
+            assert contents[0]["binary"] is False and contents[1]["binary"] is True
+            assert ATTACHMENT_TEXT not in json.dumps(request)
+            assert base64.b64encode(ATTACHMENT_BYTES).decode() not in json.dumps(request)
         if len(results) < len(STEPS):
             label, arguments = STEPS[len(results)]
             name = "mcp_remote_" + label
@@ -112,11 +125,19 @@ class Peer(BaseHTTPRequestHandler):
         elif method == "resources/templates/list":
             result = dict(common, resourceTemplates=[{"name": "report", "uriTemplate": "fixture:report/{id}"}])
         elif method == "resources/read":
-            assert params["uri"] == "fixture:report/工作"
-            result = dict(common, contents=[
-                {"uri": params["uri"], "mimeType": "text/plain", "text": f"CONTENT_ONLY_AFTER_CONSENT:{self.path}"},
-                {"uri": "fixture:binary", "mimeType": "application/octet-stream", "blob": "AAH/"},
-            ])
+            if params["uri"] == "fixture:report/附件":
+                assert set(params) - {"_meta"} == {"uri"}
+                result = dict(common, contents=[
+                    {"uri": params["uri"], "text": ATTACHMENT_TEXT},
+                    {"uri": "fixture:binary", "mimeType": "invalid/type?",
+                     "blob": base64.b64encode(ATTACHMENT_BYTES).decode()},
+                ])
+            else:
+                assert params["uri"] == "fixture:report/工作"
+                result = dict(common, contents=[
+                    {"uri": params["uri"], "mimeType": "text/plain", "text": f"CONTENT_ONLY_AFTER_CONSENT:{self.path}"},
+                    {"uri": "fixture:binary", "mimeType": "application/octet-stream", "blob": "AAH/"},
+                ])
         elif method == "prompts/list":
             result = dict(common, prompts=[{"name": "draft", "arguments": [{"name": "topic", "required": True}]}])
         elif method == "prompts/get":
@@ -152,7 +173,7 @@ def workflow(kernel, session, mode="allow"):
         waiting = kernel.wait(task["id"], "waiting_approval")
         assert waiting["pendingApproval"]["call"]["name"] == "mcp_remote_" + label
         assert count("resources/read") == (0 if index <= 3 else 1)
-        assert count("prompts/get") == 0
+        assert count("prompts/get") == int(index == len(STEPS) - 1)
         if index == 3 and mode == "switch":
             return waiting
         kernel.call("approval/respond", {"taskId": task["id"], "approvalId": waiting["pendingApproval"]["id"],
@@ -221,11 +242,23 @@ def main():
                 assert "fixture-content-model-key" not in saved
                 if args.deny:
                     assert "CONTENT_ONLY_AFTER_CONSENT" not in saved and PROMPT not in saved
+                items = kernel.call("artifacts/listSummaries", {"taskId": result["id"]})["items"]
+                if args.deny:
+                    assert not items
+                else:
+                    assert len(items) == 2 and ATTACHMENT_TEXT not in saved
+                    assert items[0]["title"] == "Quarterly report (1/2)"
+                    assert items[0]["mediaType"] == "text/plain"
+                    assert items[1]["binary"] and items[1]["mediaType"] == "application/octet-stream"
+                    binary = {"taskId": result["id"], "artifactId": items[1]["id"]}
+                    part = kernel.call("artifacts/read", dict(binary, after=1, limit=3))
+                    assert base64.b64decode(part["dataBase64"]) == ATTACHMENT_BYTES[1:4]
+                    assert kernel.call("artifacts/digest", binary)["sha256"] == sha256(ATTACHMENT_BYTES).hexdigest()
             assert count("tools/list") == 0
-            assert count("resources/read") == (0 if args.deny else 1)
+            assert count("resources/read") == (0 if args.deny else 2)
             assert count("prompts/get") == (0 if args.deny else 1)
             assert not Peer.failures, Peer.failures
-            print("MCP content: pages -> templates -> resource -> prompts -> prompt data")
+            print("MCP content: pages -> templates -> resource -> prompts -> artifact import")
             print("Result:", result["status"], "/ reads:", count("resources/read"), "/ prompt gets:", count("prompts/get"))
             print("Restart preserved the task; prompt roles remained function-call output data.")
     finally:

@@ -59,6 +59,11 @@ fn content_consent_is_source_bound_and_results_stay_in_tool_data() {
             json!({"uri":"fixture:first"}),
         ),
         (
+            "resources_import",
+            "resources/read",
+            json!({"uri":"fixture:first","title":"Imported report"}),
+        ),
+        (
             "prompts_get",
             "prompts/get",
             json!({"name":"draft","arguments":{"topic":"工作成果"}}),
@@ -101,12 +106,14 @@ fn content_consent_is_source_bound_and_results_stay_in_tool_data() {
             TaskStatus::Failed
         );
         assert_eq!(count(&second, method), 0);
+        assert!(kernel.list_artifacts(&original.id).unwrap().is_empty());
         let denied = kernel.start_task(&session.id, "deny").unwrap();
         assert_eq!(
             approve(&mut kernel, &denied, ApprovalDecision::Deny).status,
             TaskStatus::Failed
         );
         assert_eq!(count(&second, method), 0);
+        assert!(kernel.list_artifacts(&denied.id).unwrap().is_empty());
         let fresh = kernel.start_task(&session.id, "fresh consent").unwrap();
         let done = approve(&mut kernel, &fresh, ApprovalDecision::AllowOnce);
         assert_eq!(done.status, TaskStatus::Completed);
@@ -136,6 +143,21 @@ fn content_consent_is_source_bound_and_results_stay_in_tool_data() {
             serde_json::to_value(kernel.list_events(&done.id, 0, 100).unwrap()).unwrap();
         drop(kernel);
         let kernel = Kernel::open(&database, provider()).unwrap();
+        if label == "resources_import" {
+            let artifacts = kernel.list_artifacts(&done.id).unwrap();
+            assert_eq!(artifacts.len(), 2);
+            assert_eq!(artifacts[0].body.as_bytes(), b"REMOTE_CONTENT_ONLY");
+            assert_eq!(artifacts[1].body.as_bytes(), &[0, 1, 255]);
+            assert!(matches!(
+                artifacts[1].body,
+                fliuno_protocol::ArtifactBody::Binary { .. }
+            ));
+            assert_eq!(
+                output["result"]["contents"][1]["artifactId"],
+                artifacts[1].id
+            );
+            assert!(!output.to_string().contains("REMOTE_CONTENT_ONLY"));
+        }
         assert_eq!(
             serde_json::to_value(kernel.get_task(&done.id).unwrap()).unwrap(),
             serde_json::to_value(done).unwrap()

@@ -11,6 +11,8 @@ use wire::{Fixture, Response};
 mod completion;
 #[path = "content/persistence.rs"]
 mod persistence;
+#[path = "content/resource_import.rs"]
+mod resource_import;
 #[path = "content/skills.rs"]
 mod skills;
 
@@ -69,7 +71,7 @@ fn resource_only_peers_are_lazy_paginated_and_never_dereference_host_uris() {
         content::reply(request)
     });
     let tools = connect(&fixture, 2000);
-    assert_eq!(tools.len(), 3);
+    assert_eq!(tools.len(), 4);
     assert_eq!(fixture.requests().len(), 1);
     let list = tool(&tools, "resources_list");
     let first = invoke(list, json!({}), &CancellationToken::new()).unwrap();

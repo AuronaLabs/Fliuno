@@ -1,5 +1,5 @@
-//! Resources and prompts remain ordinary, approved tool-result data. A URI is
-//! sent to the configured peer; Fliuno never dereferences it or injects roles.
+//! Resource and prompt operations require approval. URIs are sent to the
+//! configured peer; Fliuno never dereferences them or injects roles.
 use crate::{Host, Tool, ToolContext, ToolError, ToolOutput, ToolSpec};
 use fliuno_core::{CancellationToken, ToolEffect};
 use fliuno_protocol::ToolCall;
@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 mod arguments;
 mod completion;
+mod resource_import;
 mod skills;
 mod watch;
 
@@ -170,6 +171,9 @@ pub(crate) fn tools(host: Arc<Host>, server: &str, peer: &ServerPeerInfo) -> Vec
             }) as Box<dyn Tool>
         })
         .collect();
+    if capabilities.resources.is_some() {
+        tools.push(resource_import::tool(Arc::clone(&host), server));
+    }
     if peer.protocol_version >= ProtocolVersion::V_2026_07_28 {
         tools.extend(watch::register(host, server, capabilities));
     }

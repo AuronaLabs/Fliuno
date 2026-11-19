@@ -874,10 +874,12 @@ name = "fliuno-mcp"
 version = "0.0.2"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "fliuno-core",
  "fliuno-protocol",
  "fliuno-sandbox",
  "jsonschema",
+ "mime",
  "process-wrap",
  "reqwest",
  "rmcp",
@@ -885,6 +887,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

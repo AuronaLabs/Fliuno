@@ -1,6 +1,6 @@
 # MCP 资源、提示与技能
 
-主机照常通过 `--mcp-config` 注册固定的 stdio 或 Streamable HTTP 服务。握手声明 `resources` 时注册资源列表、模板列表与读取。声明 `prompts` 时注册提示列表与获取。声明 `completions` 时注册参数补全。声明 `io.modelcontextprotocol/skills` 扩展时注册技能列表和元数据查询。没有 `tools` 能力的服务不会被发送 `tools/list`。连接时不枚举资源、提示或技能，不把它们自动加入上下文。
+主机照常通过 `--mcp-config` 注册固定的 stdio 或 Streamable HTTP 服务。握手声明 `resources` 时注册资源列表、模板列表、读取与导入。声明 `prompts` 时注册提示列表与获取。声明 `completions` 时注册参数补全。声明 `io.modelcontextprotocol/skills` 扩展时注册技能列表和元数据查询。没有 `tools` 能力的服务不会被发送 `tools/list`。连接时不枚举资源、提示或技能，不把它们自动加入上下文。
 
 以下名称的 `<id>` 来自主机配置。每次调用均为 `External` 工具效果，先持久审批和开始事件，再发出请求。服务的只读声明不跳过审批。
 
@@ -9,6 +9,7 @@
 | `mcp_<id>_resources_list` | `resources/list` | `{cursor?:string}` |
 | `mcp_<id>_resources_templates` | `resources/templates/list` | `{cursor?:string}` |
 | `mcp_<id>_resources_read` | `resources/read` | `{uri:string}` |
+| `mcp_<id>_resources_import` | `resources/read` | `{uri:string,title:string}` |
 | `mcp_<id>_prompts_list` | `prompts/list` | `{cursor?:string}` |
 | `mcp_<id>_prompts_get` | `prompts/get` | `{name:string,arguments?:{key:string}}` |
 | `mcp_<id>_complete` | `completion/complete` | `{ref,argument:{name,value},context?:{arguments}}` |
@@ -26,11 +27,17 @@
 
 ## 返回数据与权限
 
-结果统一为 `{serverId,method,result,grantsPermissions:false}`。`result` 是 SDK 解码后的协议结果，保留资源内容、提示消息、模板、分页和可选元数据；不是原始 wire 字节。资源文本和二进制 `blob` 作为数据保留，内核不解码二进制、不创建产物、不执行脚本、不展开 URI 模板，也不获取结果中附带的 URL。
+结果统一为 `{serverId,method,result,grantsPermissions:false}`。普通读取的 `result` 是 SDK 解码后的协议结果，保留资源内容、提示消息、模板、分页和可选元数据。`resources_read` 保留文本及 Base64 `blob`，不会创建产物。所有资源操作都不会执行脚本、展开 URI 模板或获取结果中附带的 URL。
 
 资源 URI 必须带合法 ASCII scheme，至多 4096 UTF-8 字节，不含空白或控制字符。`file:`、`http:` 和自定义 scheme 都只作为相应方法的 `uri` 发给该 MCP 服务；它们不会触发内核的文件读取或独立网络访问。远程服务实际能够读取什么由服务自身权限决定，stdio 隔离进程继续受平台策略约束。
 
 `prompts/get` 返回的 `user` / `assistant` 角色位于 `Message::ToolResult` 的 JSON 内，不会转成任务消息、系统指令或额外授权。内容仍可能包含不可信指令，客户端应保留来源与工具结果边界。`grantsPermissions:false` 描述内核权限语义，不是对内容正确性的背书。
+
+## 导入任务产物
+
+`resources_import` 经单独审批后向同一个已注册服务发送一次 `resources/read`。它将返回的文本与标准 Base64 二进制按原顺序存入当前任务，每个 `contents` 条目对应一个产物。返回的 `result.uri` 是请求 URI；`result.contents` 只包含来源 `uri`、`artifactId`、`mediaType`、`contentBytes` 和 `binary`。工具结果与事件不复制正文。客户端可以通过 `artifacts/read` 分段读取，并用 `artifacts/digest` 核对正文。
+
+标题由获批的 `title` 决定，最多 240 个 UTF-8 字节；多份产物会附加顺序。缺失或无效的媒体类型使用 `text/plain` 或 `application/octet-stream`。一次导入接受 1 至 16 项，每项最多 256 KiB 原始正文，合计最多 512 KiB，同时遵循传输上限。无效条目或超限会拒绝整批。产物、工具结果和事件同事务提交，重启读取无需再次访问 MCP 服务。
 
 ## 单次资源监听
 
