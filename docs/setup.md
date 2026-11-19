@@ -14,8 +14,19 @@
 
 Windows 原生启动层要求 Windows 10 / Server 2016 或更新版本，使用创建时 Job 分配与独立句柄中转，避免并发进程启动意外保留另一任务的管道。Linux 隔离要求 Landlock ABI 6；平台实际验收范围见 [沙箱文档](sandbox.md)。
 
-```powershell
-cargo test --workspace --all-features --locked
+### 先运行离线演示
+
+用 Python 启动示例。它会构建应用服务，用临时数据库演示审批、交付物保存和事件回放，无需 API Key。
+
+```sh
+python examples/demo.py
+```
+
+[预期输出](../README.md#跑一次离线任务) · [换用真实模型](#真实模型) · [运行工程检查](#检查与演示)
+
+### 再启动自己的服务
+
+```sh
 cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 ```
 
@@ -25,7 +36,16 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1","clientName":"my-client"}}
 ```
 
-然后依次调用 `workspace/open`、`session/create`、`task/start`。新任务先返回 `running`，后台步骤通过 `notifications/event` 实时送达，也可用 `task/get` 查询。任务进入 `waiting_approval` 后，客户端展示 `pendingApproval.call`，通过 `approval/respond` 允许一次或拒绝；允许后继续后台模型步骤。产物内容保存在 SQLite，通过 `artifacts/list` 读取。调用 `events/setScope` 可订阅任务、会话或工作区。重连或收到 `notifications/eventGap` 时，按订阅范围和持久游标补齐事件。
+| 客户端步骤 | 对应调用 |
+| --- | --- |
+| **创建任务** | `workspace/open` → `session/create` → `task/start`。用 `task/get` 查询状态。 |
+| **展示审批** | 任务进入 `waiting_approval` 后展示 `pendingApproval.call`。用户允许一次或拒绝时调用 `approval/respond`。 |
+| **收取交付物** | 用 `artifacts/list` 查看产物，用 `artifacts/read` 分段读取正文。 |
+| **订阅和重连** | 用 `events/setScope` 订阅任务、会话或工作区。重连或收到 `notifications/eventGap` 时，按范围和持久游标补读。 |
+
+[应用协议参考](protocol.md#方法) · [Rust 客户端](protocol.md#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
+
+### 导出协议 Schema
 
 ```powershell
 cargo run -p fliuno-app-server -- --schema
@@ -33,7 +53,7 @@ cargo run -p fliuno-app-server -- --schema
 
 上面的命令从 Rust 真实类型导出协议 JSON Schema，避免维护另一份手写类型。
 
-同一会话的新任务默认携带已完成工作的有界历史，包括工具结果、产物身份和 ACP 宿主操作；创建时冻结，重试与重启继续使用原快照。用 `session/context` 预览，用 `task/start.context` 调整数量/字节预算、以 `taskIds` 显式选择已完成任务，或选择 `mode:"isolated"`。显式选择超预算时整体拒绝。历史不继承旧审批或供应商推理续接；新副作用仍独立审批。选择策略与迁移边界见 [会话上下文](context.md)。
+同一会话的新任务会保存已有历史的有界快照，供重试和重启继续使用。要预览、缩小或关闭历史范围，见 [会话上下文](context.md)。
 
 ## ACP 离线演示
 

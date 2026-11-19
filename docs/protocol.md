@@ -4,7 +4,7 @@
 
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
-**常用入口：** [stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入) · [错误码](#错误)
+**常用入口：** [启动服务](setup.md#再启动自己的服务) · [stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [HTTP / SSE](ag-ui.md#http-接入) · [错误码](#错误)
 
 <details>
 <summary>展开协议索引</summary>

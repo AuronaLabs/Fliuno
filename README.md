@@ -1,5 +1,6 @@
 <p align="center">
   <picture>
+    <source media="(max-width: 540px)" srcset="docs/assets/fliuno-cover-compact.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-light.svg">
     <img src="docs/assets/fliuno-cover.svg" alt="Fliuno：从提交任务、人工审批到交付产物的 Rust Agent 内核" width="960">
   </picture>
@@ -7,9 +8,9 @@
 
 # Fliuno · 面向工作任务的 Rust Agent 内核
 
-把一项工作交给 Agent。任务可以暂停等待人工审批，完成后在本机留下交付物和执行记录。Fliuno 为宿主应用提供内核、协议和客户端库。
+Fliuno 为桌面工作台和其他宿主应用提供 Rust 内核。把一项工作交给 Agent，遇到需要授权的操作时由人决定，完成后在本机留下交付物和执行记录。
 
-**[快速开始](#快速开始)** · **[文档中心](docs/README.md)** · [应用协议](docs/protocol.md) · [更新记录](CHANGELOG.md)
+**[运行离线演示](#快速开始)** · [接入自己的客户端](#接入自己的客户端) · [文档中心](docs/README.md) · [更新记录](CHANGELOG.md)
 
 > **当前开发 `0.0.3`** · [已发布 `0.0.2`](CHANGELOG.md#002) · 应用协议 `0.1` · Windows / Linux
 
@@ -55,7 +56,7 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 
 读取返回的 `capabilities`，再依次调用 `workspace/open`、`session/create` 和 `task/start`。Rust 宿主可以使用类型化客户端；需要 HTTP 和 SSE 时，可在宿主中挂载 AG-UI 路由。
 
-[stdio 握手](docs/protocol.md#传输) · [Rust 客户端](docs/protocol.md#rust-调用方) · [AG-UI HTTP](docs/ag-ui.md#http-接入)
+[完整协议](docs/protocol.md) · [Rust 客户端](docs/protocol.md#rust-调用方) · [AG-UI HTTP](docs/ag-ui.md#http-接入)
 
 ## 一项任务如何运行
 

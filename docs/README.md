@@ -1,5 +1,6 @@
 <p align="center">
   <picture>
+    <source media="(max-width: 540px)" srcset="assets/fliuno-docs-compact.svg">
     <source media="(prefers-color-scheme: light)" srcset="assets/fliuno-docs-light.svg">
     <img src="assets/fliuno-docs.svg" alt="Fliuno 文档：上手、应用接入与内核开发" width="960">
   </picture>
@@ -10,6 +11,8 @@
 [项目首页](../README.md) · [更新记录](../CHANGELOG.md) · [开发路线图](roadmap.md)
 
 ## 从这里开始
+
+按你现在想做的事选择入口。下面的索引可以直接跳到具体主题。
 
 ### 01 · 跑一次任务
 
@@ -37,17 +40,24 @@
 
 用应用协议提交工作、展示进度、处理审批和收取交付物。
 
+### 连接方式
+
+| 从哪里接入 | 查阅 |
+| --- | --- |
+| **stdio / JSON-RPC** | [握手与消息格式](protocol.md#传输) · [JSON Schema](../protocol/fliuno.schema.json) |
+| **Rust** | [类型化客户端与事件补读](protocol.md#rust-调用方) |
+| **HTTP / SSE** | [挂载 AG-UI 路由](ag-ui.md#http-接入) · [SSE 续传](ag-ui.md#sse-输出与续传) · [HTTP 演示](../examples/ag_ui_http_demo.py) |
+
+### 工作台要展示什么
+
 | 要实现 | 查阅 |
 | --- | --- |
-| **建立连接** | [应用协议 0.1](protocol.md) · [JSON Schema](../protocol/fliuno.schema.json) |
 | **展示工作台与待审批** | [工作台实时订阅](protocol.md#工作台实时订阅) · [待审批快照与续页](protocol.md#待审批快照) |
 | **停止选中的任务** | [批量取消任务](protocol.md#批量取消任务) |
 | **刷新变动任务** | [一次读取变动摘要](protocol.md#任务变动摘要) · [仅回放任务 ID](protocol.md#任务变动回放) · [按 ID 读取摘要](protocol.md#批量读取任务摘要) |
-| **订阅进度与断线恢复** | [Rust 客户端](protocol.md#rust-调用方) · [AG-UI SSE 续传](ag-ui.md#sse-输出与续传) |
-| **走 HTTP 提交、审批与续跑** | [挂载 AG-UI 路由](ag-ui.md#http-接入) · [HTTP 演示](../examples/ag_ui_http_demo.py) |
 | **浏览会话或定位任务** | [历史分页](context.md#会话历史分页) · [搜索接口](protocol.md#查找历史任务) |
 | **浏览并下载交付物** | [目录订阅](protocol.md#交付物目录订阅) · [批量校验摘要](protocol.md#批量读取交付物摘要) · [分段读取](protocol.md#审批事件与产物) |
-| **统计用量** | [模型用量汇总](protocol.md#用量汇总) · [报告分页](protocol.md#回放用量报告) |
+| **查看模型用量** | [累计用量](protocol.md#用量汇总) · [逐次报告](protocol.md#回放用量报告) |
 
 ## 模型、工具与 Agent
 

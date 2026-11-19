@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="304" viewBox="0 0 560 304" role="img" aria-labelledby="title desc">
+  <title id="title">Fliuno — Rust agent kernel</title>
+  <desc id="desc">Submit a task, review approval, and collect a local artifact.</desc>
+  <defs>
+    <linearGradient id="ink" x2="1" y2="1">
+      <stop stop-color="#172d35"/>
+      <stop offset="1" stop-color="#0e181e"/>
+    </linearGradient>
+    <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="#6f9a91" opacity=".34"/>
+    </pattern>
+    <clipPath id="edge"><rect x="1" y="1" width="558" height="302" rx="24"/></clipPath>
+  </defs>
+  <g clip-path="url(#edge)">
+    <path fill="url(#ink)" d="M0 0h560v304H0z"/>
+    <path fill="url(#dots)" d="M354 0h206v180H354z"/>
+    <circle cx="554" cy="33" r="94" fill="none" stroke="#43605f"/>
+    <circle cx="554" cy="33" r="126" fill="none" stroke="#43605f"/>
+    <g transform="translate(32 29)">
+      <rect width="42" height="42" rx="11" fill="#a6ebce"/>
+      <path d="M12 31V16l4-4h15M12 22h13" fill="none" stroke="#112127" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="31" cy="22" r="2" fill="#112127"/>
+    </g>
+    <text x="90" y="56" fill="#a6ebce" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="19" letter-spacing="1.8">LOCAL AGENT RUNTIME</text>
+    <text x="29" y="145" fill="#f6ebd8" font-family="system-ui, 'Segoe UI', sans-serif" font-size="84" font-weight="760" letter-spacing="-3">Fliuno</text>
+    <text x="33" y="180" fill="#c3d5d1" font-family="system-ui, 'Segoe UI', sans-serif" font-size="24">Rust kernel for agent work</text>
+
+    <rect x="32" y="203" width="496" height="71" rx="12" fill="#0e1d24" stroke="#52736f"/>
+    <path d="M194 216v45m169-45v45" stroke="#304b50"/>
+    <g font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace" font-size="19" font-weight="700" text-anchor="middle">
+      <circle cx="113" cy="222" r="4" fill="#bdd8ff"/>
+      <circle cx="279" cy="222" r="4" fill="#ffd294"/>
+      <circle cx="446" cy="222" r="4" fill="#a6ebce"/>
+      <text x="113" y="252" fill="#bdd8ff">SUBMIT</text>
+      <text x="279" y="252" fill="#ffd294">APPROVE</text>
+      <text x="446" y="252" fill="#a6ebce">DELIVER</text>
+    </g>
+    <path d="m190 235 7 4-7 4m169-8 7 4-7 4" fill="none" stroke="#849c99" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <rect x="1" y="1" width="558" height="302" rx="24" fill="none" stroke="#52736f"/>
+</svg>
