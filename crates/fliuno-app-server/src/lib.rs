@@ -364,6 +364,8 @@ impl RpcServer {
             capabilities["workspaceTaskSummaries"] = json!(true);
             capabilities["workspaceTaskSummaryOrdering"] = json!(true);
             capabilities["workspaceById"] = json!(true);
+            capabilities["workspaceProfiles"] = json!(true);
+            capabilities["maxWorkspaceTitleChars"] = json!(MAX_WORKSPACE_TITLE_CHARS);
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
             if self.agent_catalog.is_some() {
@@ -489,6 +491,21 @@ impl RpcServer {
             "workspace/get" => {
                 let p: WorkspaceIdParams = decode(params)?;
                 json!(self.kernel()?.get_workspace(&p.workspace_id)?)
+            }
+            "workspace/getProfile" => {
+                let p: WorkspaceIdParams = decode(params)?;
+                json!(self.kernel()?.get_workspace_profile(&p.workspace_id)?)
+            }
+            "workspace/listProfiles" => {
+                let p: ListParams = decode(params)?;
+                json!(self.kernel()?.list_workspace_profiles(p.after, p.limit)?)
+            }
+            "workspace/setTitle" => {
+                let p: WorkspaceSetTitleParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .set_workspace_title(&p.workspace_id, &p.title)?
+                )
             }
             "workspace/list" => {
                 let p: ListParams = decode(params)?;

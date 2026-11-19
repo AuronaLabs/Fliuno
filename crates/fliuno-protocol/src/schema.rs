@@ -19,6 +19,9 @@ pub fn schema_bundle() -> Value {
         "workspace/searchHistory" => schema::<WorkspaceHistorySearchParams>(),
         "workspace/get" => schema::<WorkspaceIdParams>(),
         "workspace/list" => schema::<ListParams>(),
+        "workspace/getProfile" => schema::<WorkspaceIdParams>(),
+        "workspace/listProfiles" => schema::<ListParams>(),
+        "workspace/setTitle" => schema::<WorkspaceSetTitleParams>(),
         "session/create" => schema::<SessionCreateParams>(),
         "session/get" => schema::<SessionIdParams>(),
         "session/rename" => schema::<SessionRenameParams>(),
@@ -76,6 +79,8 @@ pub fn schema_bundle() -> Value {
     };
     let types = schemas! {
         "Workspace" => schema::<Workspace>(),
+        "WorkspaceProfile" => schema::<WorkspaceProfile>(),
+        "WorkspaceProfilesPage" => schema::<ObjectPage<WorkspaceProfile>>(),
         "Session" => schema::<Session>(),
         "Task" => schema::<Task>(),
         "TaskSummary" => schema::<TaskSummary>(),

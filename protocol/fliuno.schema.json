@@ -133,6 +133,60 @@
       },
       "additionalProperties": false
     },
+    "workspace/getProfile": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceIdParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "workspace/listProfiles": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ListParams",
+      "type": "object",
+      "properties": {
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        }
+      },
+      "additionalProperties": false
+    },
+    "workspace/setTitle": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceSetTitleParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "title": {
+          "description": "Explicitly pass an empty string to remove the title.",
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "title"
+      ]
+    },
     "session/create": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "SessionCreateParams",
@@ -1914,6 +1968,111 @@
         "id",
         "root"
       ]
+    },
+    "WorkspaceProfile": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceProfile",
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/Workspace"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 120
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspace"
+      ],
+      "$defs": {
+        "Workspace": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "root"
+          ]
+        }
+      }
+    },
+    "WorkspaceProfilesPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ObjectPage",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceProfile"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextAfter",
+        "hasMore"
+      ],
+      "$defs": {
+        "WorkspaceProfile": {
+          "type": "object",
+          "properties": {
+            "workspace": {
+              "$ref": "#/$defs/Workspace"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "workspace"
+          ]
+        },
+        "Workspace": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "root": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "root"
+          ]
+        }
+      }
     },
     "Session": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

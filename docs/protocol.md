@@ -42,6 +42,9 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,order?,after?,limit?,targetBytes?}` | 跨会话分页读取同一工作区的任务摘要，可按创建顺序正序或倒序返回 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `workspace/get` | `{workspaceId}` | 按 ID 读取已保存的 Workspace。查看 `initialize.capabilities.workspaceById` |
+| `workspace/getProfile` | `{workspaceId}` | 当前 WorkspaceProfile，包含原工作区和可选的显示名称 |
+| `workspace/listProfiles` | `{after?:0,limit?:100}` | WorkspaceProfile ObjectPage，与 `workspace/list` 的游标相同 |
+| `workspace/setTitle` | `{workspaceId,title}` | 持久化显示名称并返回 WorkspaceProfile，`title:""` 清除名称 |
 | `workspace/searchHistory` | `{workspaceId,query,role?,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，跨会话查找已完成任务，命中包含 `sessionId` |
 | `session/create` | `{workspaceId,title?,clientRequestId?}` | Session |
 | `session/get` | `{sessionId}` | 单个 Session |
@@ -94,6 +97,8 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `terminal/archives` | `{sessionId,after?:0,limit?:100}` | 归档历史 ObjectPage，每项为 TerminalArchive |
 
 `initialize.capabilities.sessionTitles` 表示会话支持标题。标题最多 120 个 Unicode 标量值，去除首尾空白后须至少保留一个字符，且不能包含控制字符。未命名的会话省略 `title`。改名保留会话 ID、所属工作区、分页顺序和已有任务。SQLite v15 保留既有会话的快照，新客户端读取旧数据时会看到未命名会话。
+
+`initialize.capabilities.workspaceProfiles` 表示支持工作区显示名称。`title` 最多 `maxWorkspaceTitleChars` 个 Unicode 字符。服务去掉首尾空白，拒绝控制字符和只有空白的名称。明确传 `""` 可清除名称。名称保存在 SQLite v35 的独立表里。工作区 ID、规范化根目录、清单顺序以及 `workspace/open`、`workspace/get`、`workspace/list` 的响应格式沿用原协议。原目录暂时不可访问时仍可读取和修改名称。
 
 `initialize.capabilities.sessionCreateIdempotency` 表示 `session/create` 接受 `clientRequestId`。键由 1 到 128 个可打印且不含空格的 ASCII 字符组成，在工作区内唯一。连接中断后用原键和原始标题重试会返回同一个会话的当前信息。复用键并更改原始标题会返回 `-32009`。创建记录和键同事务保存，重启后仍可重试。
 

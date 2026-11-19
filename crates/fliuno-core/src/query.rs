@@ -309,7 +309,7 @@ fn validate_task_list_target(target_bytes: Option<u32>) -> Result<()> {
     Ok(())
 }
 
-fn page_range(after: u64, limit: u32) -> Result<(i64, u32)> {
+pub(crate) fn page_range(after: u64, limit: u32) -> Result<(i64, u32)> {
     if after > i64::MAX as u64 || !(1..=100).contains(&limit) {
         return Err(Error::Invalid(
             "after must fit i64 and object list limit must be 1..100".into(),

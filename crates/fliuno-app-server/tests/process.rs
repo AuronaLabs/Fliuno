@@ -39,6 +39,8 @@ mod task_status;
 mod terminal;
 #[path = "process/workspace_import.rs"]
 mod workspace_import;
+#[path = "process/workspace_profiles.rs"]
+mod workspace_profiles;
 #[path = "process/workspace_search.rs"]
 mod workspace_search;
 

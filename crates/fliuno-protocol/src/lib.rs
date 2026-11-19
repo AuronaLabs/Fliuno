@@ -10,10 +10,12 @@ pub use schema::schema_bundle;
 mod session;
 pub use session::*;
 mod terminal;
+mod workspace;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub use terminal::*;
+pub use workspace::*;
 
 pub const PROTOCOL_VERSION: &str = "0.1";
 /// Includes the line delimiter on the application stdio transport.

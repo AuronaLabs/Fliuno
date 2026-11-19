@@ -405,3 +405,11 @@ Windows `scripts/check.ps1` 退出码为 0。440 项测试、26 个离线演示�
 Windows `scripts/check.ps1` 退出码为 0。441 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 校验通过。Debian 来宾的真实 stdio 客户端进程测试通过。日志分别为 `target/0.0.2-client-raw-reply-windows.log` 和 `D:/Fliuno-Native-Test/guest-client-raw-reply.log`。
 
 Windows Release 内存帧基准按新旧构建各交替测量七轮，每轮 61 帧。123,470 字节的 100 项事件页从 1.063 ms 降至 0.4728 ms，87,488 字节的产物应答从 0.1866 ms 降至 0.1048 ms，均为各轮中位数的中位数。测量覆盖客户端帧处理，不含子进程 I/O。日志为 `target/0.0.2-raw-reply-benchmark.log`。
+
+## Rust 分块下载与工作区显示名称（2026-11-19）
+
+真实 stdio 进程测试分两段下载 81,000 字节的产物，原始 UTF-8 字节和 SHA-256 一致。客户端测试覆盖非法 Base64、长度和偏移、空产物、摘要不匹配以及错误后继续使用连接。调用方可以选择从已保存的摘要校验。
+
+工作区进程测试覆盖从 SQLite v34 迁移、同名目录的独立名称、重复更新、重启后沿用清单游标，以及原目录不可用时读取和清除名称。原工作区对象在更新前后相同。
+
+Windows `scripts/check.ps1` 退出码为 0，444 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 校验通过。Debian Linux 6.12.107 来宾通过上述两项进程测试。日志为 `target/0.0.2-workspace-profiles-windows.log` 和 `D:/Fliuno-Native-Test/guest-workspace-profiles.log`。
