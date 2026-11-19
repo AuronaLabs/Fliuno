@@ -362,6 +362,7 @@ impl RpcServer {
             capabilities["taskSummaryById"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["workspaceTaskSummaries"] = json!(true);
+            capabilities["workspaceTaskSummaryOrdering"] = json!(true);
             capabilities["workspaceById"] = json!(true);
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
@@ -523,12 +524,13 @@ impl RpcServer {
             }
             "task/listWorkspaceSummaries" => {
                 let p: WorkspaceTaskSummaryListParams = decode(params)?;
-                json!(self.kernel()?.list_workspace_task_summaries_with_target(
+                json!(self.kernel()?.list_workspace_task_summaries_ordered(
                     &p.workspace_id,
                     p.after,
                     p.limit,
                     p.status,
                     p.target_bytes,
+                    p.order.unwrap_or_default(),
                 )?)
             }
             "session/create" => {

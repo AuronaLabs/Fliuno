@@ -1038,6 +1038,17 @@
         "workspaceId": {
           "type": "string"
         },
+        "order": {
+          "description": "The after cursor follows this ordering. Omit for ascending creation order.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceTaskSummaryOrder"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "status": {
           "anyOf": [
             {
@@ -1077,6 +1088,13 @@
         "workspaceId"
       ],
       "$defs": {
+        "WorkspaceTaskSummaryOrder": {
+          "type": "string",
+          "enum": [
+            "oldest_first",
+            "newest_first"
+          ]
+        },
         "TaskStatus": {
           "type": "string",
           "enum": [

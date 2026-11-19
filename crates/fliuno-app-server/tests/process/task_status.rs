@@ -265,3 +265,84 @@ fn task_summary_pages_respect_byte_targets_and_keep_session_workspace_cursors() 
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn newest_workspace_summaries_resume_before_the_last_row_after_restart() {
+    let root = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("fliuno-recent-summary-{}", uuid::Uuid::new_v4()));
+    let alternate = root.join("alternate");
+    fs::create_dir_all(&alternate).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let foreign = peer.call("workspace/open", json!({"root":alternate}));
+    let create_session = |peer: &mut Peer, ws: &Value| {
+        peer.call("session/create", json!({"workspaceId":ws["id"]}))["id"].clone()
+    };
+    let first = create_session(&mut peer, &workspace);
+    let second = create_session(&mut peer, &workspace);
+    let other = create_session(&mut peer, &foreign);
+    let start = |peer: &mut Peer, session_id: &Value| {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session_id,"input":"文档 ".repeat(80)}),
+        );
+        let id = task["id"].as_str().unwrap();
+        peer.wait_for_status(id, "waiting_approval");
+        task["id"].clone()
+    };
+    let oldest = start(&mut peer, &first);
+    let excluded = start(&mut peer, &second);
+    let _ = start(&mut peer, &other);
+    let middle = start(&mut peer, &first);
+    let newest = start(&mut peer, &second);
+    peer.call("task/cancel", json!({"taskId":excluded}));
+    let method = "task/listWorkspaceSummaries";
+    let workspace_id = &workspace["id"];
+    let before = peer.call(
+        method,
+        json!({"workspaceId":workspace_id,"status":"waiting_approval"}),
+    );
+    let ordered = before["items"].as_array().unwrap();
+    assert_eq!(
+        ordered.iter().map(|v| v["id"].clone()).collect::<Vec<_>>(),
+        [oldest.clone(), middle.clone(), newest.clone()]
+    );
+    assert_eq!(
+        peer.call(
+            method,
+            json!({"workspaceId":workspace_id,"status":"waiting_approval","order":"oldest_first"})
+        ),
+        before
+    );
+    let pair = vec![ordered[2].clone(), ordered[1].clone()];
+    let bytes = serde_json::to_vec(&pair).unwrap().len();
+    assert!(bytes >= 1024);
+    let first_page = peer.call(method, json!({"workspaceId":workspace_id,"status":"waiting_approval","order":"newest_first","targetBytes":bytes}));
+    assert_eq!(first_page["items"], json!(pair));
+    assert_eq!(first_page["hasMore"], true);
+    let newest_all = peer.call(
+        method,
+        json!({"workspaceId":workspace_id,"order":"newest_first"}),
+    );
+    assert_eq!(newest_all["items"][0]["id"], newest);
+    assert_eq!(newest_all["items"][2]["id"], excluded);
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    let later = start(&mut peer, &second);
+    let last_page = peer.call(method, json!({"workspaceId":workspace_id,"status":"waiting_approval","order":"newest_first","targetBytes":bytes,"after":first_page["nextAfter"]}));
+    assert_eq!(last_page["items"], json!([ordered[0]]));
+    assert_eq!(last_page["hasMore"], false);
+    assert!(last_page["nextAfter"].as_u64().unwrap() < first_page["nextAfter"].as_u64().unwrap());
+    let latest = peer.call(
+        method,
+        json!({"workspaceId":workspace_id,"order":"newest_first","limit":1}),
+    );
+    assert_eq!(latest["items"][0]["id"], later);
+    assert_eq!(latest["hasMore"], true);
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

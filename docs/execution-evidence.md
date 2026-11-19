@@ -371,3 +371,11 @@ Windows `scripts/check.ps1` 退出码为 0。432 项测试、26 个离线演示�
 Windows 内存 SQLite 3.49.1 使用同一任务的 100,000 条模拟事件，其中 400 条是决定。61 轮交替采样的命中查询中位数为全任务扫描 115.46 ms、主键索引 0.023 ms，结果逐字段一致。一次 v34 回填耗时 86.78 ms。该对照测量 SQLite 查询与取行。日志为 `target/0.0.2-approval-decision-query.log`。
 
 Windows 通过 433 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema。Debian Linux 6.12.107 来宾通过 3 项审批与 1 项 ACP 进程测试。日志分别为 `target/0.0.2-approval-decision-windows.log` 和 `D:/Fliuno-Native-Test/guest-approval-decision.log`。
+
+## 工作区任务摘要倒序分页（2026-11-19）
+
+进程测试跨会话和工作区创建任务，检查按状态筛选与紧凑 JSON 字节目标，最后重启并新增任务，确认旧倒序游标继续向更早任务读取。默认正序的结果和显式 `oldest_first` 一致。
+
+Windows 内存 SQLite 3.49.1 在 100,000 条模拟任务上使用既有工作区索引倒扫，带状态筛选时使用工作区与状态复合索引。两者都无临时排序。取 51 行含翻页探针的 61 轮查询中位数分别为 0.0588 ms（筛选）和 0.0797 ms（不筛选）。此测量只计 SQL 查询和取行。日志为 `target/0.0.2-newest-task-summaries-query.log`。
+
+Windows 通过 434 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema。Debian Linux 6.12.107 来宾通过 4 项任务摘要及完整任务分页进程测试。日志为 `target/0.0.2-newest-task-summaries-windows.log` 和 `D:/Fliuno-Native-Test/guest-newest-task-summaries.log`。

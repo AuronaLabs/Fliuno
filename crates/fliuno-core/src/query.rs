@@ -173,28 +173,76 @@ impl Kernel {
         status: Option<TaskStatus>,
         target_bytes: Option<u32>,
     ) -> Result<ObjectPage<TaskSummary>> {
+        self.list_workspace_task_summaries_ordered(
+            workspace,
+            after,
+            limit,
+            status,
+            target_bytes,
+            WorkspaceTaskSummaryOrder::OldestFirst,
+        )
+    }
+
+    pub fn list_workspace_task_summaries_ordered(
+        &self,
+        workspace: &str,
+        after: u64,
+        limit: u32,
+        status: Option<TaskStatus>,
+        target_bytes: Option<u32>,
+        order: WorkspaceTaskSummaryOrder,
+    ) -> Result<ObjectPage<TaskSummary>> {
         validate_task_list_target(target_bytes)?;
         self.require_workspace(workspace)?;
+        let (cursor, fetch) = page_range(after, limit)?;
+        use WorkspaceTaskSummaryOrder::{NewestFirst, OldestFirst};
+        // Reverse scans use an inclusive ceiling one below the last row. For
+        // the first page, a zero cursor means start at the end of the index.
+        let bound = match (order, cursor) {
+            (OldestFirst, _) => cursor,
+            (NewestFirst, 0) => i64::MAX,
+            (NewestFirst, _) => cursor - 1,
+        };
         if let Some(status) = status {
-            let (cursor, fetch) = page_range(after, limit)?;
-            return self.query_object_page(
-                "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+            let sql = match order {
+                OldestFirst => {
+                    "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
                  JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
                  WHERE scoped.workspace_id=?1 AND scoped.status=?2 AND scoped.task_row>?3
-                 ORDER BY scoped.task_row LIMIT ?4",
-                params![workspace, status.as_str(), cursor, fetch],
+                 ORDER BY scoped.task_row LIMIT ?4"
+                }
+                NewestFirst => {
+                    "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+                 JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
+                 WHERE scoped.workspace_id=?1 AND scoped.status=?2 AND scoped.task_row<=?3
+                 ORDER BY scoped.task_row DESC LIMIT ?4"
+                }
+            };
+            return self.query_object_page(
+                sql,
+                params![workspace, status.as_str(), bound, fetch],
                 after,
                 limit,
                 target_bytes,
             );
         }
-        let (cursor, fetch) = page_range(after, limit)?;
-        self.query_object_page(
-            "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+        let sql = match order {
+            OldestFirst => {
+                "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
              JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
              WHERE scoped.workspace_id=?1 AND scoped.task_row>?2
-             ORDER BY scoped.task_row LIMIT ?3",
-            params![workspace, cursor, fetch],
+             ORDER BY scoped.task_row LIMIT ?3"
+            }
+            NewestFirst => {
+                "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
+             JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
+             WHERE scoped.workspace_id=?1 AND scoped.task_row<=?2
+             ORDER BY scoped.task_row DESC LIMIT ?3"
+            }
+        };
+        self.query_object_page(
+            sql,
+            params![workspace, bound, fetch],
             after,
             limit,
             target_bytes,

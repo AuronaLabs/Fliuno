@@ -139,6 +139,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["taskSummaryById"], true);
         assert_eq!(init["capabilities"]["taskSummaryStatusFilter"], true);
         assert_eq!(init["capabilities"]["workspaceTaskSummaries"], true);
+        assert_eq!(init["capabilities"]["workspaceTaskSummaryOrdering"], true);
         assert_eq!(init["capabilities"]["sessionArchiving"], true);
         assert_eq!(init["capabilities"]["sessionArchiveBatch"], true);
         assert_eq!(init["capabilities"]["maxSessionArchiveBatch"], 32);

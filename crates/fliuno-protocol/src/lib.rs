@@ -726,6 +726,9 @@ pub struct TaskSummaryListParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceTaskSummaryListParams {
     pub workspace_id: String,
+    /// The after cursor follows this ordering. Omit for ascending creation order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<WorkspaceTaskSummaryOrder>,
     #[serde(default)]
     pub status: Option<TaskStatus>,
     #[serde(default)]
@@ -735,6 +738,14 @@ pub struct WorkspaceTaskSummaryListParams {
     /// Compact items array byte target. A larger first summary still advances the cursor.
     #[serde(default)]
     pub target_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceTaskSummaryOrder {
+    #[default]
+    OldestFirst,
+    NewestFirst,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

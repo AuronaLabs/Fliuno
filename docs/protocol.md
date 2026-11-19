@@ -19,7 +19,7 @@
 | `session/list` | `{workspaceId,archived?,after?:0,limit?:100}` | Session ObjectPage，可按归档状态筛选 |
 | `task/list` | `{sessionId,after?:0,limit?:100,targetBytes?}` | Task ObjectPage |
 | `task/listSummaries` | `{sessionId,status?,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
-| `task/listWorkspaceSummaries` | `{workspaceId,status?,after?,limit?}` | 按创建顺序跨会话分页读取同一工作区的任务摘要 |
+| `task/listWorkspaceSummaries` | `{workspaceId,status?,order?,after?,limit?,targetBytes?}` | 跨会话分页读取同一工作区的任务摘要，可按创建顺序正序或倒序返回 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `workspace/get` | `{workspaceId}` | 按 ID 读取已保存的 Workspace。查看 `initialize.capabilities.workspaceById` |
 | `workspace/searchHistory` | `{workspaceId,query,role?,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，跨会话查找已完成任务，命中包含 `sessionId` |
@@ -82,6 +82,8 @@
 `taskSummaryStatusFilter` 表示 `task/listSummaries` 可以按一个 `status` 筛选。筛选沿用原清单的任务创建顺序和游标。翻页应保持相同条件。任务状态改变后，从 `after:0` 重拉列表即可看到当前结果。SQLite v23 从已保存的任务摘要回填状态索引。
 
 `workspaceTaskSummaries` 表示支持 `task/listWorkspaceSummaries`。它查询同一工作区所有会话的任务，支持与 `task/listSummaries` 相同的状态筛选、创建游标和分页上限，每页最多 100 条。归档会话中的任务仍属于其工作区。需要继续按会话查询时，可沿用 `task/listSummaries`。
+
+`workspaceTaskSummaryOrdering` 表示支持 `order:"oldest_first"` 和 `order:"newest_first"`。省略 `order` 时按创建顺序正序查询。倒序查询也从 `after:0` 开始，用同一查询范围、状态和排序的 `nextAfter` 续页。倒序翻页只读取游标之前创建的任务，摘要反映查询时的任务状态。
 
 `eventBySequence` 表示支持 `events/get`。`sequence` 取自实时通知或回放，范围为 1 到 SQLite 的最大 64 位有符号整数。序号不存在时返回 `-32004`。
 
