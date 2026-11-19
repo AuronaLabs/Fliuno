@@ -1,5 +1,7 @@
 # 开发计划与验收
 
+[文档首页](README.md) · [更新记录](../CHANGELOG.md) · [验收与性能记录](execution-evidence.md)
+
 ## 0.0.3 开发中
 
 - [x] Rust 客户端将持久任务事件转换为 AG-UI 运行、文本和自定义事件。重放时使用稳定的运行和消息 ID。

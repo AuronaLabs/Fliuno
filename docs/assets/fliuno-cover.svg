@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="306" viewBox="0 0 1200 306" role="img" aria-labelledby="title description">
+  <title id="title">Fliuno</title>
+  <desc id="description">A task moves through approval and produces an artifact.</desc>
+  <defs>
+    <linearGradient id="surface" x2="1" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#101e1b"/>
+      <stop offset="1" stop-color="#0d2923"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="80%" cy="23%" r="58%">
+      <stop stop-color="#25533f" stop-opacity=".72"/>
+      <stop offset="1" stop-color="#25533f" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#a0d3b3" stroke-opacity=".11"/>
+    </pattern>
+    <linearGradient id="grid-fade">
+      <stop stop-color="white" stop-opacity="0"/>
+      <stop offset=".32" stop-color="white"/>
+      <stop offset="1" stop-color="white" stop-opacity=".7"/>
+    </linearGradient>
+    <mask id="grid-mask">
+      <rect x="458" width="742" height="306" fill="url(#grid-fade)"/>
+    </mask>
+    <clipPath id="frame">
+      <rect width="1200" height="306" rx="26"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <path fill="url(#surface)" d="M0 0h1200v306H0z"/>
+    <path fill="url(#glow)" d="M0 0h1200v306H0z"/>
+    <path fill="url(#grid)" mask="url(#grid-mask)" d="M458 0h742v306H458z"/>
+    <path d="M546 45v216" stroke="#bfd5c5" stroke-opacity=".17"/>
+
+    <g transform="translate(72 46)">
+      <rect width="49" height="49" rx="13" fill="#c9f38d"/>
+      <path d="M14 36V18a5 5 0 0 1 5-5h17M14 25h14" fill="none" stroke="#13231b" stroke-width="4.5" stroke-linecap="round"/>
+    </g>
+    <text x="68" y="184" fill="#f4f5e9" font-family="'Segoe UI', system-ui, sans-serif" font-size="110" font-weight="700" letter-spacing="-7">Fliuno</text>
+    <text x="75" y="242" fill="#a7c9b7" font-family="ui-monospace, Consolas, monospace" font-size="21" letter-spacing="4">RUST AGENT KERNEL</text>
+
+    <g fill="none" stroke="#8fac9c" stroke-width="2">
+      <path d="M798 76h29a15 15 0 0 1 15 15v23a15 15 0 0 1-15 15h-58a24 24 0 0 0 0 48h22"/>
+      <path d="m784 171 7 6-7 6" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M1019 177h33a15 15 0 0 1 15 15v10a15 15 0 0 1-15 15h-43a15 15 0 0 0-15 15v6h21"/>
+      <path d="m1008 232 7 6-7 6" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <g font-family="'Segoe UI', system-ui, sans-serif" font-size="23" font-weight="600">
+      <g transform="translate(603 43)">
+        <rect width="195" height="66" rx="14" fill="#142a24" stroke="#5b8070"/>
+        <rect x="17" y="15" width="36" height="36" rx="9" fill="#243e33"/>
+        <path d="M29 26h12m-12 7h12m-12 7h7" fill="none" stroke="#b8ddc8" stroke-width="2" stroke-linecap="round"/>
+        <text x="70" y="41" fill="#e8f2e5">Task</text>
+      </g>
+      <g transform="translate(804 144)">
+        <rect width="215" height="66" rx="14" fill="#26382c" stroke="#8b9864"/>
+        <rect x="17" y="15" width="36" height="36" rx="9" fill="#3d4731"/>
+        <path d="m27 33 5 5 11-11" fill="none" stroke="#ebd585" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="70" y="41" fill="#f3e9bc">Approval</text>
+      </g>
+      <g transform="translate(1028 214)">
+        <rect width="142" height="48" rx="12" fill="#c9f38d"/>
+        <path d="m14 24 8-5 8 5-8 5-8-5Zm8 5v7m-8-7 8 7 8-7" fill="none" stroke="#244223" stroke-width="1.6" stroke-linejoin="round"/>
+        <text x="41" y="31" fill="#17271b" font-size="20">Artifact</text>
+      </g>
+    </g>
+  </g>
+  <rect x=".5" y=".5" width="1199" height="305" rx="25.5" fill="none" stroke="#7fa18d" stroke-opacity=".38"/>
+</svg>

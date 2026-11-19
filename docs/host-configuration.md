@@ -1,5 +1,7 @@
 # 启动配置读取
 
+[文档首页](README.md) · [运行与配置](setup.md) · [沙箱](sandbox.md)
+
 `fliuno-app-server` 的 MCP、ACP、A2A、exec 和 terminal JSON 配置由宿主通过命令行指定，运行中不接受模型或 RPC 改写。这五类文件统一经过独立的 `configuration` 模块：
 
 - 每份最多 1 MiB，实际读取最多 1 MiB + 1 字节探测超额；不先整文件分配再检查 metadata。文件在读取中增长也不会越过该字节预算。

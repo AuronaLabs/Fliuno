@@ -1,5 +1,7 @@
 # 终端归档与身份保留
 
+[文档首页](README.md) · [终端订阅与恢复](terminal-subscriptions.md) · [应用协议](protocol.md#跨轮次终端)
+
 终端输出和输入操作缓存可以回收，创建身份不能复用。Fliuno 将小型 tombstone 账本保存在状态根的 `archive.db`，与每个 terminal ID 的输出目录分开；Tauri 或其他客户端通过相同应用协议管理它，不接触 SQLite 路径、IPC 凭据或 PID。
 
 `initialize.capabilities.terminalArchiving:true` 表示支持此功能。`terminal/archive({sessionId,terminalId})` 是受信本机客户端显式发起的保留策略操作，返回 `{snapshot,cleanupPending}`；不会隐式终止仍运行的监督进程。模型通过单独的 `terminal_archive_*({terminalId})` 工具使用它，走既有逐次审批，session 始终从任务关系解析。拒绝审批不删除输出。需要先 release/kill 或等待自然退出，再等监督进程真正释放所有权锁。
