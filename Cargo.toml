@@ -32,6 +32,10 @@ unsafe_code = "forbid"
 debug = "line-tables-only"
 incremental = false
 
+# Keep hashing large pinned runtimes practical in local debug builds.
+[profile.dev.package.sha2]
+opt-level = 3
+
 [profile.test]
 debug = "line-tables-only"
 incremental = false
