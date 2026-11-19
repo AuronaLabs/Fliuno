@@ -13,6 +13,7 @@ use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 const METHOD: &str = "subscriptions/listen";
 const CAPACITY: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 const MAX_WAIT_MS: u64 = 5_000;
+const MAX_RESOURCE_URIS: usize = 8;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -27,9 +28,17 @@ struct CatalogArgs {
     wait_ms: u64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResourceSetArgs {
+    uris: Vec<String>,
+    wait_ms: u64,
+}
+
 #[derive(Clone, Copy)]
 enum Kind {
     ResourceUri,
+    ResourceSet,
     Catalog(Catalog),
 }
 
@@ -44,6 +53,7 @@ impl Kind {
     fn label(self) -> &'static str {
         match self {
             Self::ResourceUri => "resources_watch",
+            Self::ResourceSet => "resources_watch_many",
             Self::Catalog(Catalog::Resources) => "resources_watch_list",
             Self::Catalog(Catalog::Prompts) => "prompts_watch_list",
             Self::Catalog(Catalog::Tools) => "tools_watch_list",
@@ -54,6 +64,9 @@ impl Kind {
         match self {
             Self::ResourceUri => {
                 "Watch one remote resource URI for one update during the approved wait. The notification contains no fetched resource body."
+            }
+            Self::ResourceSet => {
+                "Watch up to 8 remote resource URIs and report the first update. No resource body is fetched."
             }
             Self::Catalog(Catalog::Resources) => {
                 "Watch the remote resource catalog for one change. List resources separately to fetch the current catalog."
@@ -71,6 +84,7 @@ impl Kind {
 #[derive(Clone)]
 enum Target {
     ResourceUri(String),
+    ResourceSet(Vec<String>),
     Catalog(Catalog),
 }
 
@@ -79,6 +93,7 @@ impl Target {
         let builder = SubscriptionFilter::builder();
         match self {
             Self::ResourceUri(uri) => builder.resource_subscription(uri),
+            Self::ResourceSet(uris) => builder.resource_subscriptions(uris),
             Self::Catalog(Catalog::Resources) => builder.resources_list_changed(),
             Self::Catalog(Catalog::Prompts) => builder.prompts_list_changed(),
             Self::Catalog(Catalog::Tools) => builder.tools_list_changed(),
@@ -90,6 +105,9 @@ impl Target {
         match (self, notification) {
             (Self::ResourceUri(uri), ServerNotification::ResourceUpdatedNotification(update)) => {
                 update.params.uri == *uri
+            }
+            (Self::ResourceSet(uris), ServerNotification::ResourceUpdatedNotification(update)) => {
+                uris.contains(&update.params.uri)
             }
             (
                 Self::Catalog(Catalog::Resources),
@@ -106,10 +124,13 @@ impl Target {
         }
     }
 
-    fn result(&self, status: &str) -> Value {
+    fn result(&self, status: &str, updated_uri: Option<String>) -> Value {
         match self {
             Self::ResourceUri(uri) => json!({"uri":uri,"status":status}),
-            Self::Catalog(_) => json!({"status":status}),
+            Self::ResourceSet(_) if updated_uri.is_some() => {
+                json!({"status":status,"updatedUri":updated_uri})
+            }
+            Self::ResourceSet(_) | Self::Catalog(_) => json!({"status":status}),
         }
     }
 }
@@ -124,6 +145,10 @@ pub(super) fn register(
     [
         (
             Kind::ResourceUri,
+            caps.resources.as_ref().and_then(|r| r.subscribe),
+        ),
+        (
+            Kind::ResourceSet,
             caps.resources.as_ref().and_then(|r| r.subscribe),
         ),
         (
@@ -163,6 +188,7 @@ impl Watch {
     fn args(&self, value: &Value) -> Result<(Target, u64), String> {
         let invalid = || match self.kind {
             Kind::ResourceUri => "invalid MCP watch URI or waitMs".to_owned(),
+            Kind::ResourceSet => "invalid MCP watch URIs or waitMs".to_owned(),
             Kind::Catalog(_) => "invalid MCP catalog watch waitMs".to_owned(),
         };
         let (target, wait_ms) = match self.kind {
@@ -172,6 +198,17 @@ impl Watch {
                     return Err(invalid());
                 }
                 (Target::ResourceUri(args.uri), args.wait_ms)
+            }
+            Kind::ResourceSet => {
+                let args = ResourceSetArgs::deserialize(value).map_err(|_| invalid())?;
+                if !(1..=MAX_RESOURCE_URIS).contains(&args.uris.len())
+                    || args.uris.iter().enumerate().any(|(index, uri)| {
+                        !arguments::valid_uri(uri) || args.uris[..index].contains(uri)
+                    })
+                {
+                    return Err(invalid());
+                }
+                (Target::ResourceSet(args.uris), args.wait_ms)
             }
             Kind::Catalog(catalog) => {
                 let args = CatalogArgs::deserialize(value).map_err(|_| invalid())?;
@@ -194,9 +231,17 @@ impl Tool for Watch {
         let mut required = vec!["waitMs"];
         let mut properties =
             json!({"waitMs":{"type":"integer","minimum":1,"maximum":self.max_wait_ms}});
-        if matches!(self.kind, Kind::ResourceUri) {
-            required.insert(0, "uri");
-            properties["uri"] = json!({"type":"string","minLength":1,"maxLength":4096});
+        match self.kind {
+            Kind::ResourceUri => {
+                required.insert(0, "uri");
+                properties["uri"] = json!({"type":"string","minLength":1,"maxLength":4096});
+            }
+            Kind::ResourceSet => {
+                required.insert(0, "uris");
+                properties["uris"] = json!({"type":"array","minItems":1,"maxItems":MAX_RESOURCE_URIS,
+                    "uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":4096}});
+            }
+            Kind::Catalog(_) => {}
         }
         ToolSpec {
             name: format!("mcp_{}_{}", self.server, self.kind.label()),
@@ -221,34 +266,42 @@ impl Tool for Watch {
     ) -> Result<ToolOutput, ToolError> {
         let (target, wait_ms) = self.args(&call.arguments)?;
         let watched = target.clone();
-        let status = self.host.request(cancellation, move |service| {
+        let (status, updated_uri) = self.host.request(cancellation, move |service| {
             Box::pin(async move {
                 let filter = watched.filter();
                 let mut watch = service
                     .listen_with_capacity(filter.clone(), CAPACITY)
                     .await?;
-                let status = if filter.is_subset_of(watch.acknowledged()) {
+                let outcome = if filter.is_subset_of(watch.acknowledged()) {
                     match tokio::time::timeout(Duration::from_millis(wait_ms), watch.next()).await {
-                        Err(_) => "elapsed",
-                        Ok(Ok(Some(notification))) if watched.matches(&notification) => "updated",
+                        Err(_) => ("elapsed", None),
+                        Ok(Ok(Some(notification))) if watched.matches(&notification) => {
+                            let updated_uri = match notification {
+                                ServerNotification::ResourceUpdatedNotification(update) => {
+                                    Some(update.params.uri)
+                                }
+                                _ => None,
+                            };
+                            ("updated", updated_uri)
+                        }
                         Ok(Ok(None))
                             if matches!(watch.end(), Some(SubscriptionEnd::Graceful(_))) =>
                         {
-                            "ended"
+                            ("ended", None)
                         }
                         Ok(Err(error)) => return Err(error),
                         _ => return Ok(None),
                     }
                 } else {
-                    "declined"
+                    ("declined", None)
                 };
                 watch.cancel().await?;
-                Ok(Some(status))
+                Ok(Some(outcome))
             })
         })?;
         Ok(ToolOutput {
             output: json!({"serverId":self.server,"method":METHOD,
-                "result":target.result(status),"grantsPermissions":false}),
+                "result":target.result(status, updated_uri),"grantsPermissions":false}),
             artifacts: Vec::new(),
         })
     }

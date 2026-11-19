@@ -77,31 +77,29 @@ impl ServerHandler for Peer {
         &self,
         requested: &SubscriptionFilter,
     ) -> Option<SubscriptionFilter> {
-        let declined_uri = requested
-            .resource_subscriptions
-            .as_ref()
-            .is_some_and(|uris| uris == &["fixture:declined"]);
-        Some(if declined_uri {
-            SubscriptionFilter::new()
-        } else {
-            requested.clone()
-        })
+        let mut accepted = requested.clone();
+        if let Some(uris) = &mut accepted.resource_subscriptions {
+            uris.retain(|uri| uri != "fixture:declined");
+            if uris.is_empty() {
+                accepted.resource_subscriptions = None;
+            }
+        }
+        Some(accepted)
     }
 
     async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
         self.started.fetch_add(1, Ordering::Relaxed);
         if let Some(uris) = &context.accepted().resource_subscriptions {
-            assert_eq!(uris.len(), 1);
-            if uris[0] == "fixture:ended" {
+            if uris == &["fixture:ended"] {
                 self.closed.fetch_add(1, Ordering::Relaxed);
                 return Ok(());
             }
-            if uris[0] == "fixture:changed" {
+            if let Some(changed) = uris.iter().find(|uri| *uri == "fixture:changed") {
                 context
                     .sink()
                     .send(ServerNotification::ResourceUpdatedNotification(
                         ResourceUpdatedNotification::new(ResourceUpdatedNotificationParam::new(
-                            &uris[0],
+                            changed,
                         )),
                     ))
                     .await
@@ -245,6 +243,48 @@ fn a_bounded_watch_closes_each_stream_and_keeps_the_connection_reusable() {
     }
     wait_for(&peer.closed, 5);
     assert_eq!(peer.started.load(Ordering::Relaxed), 5);
+    drop(tools);
+    stop.cancel();
+    runtime.block_on(server).unwrap();
+}
+
+#[test]
+fn one_watch_reports_the_changed_uri_and_declines_a_partial_acknowledgement() {
+    let peer = Peer::default();
+    let stop = CancellationToken::new();
+    let (runtime, server, tools) = connect(&peer, &stop);
+    let tool = tools
+        .iter()
+        .find(|tool| tool.spec().name == "mcp_sdk_resources_watch_many")
+        .unwrap();
+    let cancel = CancellationToken::new();
+    for uris in [
+        json!([]),
+        json!(["fixture:idle", "fixture:idle"]),
+        json!(["fixture:idle", "not a URI"]),
+        json!((0..9).map(|i| format!("fixture:{i}")).collect::<Vec<_>>()),
+    ] {
+        assert!(call_watch(tool.as_ref(), json!({"uris":uris,"waitMs":1000}), &cancel).is_err());
+    }
+    assert_eq!(peer.started.load(Ordering::Relaxed), 0);
+    for (uris, expected) in [
+        (
+            ["fixture:idle", "fixture:changed"],
+            json!({"status":"updated","updatedUri":"fixture:changed"}),
+        ),
+        (
+            ["fixture:declined", "fixture:idle"],
+            json!({"status":"declined"}),
+        ),
+    ] {
+        let result =
+            call_watch(tool.as_ref(), json!({"uris":uris,"waitMs":1000}), &cancel).unwrap();
+        assert_eq!(result.output["result"], expected);
+        assert_eq!(result.output["grantsPermissions"], false);
+        assert!(result.artifacts.is_empty());
+    }
+    wait_for(&peer.closed, 2);
+    assert_eq!(peer.started.load(Ordering::Relaxed), 2);
     drop(tools);
     stop.cancel();
     runtime.block_on(server).unwrap();

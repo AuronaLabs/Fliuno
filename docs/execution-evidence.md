@@ -245,3 +245,7 @@ Windows 和 Debian 各通过 4 项实际进程用例。覆盖轮询 A2A、流式
 ## 远端核对调度（2026-11-19）
 
 Windows app-server Clippy、15 项库测试和 65 项进程测试通过。Debian 通过 5 项调度库测试和 20 项 A2A 进程测试。并发用例让远端核对停在屏障处，同一任务再次核对被拒绝，普通模型任务同时到达待审批状态。记录在 `target/0.0.2-remote-queue-windows.log` 和 `D:/Fliuno-Native-Test/guest-remote-queue.log`。
+
+## MCP 多资源短时监听（2026-11-19）
+
+Windows 和 Debian 各通过 5 项官方 SDK 订阅测试及 1 项 HTTP 生命周期测试。新增用例验证一次订阅报告第二条 URI 的更新，部分确认返回 `declined`，非法、重复与超额 URI 在发送前被拒绝，两个有效请求结束后服务端都释放流。Debian 记录在 `D:/Fliuno-Native-Test/guest-mcp-watch-many.log`。
