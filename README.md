@@ -39,7 +39,7 @@ cargo run -p fliuno-app-server -- --schema
 | --- | --- |
 | `fliuno-protocol` | 版本、请求参数、领域对象、事件与 Schema |
 | `fliuno-core` | 执行状态机、审批策略、工具注册、SQLite 事务与恢复 |
-| `fliuno-providers` | OpenAI Responses / Anthropic Messages 的 HTTP 与消息转换 |
+| `fliuno-providers` | OpenAI Responses / Anthropic Messages / Gemini Interactions 的 HTTP 与消息转换 |
 | `fliuno-mcp` | 官方 Rust SDK 驱动的 MCP stdio / Streamable HTTP、工具与资源/提示适配 |
 | `fliuno-acp` | 独立 ACP v1 客户端；会话、流式更新、单次权限、文件请求与取消 |
 | `fliuno-a2a` | 独立 A2A 1.0 JSON-RPC 客户端；有界请求、消息/任务/产物校验与取消 |
@@ -67,15 +67,15 @@ python examples/agent_demo.py --workspace --deny
 API key 仅从进程环境读取，不写入任务数据库。模型 ID 由调用方明确指定。
 
 ```powershell
-$env:FLIUNO_PROVIDER = 'openai' # 或 anthropic；默认 demo
+$env:FLIUNO_PROVIDER = 'openai' # 或 anthropic、gemini；默认 demo
 $env:FLIUNO_MODEL = '<你的模型 ID>'
-$env:OPENAI_API_KEY = '<你的 key>' # anthropic 使用 ANTHROPIC_API_KEY
+$env:OPENAI_API_KEY = '<你的 key>' # anthropic / gemini 分别使用 ANTHROPIC_API_KEY / GEMINI_API_KEY
 cargo run -p fliuno-app-server
 ```
 
-可同时设置 `FLIUNO_CONTEXT_WINDOW_TOKENS` 和 `FLIUNO_MAX_OUTPUT_TOKENS`，检查输入预算并给供应商设置生成上限。默认按 JSON 字节估算。用 `FLIUNO_CONTEXT_COUNT_MODE=provider` 可启用供应商输入计数。Anthropic 还支持用 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider` 在启动时探测模型窗口。[模型请求预算](docs/context.md#模型请求预算)
+可同时设置 `FLIUNO_CONTEXT_WINDOW_TOKENS` 和 `FLIUNO_MAX_OUTPUT_TOKENS`，检查输入预算并给供应商设置生成上限。默认按 JSON 字节估算。OpenAI 与 Anthropic 可用 `FLIUNO_CONTEXT_COUNT_MODE=provider` 启用供应商输入计数。Anthropic 还支持用 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider` 在启动时探测模型窗口；Gemini 暂用宿主配置的数字窗口和本地估算。[模型请求预算](docs/context.md#模型请求预算)
 
-可用 `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` 指定兼容服务的 API 基础地址，例如以 `/v1/` 结尾。仅允许 HTTPS 和本机回环 HTTP；禁止自动重定向。模型请求使用有超时的 SSE 流式响应，也接受兼容端点返回的完整 JSON；不会自动重试付费请求。四个固定 worker 最多并发执行四个独立任务步骤，另有容量 32 的有界队列；并发能力会在 `initialize` 中声明。模型与工具执行期间都可查询和取消任务。取消会通知 provider 或工具并丢弃迟到结果，但供应商可能已收到请求并计费，外部副作用也可能已经发生。
+可用 `OPENAI_BASE_URL`、`ANTHROPIC_BASE_URL` 或 `GEMINI_BASE_URL` 指定 API 基础地址；Gemini 默认使用 `https://generativelanguage.googleapis.com/v1beta/`。仅允许 HTTPS 和本机回环 HTTP；禁止自动重定向。模型请求使用有超时的 SSE 流式响应，也接受完整 JSON 响应；不会自动重试付费请求。Gemini Interactions 使用 `store:false`，由本地持久化步骤续接函数调用；目前支持文本输出和每轮一个工具调用，已通过回环验收。四个固定 worker 最多并发执行四个独立任务步骤，另有容量 32 的有界队列；并发能力会在 `initialize` 中声明。模型与工具执行期间都可查询和取消任务。取消会通知 provider 或工具并丢弃迟到结果，但供应商可能已收到请求并计费，外部副作用也可能已经发生。
 
 支持流式进度的 provider 通过 `notifications/modelProgress` 发送带任务 ID 和步骤号的文本预览。预览不进入 SQLite，完整响应校验后才形成持久任务结果；取消、错误或工具调用会清除预览。客户端需处理 `reset`、`notifications/modelProgressGap` 与迟到增量，具体语义见 [应用协议](docs/protocol.md)。
 

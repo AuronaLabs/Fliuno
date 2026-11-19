@@ -72,7 +72,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--db" => db = args.next().ok_or("--db requires a path")?.into(),
             "--help" | "-h" => {
                 println!(
-                    "fliuno-app-server [--db PATH] [--mcp-config PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--schema]\nLocal stdio JSON-RPC. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. FLIUNO_PROVIDER=demo|openai|anthropic; live providers require FLIUNO_MODEL and an API key."
+                    "fliuno-app-server [--db PATH] [--mcp-config PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--schema]\nLocal stdio JSON-RPC. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. FLIUNO_PROVIDER=demo|openai|anthropic|gemini; live providers require FLIUNO_MODEL and an API key."
                 );
                 return Ok(());
             }

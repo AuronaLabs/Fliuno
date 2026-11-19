@@ -179,3 +179,77 @@ fn openai_requires_numeric_window_without_using_a_metadata_endpoint() {
     assert!(error.contains("unsupported for OpenAI"), "{error}");
     assert!(wire.requests().is_empty());
 }
+
+#[test]
+fn gemini_interactions_is_wired_through_app_server_without_remote_storage() {
+    let wire = Fixture::start(|request| {
+        assert_eq!(request.method, "POST");
+        assert_eq!(request.path, "/v1/interactions");
+        assert_eq!(request.headers["x-goog-api-key"], "test-gemini-key");
+        assert_eq!(request.headers["api-revision"], "2026-05-20");
+        assert_eq!(request.body["store"], false);
+        Response::json(
+            200,
+            json!({"status":"completed","steps":[{
+                "type":"model_output","content":[{"type":"text","text":"Gemini completed"}]
+            }]}),
+        )
+    });
+    let directory = TestDirectory::new();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"));
+    command
+        .arg("--db")
+        .arg(directory.db())
+        .env("FLIUNO_PROVIDER", "gemini")
+        .env("FLIUNO_MODEL", "fixture-model")
+        .env("GEMINI_API_KEY", "test-gemini-key")
+        .env("GEMINI_BASE_URL", wire.url("/v1/"))
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("ANTHROPIC_API_KEY")
+        .env_remove("FLIUNO_CONTEXT_WINDOW_TOKENS")
+        .env_remove("FLIUNO_MAX_OUTPUT_TOKENS")
+        .env_remove("FLIUNO_CONTEXT_COUNT_MODE")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    let mut peer = Peer::from_child(command.spawn().unwrap());
+    peer.call(
+        "initialize",
+        json!({"protocolVersion":"0.1","clientName":"gemini-provider-test"}),
+    );
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let accepted = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"Say hello"}),
+    );
+    let done = peer.wait_for_status(accepted["id"].as_str().unwrap(), "completed");
+    assert_eq!(done["output"], "Gemini completed");
+    assert_eq!(wire.requests().len(), 1);
+}
+
+#[test]
+fn gemini_provider_count_mode_fails_before_database_creation() {
+    let wire = Fixture::start(|_| panic!("unsupported provider counting sent a request"));
+    let directory = TestDirectory::new();
+    let result = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
+        .arg("--db")
+        .arg(directory.db())
+        .env("FLIUNO_PROVIDER", "gemini")
+        .env("FLIUNO_MODEL", "fixture-model")
+        .env("GEMINI_API_KEY", "test-gemini-key")
+        .env("GEMINI_BASE_URL", wire.url("/v1/"))
+        .env("FLIUNO_CONTEXT_WINDOW_TOKENS", "32768")
+        .env("FLIUNO_MAX_OUTPUT_TOKENS", "2048")
+        .env("FLIUNO_CONTEXT_COUNT_MODE", "provider")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(!directory.db().exists());
+    assert!(
+        String::from_utf8(result.stderr)
+            .unwrap()
+            .contains("preflight provider token counting")
+    );
+    assert!(wire.requests().is_empty());
+}

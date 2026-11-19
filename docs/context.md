@@ -103,27 +103,27 @@ SQLite 在读取候选时先检查记录字节数，最多检查 `maxTurns` 条�
 
 ## 模型请求预算
 
-OpenAI 和 Anthropic 可通过两个宿主环境变量启用请求预算预检：
+OpenAI、Anthropic 和 Gemini 可通过两个宿主环境变量启用请求预算预检：
 
 ```powershell
 $env:FLIUNO_CONTEXT_WINDOW_TOKENS = '32768'
 $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 ```
 
-数值仅用于说明。模型窗口须由宿主按实际模型配置；输出上限至少为 16，且必须小于窗口。启用时，同一输出上限会发给供应商（OpenAI `max_output_tokens`、Anthropic `max_tokens`）。两个变量都不设置时保持原有行为。
+数值仅用于说明。模型窗口须由宿主按实际模型配置；输出上限至少为 16，且必须小于窗口。启用时，同一输出上限会发给供应商（OpenAI `max_output_tokens`、Anthropic `max_tokens`、Gemini `generation_config.max_output_tokens`）。两个变量都不设置时保持原有行为。
 
 上限为窗口减去输出预留，另有 8 MiB 传输上限。`FLIUNO_CONTEXT_COUNT_MODE` 可选择：
 
 - `local`（默认）：**1 个序列化 JSON 字节计 1 个预算单位**。它计入历史、当前任务消息、工具定义、工具结果和请求结构，不额外联网；多字节文本和转义可能让它提前拒绝供应商能接受的请求。
-- `provider`：须同时配置窗口和输出上限。每步先向同一供应商地址发送一次计数请求：OpenAI `POST /v1/responses/input_tokens`，Anthropic `POST /v1/messages/count_tokens`。计数使用生成请求中的模型、系统提示、消息及工具字段，不发送仅生成用的字段；它会额外传输这些输入并增加一次往返。兼容服务必须实现对应端点。计数响应最多 16 KiB，操作最多 10 秒；超时、坏响应或超额均不会发送生成请求，也不会自动回退。供应商返回的计数不保证等于实际用量，窗口仍由宿主填写。
+- `provider`：OpenAI 和 Anthropic 须同时配置窗口和输出上限。每步先向同一供应商地址发送一次计数请求：OpenAI `POST /v1/responses/input_tokens`，Anthropic `POST /v1/messages/count_tokens`。计数使用生成请求中的模型、系统提示、消息及工具字段，不发送仅生成用的字段；它会额外传输这些输入并增加一次往返。兼容服务必须实现对应端点。计数响应最多 16 KiB，操作最多 10 秒；超时、坏响应或超额均不会发送生成请求，也不会自动回退。供应商返回的计数不保证等于实际用量，窗口仍由宿主填写。Gemini Interactions 暂无预检 token 计数适配，启动时拒绝 `provider` 计数模式。
 
 预检适用于每轮请求及流式模式。超额时当前生成步骤以已知未发送失败；此前已完成的工具操作仍保留。可在新任务用较小的 `maxBytes`、显式 `taskIds` 或 `isolated` 缩小历史。
 
 `initialize.capabilities.modelBudget` 返回当前的 `windowTokens`、`maxInputTokens`、`maxOutputTokens`、`countMode` 和 `source`。计数模式为 `json_bytes_estimate` 或 `provider`，来源为 `configured` 或 `provider_metadata`。未配置预检时返回 `null`。
 
-Anthropic 可以设置 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider`，并继续填写 `FLIUNO_MAX_OUTPUT_TOKENS`。app-server 启动时用现有凭据向配置端点请求一次 `GET /v1/models/{model_id}`，限时 5 秒、最多 64 KiB。内核以返回的 `max_input_tokens` 为窗口，再预留宿主配置的输出 token，并核对该输出值是否超过返回的 `max_tokens`。若配置的是别名，则用返回的模型 ID 进行本次进程的计数与生成。探测失败时启动终止，SQLite 尚未打开。
+Anthropic 可以设置 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider`，并继续填写 `FLIUNO_MAX_OUTPUT_TOKENS`。app-server 启动时用现有凭据向配置端点请求一次 `GET /v1/models/{model_id}`，限时 5 秒、最多 64 KiB。内核以返回的 `max_input_tokens` 为窗口，再预留宿主配置的输出 token，并核对该输出值是否超过返回的 `max_tokens`。若配置的是别名，则用返回的模型 ID 进行本次进程的计数与生成。探测失败时启动终止，SQLite 尚未打开。OpenAI 和 Gemini 使用数字窗口，不进行供应商自动窗口探测。
 
-窗口来源和输入计数可独立配置。Anthropic 的窗口探测可配合任一计数模式，OpenAI 使用数字窗口配置。
+窗口来源和输入计数可独立配置。Anthropic 的窗口探测可配合任一受支持的计数模式；OpenAI 使用数字窗口配置，Gemini 目前仅使用数字窗口和本地估算。
 
 ## 持久化与迁移
 

@@ -281,3 +281,9 @@ Debian Linux 6.12.107 来宾通过 5 项 sessions app-server 真实进程测试�
 MCP 客户端声明 `io.modelcontextprotocol/tasks`。现代对端声明该扩展后，`tools/call` 创建的远端任务句柄作为本地工具结果持久化；新增受主机注册摘要约束的 `tasks/get`、`tasks/update` 和 `tasks/cancel` 工具。输入响应限制为 16 项和 256 KiB，任务快照限制为 1 MiB。取消回执按协作请求处理，不代表远端任务已结束。
 
 官方 Rust SDK 双端测试通过任务创建、包含待补请求的状态查询、补答和协作取消。Streamable HTTP SDK 矩阵覆盖 2026 现代协议启用 Tasks 工具及 2025 旧协议不启用，并验证 JSON/SSE 两种响应。`scripts/check.ps1` 退出码为 0，涵盖 workspace 测试、Clippy、rustfmt、协议 Schema 与 Windows 离线演示；另有 workspace 全量测试及两组 Clippy 独立通过。本轮未在 Debian Linux 来宾复验。
+
+## Gemini Interactions 与 MCP 只读失败（2026-11-19）
+
+Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。
+
+Windows `scripts/check.ps1` 通过 415 项测试、26 个离线演示、Schema 一致性、Clippy 和 rustfmt。日志为 `target/0.0.2-gemini-mcp-windows.log`。本轮未使用真实 Gemini 凭据，也未在 Debian Linux 来宾复验。

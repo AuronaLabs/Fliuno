@@ -5,7 +5,7 @@ use fliuno_core::{
     ModelStreamEvent,
 };
 use fliuno_protocol::{ApprovalDecision, Message, Session, Task, TaskStatus};
-use fliuno_providers::{AnthropicProvider, ModelContextBudget, OpenAiProvider};
+use fliuno_providers::{AnthropicProvider, GeminiProvider, ModelContextBudget, OpenAiProvider};
 use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -584,6 +584,111 @@ fn anthropic_tool_result_and_thinking_are_replayed() {
             .contains("anthropic-version: 2023-06-01")
     );
     assert_history(&requests[2].1, "messages", &kernel, &source);
+}
+
+#[test]
+fn gemini_function_result_and_signed_steps_are_replayed_without_remote_storage() {
+    let output = json!([
+        {"type":"thought","signature":"signed-thought"},
+        {"type":"function_call","id":"c","name":"artifact_create","arguments":{"title":"Report","content":"report body"}}
+    ]);
+    let (base, handle) = fixture(vec![
+        (200, json!({"status":"requires_action","steps":output})),
+        (
+            200,
+            json!({"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Done"}]}]}),
+        ),
+    ]);
+    let (_kernel, _session, _) = roundtrip(Box::new(
+        GeminiProvider::new(&base, "fixture-key", "fixture-model").unwrap(),
+    ));
+    let requests = handle.join().unwrap();
+    assert!(requests[0].0.starts_with("POST /v1/interactions "));
+    assert!(
+        requests[0]
+            .0
+            .to_lowercase()
+            .contains("x-goog-api-key: fixture-key")
+    );
+    assert_eq!(requests[0].1["store"], false);
+    assert_eq!(requests[0].1["input"][0]["type"], "user_input");
+    assert_eq!(requests[0].1["tools"][0]["type"], "function");
+    assert_eq!(
+        requests[0].1["tools"][0]["parameters"]["additionalProperties"],
+        false
+    );
+    assert_eq!(requests[1].1["store"], false);
+    assert_eq!(requests[1].1["input"][0]["type"], "user_input");
+    assert_eq!(requests[1].1["input"][1], output[0]);
+    assert_eq!(requests[1].1["input"][2], output[1]);
+    assert_eq!(requests[1].1["input"][3]["type"], "function_result");
+    assert_eq!(requests[1].1["input"][3]["name"], "artifact_create");
+    assert_eq!(requests[1].1["input"][3]["call_id"], "c");
+    assert_eq!(requests[1].1["input"][3]["result"][0]["type"], "text");
+}
+
+#[test]
+fn gemini_streams_only_text_progress_and_sends_the_output_budget() {
+    let events = [
+        json!({"event_type":"step.start","index":0,"step":{"type":"model_output"}}),
+        json!({"event_type":"step.delta","index":0,"delta":{"type":"text","text":"Do"}}),
+        json!({"event_type":"step.delta","index":0,"delta":{"type":"text","text":"ne"}}),
+        json!({"event_type":"step.stop","index":0}),
+        json!({"event_type":"interaction.completed","interaction":{"status":"completed"}}),
+    ];
+    let (base, handle) = sse_fixture(sse_body(&events));
+    let provider = GeminiProvider::new(&base, "fixture-key", "fixture-model")
+        .unwrap()
+        .with_context_budget(ModelContextBudget::new(4096, 512).unwrap())
+        .unwrap();
+    let (task, tools) = prepared_model_step();
+    let mut progress = Vec::new();
+    let turn = provider
+        .next_with_progress_classified(&task, &tools, &CancellationToken::new(), &mut |event| {
+            progress.push(event)
+        })
+        .unwrap();
+    let (headers, body) = handle.join().unwrap();
+    assert!(headers.starts_with("POST /v1/interactions "));
+    assert_eq!(body["stream"], true);
+    assert_eq!(body["store"], false);
+    assert_eq!(body["generation_config"]["max_output_tokens"], 512);
+    assert!(matches!(turn.decision, ModelDecision::Complete(text) if text == "Done"));
+    assert_eq!(
+        progress,
+        [
+            ModelStreamEvent::TextDelta("Do".into()),
+            ModelStreamEvent::TextDelta("ne".into())
+        ]
+    );
+}
+
+#[test]
+fn gemini_completion_cannot_commit_an_unfinished_step() {
+    let events = [
+        json!({"event_type":"step.start","index":0,"step":{"type":"model_output"}}),
+        json!({"event_type":"step.delta","index":0,"delta":{"type":"text","text":"Partial"}}),
+        json!({"event_type":"interaction.completed","interaction":{"status":"completed"}}),
+    ];
+    let (base, handle) = sse_fixture(sse_body(&events));
+    let provider = GeminiProvider::new(&base, "fixture-key", "fixture-model").unwrap();
+    let (task, tools) = prepared_model_step();
+    let mut progress = Vec::new();
+    let result = provider.next_with_progress_classified(
+        &task,
+        &tools,
+        &CancellationToken::new(),
+        &mut |event| progress.push(event),
+    );
+    handle.join().unwrap();
+    assert!(matches!(result, Err(ModelError::OutcomeUnknown(_))));
+    assert_eq!(
+        progress,
+        [
+            ModelStreamEvent::TextDelta("Partial".into()),
+            ModelStreamEvent::Reset
+        ]
+    );
 }
 
 #[test]

@@ -1,11 +1,13 @@
 //! Model wire formats are isolated here; the kernel knows no HTTP endpoints.
 mod anthropic;
+mod gemini;
 mod http;
 mod openai;
 
 pub use anthropic::AnthropicProvider;
 use fliuno_core::{DemoProvider, ModelProvider};
 use fliuno_protocol::{ModelBudget, ModelBudgetSource, ModelInputCountMode};
+pub use gemini::GeminiProvider;
 pub use openai::OpenAiProvider;
 
 /// Opt-in guard with a host-selected context window and output reserve.
@@ -167,6 +169,22 @@ pub fn from_env() -> Result<(String, Box<dyn ModelProvider>), String> {
             } else {
                 provider
             })
+        }
+        "gemini" => {
+            let provider = GeminiProvider::new(
+                &std::env::var("GEMINI_BASE_URL")
+                    .unwrap_or_else(|_| "https://generativelanguage.googleapis.com/v1beta/".into()),
+                &std::env::var("GEMINI_API_KEY").map_err(|_| "GEMINI_API_KEY is required")?,
+                &model,
+            )?;
+            if let Some(config) = budget {
+                let budget = config.resolve(|_| {
+                    Err("FLIUNO_CONTEXT_WINDOW_TOKENS=provider is unsupported for Gemini; configure a numeric window".into())
+                })?;
+                Box::new(provider.with_context_budget(budget)?)
+            } else {
+                Box::new(provider)
+            }
         }
         _ => return Err(format!("unknown provider: {name}")),
     };

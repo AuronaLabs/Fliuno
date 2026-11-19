@@ -51,7 +51,7 @@ Fliuno 现在并行提供前台 `process_execution` 与独立 `fliuno-terminal`�
 
 ### 模型响应流
 
-OpenAI Responses 与 Anthropic Messages 都提供 SSE 流式响应，但事件形状不同。OpenAI 的 `response.output_text.delta` 可用于实时文本预览，`response.completed` 中的完整响应仍是最终解析与工具调用判定的依据。Anthropic 通过 `content_block_start`、`content_block_delta`、`content_block_stop` 和 `message_stop` 表达块生命周期；工具输入的 `partial_json` 必须在块结束后合并解析，thinking 与 signature block 则需保留为原生续接数据。
+OpenAI Responses、Anthropic Messages 与 Gemini Interactions 都提供 SSE 流式响应，但事件形状不同。OpenAI 的 `response.output_text.delta` 可用于实时文本预览，`response.completed` 中的完整响应仍是最终解析与工具调用判定的依据。Anthropic 通过 `content_block_start`、`content_block_delta`、`content_block_stop` 和 `message_stop` 表达块生命周期；工具输入的 `partial_json` 必须在块结束后合并解析，thinking 与 signature block 则需保留为原生续接数据。Gemini 使用 `step.start`、`step.delta`、`step.stop` 和 `interaction.completed`；函数参数增量在步骤结束后解析，思考签名保留给无状态续接，不进入文本预览。
 
 Fliuno 将这些 provider 事件映射为 `notifications/modelProgress` 的易失文本增量；它没有持久游标，不参与审批、任务完成或上下文构造。工具调用、流错误和取消会发出 `reset`，完整 provider 响应通过现有状态机校验后才会形成持久任务结果。SSE decoder 限制总响应为 4 MiB、单事件为 1 MiB；JSON 兼容端点保留整包解析路径。
 
@@ -59,11 +59,15 @@ Fliuno 将这些 provider 事件映射为 `notifications/modelProgress` 的易�
 
 - https://platform.openai.com/docs/guides/streaming-responses
 - https://docs.anthropic.com/en/api/messages-streaming
+- https://ai.google.dev/gemini-api/docs/interactions
+- https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026
+- https://ai.google.dev/gemini-api/docs/streaming
+- https://ai.google.dev/gemini-api/docs/function-calling
 
 | 协议 / 约定 | 边界 | Fliuno 的处理方式 |
 | --- | --- | --- |
 | Fliuno Application Protocol | 桌面 / CLI ↔ Fliuno 内核 | 自有、版本化 JSON-RPC；Schema 从 Rust 类型生成 |
-| OpenAI Responses / Anthropic Messages | 内核 ↔ 模型供应商 | 统一模型决策，保留供应商要求的推理与工具调用上下文 |
+| OpenAI Responses / Anthropic Messages / Gemini Interactions | 内核 ↔ 模型供应商 | 统一模型决策，保留供应商要求的推理与工具调用上下文；Gemini 关闭服务端存储并本地重放模型步骤 |
 | MCP | Agent ↔ 工具、资源、提示服务 | 官方 `rmcp` 客户端；外部工具先注册、验参、审批再执行 |
 | ACP（Agent Client Protocol） | 编辑器 / 客户端 ↔ Agent | 独立适配层；不与自有应用协议混称 |
 | A2A | Agent 服务 ↔ Agent 服务 | 独立 1.0 JSON-RPC 通道；身份、Task、Artifact、轮询与取消证据 |
