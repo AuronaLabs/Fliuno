@@ -288,6 +288,55 @@
         }
       }
     },
+    "session/searchHistory": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionHistorySearchParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal substring in a user or assistant message, 1 to 256 UTF-8 bytes after trimming.",
+          "type": "string"
+        },
+        "throughSequence": {
+          "description": "Reuse the first page's completion watermark when fetching more results.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "beforeSequence": {
+          "description": "Exclusive completion cursor returned by the previous page.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "limit": {
+          "description": "Match count per page. Defaults to 16 and accepts 1 to 32.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "query"
+      ]
+    },
     "terminal/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TerminalListParams",
@@ -2794,6 +2843,70 @@
             "failed",
             "outcome_unknown",
             "closed"
+          ]
+        }
+      }
+    },
+    "SessionHistorySearchPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionHistorySearchPage",
+      "type": "object",
+      "properties": {
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionHistoryMatch"
+          }
+        },
+        "scannedTurns": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "skippedOversizedTurns": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "nextBeforeSequence": {
+          "description": "Continue even if a bounded scan produced no matches.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "throughSequence",
+        "matches",
+        "scannedTurns",
+        "skippedOversizedTurns"
+      ],
+      "$defs": {
+        "SessionHistoryMatch": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence"
           ]
         }
       }

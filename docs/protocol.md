@@ -27,6 +27,7 @@
 | `session/rename` | `{sessionId,title}` | 持久化标题并返回 Session |
 | `session/setArchived` | `{sessionId,archived}` | 设置持久归档标记并返回 Session |
 | `session/context` | `{sessionId,throughSequence?,options?:{mode?,maxTurns?,maxBytes?,selection?,detail?,taskIds?}}` | TaskContext，预览指定序号的历史 |
+| `session/searchHistory` | `{sessionId,query,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/get` | `{taskId}` | Task |
 | `task/getSummary` | `{taskId}` | 单条 `TaskSummary`，可以轻量轮询任务状态 |
@@ -288,3 +289,9 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 路径使用相对的正斜杠形式。绝对路径、`..`、反斜杠、ADS、Windows 设备名等被拒绝，目录能力继续约束实际路径解析。
 
 对象分页返回 `{items,nextAfter,hasMore}`，对象列表 limit 在 1..100；after 是数据库局部游标，不应解析其数值意义。`clientRequestId` 为会话内 1..128 可打印 ASCII 字节；重试必须使用相同输入、后端与上下文选项。新任务省略 context 和显式默认选项等价；升级前 context=null 的旧任务仅接受未显式指定 context 的原样重试。没有提供幂等键的 task/start 每次都创建新任务。
+
+### 查找历史任务
+
+`session/searchHistory` 只检查指定会话里已完成且有历史投影的用户与助手消息。查询去除首尾空白后须为 1～256 个 UTF-8 字节，按 Unicode 小写转换后的字面子串匹配，无词法或正则语法。`limit` 默认为 16，接受 1～32。结果按完成序号从新到旧，包含 `taskId` 与 `completionSequence`。
+
+每页最多检查 128 条历史。超过 128 KiB 的精简对话投影会跳过并计入 `skippedOversizedTurns`。`scannedTurns` 包含这些记录。只要 `nextBeforeSequence` 有值就还能翻页，即使 `matches` 为空。下一页使用首次返回的 `throughSequence` 和上一页的 `nextBeforeSequence` 作为 `beforeSequence`。调用方可用查到的 `taskId` 配合 `session/context` 的 `options.taskIds` 预览和选择历史，搜索本身只读取本机数据库。

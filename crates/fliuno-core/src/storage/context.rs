@@ -6,17 +6,17 @@ use rusqlite::Transaction;
 mod conversation;
 pub(super) use conversation::migrate as migrate_conversations;
 
-fn projection(detail: ContextDetail, budget: &str) -> String {
+fn projection(detail: ContextDetail, budget: &str, extra_columns: &str) -> String {
     // These SQL fragments are internal constants. Use octet_length on the
     // column itself so rejected records do not require reading overflow pages.
     match detail {
         ContextDetail::Full => format!(
-            "SELECT CASE WHEN octet_length(s.data)<={budget} THEN s.data END FROM session_turns s"
+            "SELECT CASE WHEN octet_length(s.data)<={budget} THEN s.data END{extra_columns} FROM session_turns s"
         ),
         ContextDetail::Conversation => format!(
             "SELECT CASE WHEN c.task_id IS NOT NULL
                 THEN CASE WHEN octet_length(c.data)<={budget} THEN c.data END
-                ELSE CASE WHEN octet_length(s.data)<={budget} THEN s.data END END
+                ELSE CASE WHEN octet_length(s.data)<={budget} THEN s.data END END{extra_columns}
              FROM session_turns s LEFT JOIN conversation_turns c ON c.task_id=s.task_id"
         ),
     }
@@ -115,6 +115,40 @@ pub(super) fn record(
 }
 
 impl Kernel {
+    pub(crate) fn scan_conversation(
+        &self,
+        session: &str,
+        upper: u64,
+        mut visit: impl FnMut(u64, Option<ContextTurn>) -> bool,
+    ) -> Result<Option<u64>> {
+        use crate::context::search::{MAX_SEARCH_TURN_BYTES, MAX_SEARCH_TURNS};
+
+        let sql = format!(
+            "{} WHERE s.session_id=?1 AND s.sequence<=?2 ORDER BY s.sequence DESC LIMIT ?4",
+            projection(ContextDetail::Conversation, "?3", ", s.sequence")
+        );
+        let mut statement = self.db.prepare_cached(&sql)?;
+        let mut rows = statement.query(params![
+            session,
+            validate_event_cursor(upper)?,
+            MAX_SEARCH_TURN_BYTES,
+            MAX_SEARCH_TURNS + 1
+        ])?;
+        for index in 0..MAX_SEARCH_TURNS {
+            let Some(row) = rows.next()? else {
+                break;
+            };
+            let sequence = row.get::<_, i64>(1)? as u64;
+            let data: Option<String> = row.get(0)?;
+            let turn = data.as_deref().map(serde_json::from_str).transpose()?;
+            if !visit(sequence, turn) || index + 1 == MAX_SEARCH_TURNS {
+                // Peek without decoding another turn to distinguish a full page from exhaustion.
+                return Ok(rows.next()?.is_some().then_some(sequence));
+            }
+        }
+        Ok(None)
+    }
+
     /// Read only selected projections. A foreign, unfinished or absent ID has
     /// the same diagnostic; no Task snapshot or content is loaded to explain it.
     pub(crate) fn selected_context(
@@ -131,7 +165,7 @@ impl Kernel {
             .ok_or_else(|| Error::Invalid("selected context requires taskIds".into()))?;
         let sql = format!(
             "{} WHERE s.session_id=?1 AND s.task_id=?2 AND s.sequence<=?3",
-            projection(options.detail, "?4")
+            projection(options.detail, "?4", "")
         );
         let mut statement = self.db.prepare_cached(&sql)?;
         let mut turns: Vec<ContextTurn> = Vec::new();
@@ -194,7 +228,7 @@ impl Kernel {
         };
         let sql = format!(
             "{} WHERE s.session_id=?1 AND s.sequence<=?2 ORDER BY s.sequence DESC LIMIT ?4",
-            projection(options.detail, "?3")
+            projection(options.detail, "?3", "")
         );
         let mut statement = self.db.prepare_cached(&sql)?;
         let rows = statement.query_map(

@@ -137,3 +137,38 @@ pub struct SessionContextParams {
     #[serde(default)]
     pub options: ContextOptions,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistorySearchParams {
+    pub session_id: String,
+    /// Literal substring in a user or assistant message, 1 to 256 UTF-8 bytes after trimming.
+    pub query: String,
+    /// Reuse the first page's completion watermark when fetching more results.
+    #[serde(default)]
+    pub through_sequence: Option<u64>,
+    /// Exclusive completion cursor returned by the previous page.
+    #[serde(default)]
+    pub before_sequence: Option<u64>,
+    /// Match count per page. Defaults to 16 and accepts 1 to 32.
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistoryMatch {
+    pub task_id: String,
+    pub completion_sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistorySearchPage {
+    pub through_sequence: u64,
+    pub matches: Vec<SessionHistoryMatch>,
+    pub scanned_turns: u32,
+    pub skipped_oversized_turns: u32,
+    /// Continue even if a bounded scan produced no matches.
+    pub next_before_sequence: Option<u64>,
+}

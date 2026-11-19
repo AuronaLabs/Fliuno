@@ -2,6 +2,8 @@
 
 ## 0.0.2：内核增量开发中
 
+- [x] `session/searchHistory` 按字面子串查找指定会话的已完成任务。按全局完成序号划定快照和分页窗口，可将匹配 ID 交给 `session/context` 选择历史。
+
 - [x] Windows 可信 ACP Agent 支持显式内存与进程数上限，实机探针分别覆盖超额分配和额外子进程。续接测试使用启用预算的 Agent。
 - [x] `events/listWorkspace` 可在工作区内跨会话回放持久事件，保留全局游标、上界和每页字节目标。SQLite v27 回填索引。`events/setScope` 可订阅同一工作区的实时事件，断流后保留范围。
 - [x] `events/setScope` 可订阅单个任务。`events/list` 支持包含式上界，可用同一全局序号补齐历史和实时通知。

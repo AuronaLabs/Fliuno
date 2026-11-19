@@ -1,5 +1,7 @@
 use super::*;
 use serde_json::json;
+#[path = "tests/search.rs"]
+mod search;
 #[path = "tests/selection.rs"]
 mod selection;
 

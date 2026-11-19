@@ -332,6 +332,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["sessionHistorySearch"] = json!(true);
             capabilities["workspaceEventReplay"] = json!(true);
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);
@@ -511,6 +512,10 @@ impl RpcServer {
                     self.kernel()?
                         .set_session_archived(&p.session_id, p.archived)?
                 )
+            }
+            "session/searchHistory" => {
+                let p: SessionHistorySearchParams = decode(params)?;
+                json!(self.kernel()?.search_session_history(p)?)
             }
             "session/context" => {
                 let p: SessionContextParams = decode(params)?;

@@ -244,3 +244,54 @@ fn conversation_history_fits_larger_tool_turns_and_backfills_without_rewriting_t
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn history_search_pages_keep_their_watermark_and_can_select_context_after_restart() {
+    let root = std::env::temp_dir().join(format!(
+        "fliuno-search-context-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let other = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let older = approve_report(&mut peer, &session, "Audit \"报告\" old", "old");
+    let newer = approve_report(&mut peer, &session, "AUDIT \"报告\" new", "new");
+    approve_report(&mut peer, &other, "audit \"报告\" foreign", "foreign");
+    let request = json!({"sessionId":session["id"],"query":" AuDiT \"报告\" ","limit":1});
+    let first = peer.call("session/searchHistory", request.clone());
+    assert_eq!(first["scannedTurns"], 1);
+    assert_eq!(first["matches"][0]["taskId"], newer["id"]);
+    assert_eq!(
+        first["nextBeforeSequence"],
+        first["matches"][0]["completionSequence"]
+    );
+    approve_report(&mut peer, &session, "audit \"报告\" later", "later");
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    let mut frozen = request;
+    frozen["throughSequence"] = first["throughSequence"].clone();
+    assert_eq!(peer.call("session/searchHistory", frozen.clone()), first);
+    frozen["beforeSequence"] = first["nextBeforeSequence"].clone();
+    let next = peer.call("session/searchHistory", frozen.clone());
+    assert_eq!(next["matches"][0]["taskId"], older["id"]);
+    assert!(next["nextBeforeSequence"].is_null());
+    let selected = peer.call("session/context", json!({"sessionId":session["id"],
+        "throughSequence":first["throughSequence"],"options":{"taskIds":[next["matches"][0]["taskId"]]}}));
+    assert_eq!(selected["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(selected["turns"][0]["taskId"], older["id"]);
+    frozen["beforeSequence"] = json!(0);
+    assert_eq!(
+        peer.request("session/searchHistory", frozen)["error"]["code"],
+        -32602
+    );
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

@@ -1,5 +1,7 @@
 //! Context selection is separate from task execution. A snapshot never contains
 //! a live approval, provider continuation, or recursively inherited context.
+pub(crate) mod search;
+
 use super::*;
 
 pub const MAX_CONTEXT_TURNS: u32 = 32;
