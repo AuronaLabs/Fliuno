@@ -440,21 +440,29 @@ impl Kernel {
     pub fn interrupt_running_tasks(&mut self) -> Result<()> {
         let mut after = 0_i64;
         loop {
-            let rows: Vec<(i64, String)> = {
+            // The running index covers row IDs. Keep only those IDs in the
+            // page so large frozen contexts cannot multiply recovery memory.
+            let rowids: Vec<i64> = {
                 let mut stmt = self.db.prepare_cached(
-                    "SELECT rowid,data FROM tasks WHERE running=1 AND rowid>?1 ORDER BY rowid LIMIT ?2",
+                    "SELECT rowid FROM tasks WHERE running=1 AND rowid>?1 ORDER BY rowid LIMIT ?2",
                 )?;
-                stmt.query_map(params![after, RECOVERY_BATCH_SIZE], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })?
-                .collect::<std::result::Result<_, _>>()?
+                stmt.query_map(params![after, RECOVERY_BATCH_SIZE], |row| row.get(0))?
+                    .collect::<std::result::Result<_, _>>()?
             };
-            if rows.is_empty() {
+            if rowids.is_empty() {
                 break;
             }
-            for (rowid, data) in rows {
+            for rowid in rowids {
                 after = rowid;
-                let mut task: Task = serde_json::from_str(&data)?;
+                let mut task: Task = {
+                    let mut stmt = self
+                        .db
+                        .prepare_cached("SELECT data FROM tasks WHERE rowid=?1 AND running=1")?;
+                    let mut rows = stmt.query([rowid])?;
+                    let Some(row) = rows.next()? else { continue };
+                    let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+                    serde_json::from_str(data)?
+                };
                 let mut events = Vec::new();
                 if task.status != TaskStatus::Cancelled {
                     task.status = TaskStatus::Interrupted;

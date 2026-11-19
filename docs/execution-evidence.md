@@ -320,6 +320,14 @@ Windows 21 项 A2A 进程测试通过。合并超限的用例先收到合法分�
 
 Windows 调试构建使用 96 段、197,697 字节的最终 JSON，先校验输入分片，再对比增量合并与每次完整序列化并重新验证的旧流程。21 轮交替采样中位数分别为 5.61 ms 和 699.19 ms，最终 JSON 相同。该探针只测 Rust 内存组装，不含 HTTP 或入库。日志为 `target/0.0.2-a2a-assembly-benchmark.log`。
 
+## 降低任务恢复的内存开销（2026-11-19）
+
+恢复时先从 SQLite 的运行索引取得最多 64 个行号，再逐条读取并提交快照。5 项内核恢复测试通过，包括跨页积压和中途写入失败后再次恢复。
+
+Windows 调试版 app-server 在同一份种子库上交替执行旧版和新版，每版 3 次。库中有 80 个待恢复任务，每份快照约 1 MiB。进程从启动到返回 `initialize` 的峰值工作集中位数从 79.89 MiB 降至 16.00 MiB。每轮均恢复全部 80 条任务，每项只记录一次中断和模型结果未知，无产物写入。该测量仅代表这一组队列和本机环境。日志为 `target/0.0.2-recovery-memory-benchmark.log`。
+
+包含 A2A 组装和任务恢复改动的 Windows `scripts/check.ps1` 退出码为 0：429 项测试、26 个离线演示、rustfmt、两组严格 Clippy 与 RPC Schema 均通过。日志为 `target/0.0.2-stream-assembly-recovery-windows.log`。本轮未在 Debian Linux 来宾复验。
+
 ## Gemini Interactions 与 MCP 只读失败（2026-11-19）
 
 Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。
