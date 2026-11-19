@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 pub const FRAME_LIMIT: usize = 128 * 1024;
-pub const READ_LIMIT: usize = 32 * 1024;
+pub const READ_LIMIT: usize = fliuno_protocol::MAX_TERMINAL_OUTPUT_BYTES;
 pub const INPUT_LIMIT: usize = 16 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]

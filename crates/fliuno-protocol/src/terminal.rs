@@ -90,8 +90,11 @@ pub struct TerminalTailParams {
     pub limit: usize,
 }
 
+/// Maximum raw bytes in one terminal output page, before base64 encoding.
+pub const MAX_TERMINAL_OUTPUT_BYTES: usize = 32 * 1024;
+
 fn limit() -> usize {
-    32768
+    MAX_TERMINAL_OUTPUT_BYTES
 }
 
 /// Subscription IDs belong to one app-server connection and are never authority
@@ -197,7 +200,7 @@ fn archive_limit() -> u32 {
     100
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TerminalSubscriptionEnded {
     pub subscription_id: String,

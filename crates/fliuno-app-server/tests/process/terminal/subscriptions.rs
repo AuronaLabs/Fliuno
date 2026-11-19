@@ -160,6 +160,126 @@ fn terminal_subscriptions_deliver_live_bytes_and_resume_after_server_restart() {
 }
 
 #[test]
+fn rust_terminal_feed_resumes_from_consumed_tail_after_app_server_restart() {
+    use fliuno_client::{Client, TerminalFeedEvent};
+    use fliuno_protocol::{
+        TerminalOutputParams, TerminalSubscriptionEndReason, TerminalTailParams,
+    };
+
+    struct Server(Child);
+    impl Drop for Server {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let dir = Directory::new(30000);
+    let fixture = model();
+    let base = fixture.url("/v1/");
+    let mut peer = dir.peer(&base);
+    let session = session(&mut peer, &dir);
+    let terminal = execute(&mut peer, &session, "start", json!({}), "start");
+    let id = terminal["terminalId"].as_str().unwrap();
+    wait_text(&mut peer, &session, id, "TERMINAL_READY");
+    drop(peer);
+
+    let connect = || {
+        let mut server = Server(
+            Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
+                .arg("--db")
+                .arg(dir.root.join("kernel.db"))
+                .arg("--terminal-config")
+                .arg(dir.root.join("terminal.json"))
+                .env("FLIUNO_PROVIDER", "demo")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let stdin = server.0.stdin.take().unwrap();
+        let stdout = server.0.stdout.take().unwrap();
+        let client =
+            Client::connect(BufReader::new(stdout), stdin, "rust-terminal-test", |_| {}).unwrap();
+        (server, client)
+    };
+    let tail_params = TerminalTailParams {
+        session_id: session["id"].as_str().unwrap().into(),
+        terminal_id: id.into(),
+        limit: 8,
+    };
+    let (server, mut client) = connect();
+    let tail = client.terminal_tail(&tail_params, |_| {}).unwrap();
+    assert!(!tail.snapshot.supervisor_connected);
+    assert_eq!(tail.next, tail.snapshot.end_offset);
+    assert_eq!(tail.bytes.len(), 8);
+    let page = client
+        .terminal_output(
+            &TerminalOutputParams {
+                session_id: tail_params.session_id.clone(),
+                terminal_id: id.into(),
+                after: tail.from,
+                limit: 8,
+            },
+            |_| {},
+        )
+        .unwrap();
+    assert_eq!(page.bytes, tail.bytes);
+    drop(client);
+    drop(server);
+
+    let mut peer = dir.peer(&base);
+    execute(
+        &mut peer,
+        &session,
+        "write",
+        json!({"terminalId":id,"data":enter("exit")}),
+        "exit",
+    );
+    wait_text(&mut peer, &session, id, "TERMINAL_EXIT");
+    drop(peer);
+
+    let (_server, mut client) = connect();
+    let mut feed = client
+        .subscribe_terminal(
+            &TerminalOutputParams {
+                session_id: tail_params.session_id,
+                terminal_id: id.into(),
+                after: tail.next,
+                limit: 7,
+            },
+            |_| {},
+        )
+        .unwrap();
+    let mut rebuilt = Vec::new();
+    loop {
+        let note = client.read_notification().unwrap();
+        match feed.observe(note).unwrap() {
+            TerminalFeedEvent::Output(page) => {
+                assert!(!page.gap);
+                assert_eq!(page.from, tail.next + rebuilt.len() as u64);
+                rebuilt.extend(page.bytes);
+            }
+            TerminalFeedEvent::Ended(end) => {
+                assert_eq!(end.reason, TerminalSubscriptionEndReason::Closed);
+                assert_eq!(end.after, tail.next + rebuilt.len() as u64);
+                break;
+            }
+            TerminalFeedEvent::Unrelated(_) => {}
+        }
+    }
+    assert!(
+        rebuilt
+            .windows(b"TERMINAL_EXIT".len())
+            .any(|bytes| bytes == b"TERMINAL_EXIT")
+    );
+    assert!(
+        !client
+            .unsubscribe_terminal(feed.subscription_id(), |_| {})
+            .unwrap()
+    );
+}
+
+#[test]
 fn terminal_subscriptions_bound_resources_reject_ownership_and_replay_retention_gaps() {
     let dir = Directory::new(30000);
     let fixture = model();

@@ -9,6 +9,7 @@ mod history_search;
 mod replay;
 mod task_cancel;
 mod task_summaries;
+mod terminal;
 mod wire;
 mod work;
 
@@ -18,6 +19,7 @@ pub use feed::EventFeed;
 pub use history::SessionHistory;
 pub use history_search::{HistorySearch, HistorySearchRequest};
 pub use replay::{EventReplay, ModelUsageScope, ReplayScope};
+pub use terminal::{TerminalFeed, TerminalFeedEvent, TerminalOutputPage};
 pub use work::WorkSubscription;
 
 use fliuno_protocol::{InitializeParams, PROTOCOL_VERSION};
@@ -65,6 +67,12 @@ pub enum Error {
     ArtifactStagingRead(#[source] io::Error),
     #[error("writing artifact output: {0}")]
     ArtifactOutput(#[source] io::Error),
+    #[error("invalid terminal output limit or byte cursor")]
+    InvalidTerminalCursor,
+    #[error("terminal output violates the requested identity, byte range or budget")]
+    InvalidTerminalOutput,
+    #[error("invalid terminal subscription identity or state")]
+    InvalidTerminalSubscription,
     #[error("application RPC error {code}: {message}")]
     Rpc { code: i32, message: String },
 }
