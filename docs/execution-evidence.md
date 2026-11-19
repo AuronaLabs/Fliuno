@@ -363,3 +363,11 @@ Debian Linux 6.12.107 来宾通过 4 项产物进程测试和 1 项文本定位�
 使用两份相同的 SQLite 测试库，目标为 4 KiB，首个事件形成 24,688 字节的页面，下一事件含 1,048,576 字节正文。61 轮交替测得本机 stdio JSON-RPC 延迟中位数由 63.38 ms 降至 4.97 ms。该结果针对下一条事件较大且当前页已达到目标的场景。日志为 `target/0.0.2-event-replay-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0。432 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 均通过。Debian Linux 6.12.107 来宾的 6 项事件回放及订阅进程测试均通过。日志分别为 `target/0.0.2-event-replay-windows.log` 和 `D:/Fliuno-Native-Test/guest-event-replay.log`。
+
+## 审批决定查询（2026-11-19）
+
+模型工具的允许和拒绝、ACP 权限的允许均可按审批 ID 取回原事件。进程测试覆盖提交前返回未找到、跨任务隔离、重启续读和 SQLite v33 回填。决定事件与任务状态及索引在同一事务提交。
+
+Windows 内存 SQLite 3.49.1 使用同一任务的 100,000 条模拟事件，其中 400 条是决定。61 轮交替采样的命中查询中位数为全任务扫描 115.46 ms、主键索引 0.023 ms，结果逐字段一致。一次 v34 回填耗时 86.78 ms。该对照测量 SQLite 查询与取行。日志为 `target/0.0.2-approval-decision-query.log`。
+
+Windows 通过 433 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema。Debian Linux 6.12.107 来宾通过 3 项审批与 1 项 ACP 进程测试。日志分别为 `target/0.0.2-approval-decision-windows.log` 和 `D:/Fliuno-Native-Test/guest-approval-decision.log`。

@@ -374,6 +374,7 @@ impl RpcServer {
             capabilities["pendingApprovalListTargetBytes"] =
                 json!(fliuno_core::MAX_APPROVAL_LIST_TARGET_BYTES);
             capabilities["pendingApprovalDetails"] = json!(true);
+            capabilities["approvalDecisionLookup"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
             capabilities["sessionArchiveBatch"] = json!(true);
             capabilities["maxSessionArchiveBatch"] =
@@ -672,6 +673,13 @@ impl RpcServer {
                 json!(
                     self.kernel()?
                         .get_pending_approval(&p.task_id, &p.approval_id)?
+                )
+            }
+            "approval/getDecision" => {
+                let p: ApprovalGetParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .get_approval_decision(&p.task_id, &p.approval_id)?
                 )
             }
             "approval/respond" => {

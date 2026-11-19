@@ -1,4 +1,5 @@
 //! SQLite snapshots and committed event log. Only this module touches SQL.
+mod approval_decisions;
 mod approvals;
 mod artifacts;
 mod context;
@@ -14,7 +15,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 33;
+pub(crate) const SCHEMA_VERSION: u32 = 34;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -254,6 +255,9 @@ impl Kernel {
         if version < 33 {
             context::migrate_workspace_turns(&mut db)?;
         }
+        if version < 34 {
+            approval_decisions::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         tools.insert(
@@ -395,11 +399,12 @@ impl Kernel {
             let mut insert = tx.prepare_cached(INSERT_EVENT)?;
             for event in events {
                 insert.execute(params![task.id, serde_json::to_string(event)?])?;
-                let sequence = tx.last_insert_rowid() as u64;
+                let sequence = tx.last_insert_rowid();
                 if matches!(event, EventKind::TaskCompleted { .. }) {
-                    context::record(&tx, task, sequence, true)?;
+                    context::record(&tx, task, sequence as u64, true)?;
                 }
-                sequences.push(sequence);
+                approval_decisions::record(&tx, &task.id, event, sequence)?;
+                sequences.push(sequence as u64);
             }
         }
         tx.commit()?;

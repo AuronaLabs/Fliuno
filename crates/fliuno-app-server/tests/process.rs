@@ -155,6 +155,7 @@ impl Peer {
             8_388_608
         );
         assert_eq!(init["capabilities"]["pendingApprovalDetails"], true);
+        assert_eq!(init["capabilities"]["approvalDecisionLookup"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
         assert_eq!(init["capabilities"]["taskListTargetBytes"], 8_388_608);
         assert_eq!(

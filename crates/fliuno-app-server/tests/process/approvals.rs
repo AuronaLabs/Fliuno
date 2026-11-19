@@ -174,3 +174,75 @@ fn pending_approval_pages_respect_byte_targets_and_resume_after_restart() {
     drop(peer);
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn approval_decisions_can_be_reconciled_after_reconnect_and_v33_backfill() {
+    let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "fliuno-approval-decisions-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let mut receipts = Vec::new();
+    for (decision, status) in [("deny", "failed"), ("allow_once", "completed")] {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":decision}),
+        );
+        let id = task["id"].as_str().unwrap();
+        let waiting = peer.wait_for_status(id, "waiting_approval");
+        let lookup = json!({"taskId":id,"approvalId":waiting["pendingApproval"]["id"]});
+        assert_eq!(
+            peer.request("approval/getDecision", lookup.clone())["error"]["code"],
+            -32004
+        );
+        let mut params = lookup.clone();
+        params["decision"] = json!(decision);
+        peer.call("approval/respond", params);
+        peer.wait_for_status(id, status);
+        let receipt = peer.call("approval/getDecision", lookup.clone());
+        assert_eq!(receipt["taskId"], id);
+        assert_eq!(
+            receipt["data"],
+            json!({"type":"approval_resolved","approvalId":lookup["approvalId"],"decision":decision})
+        );
+        assert_eq!(
+            peer.call("events/get", json!({"sequence":receipt["sequence"]})),
+            receipt
+        );
+        assert_eq!(
+            peer.request("approval/get", lookup.clone())["error"]["code"],
+            -32004
+        );
+        receipts.push((lookup, receipt));
+    }
+    let different_task =
+        json!({"taskId":receipts[0].0["taskId"],"approvalId":receipts[1].0["approvalId"]});
+    assert_eq!(
+        peer.request("approval/getDecision", different_task)["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.request(
+            "approval/getDecision",
+            json!({"taskId":receipts[0].0["taskId"],"approvalId":""})
+        )["error"]["code"],
+        -32602
+    );
+    drop(peer);
+    {
+        let legacy = rusqlite::Connection::open(&db).unwrap();
+        legacy
+            .execute_batch("DROP TABLE approval_decisions; PRAGMA user_version=33;")
+            .unwrap();
+    }
+    let mut peer = Peer::start(&db);
+    for (lookup, receipt) in receipts {
+        assert_eq!(peer.call("approval/getDecision", lookup), receipt);
+    }
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

@@ -1256,6 +1256,24 @@
         "approvalId"
       ]
     },
+    "approval/getDecision": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalGetParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "approvalId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "approvalId"
+      ]
+    },
     "approval/respond": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ApprovalRespondParams",

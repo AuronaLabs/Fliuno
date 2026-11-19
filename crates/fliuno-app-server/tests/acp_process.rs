@@ -268,6 +268,18 @@ fn durable_agent_approval_stream_and_completion_survive_reopen() {
     let mut reopened = Peer::start(&directory);
     let restored = reopened.call("task/get", json!({"taskId":task["id"]}));
     assert_eq!(restored, done);
+    let decision = reopened.call(
+        "approval/getDecision",
+        json!({"taskId":task["id"],"approvalId":approval["id"]}),
+    );
+    assert_eq!(decision["data"]["decision"], "allow_once");
+    assert_eq!(
+        &decision,
+        events
+            .iter()
+            .find(|e| e["data"]["type"] == "agent_approval_resolved")
+            .unwrap()
+    );
     assert!(
         reopened.call(
             "events/list",
