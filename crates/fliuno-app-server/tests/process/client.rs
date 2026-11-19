@@ -1,5 +1,7 @@
 use super::*;
-use fliuno_client::{Client, Error, Notification, ReplayScope, ag_ui::AgUiProjector};
+use fliuno_client::{
+    Client, Error, Notification, ReplayScope, SessionHistory, ag_ui::AgUiProjector,
+};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalGetParams, ApprovalRespondParams, ArtifactGetParams, ArtifactSummary,
     Event, EventKind, Task, TaskIdParams, TaskStatus, TaskSummary, Workspace, WorkspaceOpenParams,
@@ -137,6 +139,33 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
         .download_artifact(&artifact, &expected, &mut output, &mut observe)
         .unwrap();
     assert_eq!(output, content.as_bytes());
+    let mut history = SessionHistory::new(fliuno_protocol::SessionHistoryListParams {
+        session_id: session.id.clone(),
+        through_sequence: None,
+        before_sequence: None,
+        limit: Some(1),
+        max_bytes: Some(262_144),
+    });
+    let page = history
+        .next_page(&mut client, &mut observe)
+        .unwrap()
+        .unwrap();
+    assert_eq!(history.through(), Some(page.through_sequence));
+    assert!(history.next_request().is_none());
+    assert!(
+        history
+            .next_page(&mut client, &mut observe)
+            .unwrap()
+            .is_none()
+    );
+    let [fliuno_protocol::SessionHistoryEntry::Turn { turn }] = page.entries.as_slice() else {
+        panic!("expected the completed conversation");
+    };
+    assert_eq!(turn.task_id, task.id);
+    assert_eq!(turn.artifacts[0].id, artifact.artifact_id);
+    assert!(
+        matches!(&turn.messages[0], fliuno_protocol::ContextMessage::User { text } if text == &content)
+    );
     let completed: TaskSummary = client
         .call("task/getSummary", &task_params, &mut observe)
         .unwrap();

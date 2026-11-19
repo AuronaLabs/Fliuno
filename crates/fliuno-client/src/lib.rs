@@ -1,9 +1,11 @@
 //! Blocking stdio client for Fliuno's local application protocol.
 pub mod ag_ui;
 mod download;
+mod history;
 mod replay;
 mod wire;
 
+pub use history::SessionHistory;
 pub use replay::{EventReplay, ReplayScope};
 
 use fliuno_protocol::{InitializeParams, PROTOCOL_VERSION};
@@ -33,6 +35,8 @@ pub enum Error {
     InvalidReplayWindow,
     #[error("event page violates the requested replay window or scope")]
     InvalidReplayPage,
+    #[error("invalid conversation history page")]
+    InvalidHistoryPage,
     #[error("invalid expected artifact SHA-256")]
     InvalidArtifactDigest,
     #[error("artifact chunk violates the requested range or content length")]

@@ -462,3 +462,5 @@ Windows `scripts/check.ps1` 以退出码 0 完成。448 项测试、26 个离线
 真实 app-server 进程测试覆盖任务创建和完成顺序不同、会话隔离、后续完成后冻结的分页水位、重启后继续翻页和无效游标。字节预算测试包含多字节文本和 JSON 转义，验证超预算引用、延后完整记录和扩大预算后的重读。SQLite 3.49.1 的查询计划使用 `session_turns_cursor` 范围扫描和 `conversation_turns` 主键查找。
 
 Windows `scripts/check.ps1` 以退出码 0 完成。450 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/fliuno-0.0.3-history-check.log`。
+
+Rust 客户端的续页测试先保存下一页参数，再模拟水位变化和重复完成序号，确认两次失败均不推进游标。真实 stdio 进程测试读回包含多字节和转义字符的完整对话，并核对产物引用。客户端和 app-server 的严格 Clippy、25 项库测试、stdio 进程测试和 RPC Schema 一致性均通过。

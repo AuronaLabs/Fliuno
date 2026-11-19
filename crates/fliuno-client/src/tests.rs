@@ -182,3 +182,54 @@ fn artifact_download_checks_empty_body_against_pinned_digest() {
         .unwrap();
     assert!(output.is_empty());
 }
+
+#[test]
+fn history_checkpoint_retries_invalid_pages_without_skipping_entries() {
+    use fliuno_protocol::SessionHistoryListParams;
+
+    let mut client = fake_client(concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"throughSequence\":31,\"entries\":[{\"kind\":\"oversized\",\"taskId\":\"new\",\"completionSequence\":25}],\"nextBeforeSequence\":25}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"throughSequence\":32,\"entries\":[{\"kind\":\"oversized\",\"taskId\":\"old\",\"completionSequence\":10}],\"nextBeforeSequence\":null}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"throughSequence\":31,\"entries\":[{\"kind\":\"oversized\",\"taskId\":\"new\",\"completionSequence\":25}],\"nextBeforeSequence\":null}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"throughSequence\":31,\"entries\":[{\"kind\":\"oversized\",\"taskId\":\"old\",\"completionSequence\":10}],\"nextBeforeSequence\":null}}\n",
+    ).as_bytes());
+    let mut history = SessionHistory::new(SessionHistoryListParams {
+        session_id: "session".into(),
+        through_sequence: None,
+        before_sequence: None,
+        limit: Some(1),
+        max_bytes: Some(1024),
+    });
+    assert_eq!(
+        history
+            .next_page(&mut client, |_| {})
+            .unwrap()
+            .unwrap()
+            .through_sequence,
+        31
+    );
+    let saved = history.next_request().unwrap().clone();
+    assert_eq!(saved.through_sequence, Some(31));
+    assert_eq!(saved.before_sequence, Some(25));
+    let mut resumed = SessionHistory::new(saved);
+    for _ in 0..2 {
+        assert!(matches!(
+            resumed.next_page(&mut client, |_| {}),
+            Err(Error::InvalidHistoryPage)
+        ));
+        assert_eq!(resumed.next_request().unwrap().before_sequence, Some(25));
+        assert_eq!(resumed.through(), Some(31));
+    }
+    assert!(resumed.next_page(&mut client, |_| {}).unwrap().is_some());
+    assert!(resumed.next_request().is_none());
+    assert!(resumed.next_page(&mut client, |_| {}).unwrap().is_none());
+    let (_, written) = client.into_parts();
+    let sent: Vec<Value> = written
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(sent.len(), 5);
+    assert_eq!(sent[2]["params"], sent[3]["params"]);
+    assert_eq!(sent[3]["params"], sent[4]["params"]);
+}
