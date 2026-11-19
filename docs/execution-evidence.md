@@ -231,3 +231,9 @@ Windows 全量检查通过 396 项测试和 26 个离线演示，记录在 `targ
 Windows 和 Debian 各通过 4 项上下文进程测试和 2 项任务清单进程测试。检索用例验证按角色查找、排除另一角色和重启后的快照游标。任务清单用例覆盖 JSON 转义及 UTF-8 字节数、恰好达到目标、单项超额、数量上限和摘要游标。Debian 记录为 `D:/Fliuno-Native-Test/guest-context-task-pages.log`。
 
 Windows 调试构建用同一批 32 个模拟任务快照交替请求 21 次。默认首屏返回 7,894,655 字节，客户端收到并解析响应的中位时间为 668.08 ms。指定 256 KiB 后首屏返回 1 个任务，共 246,706 字节，中位时间为 46.89 ms。该结果只比较首屏，读取全部任务仍需继续翻页。记录为 `target/0.0.2-task-pages-benchmark.log`。
+
+Windows 的全量 `scripts/check.ps1` 通过 397 项测试和 26 个离线演示，包含上面两项功能，记录为 `target/0.0.2-context-task-pages-windows.log`。另用官方 `a2a-sdk==1.3.1` 验证活动补答任务上的 `SubscribeToTask`，记录为 `target/0.0.2-a2a-watch-sdk.log`。
+
+## SQLite 读取语句复用（2026-11-19）
+
+工作区、会话和任务的存在性检查、事件水位和会话读取使用 SQLite 连接已有的语句缓存。会话 JSON 从查询行借用，省去解析前的一次字符串复制。Windows 内存 SQLite 微基准将会话存在性检查、水位查询和会话内容读取作为一组，交替执行 11 组，每组 2 万轮。中位耗时从 30.23 µs 降至 10.94 µs，覆盖 SQLite 调用和行访问，不包括 JSON 解析或 RPC。基准记录为 `target/0.0.2-read-statement-bench.log`。`fliuno-core` 的 Clippy 和全部 73 项测试通过。

@@ -24,11 +24,10 @@ impl Kernel {
     }
 
     pub(crate) fn require_task(&self, task_id: &str) -> Result<()> {
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
-            [task_id],
-            |row| row.get(0),
-        )?;
+        let exists: bool = self
+            .db
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)")?
+            .query_row([task_id], |row| row.get(0))?;
         if exists {
             Ok(())
         } else {
@@ -37,11 +36,10 @@ impl Kernel {
     }
 
     pub(crate) fn require_workspace(&self, workspace_id: &str) -> Result<()> {
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)",
-            [workspace_id],
-            |row| row.get(0),
-        )?;
+        let exists: bool = self
+            .db
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)")?
+            .query_row([workspace_id], |row| row.get(0))?;
         if exists {
             Ok(())
         } else {
@@ -50,11 +48,10 @@ impl Kernel {
     }
 
     pub(crate) fn require_session(&self, session_id: &str) -> Result<()> {
-        let exists: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?1)",
-            [session_id],
-            |r| r.get(0),
-        )?;
+        let exists: bool = self
+            .db
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM sessions WHERE id=?1)")?
+            .query_row([session_id], |row| row.get(0))?;
         if exists {
             Ok(())
         } else {

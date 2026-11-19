@@ -105,14 +105,15 @@ impl Kernel {
     }
 
     pub fn get_session(&self, id: &str) -> Result<Session> {
-        let data: String = self
+        let mut statement = self
             .db
-            .query_row("SELECT data FROM sessions WHERE id=?1", [id], |row| {
-                row.get(0)
-            })
-            .optional()?
+            .prepare_cached("SELECT data FROM sessions WHERE id=?1")?;
+        let mut rows = statement.query([id])?;
+        let row = rows
+            .next()?
             .ok_or_else(|| Error::NotFound("session".into()))?;
-        Ok(serde_json::from_str(&data)?)
+        let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+        Ok(serde_json::from_str(data)?)
     }
 
     pub fn rename_session(&mut self, id: &str, title: &str) -> Result<Session> {

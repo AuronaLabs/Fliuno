@@ -56,9 +56,8 @@ impl Kernel {
     pub fn event_watermark(&self) -> Result<u64> {
         Ok(self
             .db
-            .query_row("SELECT COALESCE(MAX(sequence),0) FROM events", [], |row| {
-                row.get::<_, i64>(0)
-            })? as u64)
+            .prepare_cached("SELECT COALESCE(MAX(sequence),0) FROM events")?
+            .query_row([], |row| row.get::<_, i64>(0))? as u64)
     }
 
     pub fn get_event(&self, sequence: u64) -> Result<Event> {
