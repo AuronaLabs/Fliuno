@@ -11,6 +11,7 @@ mod replay;
 mod session_catalog;
 mod task_cancel;
 mod task_catalog;
+mod task_resume;
 mod task_summaries;
 mod terminal;
 mod wire;

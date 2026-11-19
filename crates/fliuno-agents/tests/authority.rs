@@ -1,6 +1,6 @@
 //! Exercise actual adapter registrations without executing a remote task.
 use fliuno_core::{CancellationToken, DemoProvider, Kernel};
-use fliuno_protocol::TaskBackend;
+use fliuno_protocol::{TaskBackend, TaskResumeDisposition, TaskStatus};
 use serde_json::{Value, json};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -40,18 +40,21 @@ fn cannot_rebind(before: Value, after: Value, acp: bool) {
         .0;
     drop(kernel);
     let mut kernel = Kernel::open(&database, Box::new(DemoProvider)).unwrap();
-    register(&mut kernel, after);
-    kernel.prepare_resume_task(&old.id, false).unwrap();
-    assert!(
-        kernel
-            .prepare_agent_run(&old.id, &CancellationToken::new())
-            .is_err()
-    );
-    assert!(kernel.get_task(&old.id).unwrap().agent_run.is_none());
     assert_eq!(
-        kernel.get_task(&old.id).unwrap().status,
-        fliuno_protocol::TaskStatus::Failed
+        kernel.get_task_resume_status(&old.id).unwrap().disposition,
+        TaskResumeDisposition::AgentUnavailable
     );
+    register(&mut kernel, after);
+    let before = kernel.event_watermark().unwrap();
+    assert_eq!(
+        kernel.get_task_resume_status(&old.id).unwrap().disposition,
+        TaskResumeDisposition::AgentRegistrationChanged
+    );
+    assert!(kernel.prepare_resume_task(&old.id, false).is_err());
+    assert_eq!(kernel.event_watermark().unwrap(), before);
+    let interrupted = kernel.get_task(&old.id).unwrap();
+    assert!(interrupted.agent_run.is_none());
+    assert_eq!(interrupted.status, TaskStatus::Interrupted);
     let fresh = kernel
         .create_task_with_backend(&session.id, "fresh", None, backend)
         .unwrap()

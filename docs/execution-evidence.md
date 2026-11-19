@@ -869,3 +869,11 @@ Windows `scripts/check.ps1` 以退出码 0 完成：507 项测试、28 个离线
 进程测试通过真实 HTTP 启动连续流和审批中断两种任务，拒绝请求体中的限额覆盖。收到审批后，在默认策略下重启 app-server 与 HTTP 路由。原根 ID 重新提交返回冲突；通过原审批继续后只产生一份交付物，随后 SSE 报告尝试用尽。重连可读取完整结果，重复续跑不会重复交付。Debian Linux 6.12.107 来宾通过 8 项进程测试，涵盖两种新场景和既有 SSE 重连、审批及任务绑定。日志：`D:/Fliuno-Native-Test/guest-ag-ui-host-limit.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：510 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-ag-ui-host-limit-check.log`。
+
+## 0.0.3 任务恢复判断（2026-11-20）
+
+`task/getResumeStatus` 只读返回任务状态、恢复判断和模型剩余尝试次数。真正的 `task/resume` 使用同一判断，并在准备启动 Agent 时仍校验注册身份。查询不写入事件、不保留调度名额，与既有任务和数据库 v46 兼容。见 [任务恢复判断](protocol.md#任务恢复判断)。
+
+真实回环供应商收到一次请求并返回不可用响应后，查询与未显式同意的恢复均不新增事件；同意后恰好再发一次并成功。用尽上限、启动过的 ACP Agent、A2A 远端续接及本机工具超时均返回对应阻止原因。Windows ACP 测试另外验证注册改变后恢复直接拒绝，原中断快照跨重启保持；按新配置创建的任务仍可运行。Debian Linux 6.12.107 来宾的 12 项进程测试通过。日志：`D:/Fliuno-Native-Test/guest-resume-status.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：512 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-task-resume-status-passed-check.log`。

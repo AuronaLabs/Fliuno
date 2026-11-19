@@ -911,3 +911,21 @@ fn approval_inbox_failure_rolls_back_resolution_and_events() {
         before
     );
 }
+
+#[test]
+fn resume_status_for_work_interrupted_before_dispatch_allows_resume_without_consent() {
+    let (mut kernel, session) = setup();
+    let (task, _) = kernel
+        .create_task_with_key(&session.id, "queued task", None)
+        .unwrap();
+    kernel.interrupt_running_tasks().unwrap();
+    let through = kernel.event_watermark().unwrap();
+    let status = kernel.get_task_resume_status(&task.id).unwrap();
+    assert_eq!(status.disposition, TaskResumeDisposition::Ready);
+    assert_eq!(status.remaining_model_steps, Some(DEFAULT_TASK_MODEL_STEPS));
+    assert_eq!(kernel.event_watermark().unwrap(), through);
+    assert_eq!(
+        kernel.resume_task(&task.id).unwrap().status,
+        TaskStatus::WaitingApproval
+    );
+}

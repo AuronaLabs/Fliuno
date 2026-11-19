@@ -178,6 +178,10 @@ fn process_timeout_evidence_survives_restart_and_running_process_can_be_cancelle
         events
     );
     assert_eq!(
+        peer.call("task/getResumeStatus", json!({"taskId":timeout["id"]}))["disposition"],
+        "tool_outcome_unknown"
+    );
+    assert_eq!(
         peer.request(
             "task/resume",
             json!({"taskId":timeout["id"],"retryUncertainModelStep":true})

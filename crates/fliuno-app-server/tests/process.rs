@@ -143,6 +143,7 @@ impl Peer {
             json!({"protocolVersion":"0.1","clientName":"process-test"}),
         );
         assert_eq!(init["capabilities"]["maxTaskModelSteps"], 8);
+        assert_eq!(init["capabilities"]["taskResumeStatus"], true);
         assert_eq!(init["capabilities"]["sessionContext"], true);
         assert_eq!(init["capabilities"]["sessionHistoryList"], true);
         assert_eq!(init["capabilities"]["maxSessionHistoryBytes"], 262_144);
@@ -654,6 +655,16 @@ fn stdio_approval_restart_and_artifact_roundtrip() {
     let task_params = json!({"taskId":task["id"]});
     assert_eq!(
         peer.request("task/getSummary", json!({"taskId":"unknown"}))["error"]["code"],
+        -32004
+    );
+    assert_eq!(
+        peer.call("task/getResumeStatus", task_params.clone()),
+        json!({
+            "taskId":task["id"], "status":"waiting_approval", "disposition":"not_interrupted", "remainingModelSteps":7
+        })
+    );
+    assert_eq!(
+        peer.request("task/getResumeStatus", json!({"taskId":"unknown"}))["error"]["code"],
         -32004
     );
     let summaries = peer.call("task/listSummaries", summary_params.clone());

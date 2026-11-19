@@ -236,7 +236,25 @@ fn queued_agent_task_keeps_original_registration_across_idempotency_and_restart(
         .unwrap();
     assert!(!created);
     assert_eq!(duplicate.backend_authority, original.backend_authority);
+    assert_eq!(
+        kernel
+            .get_task_resume_status(&original.id)
+            .unwrap()
+            .disposition,
+        TaskResumeDisposition::AgentRegistrationChanged
+    );
+    assert!(kernel.prepare_resume_task(&original.id, false).is_err());
+    assert_eq!(
+        kernel.get_task(&original.id).unwrap().status,
+        TaskStatus::Interrupted
+    );
+
+    // The scheduler still checks the binding immediately before launch.
+    kernel.agents.clear();
+    kernel.register_agent(Box::new(Agent(1))).unwrap();
     kernel.prepare_resume_task(&original.id, false).unwrap();
+    kernel.agents.clear();
+    kernel.register_agent(Box::new(Agent(2))).unwrap();
     assert!(
         kernel
             .prepare_agent_run(&original.id, &CancellationToken::new())
@@ -298,14 +316,16 @@ fn v7_queued_agent_without_binding_cannot_start_even_with_the_same_registration(
             .backend_authority
             .is_none()
     );
-    kernel.prepare_resume_task(&old.id, false).unwrap();
-    assert!(
-        kernel
-            .prepare_agent_run(&old.id, &CancellationToken::new())
-            .is_err()
+    assert_eq!(
+        kernel.get_task_resume_status(&old.id).unwrap().disposition,
+        TaskResumeDisposition::AgentRegistrationChanged
     );
+    assert!(kernel.prepare_resume_task(&old.id, false).is_err());
     assert!(kernel.get_task(&old.id).unwrap().agent_run.is_none());
-    assert_eq!(kernel.get_task(&old.id).unwrap().status, TaskStatus::Failed);
+    assert_eq!(
+        kernel.get_task(&old.id).unwrap().status,
+        TaskStatus::Interrupted
+    );
     assert!(
         !kernel
             .list_events(&old.id, 0, 100)

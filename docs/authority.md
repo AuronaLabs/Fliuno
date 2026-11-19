@@ -16,7 +16,7 @@
 
 创建工具审批时，内核把 `Tool::authority()` 保存到 `Approval.authority`。允许一次时先核验摘要，再检查当前策略，随后才提交执行身份并交给 worker。注册项缺失、摘要变化或旧记录没有摘要时，任务持久失败，不产生 `tool_started` 或工具 IO。拒绝审批始终可以进行。
 
-创建外部 Agent 任务时，把 `AgentBackend::authority()` 保存到 `Task.backendAuthority`。准备启动时再次匹配，注册缺失或绑定不符会持久化失败状态与 `task_failed` 事件，不创建 Agent run，避免任务一直显示运行中。相同 `clientRequestId` 仍返回原任务及原摘要，不会刷新绑定。要使用新配置，需要创建新任务；给原请求重复提交不构成重新授权。
+创建外部 Agent 任务时，把 `AgentBackend::authority()` 保存到 `Task.backendAuthority`。准备启动时再次匹配，注册缺失或绑定不符会持久化失败状态与 `task_failed` 事件，不创建 Agent run，避免任务一直显示运行中。已中断的任务则会在 `task/resume` 时直接拒绝，保留当时的状态和事件。可先[查询恢复判断](protocol.md#任务恢复判断)。相同 `clientRequestId` 仍返回原任务及原摘要，不会刷新绑定。要使用新配置，需要创建新任务；给原请求重复提交不构成重新授权。
 
 已发出的外部操作继续遵循未知结果边界：摘要匹配不能证明副作用未发生，不能用于自动重发。已启动 ACP 进程的权限在重启后失效，A2A 的远端运行记录也不会因此自动续执行。
 

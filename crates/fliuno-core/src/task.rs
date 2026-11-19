@@ -1,6 +1,7 @@
 //! Task state machine and model budget. SQL and transport live elsewhere.
 use super::*;
 
+mod resume;
 pub(crate) mod start;
 
 impl Kernel {
@@ -225,71 +226,6 @@ impl Kernel {
         self.fail(task, message)
     }
 
-    pub fn resume_task(&mut self, task_id: &str) -> Result<Task> {
-        self.resume_task_with_options(task_id, false)
-    }
-
-    pub fn resume_task_with_options(
-        &mut self,
-        task_id: &str,
-        retry_uncertain_model_step: bool,
-    ) -> Result<Task> {
-        if self.get_task(task_id)?.backend != TaskBackend::Model {
-            return Err(Error::Conflict(
-                "external agent tasks require the background execution scheduler".into(),
-            ));
-        }
-        let task = self.prepare_resume_task(task_id, retry_uncertain_model_step)?;
-        self.drive(task)
-    }
-
-    pub fn prepare_resume_task(
-        &mut self,
-        task_id: &str,
-        retry_uncertain_model_step: bool,
-    ) -> Result<Task> {
-        let mut task = self.get_task(task_id)?;
-        if task.status != TaskStatus::Interrupted {
-            return Err(Error::Conflict("only interrupted tasks can resume".into()));
-        }
-        if task.remote_continuation.is_some() {
-            return Err(Error::Conflict(
-                "remote continuations cannot resume; inspect submission evidence before creating another attempt".into(),
-            ));
-        }
-        if task.agent_run.is_some() {
-            return Err(Error::Conflict("started agent runs cannot be replayed; create a new task after inspecting the outcome".into()));
-        }
-        if let TaskBackend::ExternalAgent { agent_id } = &task.backend
-            && !self.agents.contains_key(agent_id)
-        {
-            return Err(Error::NotFound("registered agent".into()));
-        }
-        if task.in_flight_tool.is_some() {
-            return Err(Error::Conflict(
-                "external tool outcome unknown; inspect the remote service and cancel this task"
-                    .into(),
-            ));
-        }
-        if task.model_outcome_unknown && !retry_uncertain_model_step {
-            return Err(Error::Conflict(
-                "model request outcome is uncertain; explicit retry consent is required".into(),
-            ));
-        }
-        if task.backend == TaskBackend::Model && model_step_budget_spent(&task) {
-            // Do not clear evidence of a possibly billed last attempt if no
-            // attempt remains. Inspect or cancel the interrupted task instead.
-            return Err(Error::Conflict(
-                "model step budget exhausted; task cannot resume".into(),
-            ));
-        }
-        task.model_outcome_unknown = false;
-        task.status = TaskStatus::Running;
-        task.output = None;
-        self.commit(&task, &[EventKind::TaskResumed], &[])?;
-        Ok(task)
-    }
-
     fn fail_interrupted_model(&mut self, task: Task) -> Result<Task> {
         self.commit(
             &task,
@@ -306,7 +242,13 @@ impl Kernel {
 }
 
 fn model_step_budget_spent(task: &Task) -> bool {
-    task.model_steps >= task.max_model_steps.unwrap_or(DEFAULT_TASK_MODEL_STEPS)
+    remaining_model_steps(task) == 0
+}
+
+fn remaining_model_steps(task: &Task) -> u32 {
+    task.max_model_steps
+        .unwrap_or(DEFAULT_TASK_MODEL_STEPS)
+        .saturating_sub(task.model_steps)
 }
 
 /// Prepare the same cancellation transition for single and batch callers.

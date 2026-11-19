@@ -312,6 +312,19 @@ fn lost_stream_after_submission_is_never_replayed_on_restart() {
     assert_eq!(summary["modelOutcomeUnknown"], false);
     drop(peer);
     let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let reference = json!({"taskId":stopped["id"]});
+    let before = peer.call("events/list", reference.clone());
+    assert_eq!(
+        peer.call("task/getResumeStatus", reference.clone()),
+        json!({
+            "taskId":stopped["id"], "status":"interrupted", "disposition":"remote_continuation", "remainingModelSteps":null
+        })
+    );
+    assert_eq!(
+        peer.request("task/resume", reference.clone())["error"]["code"],
+        -32009
+    );
+    assert_eq!(peer.call("events/list", reference), before);
     assert_eq!(peer.call("task/continueRemote", retry), stopped);
     assert_eq!(
         peer.request("task/continueRemote", params(&source["id"], "second-send"))["error"]["code"],

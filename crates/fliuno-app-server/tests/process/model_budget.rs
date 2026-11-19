@@ -416,6 +416,16 @@ fn model_step_limit_keeps_uncertain_outcome_when_last_attempt_cannot_resume() {
             .any(|event| event["data"]["type"] == "model_outcome_unknown"
                 && event["data"]["step"] == 1)
     );
+    assert_eq!(
+        peer.call("task/getResumeStatus", lookup.clone()),
+        json!({
+            "taskId":id,"status":"interrupted","disposition":"model_step_budget_exhausted","remainingModelSteps":0
+        })
+    );
+    assert_eq!(
+        peer.request("task/resume", lookup.clone())["error"]["code"],
+        -32009
+    );
     let response = peer.request(
         "task/resume",
         json!({"taskId":id,"retryUncertainModelStep":true}),
@@ -430,4 +440,60 @@ fn model_step_limit_keeps_uncertain_outcome_when_last_attempt_cannot_resume() {
     assert_eq!(peer.call("task/get", lookup.clone()), interrupted);
     assert_eq!(peer.call("events/list", lookup), page);
     assert_eq!(endpoint.requests().len(), 1);
+}
+
+#[test]
+fn resume_status_requires_consent_only_when_another_model_attempt_is_available() {
+    let directory = TestDirectory::new();
+    let attempt = std::sync::atomic::AtomicUsize::new(0);
+    let wire = Fixture::start(move |_| {
+        let first = attempt.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
+        let body = if first {
+            json!({"output":[]})
+        } else {
+            json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"recovered"}]}]})
+        };
+        Response::json(200, body)
+    });
+    let db = directory.db();
+    let url = wire.url("/v1/");
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&url));
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let task = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"retry me","maxModelSteps":2}),
+    );
+    let id = task["id"].as_str().unwrap();
+    let interrupted = peer.wait_for_status(id, "interrupted");
+    let lookup = json!({"taskId":id});
+    let before = peer.call("events/list", lookup.clone());
+    assert_eq!(
+        peer.call("task/getResumeStatus", lookup.clone()),
+        json!({
+            "taskId":id,"status":"interrupted","disposition":"retry_uncertain_model_step","remainingModelSteps":1
+        })
+    );
+    assert_eq!(
+        peer.request("task/resume", lookup.clone())["error"]["code"],
+        -32009
+    );
+    assert_eq!(peer.call("task/get", lookup.clone()), interrupted);
+    assert_eq!(peer.call("events/list", lookup.clone()), before);
+    assert_eq!(wire.requests().len(), 1);
+
+    peer.call(
+        "task/resume",
+        json!({"taskId":id,"retryUncertainModelStep":true}),
+    );
+    let completed = peer.wait_for_status(id, "completed");
+    assert_eq!(completed["output"], "recovered");
+    assert_eq!(completed["modelOutcomeUnknown"], false);
+    assert_eq!(
+        peer.call("task/getResumeStatus", lookup),
+        json!({
+            "taskId":id,"status":"completed","disposition":"not_interrupted","remainingModelSteps":0
+        })
+    );
+    assert_eq!(wire.requests().len(), 2);
 }

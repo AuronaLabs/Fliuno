@@ -8,7 +8,7 @@
 | --- | --- |
 | **建立连接** | [启动服务](setup.md#再启动自己的服务) · [stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP / SSE](ag-ui.md#http-接入) |
 | **提交并交付** | [创建任务与重试](#任务提交与重试) · [审批与决定](#审批收件箱与决定) · [读取产物](#审批事件与产物) |
-| **重连并刷新** | [工作台实时订阅](#工作台实时订阅) · [回放摘要修订](#任务摘要修订回放) · [查找历史任务](#查找历史任务) |
+| **重连并刷新** | [工作台实时订阅](#工作台实时订阅) · [判断能否恢复](#任务恢复判断) · [回放摘要修订](#任务摘要修订回放) · [查找历史任务](#查找历史任务) |
 | **排查调用失败** | [错误码](#错误) · [内置工具与作用域](#内置工具与作用域) |
 
 <details>
@@ -96,7 +96,7 @@ staged.sync_all()?;
 | `session/listHistory` | `{sessionId,throughSequence?,beforeSequence?,limit?,maxBytes?}` | SessionHistoryListPage，按完成序号倒序分页读取精简对话。见[会话历史分页](context.md#会话历史分页)。 |
 | `session/getHistoryTurn` | `{sessionId,taskId,throughSequence?,maxBytes?}` | `SessionHistoryEntry`，直接读一条对话或返回超限引用。见[打开搜索命中](context.md#打开一条历史记录)。 |
 | `session/searchHistory` | `{sessionId,query,role?,throughSequence?,beforeSequence?,limit?,scanLimit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
-| `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
+| `task/start` | `{sessionId, input, clientRequestId?, backend?, maxModelSteps?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/startSummary` | 与 `task/start` 相同 | 使用同一任务创建和调度流程，返回 `TaskSummary` |
 | `task/getSummaryByRequest` | `{sessionId,clientRequestId}` | 通过会话和请求键读取当前 `TaskSummary` |
 | `task/get` | `{taskId}` | Task |
@@ -109,6 +109,7 @@ staged.sync_all()?;
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |
 | `task/cancelSummary` | `{taskId}` | 复用取消流程，返回 `TaskSummary`。能力标记为 `taskCancelSummary`。 |
 | `task/cancelBatch` | `{scope,taskIds}` | 原子提交选中任务的取消，返回 `{items:[{task,changed}],throughSequence}` |
+| `task/getResumeStatus` | `{taskId}` | [`TaskResumeStatus`](#任务恢复判断)，查询当前能否恢复及原因 |
 | `task/resume` | `{taskId,retryUncertainModelStep?:false}` | Task；恢复后排队；外部未知结果不能重试；模型结果不确定时须显式传 true |
 
 ### 审批、事件与产物
@@ -213,6 +214,23 @@ SQLite v44 将普通有键提交的输入 SHA-256、后端和规范化后的上�
 内核在开始尝试时记一次 `model_started`，随后再交给供应商。即使本次请求未发出或结果不明，这次尝试也占用上限。最后一次响应若提议了工具，获准的工具仍可执行并保存产物；若接下来还需要调用模型，任务以 `model step budget exceeded` 结束。次数用完且任务已中断时，`task/resume` 返回 `-32009`，不会写入续跑事件、清空 `modelOutcomeUnknown` 或再次发出请求。
 
 SQLite v46 保存自定义上限，也能读取已有任务和两项式回执；迁移不扫描或重写历史任务。升级后的数据库应由支持 v46 的内核打开。尝试次数与[单次模型请求预算](context.md#模型请求预算)分别生效。
+
+### 任务恢复判断
+
+服务声明 `initialize.capabilities.taskResumeStatus` 时，可用 `task/getResumeStatus` 或 Rust 客户端的 `get_task_resume_status` 查询 `{taskId,status,disposition,remainingModelSteps}`。这条调用不写事件、不提交工作，也不授予重试同意。`remainingModelSteps` 是模型任务剩下的尝试次数，外部 Agent 任务返回 `null`。
+
+| `disposition` | 客户端如何处理 |
+| --- | --- |
+| `ready` | 可以调用 `task/resume`。 |
+| `retry_uncertain_model_step` | 仍有剩余尝试。向用户说明前一请求可能已经执行，再根据明确同意传 `retryUncertainModelStep:true`。 |
+| `not_interrupted` | 任务未中断。按 `status` 展示运行、审批或终止状态。 |
+| `model_step_budget_exhausted` | 次数已用完；即使显式同意也不能恢复。原结果未知的证据保留。 |
+| `tool_outcome_unknown` | 先核对外部工具的实际结果；任务不允许重跑该工具。 |
+| `agent_unavailable` | 宿主当前没有注册该 Agent。 |
+| `agent_registration_changed` | 当前注册与任务绑定不符。恢复会拒绝；核对配置后可按需新建任务。 |
+| `agent_already_started` / `remote_continuation` | 任务不允许通过 `task/resume` 重放；先核对已保存的 Agent 或远端执行证据。 |
+
+结果只反映读取当时的任务和注册。`task/resume` 会重新判断；期间的取消、状态变化或调度容量仍可能影响恢复。审批仍走 `approval/respond` 等审批入口。
 
 ### 会话目录
 

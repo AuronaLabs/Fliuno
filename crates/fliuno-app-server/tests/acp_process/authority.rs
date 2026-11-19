@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn changed_queued_registration_fails_durably_and_a_fresh_task_can_run() {
+fn changed_queued_registration_refuses_resume_and_a_fresh_task_can_run() {
     let directory = Directory::new();
     let config = fs::read(directory.0.join("agents.json")).unwrap();
     let mut kernel = fliuno_core::Kernel::open(
@@ -38,35 +38,29 @@ fn changed_queued_registration_fails_durably_and_a_fresh_task_can_run() {
         duplicate["backendAuthority"],
         json!(original.backend_authority)
     );
-    peer.call("task/resume", json!({"taskId":original.id}));
-    let failed = peer.wait(&json!(original.id), |task| task["status"] == "failed");
-    assert!(failed["agentRun"].is_null());
+    let reference = json!({"taskId":original.id});
+    let before = peer.call("events/list", reference.clone());
+    assert_eq!(
+        peer.call("task/getResumeStatus", reference.clone()),
+        json!({
+            "taskId":original.id,"status":"interrupted","disposition":"agent_registration_changed","remainingModelSteps":null
+        })
+    );
+    let refused = peer.request("task/resume", reference.clone());
+    assert_eq!(refused["error"]["code"], -32009);
     assert!(
-        failed["output"]
+        refused["error"]["message"]
             .as_str()
             .unwrap()
             .contains("registration changed")
     );
-    let events = peer.call("events/list", json!({"taskId":original.id}));
-    assert!(
-        events["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|event| event["data"]["type"] == "task_failed")
-    );
-    assert!(
-        !events["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|event| event["data"]["type"] == "agent_started")
-    );
+    assert_eq!(peer.call("task/get", reference.clone()), duplicate);
+    assert_eq!(peer.call("events/list", reference.clone()), before);
     let fresh = peer.start_task(&session.id, "context_probe", "fresh-submission");
     assert_ne!(fresh["backendAuthority"], duplicate["backendAuthority"]);
     peer.wait(&fresh["id"], |task| task["status"] == "completed");
     peer.stop();
     let mut peer = Peer::start(&directory);
-    assert_eq!(peer.call("task/get", json!({"taskId":original.id})), failed);
+    assert_eq!(peer.call("task/get", reference), duplicate);
     peer.stop();
 }

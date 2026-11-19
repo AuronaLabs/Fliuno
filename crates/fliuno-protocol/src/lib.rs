@@ -817,6 +817,31 @@ pub struct TaskResumeParams {
     pub retry_uncertain_model_step: bool,
 }
 
+/// Current policy decision for an explicit resume. It reserves no work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskResumeDisposition {
+    Ready,
+    RetryUncertainModelStep,
+    NotInterrupted,
+    RemoteContinuation,
+    AgentAlreadyStarted,
+    AgentUnavailable,
+    AgentRegistrationChanged,
+    ToolOutcomeUnknown,
+    ModelStepBudgetExhausted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskResumeStatus {
+    pub task_id: String,
+    pub status: TaskStatus,
+    pub disposition: TaskResumeDisposition,
+    /// None for external agents; zero when a model task cannot make another attempt.
+    pub remaining_model_steps: Option<u32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApprovalRespondParams {

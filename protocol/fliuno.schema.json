@@ -1842,6 +1842,20 @@
         }
       }
     },
+    "task/getResumeStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
     "task/resume": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskResumeParams",
@@ -4551,6 +4565,65 @@
                 "agentId"
               ]
             }
+          ]
+        }
+      }
+    },
+    "TaskResumeStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskResumeStatus",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "disposition": {
+          "$ref": "#/$defs/TaskResumeDisposition"
+        },
+        "remainingModelSteps": {
+          "description": "None for external agents; zero when a model task cannot make another attempt.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "status",
+        "disposition"
+      ],
+      "$defs": {
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "TaskResumeDisposition": {
+          "description": "Current policy decision for an explicit resume. It reserves no work.",
+          "type": "string",
+          "enum": [
+            "ready",
+            "retry_uncertain_model_step",
+            "not_interrupted",
+            "remote_continuation",
+            "agent_already_started",
+            "agent_unavailable",
+            "agent_registration_changed",
+            "tool_outcome_unknown",
+            "model_step_budget_exhausted"
           ]
         }
       }

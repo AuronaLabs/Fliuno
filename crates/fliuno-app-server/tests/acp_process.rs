@@ -481,6 +481,10 @@ fn expired_permission_is_closed_and_prompt_timeout_keeps_unknown_outcome() {
     let hang = peer.start_task(&session, "hang", "timeout");
     let interrupted = peer.wait(&hang["id"], |t| t["status"] == "interrupted");
     assert_eq!(interrupted["agentRun"]["outcomeUnknown"], true);
+    assert_eq!(
+        peer.call("task/getResumeStatus", json!({"taskId":hang["id"]}))["disposition"],
+        "agent_already_started"
+    );
     assert!(
         peer.request(
             "task/resume",
