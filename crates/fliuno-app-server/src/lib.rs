@@ -362,6 +362,7 @@ impl RpcServer {
             capabilities["artifactSummaryById"] = json!(true);
             capabilities["scopedArtifactSummaries"] = json!(true);
             capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
+            capabilities["maxArtifactDigestBytes"] = json!(MAX_ARTIFACT_DIGEST_BYTES);
             return Ok(json!({
                 "protocolVersion": PROTOCOL_VERSION,
                 "serverName": "fliuno-app-server",
@@ -772,6 +773,10 @@ impl RpcServer {
                     content_bytes,
                     data_base64: STANDARD.encode(bytes),
                 })
+            }
+            "artifacts/digest" => {
+                let p: ArtifactGetParams = decode(params)?;
+                json!(self.kernel()?.digest_artifact(&p.task_id, &p.artifact_id)?)
             }
             "artifacts/getSummary" => {
                 let p: ArtifactGetParams = decode(params)?;

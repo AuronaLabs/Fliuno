@@ -29,6 +29,14 @@ pub struct ArtifactCatalogParams {
 }
 
 pub const MAX_ARTIFACT_READ_BYTES: u32 = 64 * 1024;
+pub const MAX_ARTIFACT_DIGEST_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactDigest {
+    pub content_bytes: u64,
+    pub sha256: String,
+}
 const fn default_artifact_read_bytes() -> u32 {
     32 * 1024
 }

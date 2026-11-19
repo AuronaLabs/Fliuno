@@ -1479,6 +1479,24 @@
         "artifactId"
       ]
     },
+    "artifacts/digest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactGetParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "artifactId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "artifactId"
+      ]
+    },
     "tools/list": {
       "type": "object",
       "properties": {},
@@ -4431,6 +4449,26 @@
         "nextOffset",
         "contentBytes",
         "dataBase64"
+      ]
+    },
+    "ArtifactDigest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactDigest",
+      "type": "object",
+      "properties": {
+        "contentBytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "contentBytes",
+        "sha256"
       ]
     },
     "ArtifactSummariesPage": {

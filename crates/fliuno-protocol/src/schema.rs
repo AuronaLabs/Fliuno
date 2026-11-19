@@ -63,6 +63,7 @@ pub fn schema_bundle() -> Value {
         "artifacts/get" => schema::<ArtifactGetParams>(),
         "artifacts/getSummary" => schema::<ArtifactGetParams>(),
         "artifacts/read" => schema::<ArtifactReadParams>(),
+        "artifacts/digest" => schema::<ArtifactGetParams>(),
         "tools/list" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         "agents/list" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         "agents/getCapabilities" => schema::<AgentIdParams>()
@@ -90,6 +91,7 @@ pub fn schema_bundle() -> Value {
         "ApprovalDetails" => schema::<ApprovalDetails>(),
         "Artifact" => schema::<Artifact>(),
         "ArtifactChunk" => schema::<ArtifactChunk>(),
+        "ArtifactDigest" => schema::<ArtifactDigest>(),
         "ArtifactSummariesPage" => schema::<ObjectPage<ArtifactSummary>>(),
         "Event" => schema::<Event>(),
         "EventSubscription" => schema::<EventSubscription>(),

@@ -1,6 +1,7 @@
 //! Metadata catalogs and incremental reads of immutable artifact bodies.
 use super::*;
-use rusqlite::Transaction;
+use rusqlite::{Transaction, blob::Blob};
+use sha2::{Digest, Sha256};
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
@@ -281,18 +282,7 @@ impl Kernel {
                 "artifact read limit must be 1..{MAX_ARTIFACT_READ_BYTES}"
             )));
         }
-        let rowid = self
-            .db
-            .prepare_cached(
-                "SELECT b.rowid FROM artifacts a JOIN artifact_bodies b ON b.artifact_id=a.id
-             WHERE a.task_id=?1 AND a.id=?2",
-            )?
-            .query_row(params![task_id, artifact_id], |row| row.get(0))
-            .optional()?
-            .ok_or_else(|| Error::NotFound("artifact".into()))?;
-        let blob = self
-            .db
-            .blob_open("main", "artifact_bodies", "body", rowid, true)?;
+        let blob = self.artifact_body(task_id, artifact_id)?;
         let length = blob.len();
         if after > length as u64 {
             return Err(Error::Invalid("artifact offset is past the end".into()));
@@ -303,6 +293,46 @@ impl Kernel {
             blob.read_at_exact(&mut data, after as usize)?;
         }
         Ok((length as u64, data))
+    }
+
+    /// Hash the same immutable body read by artifacts/read using one reusable buffer.
+    pub fn digest_artifact(&self, task_id: &str, artifact_id: &str) -> Result<ArtifactDigest> {
+        let body = self.artifact_body(task_id, artifact_id)?;
+        let length = body.len();
+        if length > MAX_ARTIFACT_DIGEST_BYTES {
+            return Err(Error::Invalid(
+                "artifact exceeds the digest byte budget".into(),
+            ));
+        }
+        let mut sha256 = Sha256::new();
+        let mut buffer = vec![0; length.min(MAX_ARTIFACT_READ_BYTES as usize)];
+        let mut offset = 0;
+        while offset < length {
+            let count = buffer.len().min(length - offset);
+            let chunk = &mut buffer[..count];
+            body.read_at_exact(chunk, offset)?;
+            sha256.update(chunk);
+            offset += count;
+        }
+        Ok(ArtifactDigest {
+            content_bytes: length as u64,
+            sha256: format!("{:x}", sha256.finalize()),
+        })
+    }
+
+    fn artifact_body(&self, task_id: &str, artifact_id: &str) -> Result<Blob<'_>> {
+        let rowid = self
+            .db
+            .prepare_cached(
+                "SELECT b.rowid FROM artifacts a JOIN artifact_bodies b ON b.artifact_id=a.id
+             WHERE a.task_id=?1 AND a.id=?2",
+            )?
+            .query_row(params![task_id, artifact_id], |row| row.get(0))
+            .optional()?
+            .ok_or_else(|| Error::NotFound("artifact".into()))?;
+        Ok(self
+            .db
+            .blob_open("main", "artifact_bodies", "body", rowid, true)?)
     }
 
     pub fn get_artifact(&self, task_id: &str, artifact_id: &str) -> Result<Artifact> {

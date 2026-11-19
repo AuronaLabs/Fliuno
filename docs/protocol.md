@@ -52,6 +52,7 @@
 | `artifacts/listScopedSummaries` | `{scope:{kind:"session",sessionId} 或 {kind:"workspace",workspaceId},after?,limit?,mediaType?}` | 按保存顺序查询指定会话或工作区的产物元数据 |
 | `artifacts/getSummary` | `{taskId,artifactId}` | 单份 ArtifactSummary |
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
+| `artifacts/digest` | `{taskId,artifactId}` | 正文的 `contentBytes` 与小写十六进制 `sha256` |
 | `artifacts/read` | `{taskId,artifactId,after?,limit?}` | 返回 `{offset,nextOffset,contentBytes,dataBase64}` |
 | `tools/list` | `{}` | 工具名称、描述、效果类型、输入 Schema |
 | `agents/list` | `{}` | 注册 Agent 的 ID、协议、隔离类型和 `workspaceAccess` |
@@ -85,6 +86,8 @@
 `artifactMediaTypeFilter` 表示 `artifacts/listScopedSummaries` 支持 `mediaType`。筛选条件和已有产物的值完全匹配，包含大小写和参数。筛选词最多 256 个 UTF-8 字节，须包含可见内容。翻页时沿用相同筛选条件和作用域。SQLite v28 为会话和工作区分别建立类型索引，并保留原有游标。
 
 客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节后，再按 UTF-8 解码正文，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。SQLite v21 将已有正文移到独立 BLOB 表，保留产物 ID、清单游标和字节偏移。升级在一个事务内完成，迁移中数据库需要空间写入新正文。
+
+`artifacts/digest` 对分块读取的原始字节计算 SHA-256。客户端可将拼接后的内容与 `{contentBytes,sha256}` 比对。`initialize.capabilities.maxArtifactDigestBytes` 公布整次摘要的上限，目前为 8 MiB。正文分块读入固定上限的缓冲区。
 
 `initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
 

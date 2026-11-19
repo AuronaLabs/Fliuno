@@ -255,3 +255,7 @@ Windows 和 Debian 各通过 5 项官方 SDK 订阅测试及 1 项 HTTP 生命�
 ## 远端核对证据索引（2026-11-19）
 
 Windows 和 Debian 通过真实 app-server 进程用例，按 ID 读取事件，与常规回放逐字段一致。跨任务查找返回未找到。回退到 v28 结构后，在未配置远端 Agent 的进程中升级并取回原事件。内核故障测试验证索引拒绝重复 ID 时不提交额外事件或发送通知。Debian 记录在 `D:/Fliuno-Native-Test/guest-remote-lookup.log`。
+
+## 产物正文摘要（2026-11-19）
+
+Windows 和 Debian 各通过两项产物进程测试。已知摘要用例包含 108,000 个字节，覆盖多字节 UTF-8、NUL、换行和跨读取缓冲区边界。v20 正文迁移前后摘要一致。旧版空正文返回标准空 SHA-256 值，跨任务读取返回未找到。Debian 记录在 `D:/Fliuno-Native-Test/guest-artifact-digest.log`。

@@ -44,6 +44,10 @@ fn artifact_byte_reads_and_catalog_cursors_survive_v20_migration() {
         json!({"taskId":task_id,"artifactId":artifact["id"]}),
     );
     assert_eq!(full["content"], content);
+    let identity = json!({"taskId":task_id,"artifactId":artifact["id"]});
+    let digest = json!({"contentBytes":content.len(),
+        "sha256":"702efa86ad823c66f1fca00acdf586a22a29c6bc80174e9899006c12740aae1b"});
+    assert_eq!(peer.call("artifacts/digest", identity.clone()), digest);
     drop(peer);
     {
         let legacy = rusqlite::Connection::open(&db).unwrap();
@@ -122,6 +126,14 @@ fn artifact_byte_reads_and_catalog_cursors_survive_v20_migration() {
         assert_eq!(page["nextOffset"], bytes.len());
     }
     assert_eq!(bytes, content.as_bytes());
+    assert_eq!(peer.call("artifacts/digest", identity), digest);
+    assert_eq!(
+        peer.call(
+            "artifacts/digest",
+            json!({"taskId":task_id,"artifactId":"empty-fixture"})
+        ),
+        json!({"contentBytes":0,"sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"})
+    );
     let end = bytes.len() as u64;
     assert_eq!(
         peer.call("artifacts/read", params(end, 64)),
@@ -145,7 +157,7 @@ fn artifact_byte_reads_and_catalog_cursors_survive_v20_migration() {
         json!({"sessionId":session["id"],"input":"Other task"}),
     );
     let foreign = json!({"taskId":other["id"],"artifactId":artifact["id"]});
-    for method in ["artifacts/read", "artifacts/getSummary"] {
+    for method in ["artifacts/read", "artifacts/getSummary", "artifacts/digest"] {
         assert_eq!(
             peer.request(method, foreign.clone())["error"]["code"],
             -32004
