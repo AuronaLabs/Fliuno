@@ -651,6 +651,9 @@ pub struct TaskSummaryListParams {
     pub after: u64,
     #[serde(default = "default_limit")]
     pub limit: u32,
+    /// Compact items array byte target. A larger first summary still advances the cursor.
+    #[serde(default)]
+    pub target_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -663,6 +666,9 @@ pub struct WorkspaceTaskSummaryListParams {
     pub after: u64,
     #[serde(default = "default_limit")]
     pub limit: u32,
+    /// Compact items array byte target. A larger first summary still advances the cursor.
+    #[serde(default)]
+    pub target_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

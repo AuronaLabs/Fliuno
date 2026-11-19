@@ -198,3 +198,70 @@ fn full_task_pages_respect_compact_bytes_and_advance_past_an_oversized_task() {
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn task_summary_pages_respect_byte_targets_and_keep_session_workspace_cursors() {
+    let root = std::env::temp_dir().join(format!("fliuno-summary-pages-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let mut ids = Vec::new();
+    for index in 0..12 {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":format!("{index} {}", "报告 ".repeat(120))}),
+        );
+        let task = peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval");
+        ids.push(task["id"].clone());
+    }
+    for index in [2, 7] {
+        peer.call("task/cancel", json!({"taskId":ids[index]}));
+    }
+    let full = peer.call(
+        "task/listSummaries",
+        json!({"sessionId":session["id"],"status":"waiting_approval"}),
+    );
+    let expected = full["items"].as_array().unwrap();
+    assert_eq!(expected.len(), 10);
+    let count = (1..expected.len())
+        .find(|count| serde_json::to_vec(&expected[..*count]).unwrap().len() >= 1024)
+        .unwrap();
+    let target = serde_json::to_vec(&expected[..count]).unwrap().len() as u32;
+
+    let first = peer.call(
+        "task/listSummaries",
+        json!({"sessionId":session["id"],"status":"waiting_approval","targetBytes":target}),
+    );
+    assert_eq!(first["items"].as_array().unwrap(), &expected[..count]);
+    assert_eq!(first["hasMore"], true);
+    let workspace_first = peer.call(
+        "task/listWorkspaceSummaries",
+        json!({"workspaceId":workspace["id"],"status":"waiting_approval","targetBytes":target}),
+    );
+    assert_eq!(workspace_first, first);
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    let second = peer.call(
+        "task/listSummaries",
+        json!({"sessionId":session["id"],"status":"waiting_approval","after":first["nextAfter"],"targetBytes":target}),
+    );
+    assert_eq!(
+        second["items"].as_array().unwrap(),
+        &expected[count..count * 2]
+    );
+    let workspace_second = peer.call(
+        "task/listWorkspaceSummaries",
+        json!({"workspaceId":workspace["id"],"status":"waiting_approval","after":workspace_first["nextAfter"],"targetBytes":target}),
+    );
+    assert_eq!(workspace_second, second);
+    let invalid = peer.request(
+        "task/listWorkspaceSummaries",
+        json!({"workspaceId":workspace["id"],"targetBytes":1023}),
+    );
+    assert_eq!(invalid["error"]["code"], -32602);
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

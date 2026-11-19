@@ -75,9 +75,7 @@ impl Kernel {
         limit: u32,
         target_bytes: Option<u32>,
     ) -> Result<ObjectPage<Task>> {
-        if target_bytes.is_some_and(|n| !(1024..=MAX_TASK_LIST_TARGET_BYTES).contains(&n)) {
-            return Err(Error::Invalid("targetBytes must be 1024..8388608".into()));
-        }
+        validate_task_list_target(target_bytes)?;
         self.require_session(session)?;
         let (cursor, fetch) = page_range(after, limit)?;
         self.query_object_page(
@@ -116,6 +114,18 @@ impl Kernel {
         limit: u32,
         status: Option<TaskStatus>,
     ) -> Result<ObjectPage<TaskSummary>> {
+        self.list_task_summaries_with_target(session, after, limit, status, None)
+    }
+
+    pub fn list_task_summaries_with_target(
+        &self,
+        session: &str,
+        after: u64,
+        limit: u32,
+        status: Option<TaskStatus>,
+        target_bytes: Option<u32>,
+    ) -> Result<ObjectPage<TaskSummary>> {
+        validate_task_list_target(target_bytes)?;
         self.require_session(session)?;
         if let Some(status) = status {
             let (cursor, fetch) = page_range(after, limit)?;
@@ -127,17 +137,19 @@ impl Kernel {
                 params![session, status.as_str(), cursor, fetch],
                 after,
                 limit,
-                None,
+                target_bytes,
             );
         }
         // Keep the row cursor shared with task/list and load only the summary.
-        self.object_page(
+        let (cursor, fetch) = page_range(after, limit)?;
+        self.query_object_page(
             "SELECT tasks.rowid,summaries.data FROM tasks
              JOIN task_summaries AS summaries ON summaries.task_id=tasks.id
              WHERE tasks.session_id=?1 AND tasks.rowid>?2 ORDER BY tasks.rowid LIMIT ?3",
-            Some(session),
+            params![session, cursor, fetch],
             after,
             limit,
+            target_bytes,
         )
     }
 
@@ -150,6 +162,18 @@ impl Kernel {
         limit: u32,
         status: Option<TaskStatus>,
     ) -> Result<ObjectPage<TaskSummary>> {
+        self.list_workspace_task_summaries_with_target(workspace, after, limit, status, None)
+    }
+
+    pub fn list_workspace_task_summaries_with_target(
+        &self,
+        workspace: &str,
+        after: u64,
+        limit: u32,
+        status: Option<TaskStatus>,
+        target_bytes: Option<u32>,
+    ) -> Result<ObjectPage<TaskSummary>> {
+        validate_task_list_target(target_bytes)?;
         self.require_workspace(workspace)?;
         if let Some(status) = status {
             let (cursor, fetch) = page_range(after, limit)?;
@@ -161,17 +185,19 @@ impl Kernel {
                 params![workspace, status.as_str(), cursor, fetch],
                 after,
                 limit,
-                None,
+                target_bytes,
             );
         }
-        self.object_page(
+        let (cursor, fetch) = page_range(after, limit)?;
+        self.query_object_page(
             "SELECT scoped.task_row,summaries.data FROM task_summary_status scoped
              JOIN task_summaries summaries ON summaries.task_id=scoped.task_id
              WHERE scoped.workspace_id=?1 AND scoped.task_row>?2
              ORDER BY scoped.task_row LIMIT ?3",
-            Some(workspace),
+            params![workspace, cursor, fetch],
             after,
             limit,
+            target_bytes,
         )
     }
 
@@ -226,6 +252,13 @@ impl Kernel {
             has_more,
         })
     }
+}
+
+fn validate_task_list_target(target_bytes: Option<u32>) -> Result<()> {
+    if target_bytes.is_some_and(|bytes| !(1024..=MAX_TASK_LIST_TARGET_BYTES).contains(&bytes)) {
+        return Err(Error::Invalid("targetBytes must be 1024..8388608".into()));
+    }
+    Ok(())
 }
 
 fn page_range(after: u64, limit: u32) -> Result<(i64, u32)> {

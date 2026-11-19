@@ -301,6 +301,8 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `initialize.capabilities.taskListTargetBytes` 给出 `task/list` 支持的最大字节目标。传入 `targetBytes`（1024～8388608）时，`items` 按紧凑 JSON 的 UTF-8 长度分页。单项已超过目标时仍完整返回该项。字节目标和行数上限共用原始 `nextAfter` 游标，可用 `task/listSummaries` 在相同位置读取摘要。
 
+`initialize.capabilities.taskSummaryListTargetBytes` 给出 `task/listSummaries` 和 `task/listWorkspaceSummaries` 支持的最大字节目标。两种清单的 `targetBytes` 使用相同范围和紧凑 JSON 数组字节计数，过滤条件和 `after` 游标保持不变；被状态筛选排除的任务不会成为页面结果。
+
 ### 查找历史任务
 
 `session/searchHistory` 只检查指定会话里已完成且有历史投影的用户与助手消息。查询去除首尾空白后须为 1～256 个 UTF-8 字节，按 Unicode 小写转换后的字面子串匹配，无词法或正则语法。`role` 可设为 `user` 或 `assistant`，省略就查两种消息。`limit` 默认为 16，接受 1～32。结果按完成序号从新到旧，包含 `taskId` 与 `completionSequence`。
