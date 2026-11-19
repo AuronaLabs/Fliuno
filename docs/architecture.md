@@ -1,4 +1,4 @@
-# 架构
+# 内核架构
 
 [文档首页](README.md) · [应用协议](protocol.md) · [运行与配置](setup.md)
 

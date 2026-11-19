@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="152" viewBox="0 0 1200 152" role="img" aria-labelledby="title">
+  <title id="title">Fliuno Documentation</title>
+  <defs>
+    <linearGradient id="surface">
+      <stop stop-color="#101e1b"/>
+      <stop offset="1" stop-color="#173c2e"/>
+    </linearGradient>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <path d="M24 0H0V24" fill="none" stroke="#a0d3b3" stroke-opacity=".13"/>
+    </pattern>
+    <clipPath id="frame">
+      <rect width="1200" height="152" rx="24"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <path fill="url(#surface)" d="M0 0h1200v152H0z"/>
+    <path fill="url(#grid)" d="M736 0h464v152H736z"/>
+    <path d="M736 27v98" stroke="#bfd5c5" stroke-opacity=".19"/>
+    <g transform="translate(52 46)">
+      <rect width="60" height="60" rx="16" fill="#c9f38d"/>
+      <path d="M17 44V21a5 5 0 0 1 5-5h22M17 30h17" fill="none" stroke="#13231b" stroke-width="5" stroke-linecap="round"/>
+    </g>
+    <text x="148" y="64" fill="#a7c9b7" font-family="ui-monospace, Consolas, monospace" font-size="21" letter-spacing="4">FLIUNO</text>
+    <text x="145" y="111" fill="#f4f5e9" font-family="'Segoe UI', system-ui, sans-serif" font-size="50" font-weight="700" letter-spacing="-1.5">Documentation</text>
+    <path d="M864 76h272" stroke="#8fac9c" stroke-width="2" stroke-dasharray="4 6"/>
+    <g transform="translate(821 45)">
+      <rect width="62" height="62" rx="15" fill="#142a24" stroke="#5b8070"/>
+      <path d="M19 22l9 9-9 9m16 0h8" fill="none" stroke="#b8ddc8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(945 45)">
+      <rect width="62" height="62" rx="15" fill="#26382c" stroke="#8b9864"/>
+      <path d="m24 22-9 9 9 9m14-18 9 9-9 9m-4-22-6 26" fill="none" stroke="#ebd585" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g transform="translate(1069 45)">
+      <rect width="62" height="62" rx="15" fill="#c9f38d"/>
+      <path d="M31 24c-4-4-10-5-17-4v22c7-1 13 0 17 4 4-4 10-5 17-4V20c-7-1-13 0-17 4v22" fill="none" stroke="#244223" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <rect x=".5" y=".5" width="1199" height="151" rx="23.5" fill="none" stroke="#7fa18d" stroke-opacity=".38"/>
+</svg>

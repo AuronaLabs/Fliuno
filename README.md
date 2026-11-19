@@ -6,21 +6,25 @@
 
 [快速开始](#快速开始) · [文档中心](docs/README.md) · [应用协议](docs/protocol.md) · [更新记录](CHANGELOG.md)
 
+`0.0.3` 开发中 · 应用协议 `0.1` · Windows / Linux
+
 </div>
 
-Fliuno 把模型、工具和外部 Agent 接进同一个任务流程。任务可以停下来等待人工审批，事件和交付物会保存到本地。客户端断线重连后，可以从上次读到的位置继续。
-
-> **内核 `0.0.3` 开发中** · 应用协议 `0.1` · Windows / Linux
+Fliuno 把模型、工具和外部 Agent 接进同一个任务流程。任务可以暂停等待人工审批，事件和交付物会保存到本地。客户端重连后，可以从上次读到的位置继续。
 
 ## 快速开始
 
-**跑一次离线任务。** 在仓库根目录执行下面的命令。需要 Rust 1.89 或更新版本、系统 C/C++ 构建工具及 Python。演示使用临时工作区和内置模型，无需 API Key。 [环境与配置](docs/setup.md)
+### 跑一次离线任务
+
+在仓库根目录执行下一条命令。演示使用临时工作区和内置模型，无需 API Key。需要 Rust 1.89 或更新版本、系统 C/C++ 构建工具及 Python。[环境与配置](docs/setup.md)
 
 ```sh
 python examples/demo.py
 ```
 
-**接入自己的客户端。** 启动本机应用服务后，通过 stdin 发送逐行 JSON-RPC 请求，从 stdout 读取响应。
+### 接入自己的客户端
+
+启动本机应用服务后，通过 stdin 发送逐行 JSON-RPC 请求，从 stdout 读取响应。
 
 ```sh
 cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
@@ -55,7 +59,7 @@ flowchart LR
   Store -->|回放与下载| Client
 ```
 
-任务状态、审批决定、事件和交付物保存在 SQLite 中。Rust 客户端可以在一次调用里建立实时订阅和历史回放窗口，也可以把持久任务事件投影成 AG-UI 事件对象。 [客户端接入](docs/README.md#接入客户端)
+任务状态、审批决定、事件和交付物保存在 SQLite 中。客户端可以把历史回放接到实时更新，也可以将任务事件转换为 AG-UI 事件。[客户端接入](docs/README.md#接入客户端)
 
 ## 开发与验证
 
