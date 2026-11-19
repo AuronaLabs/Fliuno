@@ -224,6 +224,41 @@ fn content_cache_hints_never_hide_a_second_request_or_fallback_after_failure() {
 }
 
 #[test]
+fn remote_json_rpc_read_errors_are_known_and_keep_the_connection() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    let failures = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&failures);
+    let fixture = Fixture::start(move |request| {
+        if request.body["method"] == "resources/list"
+            && observed.fetch_add(1, Ordering::SeqCst) == 0
+        {
+            return Response::json(
+                200,
+                json!({
+                    "jsonrpc":"2.0",
+                    "id":request.body["id"],
+                    "error":{"code":-32602,"message":"READ_ERROR_MUST_NOT_LEAK"}
+                }),
+            );
+        }
+        content::reply(request)
+    });
+    let tools = connect(&fixture, 2000);
+    let list = tool(&tools, "resources_list");
+    let error = invoke(list, json!({}), &CancellationToken::new())
+        .err()
+        .unwrap();
+    assert!(matches!(error, ToolError::Failed(_)));
+    assert!(!error.to_string().contains("READ_ERROR_MUST_NOT_LEAK"));
+    assert!(invoke(list, json!({}), &CancellationToken::new()).is_ok());
+    assert_eq!(count(&fixture, "resources/list"), 2);
+}
+
+#[test]
 fn content_collection_cursor_and_transport_byte_limits_do_not_trigger_retries() {
     let cases = [
         (

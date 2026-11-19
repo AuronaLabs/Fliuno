@@ -57,6 +57,8 @@ HTTP `lifecycle` 默认 `auto`：首先使用 `2026-07-28` 的 `server/discover`
 
 `tasks/get` 收到远端 JSON-RPC 拒绝时作为已知读取失败返回，并保留连接；发送后的超时、取消或传输错误仍属于结果未知，会关闭该主机，避免后续请求复用不确定的会话状态。
 
+资源、提示、Skills 元数据和 completion 查询使用相同的只读错误语义。
+
 Fliuno 将任务句柄持久化在正常工具结果中，由模型或调用方显式选择后续的 `tasks/get`、`tasks/update` 或 `tasks/cancel`；它不会在后台隐式轮询，也不会在重启后自动重发任何 Tasks 请求。任务状态通知、自动续接、过期清理和 MRTR 续交互仍未实现。
 
 ## 当前范围

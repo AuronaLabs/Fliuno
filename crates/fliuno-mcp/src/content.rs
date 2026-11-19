@@ -219,7 +219,7 @@ impl Tool for ContentTool {
             _ => None,
         };
         let kind = self.kind;
-        let response = self.host.request(cancellation, move |service| {
+        let response = self.host.request_read(cancellation, move |service| {
             Box::pin(async move {
                 // Raw SDK requests bypass both automatic MRTR and the convenience
                 // helpers' stale-cache fallback. Each approval observes one request.

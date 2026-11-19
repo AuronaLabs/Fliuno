@@ -45,6 +45,7 @@ impl Host {
         self.request_with_mode(cancellation, operation, RequestMode::Effectful)
     }
 
+    /// Preserve the connection when a side-effect-free MCP method is rejected.
     pub fn request_read<T: 'static>(
         &self,
         cancellation: &CancellationToken,
