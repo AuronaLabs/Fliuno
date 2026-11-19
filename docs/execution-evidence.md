@@ -426,3 +426,8 @@ Windows `scripts/check.ps1` 退出码为 0，445 项测试、26 个离线演示�
 OpenAI Responses、Anthropic Messages 与 Gemini Interactions 的 JSON 和 SSE 响应可生成 `model_usage_reported` 持久事件。用量与对应的模型步骤结果同事务提交，工具调用随后被拒时仍可回放。Anthropic 合并累计用量及缓存输入，Gemini 使用其报告的输入和输出总量。供应商未报告用量或计数无效时，任务继续执行。SQLite v36 增加事件类型投影。
 
 Windows `scripts/check.ps1` 退出码为 0，446 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 校验通过。Debian 来宾通过 17 项模型 HTTP 契约测试和 1 项 app-server 用量持久回放进程测试。模型使用本地模拟服务，真实供应商验收待做。日志为 `target/0.0.2-provider-usage-windows.log`、`D:/Fliuno-Native-Test/guest-provider-usage.log` 和 `D:/Fliuno-Native-Test/guest-model-usage.log`。
+
+
+## 0.0.2 发布前复验（2026-11-19）
+
+清理 Cargo 的 Windows 开发、发布与 Linux 交叉构建产物后，在 Windows 重新运行 `scripts/check.ps1`。脚本以退出码 0 完成，446 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和生成的 RPC Schema 一致性均通过。日志为 `target/0.0.2-release-check-windows.log`。

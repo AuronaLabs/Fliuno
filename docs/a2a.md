@@ -1,5 +1,7 @@
 # A2A 任务与产物
 
+[文档首页](README.md) · [运行与配置](setup.md#a2a-远程任务) · [应用协议](protocol.md)
+
 Fliuno 的 A2A 通道用于调用主机预先注册的远程 Agent。`fliuno-a2a` 只负责有界 HTTP 与 wire 校验；`fliuno-agents` 将协议转换为中性 Agent 观察；`fliuno-core` 保存任务、远程身份、结束原因、产物和事件。它与模型 provider、MCP 工具通道、ACP 本地进程后端分别维护。
 
 ## 固定版本与支持范围

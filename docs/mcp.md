@@ -1,5 +1,7 @@
 # MCP 传输与边界
 
+[文档首页](README.md) · [运行与配置](setup.md#mcp) · [资源与提示](mcp-content.md)
+
 `fliuno-mcp` 使用官方 Rust `rmcp` SDK，将主机配置的 MCP 工具接入 Fliuno 工具注册表。工具发现时生成稳定的模型侧别名；请求仍经过参数 Schema 校验、持久化审批、执行身份记录和结果提交。MCP 工具标记为外部效果，工具注解和服务器能力不会授予权限。
 
 ## 传输配置

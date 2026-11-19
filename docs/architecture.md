@@ -1,5 +1,7 @@
 # 架构
 
+[文档首页](README.md) · [应用协议](protocol.md) · [运行与配置](setup.md)
+
 ## 领域与依赖
 
 ```mermaid
@@ -45,6 +47,25 @@ Skills 分成 frontmatter、catalog、resources 和工具适配层。catalog 固
 外部 Agent 有共同的运行、观察和取消边界。ACP 持有隔离本机进程；A2A 持有主机预选的远程端点。A2A wire crate 不依赖 core、sandbox 或 providers，适配器把远程任务身份/状态转换为中性 `AgentRemoteTask`，最终产物经 core 的有界事务导入。远端产物 URL 与 metadata 是数据；本地工具权限不能从协议响应产生。详见 [A2A](a2a.md)。
 
 跨任务历史分为三层：protocol 定义中性的 TaskContext，core/context 负责完整任务选择、选项规范化与提示数据编码，storage/context 维护完成记录索引及迁移。默认取最近连续后缀，也可按 taskIds 显式选择同会话已完成记录；显式选择整体超预算则拒绝，不丢弃指定项。TaskCompleted 与历史投影原子提交，创建任务时捕获有界快照，之后的并发完成、重启和恢复不修改输入。模型与 Agent 后端只消费已冻结快照；供应商续接留在当前 Task.messages 内，旧审批和来源 context 不进入投影。v5 引入索引，v9 增加显式选择且不重写旧快照；选择、预算与迁移见 [会话上下文](context.md)。
+
+## Rust 工作区模块
+
+| crate | 职责 |
+| --- | --- |
+| `fliuno-protocol` | 版本、请求参数、领域对象、事件与 Schema |
+| `fliuno-core` | 执行状态机、审批策略、工具注册、SQLite 事务与恢复 |
+| `fliuno-providers` | OpenAI Responses / Anthropic Messages / Gemini Interactions 的 HTTP 与消息转换 |
+| `fliuno-mcp` | 官方 Rust SDK 驱动的 MCP stdio / Streamable HTTP、工具与资源/提示适配 |
+| `fliuno-acp` | 独立 ACP v1 客户端；会话、流式更新、单次权限、文件请求与取消 |
+| `fliuno-a2a` | 独立 A2A 1.0 JSON-RPC 客户端；有界请求、消息/任务/产物校验与取消 |
+| `fliuno-agents` | 外部 Agent 后端；ACP 隔离进程/文件代理与 A2A 远程任务/产物投影 |
+| `fliuno-exec` | 主机注册的原生命令、逐任务审批、stdin/双流输出预算、超时取消与进程树回收 |
+| `fliuno-terminal` | 持久 PTY 监督进程、本机 IPC、逐操作审批、有界字节 spool、输出订阅与保留身份的归档回收 |
+| `fliuno-sandbox` | 原生启动与进程所有权；Windows host/AppContainer 共享 Job/reactor、Linux Landlock/seccomp、私有目录与受限句柄继承 |
+| `fliuno-tools` | 工作区目录分页、元数据、文本和二进制读取、流式 SHA-256、文件创建和有基线校验的编辑 |
+| `fliuno-skills` | Agent Skills 元数据、指令与资源按需读取，单技能目录能力和来源绑定 |
+| `fliuno-client` | 本机 Rust stdio 客户端，支持握手、类型化调用和通知 |
+| `fliuno-app-server` | JSON-RPC 分发、stdio 传输、配置组装；不承载业务逻辑 |
 
 ## 状态机
 

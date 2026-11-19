@@ -1,5 +1,9 @@
 # Fliuno Application Protocol 0.1
 
+[文档首页](README.md) · [运行与配置](setup.md) · [JSON Schema](../protocol/fliuno.schema.json)
+
+[传输](#传输) · [Rust 调用方](#rust-调用方) · [方法表](#方法)
+
 ## 传输
 
 本机 stdio，每行一个 UTF-8 JSON-RPC 2.0 值；支持 batch 和 notification。所有业务方法使用命名对象参数；未知参数拒绝。单个输入帧最多 1 MiB。 单批最多 128 项，包含通知。超限时返回 `-32600`，整批不执行。客户端可从 `capabilities.maxBatchItems` 读取限制。进程不监听 TCP，不把本机调用接口当作已认证的远程 API。

@@ -1,5 +1,7 @@
 # ACP 客户端适配器
 
+[文档首页](README.md) · [运行与配置](setup.md#acp-客户端) · [沙箱](sandbox.md)
+
 实现与验证基准：2026-11-18，官方 Rust SDK `agent-client-protocol 5.3.0`，稳定 ACP v1。`fliuno-acp` 是独立库，不依赖 `fliuno-core`、SQLite、模型 provider 或 UI。它使 Fliuno 可以作为 ACP 客户端连接另一个 Agent；没有将 Fliuno 伪装成 ACP 服务端。
 
 ## 当前接口
