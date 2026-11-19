@@ -1,10 +1,10 @@
 //! Process ownership and transport lifecycle, separate from tool registration.
 use super::StdioServerConfig;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
 use process_wrap::tokio::ProcessGroup;
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use process_wrap::tokio::{CommandWrap, KillOnDrop};
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 use rmcp::transport::TokioChildProcess;
 use rmcp::{
     ClientServiceExt, RoleClient,
@@ -42,14 +42,8 @@ pub(super) fn validate(config: &StdioServerConfig) -> Result<(), String> {
     }
     match config.isolation {
         ProcessIsolation::TrustedHost => {
-            if !config.resources.is_empty()
-                || config.linux_cgroup_parent.is_some()
-                || !config.assets.is_empty()
-            {
-                return Err(
-                    "assets, resource limits and linuxCgroupParent require an isolated MCP server"
-                        .into(),
-                );
+            if !config.assets.is_empty() {
+                return Err("staged assets require an isolated MCP server".into());
             }
             if !config
                 .cwd
@@ -100,7 +94,7 @@ pub(super) async fn connect(
 ) -> Result<RunningService<RoleClient, ()>, String> {
     match config.isolation {
         ProcessIsolation::TrustedHost => {
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             {
                 let (child, pipes) =
                     fliuno_sandbox::spawn_host_async(fliuno_sandbox::HostLaunchSpec {
@@ -108,8 +102,8 @@ pub(super) async fn connect(
                         args: config.args.clone(),
                         env,
                         cwd: config.cwd.as_ref().unwrap().clone(),
-                        resources: Default::default(),
-                        linux_cgroup_parent: None,
+                        resources: config.resources,
+                        linux_cgroup_parent: config.linux_cgroup_parent.clone(),
                     })
                     .await
                     .map_err(|_| "cannot spawn trusted MCP server")?;
@@ -118,7 +112,7 @@ pub(super) async fn connect(
                     .await
                     .map_err(|_| "MCP initialization failed".into())
             }
-            #[cfg(not(windows))]
+            #[cfg(not(any(windows, target_os = "linux")))]
             {
                 let mut command = CommandWrap::with_new(&config.command, |command| {
                     command
@@ -162,14 +156,14 @@ pub(super) async fn connect(
 /// and Drop all close the same process tree. Pipe IO uses the native reactor.
 enum ProcessOwner {
     Sandbox(fliuno_sandbox::Child),
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     Host(fliuno_sandbox::HostChild),
 }
 impl ProcessOwner {
     fn kill(&mut self) -> io::Result<()> {
         match self {
             Self::Sandbox(child) => child.kill(),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             Self::Host(child) => child.kill(),
         }
     }

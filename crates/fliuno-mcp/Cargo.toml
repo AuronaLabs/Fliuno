@@ -21,7 +21,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "proce
 jsonschema = { version = "0.61", default-features = false }
 
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(all(unix, not(target_os = "linux")))'.dependencies]
 process-wrap = { version = "10", default-features = false, features = ["tokio1", "kill-on-drop", "process-group"] }
 
 [dev-dependencies]

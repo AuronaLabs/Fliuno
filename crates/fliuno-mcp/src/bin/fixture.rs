@@ -31,6 +31,7 @@ impl ServerHandler for Fixture {
                         "hostPath": {"type": "string"},
                         "endpoint": {"type": "string"},
                         "stagedPath": {"type": "string"},
+                        "probeChild": {"type": "boolean"},
                         "delayMs": {"type": "integer", "minimum": 0, "maximum": 60000}
                     },
                     "required": ["hostPath", "endpoint"],
@@ -60,6 +61,18 @@ impl ServerHandler for Fixture {
         if let Some(path) = arguments.get("stagedPath").and_then(|value| value.as_str()) {
             report["asset"] = json!(std::fs::read_to_string(path).unwrap());
         }
+        if arguments
+            .get("probeChild")
+            .and_then(|value| value.as_bool())
+            == Some(true)
+        {
+            let result = std::env::current_exe().and_then(|program| {
+                std::process::Command::new(program)
+                    .arg("--probe-exit")
+                    .status()
+            });
+            report["child"] = json!(result.is_ok_and(|status| status.success()));
+        }
         report["calls"] = json!(self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1);
         Ok(CallToolResult::success(vec![ContentBlock::text(report.to_string())]).into())
     }
@@ -81,6 +94,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if args.first().is_some_and(|arg| arg == "--probe-exit") {
+        return Ok(());
+    }
     if args.first().is_some_and(|arg| arg == "--probe-native") {
         println!("{}", inspect(&args[1], &args[2]));
         return Ok(());
