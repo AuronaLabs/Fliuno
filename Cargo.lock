@@ -804,6 +804,8 @@ dependencies = [
  "fliuno-client",
  "fliuno-protocol",
  "futures-util",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 

@@ -59,13 +59,21 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
     let session_id = session.id.clone();
     let other_id = other.id.clone();
     let shared = Arc::new(Mutex::new(client));
-    let router = fliuno_ag_ui_http::router(shared.clone(), move |headers| {
-        match headers.get("authorization")?.to_str().ok()? {
+    let reviewer_session = session.id.clone();
+    let other_reviewer_session = other.id.clone();
+    let router = fliuno_ag_ui_http::router_with_approvals(
+        shared.clone(),
+        move |headers| match headers.get("authorization")?.to_str().ok()? {
             "Bearer local-test" => Some(session_id.clone()),
             "Bearer other-test" => Some(other_id.clone()),
             _ => None,
-        }
-    });
+        },
+        move |headers| match headers.get("authorization")?.to_str().ok()? {
+            "Bearer reviewer-test" => Some(reviewer_session.clone()),
+            "Bearer other-reviewer-test" => Some(other_reviewer_session.clone()),
+            _ => None,
+        },
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let listener = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -168,11 +176,10 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    // Both HTTP applications wait on the normal kernel approval gate. The host
-    // approves through the shared client while the HTTP response remains open.
+    let mut first_approval = None;
     for run_id in ["http-run-1", "http-run-2"] {
         let deadline = Instant::now() + Duration::from_secs(8);
-        loop {
+        let approval_id = loop {
             {
                 let mut client = shared.lock().await;
                 let run = client
@@ -188,18 +195,7 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
                     )
                     .unwrap();
                 if let Some(approval) = task.pending_approval {
-                    let _: Task = client
-                        .call(
-                            "approval/respond",
-                            &ApprovalRespondParams {
-                                task_id: task.id,
-                                approval_id: approval.id,
-                                decision: ApprovalDecision::AllowOnce,
-                            },
-                            |_| {},
-                        )
-                        .unwrap();
-                    break;
+                    break approval.id;
                 }
             }
             assert!(
@@ -207,7 +203,68 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
                 "missing pending approval for {run_id}"
             );
             tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        let url = format!("{base}/runs/{run_id}/approvals/{approval_id}");
+        let decide = |token, decision| {
+            http.post(&url)
+                .bearer_auth(token)
+                .json(&json!({"decision":decision}))
+        };
+        assert_eq!(
+            decide("local-test", "allow_once")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+        assert_eq!(
+            decide("other-reviewer-test", "allow_once")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            404
+        );
+        if let Some(other_id) = &first_approval {
+            let cross = format!("{base}/runs/{run_id}/approvals/{other_id}");
+            assert_eq!(
+                http.post(cross)
+                    .bearer_auth("reviewer-test")
+                    .json(&json!({"decision":"allow_once"}))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                404
+            );
+        } else {
+            first_approval = Some(approval_id.clone());
         }
+        let view = http
+            .get(&url)
+            .bearer_auth("reviewer-test")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(view.status(), 200);
+        let view: Value = view.json().await.unwrap();
+        assert_eq!(view["kind"], "tool_call");
+        assert_eq!(view["approval"]["id"], approval_id);
+        let first = decide("reviewer-test", "allow_once").send().await.unwrap();
+        assert_eq!(first.status(), 200);
+        let first: Value = first.json().await.unwrap();
+        let repeated = decide("reviewer-test", "allow_once").send().await.unwrap();
+        assert_eq!(repeated.status(), 200);
+        assert_eq!(repeated.json::<Value>().await.unwrap(), first);
+        assert_eq!(
+            decide("reviewer-test", "deny")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            409
+        );
     }
     start.extend_from_slice(&first.bytes().await.unwrap());
     let output = String::from_utf8(start).unwrap();

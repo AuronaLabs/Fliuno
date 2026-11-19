@@ -520,3 +520,9 @@ Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt�
 Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-http-coalescing-windows.log`。
 
 Debian Linux 6.12.107 来宾的 5 项 AG-UI 进程测试通过，覆盖 HTTP 授权、并发 SSE 与水位合并、跨重启重新附接、取消和帧级续传。日志为 `D:/Fliuno-Native-Test/guest-ag-ui-http-0.0.3-linux.log`。
+
+## 0.0.3 AG-UI HTTP 审批（2026-11-19）
+
+回环测试在两个 SSE 响应保持打开时分别读取并批准工具请求。提交者身份无法审批，其他会话的审批者和同会话其他任务的审批 ID 均无法处理。两次相同决定返回同一份已提交事件，相反决定返回 HTTP 409。
+
+Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。Debian Linux 6.12.107 来宾通过同一 HTTP 进程测试。日志为 `target/0.0.3-ag-ui-http-approvals-windows.log` 和 `D:/Fliuno-Native-Test/guest-ag-ui-http-approvals.log`。

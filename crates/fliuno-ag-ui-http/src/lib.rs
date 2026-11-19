@@ -1,4 +1,5 @@
 //! An embeddable HTTP transport for Fliuno's AG-UI text profile.
+mod approval;
 mod delivery;
 
 use axum::{
@@ -32,6 +33,8 @@ struct Gateway<R, W> {
     client: Arc<Mutex<Client<R, W>>>,
     authorize: Box<Authorize>,
     streams: Arc<Semaphore>,
+    reviewer: Option<Box<Authorize>>,
+    reviews: Arc<Semaphore>,
     watermark: Mutex<Option<(Instant, u64)>>,
 }
 
@@ -47,16 +50,54 @@ where
     R: BufRead + Send + 'static,
     W: Write + Send + 'static,
 {
+    build_router(client, Box::new(authorize), None)
+}
+
+/// Also mount the host approval routes. The reviewer callback selects the local
+/// session based on a separately authenticated reviewer. Run authorization
+/// by itself does not grant permission to inspect or approve tool requests.
+pub fn router_with_approvals<R, W>(
+    client: Arc<Mutex<Client<R, W>>>,
+    authorize: impl Fn(&HeaderMap) -> Option<String> + Send + Sync + 'static,
+    reviewer: impl Fn(&HeaderMap) -> Option<String> + Send + Sync + 'static,
+) -> Router
+where
+    R: BufRead + Send + 'static,
+    W: Write + Send + 'static,
+{
+    build_router(client, Box::new(authorize), Some(Box::new(reviewer)))
+}
+
+fn build_router<R, W>(
+    client: Arc<Mutex<Client<R, W>>>,
+    authorize: Box<Authorize>,
+    reviewer: Option<Box<Authorize>>,
+) -> Router
+where
+    R: BufRead + Send + 'static,
+    W: Write + Send + 'static,
+{
+    let has_reviewer = reviewer.is_some();
     let gateway = Arc::new(Gateway {
         client,
-        authorize: Box::new(authorize),
+        authorize,
         streams: Arc::new(Semaphore::new(16)),
+        reviewer,
+        reviews: Arc::new(Semaphore::new(8)),
         watermark: Mutex::new(None),
     });
-    Router::new()
+    let routes = Router::new()
         .route("/run", post(start::<R, W>))
-        .route("/runs/{run_id}", get(attach::<R, W>))
-        .with_state(gateway)
+        .route("/runs/{run_id}", get(attach::<R, W>));
+    let routes = if has_reviewer {
+        routes.route(
+            "/runs/{run_id}/approvals/{approval_id}",
+            get(approval::get::<R, W>).post(approval::respond::<R, W>),
+        )
+    } else {
+        routes
+    };
+    routes.with_state(gateway)
 }
 
 type Status<T> = Result<T, StatusCode>;
@@ -101,32 +142,12 @@ async fn start<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     if request.headers().contains_key("last-event-id") {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let is_json = request
-        .headers()
-        .get(header::CONTENT_TYPE)
-        .and_then(|header| header.to_str().ok())
-        .is_some_and(|mime| {
-            mime.split(';')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .eq_ignore_ascii_case("application/json")
-        });
-    if !is_json {
-        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
-    }
     let permit = gateway
         .streams
         .clone()
         .try_acquire_owned()
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let body = timeout(
-        Duration::from_secs(10),
-        to_bytes(request.into_body(), MAX_APP_REQUEST_BYTES),
-    )
-    .await
-    .map_err(|_| StatusCode::REQUEST_TIMEOUT)?
-    .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)?;
+    let body = read_json(request, MAX_APP_REQUEST_BYTES).await?;
     let (replay, through) = gateway
         .rpc(move |client| {
             let run = client
@@ -198,6 +219,30 @@ async fn respond<R: BufRead + Send + 'static, W: Write + Send + 'static>(
         Body::from_stream(stream),
     )
         .into_response())
+}
+
+async fn read_json(request: Request, limit: usize) -> Status<axum::body::Bytes> {
+    let is_json = request
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|mime| {
+            mime.split(';')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .eq_ignore_ascii_case("application/json")
+        });
+    if !is_json {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    timeout(
+        Duration::from_secs(10),
+        to_bytes(request.into_body(), limit),
+    )
+    .await
+    .map_err(|_| StatusCode::REQUEST_TIMEOUT)?
+    .map_err(|_| StatusCode::PAYLOAD_TOO_LARGE)
 }
 
 fn run_status(error: AgUiRunError) -> StatusCode {

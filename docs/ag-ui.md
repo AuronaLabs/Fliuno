@@ -2,7 +2,7 @@
 
 [文档首页](README.md) · [应用协议](protocol.md#rust-调用方)
 
-宿主可以通过 Rust 客户端提交文本任务，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批通过 Fliuno 应用协议处理。
+宿主可以通过 Rust 客户端提交文本任务，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批可以由宿主通过应用协议处理，也可以挂载独立授权的审批入口。
 
 [提交文本任务](#提交文本任务) · [投影内核事件](#投影内核事件) · [SSE 输出与续传](#sse-输出与续传) · [HTTP 接入](#http-接入)
 
@@ -109,5 +109,16 @@ while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &
 | `GET /runs/{run_id}` | 在授权会话中找回运行。可发送 `Last-Event-ID`，从指定帧之后续传。不存在或不属于该会话的运行返回 `404`。 |
 
 路由每次读取一页持久事件，释放客户端后再把编码好的页交给响应体。当前限制同时 16 条响应或待解析请求，POST 正文最多 1 MiB，读取超时 10 秒。空闲响应共享约每 150 毫秒一次的水位查询。水位没有推进时不读取事件页，并定期发送 SSE 保活注释。执行段结束后关闭响应。
+
+### HTTP 审批
+
+用 `router_with_approvals` 挂载审批入口。第二个授权回调根据请求头确定审批者及其可审阅的本机会话。通过任务提交授权的身份仍需单独通过审批授权。
+
+| 请求 | 行为 |
+| --- | --- |
+| `GET /runs/{run_id}/approvals/{approval_id}` | 读取绑定到该任务的待审批工具及参数。 |
+| `POST /runs/{run_id}/approvals/{approval_id}` | 提交 `{"decision":"allow_once"}` 或 `{"decision":"deny"}`，返回持久决定事件。 |
+
+审批 ID 来自 SSE 的 `fliuno.approval_requested` 事件。重复提交同一决定返回原事件，提交相反决定返回 `409`。属于其他任务或会话的审批返回 `404`。宿主可以在响应保持打开时处理审批，审批入口有独立的并发名额。
 
 事件字段对照了 AG-UI 官方规范和官方 TypeScript Schema，固定在提交 `3416b86da4b3288e87f827c7f2759a7fa18b5231`。[事件规范](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/docs/concepts/events.mdx) · [SDK Schema](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/sdks/typescript/packages/core/src/generated/schemas.ts)
