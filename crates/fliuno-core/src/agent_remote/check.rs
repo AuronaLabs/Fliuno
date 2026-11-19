@@ -1,5 +1,6 @@
 //! Explicit checks append evidence without reopening the original run.
 use super::*;
+use std::time::Duration;
 
 pub struct PreparedRemoteTaskCheck {
     task_id: String,
@@ -7,6 +8,7 @@ pub struct PreparedRemoteTaskCheck {
     check_id: String,
     expected: AgentRemoteTask,
     backend: Arc<dyn AgentBackend>,
+    wait: Option<Duration>,
 }
 
 pub struct CompletedRemoteTaskCheck {
@@ -29,8 +31,11 @@ impl PreparedRemoteTaskCheck {
         let observed = if cancellation.is_cancelled() {
             None
         } else {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                self.backend.check_remote_task(&self.expected, cancellation)
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match self.wait {
+                Some(wait) => self
+                    .backend
+                    .watch_remote_task(&self.expected, wait, cancellation),
+                None => self.backend.check_remote_task(&self.expected, cancellation),
             }))
             .ok()
             .flatten()
@@ -70,7 +75,27 @@ impl Kernel {
             .any(|agent| agent.supports_remote_task_check())
     }
 
+    pub fn remote_task_watch_supported(&self) -> bool {
+        self.agents
+            .values()
+            .any(|agent| agent.supports_remote_task_watch())
+    }
+
     pub fn prepare_remote_task_check(&self, task_id: &str) -> Result<PreparedRemoteTaskCheck> {
+        self.prepare_remote_task_observation(task_id, None)
+    }
+
+    pub fn prepare_remote_task_observation(
+        &self,
+        task_id: &str,
+        wait_ms: Option<u64>,
+    ) -> Result<PreparedRemoteTaskCheck> {
+        if wait_ms.is_some_and(|ms| !(1..=fliuno_protocol::MAX_REMOTE_TASK_WATCH_MS).contains(&ms))
+        {
+            return Err(Error::Invalid(
+                "remote task waitMs must be 1 to 5000".into(),
+            ));
+        }
         let task = self.get_task(task_id)?;
         let TaskBackend::ExternalAgent { agent_id } = &task.backend else {
             return Err(Error::Conflict(
@@ -94,12 +119,22 @@ impl Kernel {
                 "agent registration changed or lacks an authority binding".into(),
             ));
         }
+        if wait_ms.is_some()
+            && (!backend.supports_remote_task_watch()
+                || expected.state.is_terminal()
+                || expected.context_id.is_none())
+        {
+            return Err(Error::Conflict(
+                "remote task does not support watching".into(),
+            ));
+        }
         Ok(PreparedRemoteTaskCheck {
             task_id: task.id,
             run_id: run.id,
             check_id: new_id("remote_check"),
             expected,
             backend: Arc::clone(backend),
+            wait: wait_ms.map(Duration::from_millis),
         })
     }
 

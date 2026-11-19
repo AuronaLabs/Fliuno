@@ -265,6 +265,64 @@ fn remote_check_after_stream_loss_appends_evidence_without_replaying_or_changing
 }
 
 #[test]
+fn remote_watch_after_restart_records_only_changed_status_without_resubmitting() {
+    let wire = Fixture::start(|request| {
+        let result = match request.body["method"].as_str().unwrap() {
+            "SendStreamingMessage" => vec![json!({"task":task("TASK_STATE_WORKING")})],
+            "SubscribeToTask" => {
+                assert_eq!(request.body["params"], json!({"id":"remote-task"}));
+                vec![
+                    json!({"task":task("TASK_STATE_WORKING")}),
+                    json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"late","parts":[{"text":"private remote content"}]}}}),
+                    json!({"statusUpdate":{"taskId":"remote-task","contextId":"remote-context","status":{"state":"TASK_STATE_COMPLETED"}}}),
+                ]
+            }
+            other => panic!("unexpected A2A method {other}"),
+        };
+        Response::sse(
+            result
+                .into_iter()
+                .map(|frame| {
+                    format!(
+                        "data: {}\n\n",
+                        json!({"jsonrpc":"2.0","id":request.body["id"],"result":frame})
+                    )
+                })
+                .collect(),
+        )
+    });
+    let directory = Directory::new(&wire, 10_000, false).with_streaming();
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let submission = start(&mut peer, &session, "watch-after-restart");
+    let id = &submission["id"];
+    let before = wait_finished(&mut peer, id);
+    assert_eq!(before["status"], "interrupted");
+    assert!(before["agentRun"]["outcomeUnknown"].as_bool().unwrap());
+    drop(peer);
+
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    for invalid in [0, 5001] {
+        assert_eq!(
+            peer.request("task/checkRemote", json!({"taskId":id,"waitMs":invalid}))["error"]["code"],
+            -32602
+        );
+    }
+    let accepted = peer.call("task/checkRemote", json!({"taskId":id,"waitMs":3000}));
+    let observed = wait_checked(&mut peer, id, &accepted["checkId"]);
+    assert_eq!(
+        observed["data"]["outcome"],
+        json!({"status":"observed","state":"completed"})
+    );
+    assert_eq!(peer.call("task/get", json!({"taskId":id})), before);
+    assert_eq!(peer.call("artifacts/list", json!({"taskId":id})), json!([]));
+    drop(peer);
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    assert_eq!(wait_checked(&mut peer, id, &accepted["checkId"]), observed);
+    assert_eq!(wire.requests().len(), 2);
+}
+
+#[test]
 fn remote_check_reports_bad_evidence_and_rejects_changed_registrations_before_io() {
     let checks = AtomicUsize::new(0);
     let wire = Fixture::start(

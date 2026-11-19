@@ -883,11 +883,22 @@
     },
     "task/checkRemote": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "title": "TaskIdParams",
+      "title": "RemoteTaskCheckParams",
       "type": "object",
       "properties": {
         "taskId": {
           "type": "string"
+        },
+        "waitMs": {
+          "description": "Wait for a status change to a known remote task, up to this deadline.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 1,
+          "maximum": 5000,
+          "default": null
         }
       },
       "additionalProperties": false,

@@ -2,6 +2,8 @@
 
 ## 0.0.2：内核增量开发中
 
+- [x] A2A 短时远端状态观察复用 `task/checkRemote` 的后台核对和持久事件，按源任务身份接收 `SubscribeToTask` 快照与更新。
+
 - [x] 工作区和会话的产物清单支持按 `mediaType` 精确筛选。SQLite v28 回填索引并保留已有分页游标。
 
 - [x] 可信前台命令复用 Windows Job 和 Linux cgroup v2 启动层，可按宿主配置限制进程、内存及 Linux CPU。工程测试覆盖任务审批、原生进程限额和回收。

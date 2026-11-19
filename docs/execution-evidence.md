@@ -221,3 +221,7 @@ Windows 和 Debian 各通过两项产物进程契约。测试覆盖旧版正文�
 SQLite 3.49.1 内存数据库写入 10 万条模拟产物。两种查询都返回同一工作区的 51 条稀疏结果。复合索引可以同时定位工作区、类型和游标。61 轮交替采样中，首屏的中位数为 0.36 ms，使用仅工作区索引时为 7.59 ms。翻页查询分别为 0.32 ms 和 7.82 ms。日志为 `target/0.0.2-artifact-media-index-bench.log`。
 
 Windows 随后以 `target/0.0.2-native-exec-artifact-types-windows.log` 完成全量复验，包括 391 项测试和 26 个离线演示。此前一轮的测试已通过，但在重叠的构建中 Cargo 无法替换被占用的 Windows 可执行文件，演示因此中断。串行执行后通过。
+
+## A2A 短时状态观察（2026-11-19）
+
+Windows 全量检查通过 396 项测试和 26 个离线演示，记录在 `target/0.0.2-a2a-watch-windows.log`。Windows 和 Debian 各通过 20 项 app-server A2A 进程测试，验证订阅形成独立的持久核对事件、原运行和产物保持原状、重启可回放核对结果。Debian 的 `D:/Fliuno-Native-Test/guest-a2a-watch.log` 同轮有两个普通 JSON-RPC 用例失败，其中一个报传输错误。普通 fixture 请求时限从 300 ms 调到 3 秒，专门的超时用例仍使用 300 ms。最终 Windows 和 Debian 各通过 16 项 JSON-RPC 用例，Debian 复跑记录在 `D:/Fliuno-Native-Test/guest-a2a-watch-confirm.log`。

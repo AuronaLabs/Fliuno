@@ -334,6 +334,7 @@ impl RpcServer {
             });
             capabilities["sessionHistorySearch"] = json!(true);
             capabilities["artifactMediaTypeFilter"] = json!(true);
+            capabilities["remoteTaskWatch"] = json!(self.kernel()?.remote_task_watch_supported());
             capabilities["workspaceEventReplay"] = json!(true);
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);
@@ -576,8 +577,10 @@ impl RpcServer {
                 })
             }
             "task/checkRemote" => {
-                let p: TaskIdParams = decode(params)?;
-                let check = self.kernel()?.prepare_remote_task_check(&p.task_id)?;
+                let p: RemoteTaskCheckParams = decode(params)?;
+                let check = self
+                    .kernel()?
+                    .prepare_remote_task_observation(&p.task_id, p.wait_ms)?;
                 let accepted = RemoteTaskCheckAccepted {
                     check_id: check.check_id().to_owned(),
                 };

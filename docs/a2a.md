@@ -66,6 +66,8 @@ cargo run -p fliuno-app-server -- --a2a-config C:/absolute/path/to/agents.json
 
 `initialize.capabilities.remoteTaskChecks` 为 true 时，客户端可用 `task/checkRemote` 传入 `{"taskId":"<本机任务 ID>"}`。该任务必须有已结束的 Agent 运行及已保存的远端身份，且当前宿主注册须与原任务的绑定一致。客户端不提供远端 ID、URL 或凭据。请求进入共享后台队列并立即返回 `{"checkId":"..."}`；同一任务已有在途核对或队列已满时返回状态冲突。
 
+配置了支持流式的 A2A Agent 时，`initialize.capabilities.remoteTaskWatch` 为 true。调用 `task/checkRemote` 时可加 `waitMs`（1～5000），对已绑定远端任务和上下文 ID、且上次记录尚非终态的已结束本机任务发起一次 `SubscribeToTask`。预算包含可选 Agent Card 检查和订阅建立。首帧必须是身份相符的任务快照。如果状态已变化，立即记录该状态。否则继续等到检测到变化，或到期记录已验证的状态。快照前超时、协议中断或身份不符记为 `unavailable`。观察只追加核对事件，产物和原运行保持原状。
+
 如果配置了卡片，先核对固定接口；之后只发一次 `GetTask`，使用已保存的 Task ID，且不请求远端历史。核对总时限为任务超时和 5 秒中的较小值，同时受单请求超时约束。通过 `notifications/event` 或 `events/list` 查找 `agent_remote_task_checked`，按 `checkId` 关联；事件还携带原 `runId`。`outcome.status` 为 `observed` 时有 `state`；`unavailable` 表示未取得可用响应（包括超时、远端错误或坏响应），`identity_mismatch` 表示远端 ID 或上下文不一致，`state_conflict` 表示响应与原记录的终态冲突或退回 submitted。
 
 核对只追加状态证据，不改写原 `agentRun`、`outcomeUnknown`、本机任务状态或产物；也不取消或继续远端任务。若 app-server 在结果写入前退出，受理的核对可能没有结果事件，重启后不会自动恢复。客户端可显式发起新的只读核对。

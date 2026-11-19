@@ -230,6 +230,18 @@ pub struct RemoteTaskCheckAccepted {
     pub check_id: String,
 }
 
+pub const MAX_REMOTE_TASK_WATCH_MS: u64 = 5_000;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteTaskCheckParams {
+    pub task_id: String,
+    /// Wait for a status change to a known remote task, up to this deadline.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = MAX_REMOTE_TASK_WATCH_MS))]
+    pub wait_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentArtifactLink {

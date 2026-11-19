@@ -159,6 +159,9 @@ impl AgentBackend for A2aBackend {
     fn supports_remote_task_check(&self) -> bool {
         true
     }
+    fn supports_remote_task_watch(&self) -> bool {
+        self.streaming
+    }
     fn supports_remote_continuation(&self) -> bool {
         true
     }
@@ -185,6 +188,53 @@ impl AgentBackend for A2aBackend {
                 }) => result.ok()?.ok()?,
             };
             remote_task(&task).ok()
+        })
+    }
+    fn watch_remote_task(
+        &self,
+        expected: &AgentRemoteTask,
+        wait: Duration,
+        cancellation: &CancellationToken,
+    ) -> Option<AgentRemoteTask> {
+        let context = expected.context_id.as_deref()?;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
+        runtime.block_on(async {
+            let client = Client::new(self.options.clone()).ok()?;
+            let deadline = Instant::now() + self.task_timeout.min(wait);
+            let (mut stream, snapshot) = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return None,
+                _ = sleep_until(deadline) => return None,
+                result = async {
+                    if let Some(card) = &self.card {
+                        client.check_card_streaming(card).await.ok()?;
+                    }
+                    let mut stream = client.subscribe_to_task(&expected.id, context).await.ok()?;
+                    let StreamEvent::Task(snapshot) = stream.recv().await?.ok()? else { return None; };
+                    Some((stream, snapshot))
+                } => result?,
+            };
+            let mut latest = remote_task(&snapshot).ok()?;
+            if latest.state != expected.state {
+                return Some(latest);
+            }
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => return None,
+                    _ = sleep_until(deadline) => return Some(latest),
+                    event = stream.recv() => event?.ok()?,
+                };
+                if let StreamEvent::StatusUpdate { state, .. } = event {
+                    latest.state = remote_state(state).ok()?;
+                    if latest.state != expected.state {
+                        return Some(latest);
+                    }
+                }
+            }
         })
     }
     fn execute(
@@ -256,8 +306,8 @@ pub(super) fn stop_reason(state: TaskState) -> Option<AgentStopReason> {
         _ => None,
     }
 }
-fn remote_task(task: &Task) -> Result<AgentRemoteTask, ()> {
-    let state = match task.state {
+fn remote_state(state: TaskState) -> Result<AgentTaskState, ()> {
+    Ok(match state {
         TaskState::Submitted => AgentTaskState::Submitted,
         TaskState::Working => AgentTaskState::Working,
         TaskState::Completed => AgentTaskState::Completed,
@@ -267,11 +317,13 @@ fn remote_task(task: &Task) -> Result<AgentRemoteTask, ()> {
         TaskState::InputRequired => AgentTaskState::InputRequired,
         TaskState::AuthRequired => AgentTaskState::AuthRequired,
         TaskState::Unspecified => return Err(()),
-    };
+    })
+}
+fn remote_task(task: &Task) -> Result<AgentRemoteTask, ()> {
     Ok(AgentRemoteTask {
         id: task.id.clone(),
         context_id: task.context_id.clone(),
-        state,
+        state: remote_state(task.state)?,
     })
 }
 fn record_task(observer: &dyn AgentObserver, task: &Task) -> Result<(), ()> {

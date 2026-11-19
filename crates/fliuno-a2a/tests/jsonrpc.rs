@@ -8,10 +8,14 @@ use serde_json::{Value, json};
 use std::time::Duration;
 
 fn client(fixture: &Fixture) -> Client {
+    // Allow cold starts and scheduling delays in the emulated Linux runner.
+    client_with_timeout(fixture, Duration::from_secs(3))
+}
+fn client_with_timeout(fixture: &Fixture, request_timeout: Duration) -> Client {
     Client::new(Options {
         endpoint: fixture.url("/rpc"),
         bearer_token: Some("host-secret".into()),
-        request_timeout: Duration::from_millis(300),
+        request_timeout,
         max_response_bytes: 1024,
     })
     .unwrap()
@@ -180,6 +184,114 @@ async fn streaming_response_enforces_the_total_byte_budget() {
     ));
 }
 
+fn stream_response(request: &Request, frames: impl IntoIterator<Item = Value>) -> Response {
+    Response::sse(
+        frames
+            .into_iter()
+            .map(|result| {
+                format!(
+                    "data: {}\n\n",
+                    json!({"jsonrpc":"2.0","id":request.body["id"],"result":result})
+                )
+            })
+            .collect(),
+    )
+}
+
+fn status_update(state: &str, context: &str) -> Value {
+    json!({"statusUpdate":{"taskId":"remote-task","contextId":context,"status":{"state":state}}})
+}
+
+#[tokio::test]
+async fn subscription_observes_existing_task_across_pause_and_completion() {
+    let peer = Fixture::start(|request| {
+        assert_eq!(request.body["method"], "SubscribeToTask");
+        assert_eq!(request.body["params"], json!({"id":"remote-task"}));
+        assert_eq!(request.headers["accept"], "text/event-stream");
+        stream_response(
+            request,
+            [
+                json!({"task":task("TASK_STATE_INPUT_REQUIRED")}),
+                status_update("TASK_STATE_WORKING", "context"),
+                status_update("TASK_STATE_COMPLETED", "context"),
+            ],
+        )
+    });
+    let mut stream = client(&peer)
+        .subscribe_to_task("remote-task", "context")
+        .await
+        .unwrap();
+    assert!(matches!(
+        stream.recv().await,
+        Some(Ok(StreamEvent::Task(Task {
+            state: TaskState::InputRequired,
+            ..
+        })))
+    ));
+    for expected in [TaskState::Working, TaskState::Completed] {
+        assert!(
+            matches!(stream.recv().await, Some(Ok(StreamEvent::StatusUpdate { state, .. })) if state == expected)
+        );
+    }
+    assert!(stream.recv().await.is_none());
+    assert_eq!(peer.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn subscription_requires_snapshot_and_does_not_accept_a_foreign_context_or_pause_as_eof() {
+    for mode in 0..4 {
+        let peer = Fixture::start(move |request| {
+            let frames = match mode {
+                0 => vec![status_update("TASK_STATE_WORKING", "context")],
+                1 => vec![
+                    json!({"task":{"id":"remote-task","contextId":"foreign","status":{"state":"TASK_STATE_WORKING"}}}),
+                ],
+                2 => vec![
+                    json!({"task":task("TASK_STATE_WORKING")}),
+                    status_update("TASK_STATE_COMPLETED", "foreign"),
+                ],
+                _ => vec![json!({"task":task("TASK_STATE_INPUT_REQUIRED")})],
+            };
+            stream_response(request, frames)
+        });
+        let mut stream = client(&peer)
+            .subscribe_to_task("remote-task", "context")
+            .await
+            .unwrap();
+        if mode >= 2 {
+            assert!(matches!(
+                stream.recv().await,
+                Some(Ok(StreamEvent::Task(_)))
+            ));
+        }
+        assert!(matches!(stream.recv().await, Some(Err(Error::Protocol))));
+        assert!(stream.recv().await.is_none());
+        assert_eq!(peer.requests().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn subscription_preserves_a_json_rpc_rejection_without_retry() {
+    let peer = Fixture::start(|request| {
+        Response::json(
+            200,
+            json!({
+                "jsonrpc":"2.0","id":request.body["id"],"error":{"code":-32004,"message":"private detail"}
+            }),
+        )
+    });
+    let client = client(&peer);
+    assert!(matches!(
+        client.subscribe_to_task("", "context").await,
+        Err(Error::Config)
+    ));
+    assert!(matches!(
+        client.subscribe_to_task("remote-task", "context").await,
+        Err(Error::Remote(-32004))
+    ));
+    assert_eq!(peer.requests().len(), 1);
+}
+
 #[tokio::test]
 async fn immediate_message_preserves_text_data_bytes_urls_and_metadata() {
     let message = json!({"messageId":"reply","role":"ROLE_AGENT","parts":[{"text":"hello"},{"data":{"count":3}},{"raw":"aGk=","mediaType":"text/plain","filename":"hi.txt"},{"url":"https://elsewhere.invalid/file","metadata":{"inert":true}}],"metadata":{"vendor":"retained"}});
@@ -266,7 +378,9 @@ async fn response_body_and_timeout_are_bounded_and_one_shot() {
     ));
     let stalled = Fixture::start(|_| Response::hold());
     assert!(matches!(
-        client(&stalled).send_text("one", "input", None).await,
+        client_with_timeout(&stalled, Duration::from_millis(300))
+            .send_text("one", "input", None)
+            .await,
         Err(Error::Transport)
     ));
     assert_eq!(stalled.requests().len(), 1);

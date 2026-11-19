@@ -93,6 +93,9 @@ pub trait AgentBackend: Send + Sync {
     fn supports_remote_task_check(&self) -> bool {
         false
     }
+    fn supports_remote_task_watch(&self) -> bool {
+        false
+    }
     fn supports_remote_continuation(&self) -> bool {
         false
     }
@@ -104,6 +107,15 @@ pub trait AgentBackend: Send + Sync {
     fn check_remote_task(
         &self,
         _remote: &AgentRemoteTask,
+        _cancellation: &CancellationToken,
+    ) -> Option<AgentRemoteTask> {
+        None
+    }
+    /// Observe only the status of a previously recorded remote task.
+    fn watch_remote_task(
+        &self,
+        _remote: &AgentRemoteTask,
+        _wait: std::time::Duration,
         _cancellation: &CancellationToken,
     ) -> Option<AgentRemoteTask> {
         None

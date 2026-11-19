@@ -1,4 +1,4 @@
-use crate::{Error, Result, SendResponse, StreamEvent, Task, wire::valid_id};
+use crate::{Error, Result, SendResponse, StreamEvent, Task, TaskState, wire::valid_id};
 use reqwest::{
     Url,
     header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue},
@@ -224,22 +224,7 @@ impl Client {
             .send()
             .await
             .map_err(|_| Error::Transport)?;
-        let raw = self.body(response).await?;
-        if raw.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
-            || raw.get("id").and_then(Value::as_str) != Some(&id)
-            || raw.get("result").is_some() == raw.get("error").is_some()
-        {
-            return Err(Error::Protocol);
-        }
-        if let Some(error) = raw.get("error") {
-            return Err(Error::Remote(
-                error
-                    .get("code")
-                    .and_then(Value::as_i64)
-                    .ok_or(Error::Protocol)?,
-            ));
-        }
-        raw.get("result").cloned().ok_or(Error::Protocol)
+        decode_rpc_result(self.body(response).await?, &id)
     }
     /// Validate and encode before the caller commits to a one-shot send.
     pub fn prepare_text(
@@ -264,7 +249,10 @@ impl Client {
             streaming,
             existing_task: if streaming {
                 target.and_then(|target| {
-                    Some((target.task_id?.to_owned(), target.context_id.to_owned()))
+                    Some(TaskIdentity {
+                        id: target.task_id?.to_owned(),
+                        context_id: target.context_id.to_owned(),
+                    })
                 })
             } else {
                 None
@@ -295,11 +283,33 @@ impl Client {
             .await
     }
 
+    /// Observe an existing task. The caller supplies the task's previously
+    /// observed identity and owns the wait deadline and receiver.
+    pub async fn subscribe_to_task(
+        &self,
+        task_id: &str,
+        context_id: &str,
+    ) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
+        if !valid_id(task_id) || !valid_id(context_id) {
+            return Err(Error::Config);
+        }
+        let (id, bytes) = self.encode_rpc("SubscribeToTask", json!({"id":task_id}))?;
+        self.post_stream(
+            id,
+            bytes,
+            StreamStart::Subscription(TaskIdentity {
+                id: task_id.to_owned(),
+                context_id: context_id.to_owned(),
+            }),
+        )
+        .await
+    }
+
     async fn post_stream(
         &self,
         id: String,
         bytes: Vec<u8>,
-        existing_task: Option<(String, String)>,
+        start: StreamStart,
     ) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
         let mut response = self
             .stream_http
@@ -312,13 +322,19 @@ impl Client {
         if !response.status().is_success() {
             return Err(Error::Http(response.status().as_u16()));
         }
-        if response
+        let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.split(';').next())
-            .is_none_or(|value| !value.trim().eq_ignore_ascii_case("text/event-stream"))
-        {
+            .map(str::trim)
+            .ok_or(Error::Protocol)?;
+        if content_type.eq_ignore_ascii_case("application/json") {
+            // A peer can reject the subscription before opening an SSE stream.
+            decode_rpc_result(self.body(response).await?, &id)?;
+            return Err(Error::Protocol);
+        }
+        if !content_type.eq_ignore_ascii_case("text/event-stream") {
             return Err(Error::Protocol);
         }
         if response
@@ -331,7 +347,7 @@ impl Client {
         let limit = self.limit;
         tokio::spawn(async move {
             let sequence = StreamSequence {
-                existing_task,
+                start,
                 identity: None,
             };
             if let Err(error) =
@@ -422,7 +438,7 @@ pub struct PreparedMessage<'a> {
     id: String,
     bytes: Vec<u8>,
     streaming: bool,
-    existing_task: Option<(String, String)>,
+    existing_task: Option<TaskIdentity>,
 }
 
 impl PreparedMessage<'_> {
@@ -438,7 +454,11 @@ impl PreparedMessage<'_> {
             return Err(Error::Config);
         }
         self.client
-            .post_stream(self.id, self.bytes, self.existing_task)
+            .post_stream(
+                self.id,
+                self.bytes,
+                StreamStart::Submission(self.existing_task),
+            )
             .await
     }
 }
@@ -453,7 +473,14 @@ async fn consume_stream(
     let mut decoder = SseDecoder::default();
     let mut total = 0usize;
     let mut event_count = 0usize;
-    while let Some(chunk) = response.chunk().await.map_err(|_| Error::Transport)? {
+    loop {
+        let chunk = tokio::select! {
+            _ = sender.closed() => return Ok(()),
+            chunk = response.chunk() => chunk.map_err(|_| Error::Transport)?,
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
         total = total.checked_add(chunk.len()).ok_or(Error::Budget)?;
         if total > limit {
             return Err(Error::Budget);
@@ -588,8 +615,26 @@ impl SseDecoder {
     }
 }
 
+struct TaskIdentity {
+    id: String,
+    context_id: String,
+}
+
+impl TaskIdentity {
+    fn matches(&self, id: &str, context_id: Option<&str>) -> bool {
+        self.id == id && context_id == Some(self.context_id.as_str())
+    }
+}
+
+// Submission ends at the end of the current turn. A subscription observes the
+// task itself, including turns resumed by another client while it stays open.
+enum StreamStart {
+    Submission(Option<TaskIdentity>),
+    Subscription(TaskIdentity),
+}
+
 struct StreamSequence {
-    existing_task: Option<(String, String)>,
+    start: StreamStart,
     identity: Option<StreamIdentity>,
 }
 
@@ -605,9 +650,14 @@ impl StreamSequence {
         }
         match (&mut self.identity, event) {
             (None, StreamEvent::Task(task)) => {
-                if self.existing_task.as_ref().is_some_and(|(id, context)| {
-                    id != &task.id || task.context_id.as_ref() != Some(context)
-                }) {
+                let expected = match &self.start {
+                    StreamStart::Submission(expected) => expected.as_ref(),
+                    StreamStart::Subscription(expected) => Some(expected),
+                };
+                if expected.is_some_and(|id| !id.matches(&task.id, task.context_id.as_deref()))
+                    || matches!(self.start, StreamStart::Subscription(_))
+                        && task.state == TaskState::Unspecified
+                {
                     return Err(Error::Protocol);
                 }
                 self.identity = Some(StreamIdentity::Task(
@@ -616,7 +666,9 @@ impl StreamSequence {
                     task.state,
                 ));
             }
-            (None, StreamEvent::Message(_)) if self.existing_task.is_none() => {
+            (None, StreamEvent::Message(_))
+                if matches!(self.start, StreamStart::Submission(None)) =>
+            {
                 self.identity = Some(StreamIdentity::Message);
             }
             // The official Python SDK may omit the Task snapshot when resuming
@@ -629,9 +681,9 @@ impl StreamSequence {
                     state,
                     ..
                 },
-            ) if self.existing_task.as_ref().is_some_and(|(id, context)| {
-                id == task_id && context_id.as_ref() == Some(context)
-            }) && *state != crate::TaskState::Unspecified =>
+            ) if matches!(&self.start, StreamStart::Submission(Some(expected))
+                if expected.matches(task_id, context_id.as_deref()))
+                && *state != TaskState::Unspecified =>
             {
                 self.identity = Some(StreamIdentity::Task(
                     task_id.clone(),
@@ -649,9 +701,15 @@ impl StreamSequence {
                     ..
                 },
             ) => {
+                let resumed = matches!(self.start, StreamStart::Subscription(_))
+                    && matches!(
+                        *previous_state,
+                        TaskState::InputRequired | TaskState::AuthRequired
+                    )
+                    && *state != TaskState::Unspecified;
                 if id != task_id
                     || context != context_id
-                    || !previous_state.allows_transition_to(*state)
+                    || !(resumed || previous_state.allows_transition_to(*state))
                 {
                     return Err(Error::Protocol);
                 }
@@ -677,7 +735,10 @@ impl StreamSequence {
     fn is_complete(&self) -> bool {
         match self.identity {
             Some(StreamIdentity::Message) => true,
-            Some(StreamIdentity::Task(_, _, state)) => state.is_settled(),
+            Some(StreamIdentity::Task(_, _, state)) => match self.start {
+                StreamStart::Subscription(_) => state.is_terminal(),
+                StreamStart::Submission(_) => state.is_settled(),
+            },
             None => false,
         }
     }
@@ -688,7 +749,13 @@ fn parse_stream_response(
     request_id: &str,
     sequence: &mut StreamSequence,
 ) -> Result<StreamEvent> {
-    let raw: Value = serde_json::from_slice(data).map_err(|_| Error::Protocol)?;
+    let raw = serde_json::from_slice(data).map_err(|_| Error::Protocol)?;
+    let event = StreamEvent::parse(decode_rpc_result(raw, request_id)?)?;
+    sequence.accept(&event)?;
+    Ok(event)
+}
+
+fn decode_rpc_result(mut raw: Value, request_id: &str) -> Result<Value> {
     if raw.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
         || raw.get("id").and_then(Value::as_str) != Some(request_id)
         || raw.get("result").is_some() == raw.get("error").is_some()
@@ -703,7 +770,5 @@ fn parse_stream_response(
                 .ok_or(Error::Protocol)?,
         ));
     }
-    let event = StreamEvent::parse(raw.get("result").cloned().ok_or(Error::Protocol)?)?;
-    sequence.accept(&event)?;
-    Ok(event)
+    Ok(raw["result"].take())
 }
