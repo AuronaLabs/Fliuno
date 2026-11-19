@@ -6,7 +6,7 @@
 
 - **命令执行**：[预算和停止顺序](#预算和停止顺序) · [报告字段](#报告字段) · [工程验证](#工程验证2026-11-18)
 - **发布验收**：[0.0.2 Windows 与 Linux 双平台验收](#002-windows-与-linux-双平台验收)
-- **开发验收**：[AG-UI SSE 续传](#003-ag-ui-sse-续传2026-11-19) · [HTTP 审批](#003-ag-ui-http-审批2026-11-19) · [HTTP 宿主演示](#003-ag-ui-http-宿主演示2026-11-19)
+- **开发验收**：[AG-UI SSE 续传](#003-ag-ui-sse-续传2026-11-19) · [HTTP 审批](#003-ag-ui-http-审批2026-11-19) · [HTTP 宿主演示](#003-ag-ui-http-宿主演示2026-11-19) · [审批中断与续跑](#003-ag-ui-审批中断与续跑2026-11-19)
 
 ## 预算和停止顺序
 
@@ -546,3 +546,12 @@ Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt�
 ## 0.0.3 AG-UI HTTP 宿主演示（2026-11-19）
 
 `python examples/ag_ui_http_demo.py` 启动独立 Rust 宿主及 app-server，在临时工作区完成任务提交、独立身份审批和 SSE 帧级续传。Windows `scripts/check.ps1` 通过 462 项测试和 27 个离线演示，日志为 `target/0.0.3-ag-ui-http-demo-windows.log`。
+
+
+## 0.0.3 AG-UI 审批中断与续跑（2026-11-19）
+
+真实 stdio 测试将带待审批任务的数据库从 v37 升级到 v38。审批决定与续跑键绑定同一个事件；跨重启重试保持序号不变，工具执行和产物创建各发生一次。其他会话、错误的父运行、变更后的决定以及父运行取消子运行均被拒绝。
+
+真实 HTTP 测试通过本机回环连接验证父流在 `RUN_FINISHED.outcome.type=interrupt` 后断开。审批者可读取详情并用新 ID 续跑，提交者无此权限。重连父流不混入子运行，跨执行段游标被拒绝；重启后子运行的 SSE 可逐帧重放。原有审批路由的测试与离线演示继续通过。
+
+Windows `scripts/check.ps1` 通过 464 项测试、28 个离线演示、rustfmt、两组严格 Clippy 及应用协议 Schema 检查。`@ag-ui/core@1.0.5` 验证了文档示例、两次实际 HTTP 输入和父子运行的 8 条 SSE 消息。日志为 `target/0.0.3-ag-ui-interrupt-windows.log` 与 `target/0.0.3-ag-ui-interrupt-sdk.log`。

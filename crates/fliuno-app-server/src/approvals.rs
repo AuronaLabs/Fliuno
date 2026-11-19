@@ -1,9 +1,40 @@
 //! Approval RPCs share one preparation and scheduling path.
 use super::{RpcError, RpcServer};
 use fliuno_core::{ApprovalOutcome, Error};
-use fliuno_protocol::{ApprovalRespondParams, Event, EventKind, Task};
+use fliuno_protocol::{
+    ApprovalRespondParams, ApprovalResumeParams, ApprovalRun, Event, EventKind, Task,
+    TaskRequestLookupParams, TaskSummary,
+};
 
 impl RpcServer {
+    pub(super) fn cancel_approval_run(
+        &self,
+        p: TaskRequestLookupParams,
+    ) -> Result<TaskSummary, RpcError> {
+        let mut kernel = self.kernel()?;
+        let task = kernel.cancel_approval_run(&p.session_id, &p.client_request_id)?;
+        self.scheduler
+            .cancel(&task.id)
+            .map_err(|message| RpcError {
+                code: -32603,
+                message: message.into(),
+            })?;
+        Ok(task)
+    }
+
+    pub(super) fn resume_approval_run(
+        &self,
+        p: ApprovalResumeParams,
+    ) -> Result<ApprovalRun, RpcError> {
+        let outcome = self.kernel()?.resume_approval_run(&p)?;
+        if let Some(outcome) = outcome {
+            self.schedule_approval(outcome)?;
+        }
+        Ok(self
+            .kernel()?
+            .get_approval_run(&p.session_id, &p.client_request_id)?)
+    }
+
     pub(super) fn respond_approval(&self, params: ApprovalRespondParams) -> Result<Task, RpcError> {
         let outcome = self.kernel()?.prepare_approval_response(
             &params.task_id,

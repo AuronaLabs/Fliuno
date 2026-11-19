@@ -88,7 +88,7 @@ impl Kernel {
     ) -> Result<ApprovalOutcome> {
         let task = self.get_task(task_id)?;
         match task.backend {
-            TaskBackend::Model => self.prepare_model_approval(task, approval_id, decision),
+            TaskBackend::Model => self.prepare_model_approval(task, approval_id, decision, None),
             TaskBackend::ExternalAgent { .. } => self
                 .respond_agent_approval_for_task(task, approval_id, decision)
                 .map(ApprovalOutcome::Finished),
@@ -104,14 +104,15 @@ impl Kernel {
         decision: ApprovalDecision,
     ) -> Result<ApprovalOutcome> {
         let task = self.get_task(task_id)?;
-        self.prepare_model_approval(task, approval_id, decision)
+        self.prepare_model_approval(task, approval_id, decision, None)
     }
 
-    fn prepare_model_approval(
+    pub(crate) fn prepare_model_approval(
         &mut self,
         mut task: Task,
         approval_id: &str,
         decision: ApprovalDecision,
+        resume: Option<&ApprovalResumeParams>,
     ) -> Result<ApprovalOutcome> {
         let task_id = task.id.as_str();
         if task.status != TaskStatus::WaitingApproval {
@@ -128,48 +129,39 @@ impl Kernel {
             decision,
         };
         task.pending_approval = None;
-        if decision == ApprovalDecision::Deny {
+        let failure = if decision == ApprovalDecision::Deny {
+            Some("tool execution denied".into())
+        } else {
+            match self.tools.get(&approval.call.name) {
+                None => Some("approved tool is no longer registered".into()),
+                Some(tool) if approval.authority.as_deref() != Some(tool.authority().as_str()) => {
+                    Some("approved tool registration changed or lacks an authority binding; create a new task".into())
+                }
+                Some(tool) => match self.policy.evaluate(&tool.spec(), &approval.call) {
+                    PolicyDecision::Deny(message) => Some(message),
+                    _ => None,
+                },
+            }
+        };
+        if let Some(message) = failure {
             task.status = TaskStatus::Failed;
-            task.output = Some("tool execution denied".into());
-            self.commit(
+            task.in_flight_tool = None;
+            task.output = Some(message.clone());
+            self.commit_with_bindings(
                 &task,
-                &[
-                    resolved,
-                    EventKind::TaskFailed {
-                        message: "tool execution denied".into(),
-                    },
-                ],
+                &[resolved, EventKind::TaskFailed { message }],
                 &[],
+                None,
+                resume,
             )?;
             return Ok(ApprovalOutcome::Finished(task));
         }
 
-        let Some(tool) = self.tools.get(&approval.call.name).cloned() else {
-            return Ok(ApprovalOutcome::Finished(self.fail_with_events(
-                task,
-                "approved tool is no longer registered".into(),
-                vec![resolved],
-            )?));
-        };
-        if approval.authority.as_deref() != Some(tool.authority().as_str()) {
-            return Ok(ApprovalOutcome::Finished(self.fail_with_events(
-                task,
-                "approved tool registration changed or lacks an authority binding; create a new task".into(),
-                vec![resolved],
-            )?));
-        }
-        if let PolicyDecision::Deny(message) = self.policy.evaluate(&tool.spec(), &approval.call) {
-            return Ok(ApprovalOutcome::Finished(self.fail_with_events(
-                task,
-                message,
-                vec![resolved],
-            )?));
-        }
-
+        let tool = self.tools[&approval.call.name].clone();
         let workspace = self.workspace_for_task(task_id)?;
         task.status = TaskStatus::Running;
         task.in_flight_tool = Some(approval.call.clone());
-        self.commit(&task, &[resolved], &[])?;
+        self.commit_with_bindings(&task, &[resolved], &[], None, resume)?;
         let execution = Box::new(PreparedToolExecution {
             task_id: task.id.clone(),
             session_id: task.session_id.clone(),

@@ -28,6 +28,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'demo failed' }
     python examples/ag_ui_http_demo.py
     if ($LASTEXITCODE -ne 0) { throw 'AG-UI HTTP demo failed' }
+    python examples/ag_ui_http_demo.py --interrupts
+    if ($LASTEXITCODE -ne 0) { throw 'AG-UI HTTP interrupt demo failed' }
     python examples/context_demo.py
     if ($LASTEXITCODE -ne 0) { throw 'context demo failed' }
     python examples/skills_demo.py

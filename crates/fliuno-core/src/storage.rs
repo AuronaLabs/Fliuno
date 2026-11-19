@@ -1,5 +1,6 @@
 //! SQLite snapshots and committed event log. Only this module touches SQL.
 mod approval_decisions;
+mod approval_runs;
 mod approvals;
 mod artifacts;
 mod context;
@@ -17,7 +18,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 37;
+pub(crate) const SCHEMA_VERSION: u32 = 38;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -270,6 +271,9 @@ impl Kernel {
         if version < 37 {
             model_usage::migrate(&mut db)?;
         }
+        if version < 38 {
+            approval_runs::migrate(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         tools.insert(
@@ -350,6 +354,17 @@ impl Kernel {
         artifacts: &[Artifact],
         key: Option<&str>,
     ) -> Result<()> {
+        self.commit_with_bindings(task, events, artifacts, key, None)
+    }
+
+    pub(crate) fn commit_with_bindings(
+        &mut self,
+        task: &Task,
+        events: &[EventKind],
+        artifacts: &[Artifact],
+        key: Option<&str>,
+        resume: Option<&ApprovalResumeParams>,
+    ) -> Result<()> {
         let tx = self.db.transaction()?;
         let running = task.status == TaskStatus::Running
             || task.agent_run.as_ref().is_some_and(|run| !run.finished);
@@ -416,6 +431,9 @@ impl Kernel {
                     context::record(&tx, task, sequence as u64, true)?;
                 }
                 approval_decisions::record(&tx, &task.id, event, sequence)?;
+                if let (Some(resume), EventKind::ApprovalResolved { .. }) = (resume, event) {
+                    approval_runs::record(&tx, &task.id, resume, sequence)?;
+                }
                 if matches!(event, EventKind::ModelUsageReported { .. }) {
                     model_usage::record(&tx, &task.id, sequence)?;
                 }

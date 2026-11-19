@@ -1,4 +1,5 @@
 """Run the local Rust HTTP host, approve one task, and resume from an SSE frame."""
+import argparse
 import http.client
 import json
 import os
@@ -34,7 +35,7 @@ def frames(response):
             event_id, until_blank = None, None
 
 
-def exercise(address, session, run_token, review_token):
+def exercise(address, session, run_token, review_token, interrupts=False):
     def request(connection, method, path, token, body=None, extra=None):
         headers = {"Authorization": f"Bearer {token}", **(extra or {})}
         if body is not None:
@@ -51,37 +52,64 @@ def exercise(address, session, run_token, review_token):
             "messages": [{"id": "message-1", "role": "user", "content": "Prepare an artifact."}],
         })
         assert response.status == 200 and response.headers["Content-Type"] == "text/event-stream"
-        delivered = []
-        for event_id, event in frames(response):
-            delivered.append((event_id, event))
-            if event.get("name") == "fliuno.approval_requested":
-                approval = event["value"]["approvalId"]
-                path = f"/runs/offline-http-demo/approvals/{approval}"
-                rejected = request(control, "POST", path, run_token, {"decision": "allow_once"})
-                assert rejected.status == 401
-                rejected.read()
-                accepted = request(control, "POST", path, review_token, {"decision": "allow_once"})
-                assert accepted.status == 200
-                assert json.load(accepted)["data"]["decision"] == "allow_once"
+        run_id = "offline-http-demo"
+        if interrupts:
+            parent = list(frames(response))
+            assert parent[-1][1]["type"] == "RUN_FINISHED"
+            outcome = parent[-1][1]["outcome"]
+            assert outcome["type"] == "interrupt"
+            run_id = "offline-http-child"
+            continuation = {"threadId": session, "runId": run_id, "parentRunId": "offline-http-demo",
+                            "messages": [], "resume": [{"interruptId": outcome["interrupts"][0]["id"],
+                                                       "status": "resolved", "payload": {"decision": "allow_once"}}]}
+            rejected = request(control, "POST", "/run", run_token, continuation)
+            assert rejected.status == 401
+            rejected.read()
+            resumed = request(run, "POST", "/run", review_token, continuation)
+            assert resumed.status == 200 and resumed.headers["Content-Type"] == "text/event-stream"
+            delivered = list(frames(resumed))
+            assert delivered[0][1]["runId"] == run_id
+            original = request(control, "GET", "/runs/offline-http-demo", run_token)
+            assert original.status == 200 and list(frames(original)) == parent
+        else:
+            delivered = []
+            for event_id, event in frames(response):
+                delivered.append((event_id, event))
+                if event.get("name") == "fliuno.approval_requested":
+                    approval = event["value"]["approvalId"]
+                    path = f"/runs/offline-http-demo/approvals/{approval}"
+                    rejected = request(control, "POST", path, run_token, {"decision": "allow_once"})
+                    assert rejected.status == 401
+                    rejected.read()
+                    accepted = request(control, "POST", path, review_token, {"decision": "allow_once"})
+                    assert accepted.status == 200
+                    assert json.load(accepted)["data"]["decision"] == "allow_once"
         assert delivered[-1][1]["type"] == "RUN_FINISHED"
         position = next(index for index, (_, event) in enumerate(delivered)
                         if event["type"] == "TEXT_MESSAGE_CONTENT")
-        response = request(control, "GET", "/runs/offline-http-demo", run_token,
+        response = request(control, "GET", f"/runs/{run_id}", run_token,
                            extra={"Last-Event-ID": delivered[position][0]})
         assert response.status == 200
         assert list(frames(response)) == delivered[position + 1:]
-        print("AG-UI HTTP task, separate reviewer authorization, and frame-level resume passed.")
+        profile = "interrupt" if interrupts else "legacy"
+        print(f"AG-UI HTTP {profile} profile: reviewer authorization and frame-level replay passed.")
     finally:
         control.close()
         run.close()
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--interrupts", action="store_true", help="Resume a standard approval interrupt with a new run ID")
+    args = parser.parse_args()
     server = build_server()
     host = build_host(server.parent)
     run_token, review_token = secrets.token_urlsafe(24), secrets.token_urlsafe(24)
     with tempfile.TemporaryDirectory(prefix="fliuno-http-demo-") as directory:
         env = dict(os.environ, FLIUNO_DEMO_RUN_TOKEN=run_token, FLIUNO_DEMO_REVIEW_TOKEN=review_token)
+        env.pop("FLIUNO_DEMO_INTERRUPTS", None)
+        if args.interrupts:
+            env["FLIUNO_DEMO_INTERRUPTS"] = "1"
         child = subprocess.Popen([str(host), str(server), directory, str(Path(directory) / "kernel.db")],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
                                  encoding="utf-8", env=env, cwd=ROOT)
@@ -89,7 +117,7 @@ def main():
             ready = queue.Queue(maxsize=1)
             threading.Thread(target=lambda: ready.put(child.stdout.readline()), daemon=True).start()
             launch = json.loads(ready.get(timeout=15))
-            exercise(launch["address"], launch["sessionId"], run_token, review_token)
+            exercise(launch["address"], launch["sessionId"], run_token, review_token, args.interrupts)
         finally:
             child.stdin.close()
             try:

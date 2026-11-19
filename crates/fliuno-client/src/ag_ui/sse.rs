@@ -102,6 +102,14 @@ impl AgUiSseStream {
         &self.projector.task_id
     }
 
+    pub(super) fn after(&self) -> u64 {
+        self.projector.after()
+    }
+
+    pub(super) fn sealed(&self) -> bool {
+        self.projector.sealed()
+    }
+
     pub(super) fn run_phase(&self) -> AgUiRunPhase {
         self.projector.run_phase()
     }

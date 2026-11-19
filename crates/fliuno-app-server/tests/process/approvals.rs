@@ -1,6 +1,105 @@
 use super::*;
 
 #[test]
+fn approval_run_binding_migrates_and_replays_one_decision_after_restart() {
+    let root = std::env::temp_dir().join(format!("fliuno-approval-run-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let path = root.join("kernel.db");
+    let mut peer = Peer::start(&path);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let other = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let start =
+        json!({"sessionId":session["id"],"input":"build one artifact","clientRequestId":"parent"});
+    let task = peer.call("task/startSummary", start.clone());
+    let task_id = task["id"].as_str().unwrap();
+    let waiting = peer.wait_for_status(task_id, "waiting_approval");
+    let approval = &waiting["pendingApproval"]["id"];
+    drop(peer);
+
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch("DROP TABLE approval_runs; PRAGMA user_version=37;")
+        .unwrap();
+    drop(db);
+    let mut peer = Peer::start(&path);
+    let parent = json!({"sessionId":session["id"],"clientRequestId":"parent"});
+    let child = json!({"sessionId":session["id"],"clientRequestId":"child"});
+    assert_eq!(
+        peer.call("approval/getRun", parent.clone())["startSequence"],
+        Value::Null
+    );
+    let request = json!({"sessionId":session["id"],"parentRequestId":"parent",
+        "clientRequestId":"child","approvalId":approval,"decision":"allow_once"});
+    for (field, value, code) in [
+        ("sessionId", other["id"].clone(), -32004),
+        ("parentRequestId", json!("other"), -32004),
+        ("approvalId", json!("other"), -32004),
+        ("clientRequestId", json!("parent"), -32009),
+    ] {
+        let mut invalid = request.clone();
+        invalid[field] = value;
+        assert_eq!(
+            peer.request("approval/resumeRun", invalid)["error"]["code"],
+            code
+        );
+    }
+    let accepted = peer.call("approval/resumeRun", request.clone());
+    assert_eq!(accepted["task"]["id"], task_id);
+    let sequence = &accepted["startSequence"];
+    let decision = peer.call("events/get", json!({"sequence":sequence}));
+    assert_eq!(
+        decision["data"],
+        json!({"type":"approval_resolved","approvalId":approval,"decision":"allow_once"})
+    );
+    assert_eq!(
+        peer.request("approval/cancelRun", parent)["error"]["code"],
+        -32009
+    );
+    peer.wait_for_status(task_id, "completed");
+    drop(peer);
+
+    let mut peer = Peer::start(&path);
+    assert_eq!(
+        peer.call("approval/getRun", child)["startSequence"],
+        *sequence
+    );
+    let retry = peer.call("approval/resumeRun", request.clone());
+    assert_eq!(retry["startSequence"], *sequence);
+    assert_eq!(retry["task"]["status"], "completed");
+    for (field, value) in [
+        ("decision", json!("deny")),
+        ("parentRequestId", json!("other")),
+        ("approvalId", json!("other")),
+    ] {
+        let mut conflict = request.clone();
+        conflict[field] = value;
+        assert_eq!(
+            peer.request("approval/resumeRun", conflict)["error"]["code"],
+            -32009
+        );
+    }
+    let mut duplicate = start;
+    duplicate["clientRequestId"] = json!("child");
+    assert_eq!(
+        peer.request("task/startSummary", duplicate)["error"]["code"],
+        -32009
+    );
+    let page = peer.call("events/list", json!({"taskId":task_id}));
+    let events = page["events"].as_array().unwrap();
+    for kind in ["approval_resolved", "tool_started", "artifact_created"] {
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["data"]["type"] == kind)
+                .count(),
+            1
+        );
+    }
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn pending_approval_inbox_migrates_preserves_cursors_and_tracks_resolution() {
     let directory = std::env::temp_dir()
         .canonicalize()

@@ -31,7 +31,11 @@ impl AgUiSseReplay {
         stream: AgUiSseStream,
         through: u64,
     ) -> Result<Self, AgUiSseFeedError> {
-        let replay = EventReplay::new(ReplayScope::Task(stream.task_id().into()), 0, through)?;
+        let replay = EventReplay::new(
+            ReplayScope::Task(stream.task_id().into()),
+            stream.after(),
+            through,
+        )?;
         stream.check_watermark(through)?;
         Ok(Self {
             replay,
@@ -84,6 +88,10 @@ impl AgUiSseReplay {
         client: &mut Client<R, W>,
         on_notification: impl FnMut(Notification),
     ) -> Result<Option<Vec<u8>>, AgUiSseFeedError> {
+        if self.stream.sealed() {
+            self.stream.finish_replay()?;
+            return Ok(None);
+        }
         let Some(page) =
             self.replay
                 .next_page(client, PAGE_EVENTS, Some(PAGE_BYTES), on_notification)?
@@ -94,6 +102,10 @@ impl AgUiSseReplay {
         let mut output = Vec::new();
         for event in page {
             self.stream.write_event(event, &mut output)?;
+            if self.stream.sealed() {
+                self.stream.finish_replay()?;
+                break;
+            }
         }
         Ok(Some(output))
     }

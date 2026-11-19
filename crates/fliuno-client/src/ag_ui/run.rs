@@ -1,11 +1,12 @@
 //! Bind the AG-UI text input profile to a durable local task request.
 use super::{
     AgUiProjector, AgUiSseError, AgUiSseFeed, AgUiSseFeedError, AgUiSseReplay, AgUiSseStream,
+    interrupt::ResumeEntry,
 };
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
-    MAX_APP_REQUEST_BYTES, TaskIdParams, TaskRequestLookupParams, TaskStartParams, TaskStatus,
-    TaskSummary,
+    ApprovalRun, MAX_APP_REQUEST_BYTES, TaskIdParams, TaskRequestLookupParams, TaskStartParams,
+    TaskStatus, TaskSummary,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -25,7 +26,7 @@ pub enum AgUiRunError {
     WrongThread,
     #[error("AG-UI runId must be nonempty, at most 512 bytes and contain no control characters")]
     RunId,
-    #[error("this run accepts text turns and uses the local session history and tools")]
+    #[error("the request does not match the selected AG-UI input profile")]
     UnsupportedInput,
     #[error("the last AG-UI message must be nonempty user text within 256 KiB")]
     UserText,
@@ -37,24 +38,24 @@ pub enum AgUiRunError {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Input {
+pub struct AgUiRunInput {
     thread_id: String,
-    run_id: String,
+    pub(super) run_id: String,
     protocol_version: Option<String>,
-    parent_run_id: Option<String>,
+    pub(super) parent_run_id: Option<String>,
     state: Option<Value>,
-    messages: Vec<Message>,
+    pub(super) messages: Vec<Message>,
     #[serde(default)]
     tools: Vec<serde::de::IgnoredAny>,
     #[serde(default)]
     context: Vec<serde::de::IgnoredAny>,
     forwarded_props: Option<Value>,
     #[serde(default)]
-    resume: Vec<serde::de::IgnoredAny>,
+    pub(super) resume: Vec<ResumeEntry>,
 }
 
 #[derive(Deserialize)]
-struct Message {
+pub(super) struct Message {
     #[serde(rename = "id")]
     _id: String,
     role: Role,
@@ -97,30 +98,51 @@ impl TextContent {
     }
 }
 
-impl Input {
-    fn into_task(self, session_id: &str) -> Result<(TaskStartParams, String), AgUiRunError> {
+impl AgUiRunInput {
+    pub fn parse(body: &[u8]) -> Result<Self, AgUiRunError> {
+        if body.len() > MAX_APP_REQUEST_BYTES {
+            return Err(AgUiRunError::InputTooLarge);
+        }
+        Ok(serde_json::from_slice(body)?)
+    }
+
+    pub fn is_resume(&self) -> bool {
+        self.parent_run_id.is_some() || !self.resume.is_empty()
+    }
+
+    pub(super) fn validate(&self, session_id: &str) -> Result<(), AgUiRunError> {
         if self.thread_id != session_id || session_id.is_empty() {
             return Err(AgUiRunError::WrongThread);
         }
         validate_run_id(&self.run_id)?;
-        let no_state = |field: Option<Value>| {
+        let no_state = |field: Option<&Value>| {
             field.is_none_or(|value| value.as_object().is_some_and(|map| map.is_empty()))
         };
-        if self.parent_run_id.is_some()
-            || self
-                .protocol_version
-                .as_deref()
-                .is_some_and(|version| version != "1.0")
-            || !no_state(self.state)
-            || !no_state(self.forwarded_props)
+        if self
+            .protocol_version
+            .as_deref()
+            .is_some_and(|version| version != "1.0")
+            || !no_state(self.state.as_ref())
+            || !no_state(self.forwarded_props.as_ref())
             || !self.tools.is_empty()
             || !self.context.is_empty()
-            || !self.resume.is_empty()
             || self
                 .messages
                 .iter()
                 .any(|message| message.encrypted_value.is_some() || !message.tool_calls.is_empty())
         {
+            return Err(AgUiRunError::UnsupportedInput);
+        }
+        Ok(())
+    }
+
+    fn into_task(
+        self,
+        session_id: &str,
+        interrupt_profile: bool,
+    ) -> Result<(TaskStartParams, String), AgUiRunError> {
+        self.validate(session_id)?;
+        if self.is_resume() {
             return Err(AgUiRunError::UnsupportedInput);
         }
         // The kernel already captured prior committed turns. Use only the new
@@ -141,7 +163,7 @@ impl Input {
             TaskStartParams {
                 session_id: session_id.to_owned(),
                 input: text,
-                client_request_id: Some(request_key(&self.run_id)),
+                client_request_id: Some(request_key(&self.run_id, interrupt_profile)),
                 backend: Default::default(),
                 context: None,
             },
@@ -156,6 +178,7 @@ impl Input {
 pub struct AgUiRun {
     task: TaskSummary,
     run_id: String,
+    segment_start: Option<u64>,
 }
 
 impl AgUiRun {
@@ -168,7 +191,7 @@ impl AgUiRun {
     }
 
     pub fn projector(&self) -> AgUiProjector {
-        AgUiProjector::for_external_run(&self.task, &self.run_id)
+        AgUiProjector::for_external_run(&self.task, &self.run_id, self.segment_start)
     }
 
     pub fn sse(&self, last_event_id: Option<&str>) -> Result<AgUiSseStream, AgUiSseError> {
@@ -181,13 +204,21 @@ impl AgUiRun {
         client: &mut Client<R, W>,
         on_notification: impl FnMut(Notification),
     ) -> Result<TaskSummary, AgUiRunError> {
-        let task: TaskSummary = client.call(
-            "task/cancelSummary",
-            &TaskIdParams {
-                task_id: self.task.id.clone(),
-            },
-            on_notification,
-        )?;
+        let task: TaskSummary = if self.segment_start.is_some() {
+            client.call(
+                "approval/cancelRun",
+                &lookup(&self.task.session_id, &self.run_id, true),
+                on_notification,
+            )?
+        } else {
+            client.call(
+                "task/cancelSummary",
+                &TaskIdParams {
+                    task_id: self.task.id.clone(),
+                },
+                on_notification,
+            )?
+        };
         if task.id != self.task.id
             || task.session_id != self.task.session_id
             || task.backend != self.task.backend
@@ -218,12 +249,21 @@ impl AgUiRun {
         AgUiSseFeed::with_stream(client, &self.task.id, stream, on_notification)
     }
 
-    fn checked(task: TaskSummary, session_id: &str, run_id: String) -> Result<Self, AgUiRunError> {
+    fn checked(
+        task: TaskSummary,
+        session_id: &str,
+        run_id: String,
+        segment_start: Option<u64>,
+    ) -> Result<Self, AgUiRunError> {
         if task.session_id != session_id || task.backend != Default::default() || task.id.is_empty()
         {
             return Err(AgUiRunError::InvalidResult);
         }
-        Ok(Self { task, run_id })
+        Ok(Self {
+            task,
+            run_id,
+            segment_start,
+        })
     }
 }
 
@@ -235,13 +275,50 @@ impl<R: BufRead, W: Write> Client<R, W> {
         body: &[u8],
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
-        if body.len() > MAX_APP_REQUEST_BYTES {
-            return Err(AgUiRunError::InputTooLarge);
-        }
-        let input: Input = serde_json::from_slice(body)?;
-        let (request, run_id) = input.into_task(session_id)?;
+        self.start_ag_ui(
+            session_id,
+            AgUiRunInput::parse(body)?,
+            None,
+            on_notification,
+        )
+    }
+
+    /// Start a text run whose SSE stream stops at the first committed interrupt.
+    pub fn start_ag_ui_interrupt_run(
+        &mut self,
+        session_id: &str,
+        input: AgUiRunInput,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<AgUiRun, AgUiRunError> {
+        self.start_ag_ui(session_id, input, Some(0), on_notification)
+    }
+
+    fn start_ag_ui(
+        &mut self,
+        session_id: &str,
+        input: AgUiRunInput,
+        segment_start: Option<u64>,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<AgUiRun, AgUiRunError> {
+        let (request, run_id) = input.into_task(session_id, segment_start.is_some())?;
         let task = self.call("task/startSummary", &request, on_notification)?;
-        AgUiRun::checked(task, session_id, run_id)
+        AgUiRun::checked(task, session_id, run_id, segment_start)
+    }
+
+    /// Answer one interrupt after the host has authorized the reviewer.
+    pub fn resume_ag_ui_run(
+        &mut self,
+        session_id: &str,
+        input: AgUiRunInput,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<AgUiRun, AgUiRunError> {
+        let (request, run_id) = input.into_resume(session_id)?;
+        let result: ApprovalRun = self.call("approval/resumeRun", &request, on_notification)?;
+        let start = result
+            .start_sequence
+            .filter(|seq| (1..=i64::MAX as u64).contains(seq))
+            .ok_or(AgUiRunError::InvalidResult)?;
+        AgUiRun::checked(result.task, session_id, run_id, Some(start))
     }
 
     /// Look up the existing run without resubmitting the input or driving work.
@@ -257,23 +334,55 @@ impl<R: BufRead, W: Write> Client<R, W> {
         validate_run_id(run_id)?;
         let task = self.call(
             "task/getSummaryByRequest",
-            &TaskRequestLookupParams {
-                session_id: session_id.to_owned(),
-                client_request_id: request_key(run_id),
-            },
+            &lookup(session_id, run_id, false),
             on_notification,
         )?;
-        AgUiRun::checked(task, session_id, run_id.to_owned())
+        AgUiRun::checked(task, session_id, run_id.to_owned(), None)
+    }
+
+    /// Reattach to the original run or to a child created by a reviewer.
+    pub fn attach_ag_ui_interrupt_run(
+        &mut self,
+        session_id: &str,
+        run_id: &str,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<AgUiRun, AgUiRunError> {
+        if session_id.is_empty() {
+            return Err(AgUiRunError::WrongThread);
+        }
+        validate_run_id(run_id)?;
+        let found: ApprovalRun = self.call(
+            "approval/getRun",
+            &lookup(session_id, run_id, true),
+            on_notification,
+        )?;
+        let start = found.start_sequence.unwrap_or(0);
+        if start > i64::MAX as u64 || found.start_sequence == Some(0) {
+            return Err(AgUiRunError::InvalidResult);
+        }
+        AgUiRun::checked(found.task, session_id, run_id.to_owned(), Some(start))
     }
 }
 
-fn validate_run_id(id: &str) -> Result<(), AgUiRunError> {
+fn lookup(session: &str, run_id: &str, interrupt_profile: bool) -> TaskRequestLookupParams {
+    TaskRequestLookupParams {
+        session_id: session.to_owned(),
+        client_request_id: request_key(run_id, interrupt_profile),
+    }
+}
+
+pub(super) fn validate_run_id(id: &str) -> Result<(), AgUiRunError> {
     if id.trim().is_empty() || id.len() > MAX_RUN_ID_BYTES || id.chars().any(char::is_control) {
         return Err(AgUiRunError::RunId);
     }
     Ok(())
 }
 
-fn request_key(run_id: &str) -> String {
-    format!("ag-ui:{:x}", Sha256::digest(run_id.as_bytes()))
+pub(super) fn request_key(run_id: &str, interrupt_profile: bool) -> String {
+    let prefix = if interrupt_profile {
+        "ag-ui-interrupt"
+    } else {
+        "ag-ui"
+    };
+    format!("{prefix}:{:x}", Sha256::digest(run_id.as_bytes()))
 }

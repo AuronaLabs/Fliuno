@@ -53,6 +53,11 @@ impl Kernel {
         if let Some(key) = key {
             validate_key(key)?;
             if let Some(task) = self.find_task_request(session_id, key)? {
+                if self.has_approval_binding(session_id, key)? {
+                    return Err(Error::Conflict(
+                        "request ID already belongs to a resumed run".into(),
+                    ));
+                }
                 let same_input =
                     matches!(task.messages.first(),Some(Message::User{text}) if text==input);
                 let same_context = task

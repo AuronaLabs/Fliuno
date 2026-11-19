@@ -17,6 +17,8 @@ impl Drop for Server {
 
 #[path = "client/ag_ui_http.rs"]
 mod ag_ui_http;
+#[path = "client/ag_ui_interrupt.rs"]
+mod ag_ui_interrupt;
 #[path = "client/ag_ui_run.rs"]
 mod ag_ui_run;
 #[path = "client/feed.rs"]

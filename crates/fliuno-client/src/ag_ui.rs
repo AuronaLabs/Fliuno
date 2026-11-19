@@ -1,11 +1,13 @@
 //! Bind AG-UI requests to tasks and project committed events.
+mod interrupt;
 mod replay;
 mod run;
 mod sse;
 mod stream;
 
+pub use interrupt::AgUiInterrupt;
 pub use replay::AgUiSseReplay;
-pub use run::{AgUiRun, AgUiRunError};
+pub use run::{AgUiRun, AgUiRunError, AgUiRunInput};
 pub use sse::{AG_UI_SSE_CONTENT_TYPE, AgUiSseError, AgUiSseStream};
 pub use stream::{AgUiSseFeed, AgUiSseFeedError};
 
@@ -55,6 +57,7 @@ pub enum AgUiEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgUiRunOutcome {
     Cancelled,
+    Interrupt { interrupts: [AgUiInterrupt; 1] },
 }
 
 /// The phase of the latest execution segment in this task's projected history.
@@ -93,6 +96,8 @@ pub struct AgUiProjector {
     external_run_id: Option<String>,
     sequence: u64,
     state: RunState,
+    // A standard AG-UI run owns only one segment of the local task.
+    segment_start: Option<u64>,
 }
 
 impl AgUiProjector {
@@ -103,14 +108,26 @@ impl AgUiProjector {
             external_run_id: None,
             sequence: 0,
             state: RunState::Pending,
+            segment_start: None,
         }
     }
 
-    fn for_external_run(task: &TaskSummary, run_id: &str) -> Self {
+    fn for_external_run(task: &TaskSummary, run_id: &str, segment_start: Option<u64>) -> Self {
         Self {
             external_run_id: Some(run_id.to_owned()),
+            sequence: segment_start.unwrap_or(0).saturating_sub(1),
+            segment_start,
             ..Self::new(task)
         }
+    }
+
+    fn after(&self) -> u64 {
+        self.segment_start.unwrap_or(0).saturating_sub(1)
+    }
+
+    fn sealed(&self) -> bool {
+        self.segment_start.is_some()
+            && matches!(self.state, RunState::Interrupted | RunState::Finished)
     }
 
     pub fn run_phase(&self) -> AgUiRunPhase {
@@ -132,7 +149,26 @@ impl AgUiProjector {
             return Err(AgUiProjectionError::Sequence);
         }
         let sequence = event.sequence;
+        if self.sealed() {
+            self.sequence = sequence;
+            return Ok(Vec::new());
+        }
         let output = match (event.data, self.state) {
+            (EventKind::ApprovalResolved { .. }, RunState::Pending)
+                if self.segment_start == Some(sequence) =>
+            {
+                self.state = RunState::Running {
+                    start_sequence: sequence,
+                    initial: true,
+                };
+                vec![AgUiEvent::RunStarted {
+                    thread_id: self.thread_id.clone(),
+                    run_id: self.run_id(sequence, true),
+                }]
+            }
+            (_, RunState::Pending) if self.after() != 0 => {
+                return Err(AgUiProjectionError::Lifecycle);
+            }
             (EventKind::TaskStarted, RunState::Pending)
             | (EventKind::TaskResumed, RunState::Interrupted) => {
                 let initial = matches!(self.state, RunState::Pending);
@@ -209,6 +245,22 @@ impl AgUiProjector {
                     "fliuno.task_cancelled",
                     json!({"taskId": self.task_id}),
                 )]
+            }
+            (
+                EventKind::ApprovalRequested { approval },
+                RunState::Running {
+                    start_sequence,
+                    initial,
+                },
+            ) if self.segment_start.is_some() => {
+                self.state = RunState::Interrupted;
+                vec![AgUiEvent::RunFinished {
+                    thread_id: self.thread_id.clone(),
+                    run_id: self.run_id(start_sequence, initial),
+                    outcome: Some(AgUiRunOutcome::Interrupt {
+                        interrupts: [AgUiInterrupt::approval(approval)],
+                    }),
+                }]
             }
             (
                 EventKind::TaskStarted

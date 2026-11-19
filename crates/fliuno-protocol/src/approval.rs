@@ -4,6 +4,23 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalResumeParams {
+    pub session_id: String,
+    pub parent_request_id: String,
+    pub client_request_id: String,
+    pub approval_id: String,
+    pub decision: super::ApprovalDecision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalRun {
+    pub task: super::TaskSummary,
+    pub start_sequence: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApprovalListParams {
     #[serde(default)]
     pub workspace_id: Option<String>,

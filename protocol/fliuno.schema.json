@@ -1691,6 +1691,81 @@
         }
       }
     },
+    "approval/resumeRun": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalResumeParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "parentRequestId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecision"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "parentRequestId",
+        "clientRequestId",
+        "approvalId",
+        "decision"
+      ],
+      "$defs": {
+        "ApprovalDecision": {
+          "type": "string",
+          "enum": [
+            "allow_once",
+            "deny"
+          ]
+        }
+      }
+    },
+    "approval/getRun": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskRequestLookupParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clientRequestId"
+      ]
+    },
+    "approval/cancelRun": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskRequestLookupParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clientRequestId"
+      ]
+    },
     "events/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventGetParams",
@@ -5898,6 +5973,119 @@
           "enum": [
             "agent_permission",
             "host_tool"
+          ]
+        }
+      }
+    },
+    "ApprovalRun": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalRun",
+      "type": "object",
+      "properties": {
+        "task": {
+          "$ref": "#/$defs/TaskSummary"
+        },
+        "startSequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task"
+      ],
+      "$defs": {
+        "TaskSummary": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskStatus"
+            },
+            "backend": {
+              "$ref": "#/$defs/TaskBackend"
+            },
+            "inputPreview": {
+              "description": "At most 160 Unicode characters from the first user message.",
+              "type": "string"
+            },
+            "pendingApprovalCount": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "modelOutcomeUnknown": {
+              "type": "boolean"
+            },
+            "agentOutcomeUnknown": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "sessionId",
+            "status",
+            "backend",
+            "inputPreview",
+            "pendingApprovalCount",
+            "modelOutcomeUnknown",
+            "agentOutcomeUnknown"
+          ]
+        },
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
           ]
         }
       }

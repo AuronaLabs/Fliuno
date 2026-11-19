@@ -50,7 +50,7 @@ impl AgUiSseFeed {
         let feed = EventFeed::subscribe(
             client,
             ReplayScope::Task(task_id.into()),
-            0,
+            stream.after(),
             on_notification,
         )?;
         // A cursor cannot refer to a notification that commits after subscription.
@@ -83,6 +83,10 @@ impl AgUiSseFeed {
         output: &mut impl Write,
         on_notification: impl FnMut(Notification),
     ) -> Result<Option<usize>, AgUiSseFeedError> {
+        if self.stream.sealed() {
+            self.stream.finish_replay()?;
+            return Ok(None);
+        }
         if self.failed {
             return Err(AgUiSseError::Closed.into());
         }
@@ -107,6 +111,10 @@ impl AgUiSseFeed {
         let mut frames = 0;
         for event in page {
             frames += self.stream.write_event(event, output)?;
+            if self.stream.sealed() {
+                self.stream.finish_replay()?;
+                break;
+            }
         }
         Ok(Some(frames))
     }

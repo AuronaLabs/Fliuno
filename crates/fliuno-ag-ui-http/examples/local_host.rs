@@ -68,11 +68,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     let run_session = session.id.clone();
     let review_session = session.id.clone();
-    let app = fliuno_ag_ui_http::router_with_approvals(
-        Arc::new(Mutex::new(client)),
-        move |headers| authorized(headers, &run_token).then(|| run_session.clone()),
-        move |headers| authorized(headers, &review_token).then(|| review_session.clone()),
-    );
+    let client = Arc::new(Mutex::new(client));
+    let run = move |headers: &axum::http::HeaderMap| {
+        authorized(headers, &run_token).then(|| run_session.clone())
+    };
+    let review = move |headers: &axum::http::HeaderMap| {
+        authorized(headers, &review_token).then(|| review_session.clone())
+    };
+    let app = if env::var_os("FLIUNO_DEMO_INTERRUPTS").is_some() {
+        fliuno_ag_ui_http::router_with_interrupts(client, run, review)
+    } else {
+        fliuno_ag_ui_http::router_with_approvals(client, run, review)
+    };
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     println!(
         "{}",

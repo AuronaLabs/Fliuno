@@ -4,7 +4,7 @@
 
 宿主可以通过 Rust 客户端提交文本任务，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批可以由宿主通过应用协议处理，也可以挂载独立授权的审批入口。
 
-[提交文本任务](#提交文本任务) · [投影内核事件](#投影内核事件) · [SSE 输出与续传](#sse-输出与续传) · [HTTP 接入](#http-接入)
+[提交文本任务](#提交文本任务) · [投影内核事件](#投影内核事件) · [SSE 输出与续传](#sse-输出与续传) · [HTTP 接入](#http-接入) · [审批中断与续跑](#审批中断与续跑)
 
 ## 提交文本任务
 
@@ -66,7 +66,7 @@ while let Some(page) = replay.next_page(&mut client, 64, Some(64 * 1024), &mut b
 | 审批请求、决定和关闭 | `CUSTOM`，名称分别为 `fliuno.approval_requested`、`fliuno.approval_resolved` 和 `fliuno.approval_closed`。值包含任务 ID 与审批 ID。审批细节可从原 RPC 按 ID 查询。 |
 | 产物和模型用量 | `CUSTOM`，名称为 `fliuno.artifact_created` 和 `fliuno.model_usage_reported`。产物内容通过现有产物 RPC 读取。 |
 
-投影涵盖持久的生命周期、完成文本和轻量引用。进度预览、宿主工具参数和远端原始载荷通过各自的协议处理。AG-UI 的中断和恢复输入尚未接入。
+上表是默认文本模式的行为。[审批中断模式](#审批中断与续跑)会在提交工具审批请求时结束本次执行段。进度预览、宿主工具参数和远端原始载荷通过各自的协议处理。
 
 ## SSE 输出与续传
 
@@ -125,5 +125,37 @@ Rust 宿主演示位于 [`local_host.rs`](../crates/fliuno-ag-ui-http/examples/l
 | `POST /runs/{run_id}/approvals/{approval_id}` | 提交 `{"decision":"allow_once"}` 或 `{"decision":"deny"}`，返回持久决定事件。 |
 
 审批 ID 来自 SSE 的 `fliuno.approval_requested` 事件。重复提交同一决定返回原事件，提交相反决定返回 `409`。属于其他任务或会话的审批返回 `404`。宿主可以在响应保持打开时处理审批，审批入口有独立的并发名额，并通过 `approval/respondDecision` 提交决定。
+
+### 审批中断与续跑
+
+新宿主可选择 `router_with_interrupts(client, authorize, reviewer)`。需要 app-server 声明 `approvalResumeRun`。现有 `router_with_approvals` 继续使用上一节的行为；两个模式的运行 ID 各自查找。
+
+1. 提交者向 `POST /run` 发送文本任务。需要审批时，父流在已提交的审批请求处输出 `RUN_FINISHED`，随后关闭。`outcome` 中含有一项 `interrupts`；详情（包括工具参数）仍通过审批者专用的 `GET /runs/{run_id}/approvals/{approval_id}` 读取。
+2. 审批者向 `POST /run` 发送下方 JSON。`threadId` 必须匹配其授权的会话，`parentRunId` 引用刚结束的执行段，`runId` 是新的 ID。每次续跑只接受一个中断答复，`messages` 为空。
+3. 响应从子运行的 `RUN_STARTED` 开始，继续同一内核任务。子运行若再次需要审批，可以用它作为下一次续跑的父运行。每条 SSE 响应最多包含自己的执行段，重连时使用对应的 `runId` 与 `Last-Event-ID`。
+
+```json
+{
+  "threadId": "local-session-id",
+  "runId": "review-002",
+  "parentRunId": "request-001",
+  "messages": [],
+  "resume": [{
+    "interruptId": "approval-id-from-outcome",
+    "status": "resolved",
+    "payload": { "decision": "allow_once" }
+  }]
+}
+```
+
+拒绝可使用 `decision: "deny"`，或使用 `status: "cancelled"` 并省略 `payload`。拒绝会留下审批决定，子运行以 `RUN_ERROR` 结束。`POST` 审批详情路由在这个模式下不开放。审批者可以读取本会话的 SSE，但只持有审批权限不能创建文本任务或取消运行。
+
+同一个子 `runId` 重试相同答复时返回同一执行段，重启后也不会重新执行工具。重复 ID 换成不同父运行、审批或决定时返回 `409`。把一个执行段的 `Last-Event-ID` 传给另一个执行段返回 `400`。子运行接管后，通过父 ID 取消任务返回 `409`。
+
+Rust 宿主可先用 `AgUiRunInput::parse` 解码请求，再调用 `start_ag_ui_interrupt_run` 或 `resume_ag_ui_run`。后者应在宿主独立验证审批身份后调用。用 `attach_ag_ui_interrupt_run` 重连。底层手动投影子运行时，应先喂入 `approval/getRun` 返回的 `startSequence` 对应的事件；`replay_sse` 和 `subscribe_sse` 会自动定位。
+
+```sh
+python examples/ag_ui_http_demo.py --interrupts
+```
 
 事件字段对照了 AG-UI 官方规范和官方 TypeScript Schema，固定在提交 `3416b86da4b3288e87f827c7f2759a7fa18b5231`。[事件规范](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/docs/concepts/events.mdx) · [SDK Schema](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/sdks/typescript/packages/core/src/generated/schemas.ts)

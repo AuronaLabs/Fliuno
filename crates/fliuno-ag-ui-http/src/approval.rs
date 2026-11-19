@@ -1,5 +1,5 @@
 //! Host-authorized reads and decisions for a run's pending tool calls.
-use super::{Gateway, Status, read_json, rpc_status, run_status};
+use super::{Gateway, Status, lookup_run, read_json, rpc_status};
 use axum::{
     extract::{Path, Request, State},
     http::{HeaderMap, StatusCode, header},
@@ -28,9 +28,11 @@ pub(super) async fn get<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     headers: HeaderMap,
 ) -> Status<Response> {
     let (session, _permit) = review_access(&gateway, &headers, &approval_id)?;
+    let interrupt_profile = gateway.interrupt_profile;
     let details: ApprovalDetails = gateway
         .rpc(move |client| {
-            let params = approval_params(client, &session, &run_id, approval_id)?;
+            let params =
+                approval_params(client, &session, &run_id, approval_id, interrupt_profile)?;
             client
                 .call("approval/get", &params, |_| {})
                 .map_err(rpc_status)
@@ -50,7 +52,7 @@ pub(super) async fn respond<R: BufRead + Send + 'static, W: Write + Send + 'stat
         serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
     let event = gateway
         .rpc(move |client| {
-            let params = approval_params(client, &session, &run_id, approval_id)?;
+            let params = approval_params(client, &session, &run_id, approval_id, false)?;
             let request = ApprovalRespondParams {
                 task_id: params.task_id,
                 approval_id: params.approval_id,
@@ -93,10 +95,9 @@ fn approval_params<R: BufRead, W: Write>(
     session: &str,
     run_id: &str,
     approval_id: String,
+    interrupt_profile: bool,
 ) -> Status<ApprovalGetParams> {
-    let run = client
-        .attach_ag_ui_run(session, run_id, |_| {})
-        .map_err(run_status)?;
+    let run = lookup_run(client, session, run_id, interrupt_profile)?;
     Ok(ApprovalGetParams {
         task_id: run.task().id.clone(),
         approval_id,
