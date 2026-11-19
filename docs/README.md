@@ -1,49 +1,59 @@
-![Fliuno Documentation](assets/fliuno-docs.svg)
+<p align="center">
+  <img src="assets/fliuno-docs.svg" alt="Fliuno Field Guide" width="960">
+</p>
 
 # Fliuno 文档中心
 
 [项目首页](../README.md) · [更新记录](../CHANGELOG.md)
 
-第一次使用 Fliuno，可以先[跑一次离线任务](../README.md#跑一次离线任务)。接入真实模型或配置本机服务时，查阅[运行与配置](setup.md)。
+第一次用 Fliuno，先跑一个离线任务。已经有客户端或宿主，可以直接查应用协议和对应的接入方式。
+
+1. **跑示例**：[离线任务](../README.md#跑一次离线任务) → [环境与配置](setup.md) → [真实模型](setup.md#真实模型)
+2. **接客户端**：[stdio 握手](protocol.md#传输) → [Rust 客户端](protocol.md#rust-调用方) 或 [AG-UI HTTP](ag-ui.md#http-接入)
+3. **读内核**：[内核架构](architecture.md) → [注册身份与授权](authority.md) → [验收记录](execution-evidence.md)
 
 [接入客户端](#接入客户端) · [模型、工具与 Agent](#模型工具与-agent) · [本机执行与隔离](#本机执行与隔离) · [内核与开发](#内核与开发)
 
 ## 接入客户端
 
-| 文档 | 内容 |
+从 `initialize` 读取服务能力，再选用本机 stdio、Rust 客户端或宿主 HTTP 接口。
+
+| 文档 | 查什么 |
 | --- | --- |
-| [应用协议 0.1](protocol.md) · [JSON Schema](../protocol/fliuno.schema.json) | stdio 握手、RPC 方法、审批、产物和事件回放 |
-| [会话历史分页](context.md#会话历史分页) | 用固定水位读取已完成对话和交付物引用 |
-| [Rust 客户端](protocol.md#rust-调用方) | 类型化调用、订阅和回放交接、分段下载和摘要校验 |
-| [AG-UI 接入](ag-ui.md) | 提交文本任务，输出 AG-UI 事件并在断线后续传 SSE |
+| [应用协议 0.1](protocol.md) · [JSON Schema](../protocol/fliuno.schema.json) | 握手、任务、审批、事件和产物的接口定义 |
+| [Rust 客户端](protocol.md#rust-调用方) | 类型化调用、订阅与回放交接、分段下载和摘要校验 |
+| [AG-UI](ag-ui.md) · [本机 HTTP 演示](../examples/ag_ui_http_demo.py) | 提交文本任务、独立授权审批和 SSE 断线续传 |
+| [会话历史分页](context.md#会话历史分页) | 用固定水位读取已完成对话与产物引用 |
 
 ## 模型、工具与 Agent
 
-| 文档 | 内容 |
+先选任务需要的模型，再按需接入外部工具或把任务交给 Agent。
+
+| 接入方式 | 查什么 |
 | --- | --- |
-| [模型配置](setup.md#真实模型) | 接入 OpenAI、Anthropic、Gemini，启用文本流并配置请求预算 |
-| [MCP](mcp.md) · [MCP 资源、提示与技能](mcp-content.md) | 连接工具服务，读取资源和提示，监听目录与资源更新 |
-| [ACP](acp.md) | 启动本机 Agent、加载会话历史，并代理受控文件访问 |
-| [A2A](a2a.md) | 提交远端任务、跟踪状态、显式续接并导入附件 |
+| [模型配置](setup.md#真实模型) | OpenAI、Anthropic、Gemini 的流式输出与请求预算 |
+| [MCP](mcp.md) · [资源、提示与技能](mcp-content.md) | 连接外部工具，读取资源与提示，监听变更 |
+| [ACP](acp.md) | 启动本机 Agent、加载会话历史、代理受控文件访问 |
+| [A2A](a2a.md) | 提交远端任务、跟踪状态、显式续接和导入附件 |
 | [Agent Skills](skills.md) | 发现本机技能，按需读取指令和资源 |
 
 ## 本机执行与隔离
 
-| 文档 | 内容 |
+| 文档 | 查什么 |
 | --- | --- |
-| [宿主配置](host-configuration.md) | 启动参数、配置文件读取和大小限制 |
-| [原生隔离](sandbox.md) · [运行时伴随文件](runtime-bundles.md) | Windows 与 Linux 的进程隔离、资源预算和依赖文件 |
-| [注册身份与持久授权](authority.md) | 注册配置变化后如何处理旧审批和排队任务 |
-| [终端订阅与恢复](terminal-subscriptions.md) · [终端归档](terminal-archive.md) | PTY 字节游标、断线续读、输出回收和创建身份保留 |
+| [宿主配置](host-configuration.md) | 读取配置文件、注册执行能力和配置大小限制 |
+| [原生隔离](sandbox.md) · [运行时伴随文件](runtime-bundles.md) | Windows、Linux 的进程隔离、资源预算和依赖文件 |
+| [注册身份与持久授权](authority.md) | 注册配置变化后如何处理旧审批与排队任务 |
+| [终端订阅与恢复](terminal-subscriptions.md) · [终端归档](terminal-archive.md) | PTY 字节游标、断线续读、输出回收和创建身份 |
 
 ## 内核与开发
 
-| 文档 | 内容 |
+| 文档 | 查什么 |
 | --- | --- |
 | [内核架构](architecture.md) | Rust 模块、任务状态机、事务与权限边界 |
-| [会话上下文](context.md) | 历史选择、冻结快照和模型请求预算 |
-| [路线图](roadmap.md) · [更新记录](../CHANGELOG.md) | 正在开发的内核能力、后续计划和已发布版本 |
-| [验收与性能记录](execution-evidence.md) · [检查与演示](setup.md#检查与演示) | Windows 与 Debian 的实测、性能测量和复现命令 |
+| [会话上下文](context.md) | 历史选择、冻结快照与模型请求预算 |
+| [路线图](roadmap.md) · [更新记录](../CHANGELOG.md) | 开发中的能力、后续计划与已发布版本 |
+| [验收与性能记录](execution-evidence.md) · [检查与演示](setup.md#检查与演示) | Windows 与 Debian 实测、性能测量和复现命令 |
 | [协议调研](research.md) | 模型、工具、Agent 和系统隔离的选型依据 |
 
-[返回文档顶部](#fliuno-文档中心)
+[返回文档顶部](#fliuno-文档中心) · [返回项目首页](../README.md)

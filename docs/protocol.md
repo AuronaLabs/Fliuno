@@ -4,7 +4,9 @@
 
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
-[传输](#传输) · [Rust 调用方](#rust-调用方) · [方法表](#方法) · [错误](#错误) · [内置工具](#内置工具与作用域)
+- **建立连接**：[stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
+- **查接口**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [错误](#错误)
+- **配置能力**：[A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
 ## 传输
 
@@ -40,6 +42,8 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 
 ## 方法
 
+### 工作区、会话与任务
+
 | 方法 | params | result |
 | --- | --- | --- |
 | `initialize` | `{protocolVersion, clientName}` | 服务身份与能力 |
@@ -74,6 +78,11 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |
 | `task/cancelSummary` | `{taskId}` | 复用取消流程，返回 `TaskSummary`。能力标记为 `taskCancelSummary`。 |
 | `task/resume` | `{taskId,retryUncertainModelStep?:false}` | Task；恢复后排队；外部未知结果不能重试；模型结果不确定时须显式传 true |
+
+### 审批、事件与产物
+
+| 方法 | params | result |
+| --- | --- | --- |
 | `approval/listPending` | `{workspaceId?,sessionId?,after?:0,limit?:100,targetBytes?}` | `{items,nextAfter,hasMore}`，只包含当前待审批的摘要 |
 | `approval/get` | `{taskId,approvalId}` | `{kind,approval}`，包含指定待审批项的完整请求 |
 | `approval/getDecision` | `{taskId,approvalId}` | 已提交决定对应的 `Event`，用于重连核对 |
@@ -96,6 +105,11 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
 | `artifacts/digest` | `{taskId,artifactId}` | 正文的 `contentBytes` 与小写十六进制 `sha256` |
 | `artifacts/read` | `{taskId,artifactId,after?,limit?}` | 返回 `{offset,nextOffset,contentBytes,dataBase64}` |
+
+### 工具、Agent 与终端
+
+| 方法 | params | result |
+| --- | --- | --- |
 | `tools/list` | `{}` | 工具名称、描述、效果类型、输入 Schema |
 | `agents/list` | `{}` | 注册 Agent 的 ID、协议、隔离类型和 `workspaceAccess` |
 | `agents/getCapabilities` | `{agentId}` | 单个注册项的 `AgentCapabilities`。见 `initialize.capabilities.agentCapabilitiesById` |
