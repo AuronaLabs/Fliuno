@@ -198,6 +198,12 @@ Windows 完整 `scripts/check.ps1` 通过 385 项测试、格式检查、两种 
 
 ## Linux 可信 ACP 续接（2026-11-19）
 
-Debian 实机来宾的 13 项 ACP app-server 契约通过。另以委派 cgroup v2、256 MiB 内存及 16 个进程或线程名额复跑两项续接测试。一次明确拒绝会释放续接名额，提交结果未知的上一轮在重启后不会重发。原生运行另通过 3 项异步管道探针及 5 项隔离探针。部分隔离探针按委派可用性选择分支。记录为 `D:/Fliuno-Native-Test/guest-acp-trusted.log` 和 `guest-acp-native.log`。
+Debian 来宾的 13 项 ACP app-server 契约通过。另以委派 cgroup v2、256 MiB 内存及 16 个进程或线程名额复跑两项续接测试。一次明确拒绝会释放续接名额，提交结果未知的上一轮在重启后不会重发。原生运行另通过 3 项异步管道探针及 5 项隔离探针。部分隔离探针按委派可用性选择分支。记录为 `D:/Fliuno-Native-Test/guest-acp-trusted.log` 和 `guest-acp-native.log`。
 
 Windows 全量 `scripts/check.ps1` 以退出码 0 完成，包括 385 项测试和 26 个离线演示。Linux 工作区交叉 Clippy 通过。记录分别为 `target/0.0.2-acp-trusted-linux-windows.log` 和 `D:/Fliuno-Native-Test/guest-acp-trusted-linux-clippy.log`。
+
+## 会话历史检索和 MCP 目录监听（2026-11-19）
+
+Windows 的 `scripts/check.ps1` 退出码为 0，包含 388 项测试和 26 个离线演示。日志为 `target/0.0.2-search-mcp-catalog-windows.log`。Debian 复验通过一项真实 app-server 历史检索契约和三项 MCP 官方 SDK HTTP SSE 契约。日志为 `D:/Fliuno-Native-Test/guest-search-catalog.log`。
+
+检索性能试验使用相同 SQLite 数据库和 Windows 调试二进制，在 128 条模拟历史中查找最早一条。两份二进制交替运行，每组 55 次。仅反序列化必要字段的试验版本对纯 ASCII 数据有改善，混合文本的结果随轮次波动且没有稳定收益。此轮保留原有查询实现。对照记录为 `target/0.0.2-history-search-lighter-bench.log`。
