@@ -694,3 +694,5 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 要查看某一条命中，检查 `sessionHistoryGet`，将命中的 `taskId`、所属 `sessionId` 及搜索页的 `throughSequence` 传给 `session/getHistoryTurn`。会话搜索沿用原请求的 `sessionId`，工作区搜索则使用该命中的 `sessionId`。[请求示例与错误边界](context.md#打开一条历史记录)。
 
 `initialize.capabilities.contextMatchRecent` 表示上下文选项也支持 `selection: "match_recent"` 和 `historyQuery: {query,role?}`，将近期匹配记录直接冻结到新任务。匹配方式和扫描上限与历史搜索相同；具体预算和快照语义见[上下文](context.md)。
+
+搜索从既有的精简历史投影读取匹配字段，命中时返回索引中的任务 ID。构建上下文时才完整解码命中项，并继续应用原有的字节预算。数据库版本和分页结果不变。

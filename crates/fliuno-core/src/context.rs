@@ -142,21 +142,23 @@ impl Kernel {
         };
         if let Some(history) = &snapshot.options.history_query {
             let query = history.query.to_lowercase();
+            let matcher = search::HistoryMatcher::new(&query, history.role);
             self.scan_conversation(
                 search::HistoryScope::Session(session),
                 through_sequence,
-                |sequence, turn, has_compact_projection, _| {
-                    let Some(turn) = turn
-                        .filter(|turn| search::matches_query(&turn.messages, &query, history.role))
-                    else {
+                |row| {
+                    let Some(data) = row.data else {
                         return Ok(true);
                     };
+                    if !matcher.matches(data)? {
+                        return Ok(true);
+                    }
                     let candidate = if snapshot.options.detail == ContextDetail::Full
-                        && has_compact_projection
+                        && row.has_compact_projection
                     {
-                        self.full_context_candidate(session, sequence, limit as u32)?
+                        self.full_context_candidate(session, row.sequence, limit as u32)?
                     } else {
-                        Some(turn)
+                        Some(serde_json::from_str(data)?)
                     };
                     admit(candidate)
                 },

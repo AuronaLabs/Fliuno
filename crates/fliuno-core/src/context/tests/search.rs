@@ -72,3 +72,40 @@ fn match_recent_rejects_conflicting_modes_and_over_budget_envelopes() {
         ));
     }
 }
+
+#[test]
+fn borrowed_search_preserves_unicode_escapes_and_message_boundaries() {
+    use crate::context::search::HistoryMatcher;
+
+    let stored = json!({
+        "messages":[
+            {"role":"user","text":"AUDIT \"Report\"\tA\0B"},
+            {"role":"assistant","text":"前缀 KELVIN İSTANBUL ΟΣ ΑΣΑ"},
+            {"role":"tool_result","callId":"hidden","output":{"text":"only-in-tool"}}
+        ],
+        "artifacts":[{"id":"artifact","title":"only-in-title","mediaType":"text/plain"}]
+    })
+    .to_string();
+    for (query, role, expected) in [
+        (
+            "audit \"report\"\ta\0b",
+            Some(SessionHistoryRole::User),
+            true,
+        ),
+        ("audit", Some(SessionHistoryRole::Assistant), false),
+        ("kelvin", None, true),
+        ("i\u{307}stanbul", Some(SessionHistoryRole::Assistant), true),
+        ("ος", None, true),
+        ("οσ", None, false),
+        ("ασα", None, true),
+        ("b前缀", None, false),
+        ("only-in-tool", None, false),
+        ("only-in-title", None, false),
+    ] {
+        assert_eq!(
+            HistoryMatcher::new(query, role).matches(&stored).unwrap(),
+            expected,
+            "{query:?}"
+        );
+    }
+}

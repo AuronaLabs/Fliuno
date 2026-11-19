@@ -1,11 +1,11 @@
 //! Indexed history projections commit atomically with TaskCompleted. The query
 //! checks byte lengths in SQLite before loading any potentially large record.
 use super::*;
-use crate::context::search::{HistoryScope, MAX_SEARCH_TURN_BYTES, MAX_SEARCH_TURNS};
 use rusqlite::Transaction;
 
 mod conversation;
 mod history_list;
+mod search;
 pub(super) use conversation::migrate as migrate_conversations;
 
 fn projection(detail: ContextDetail, budget: &str, extra_columns: &str) -> String {
@@ -147,57 +147,6 @@ pub(super) fn migrate_workspace_turns(db: &mut Connection) -> Result<()> {
 }
 
 impl Kernel {
-    pub(crate) fn scan_conversation(
-        &self,
-        scope: HistoryScope<'_>,
-        upper: u64,
-        mut visit: impl FnMut(u64, Option<ContextTurn>, bool, Option<&str>) -> Result<bool>,
-    ) -> Result<Option<u64>> {
-        let (owner, source, predicate, cursor, session_column) = match scope {
-            HistoryScope::Session(id) => {
-                (id, "session_turns s", "s.session_id", "s.sequence", "NULL")
-            }
-            // Keep the workspace range on the outside of the join so LIMIT
-            // bounds work even if unrelated workspaces have much more history.
-            HistoryScope::Workspace(id) => (
-                id,
-                "workspace_turn_index w CROSS JOIN session_turns s ON s.sequence=w.sequence",
-                "w.workspace_id",
-                "w.sequence",
-                "s.session_id",
-            ),
-        };
-        let columns = format!(", s.sequence, c.task_id IS NOT NULL, {session_column}");
-        let projection = conversation_projection("?3", &columns, source);
-        let sql = format!(
-            "{projection} WHERE {predicate}=?1 AND {cursor}<=?2 ORDER BY {cursor} DESC LIMIT ?4"
-        );
-        let mut statement = self.db.prepare_cached(&sql)?;
-        let mut rows = statement.query(params![
-            owner,
-            validate_event_cursor(upper)?,
-            MAX_SEARCH_TURN_BYTES,
-            MAX_SEARCH_TURNS + 1
-        ])?;
-        for index in 0..MAX_SEARCH_TURNS {
-            let Some(row) = rows.next()? else {
-                break;
-            };
-            let sequence = row.get::<_, i64>(1)? as u64;
-            let data: Option<String> = row.get(0)?;
-            let has_compact_projection: bool = row.get(2)?;
-            let session: Option<String> = row.get(3)?;
-            let turn = data.as_deref().map(serde_json::from_str).transpose()?;
-            if !visit(sequence, turn, has_compact_projection, session.as_deref())?
-                || index + 1 == MAX_SEARCH_TURNS
-            {
-                // Peek without decoding another turn to distinguish a full page from exhaustion.
-                return Ok(rows.next()?.is_some().then_some(sequence));
-            }
-        }
-        Ok(None)
-    }
-
     /// Only matched conversation records may load the full tool history.
     pub(crate) fn full_context_candidate(
         &self,
