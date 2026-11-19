@@ -882,6 +882,7 @@ fn approval_inbox_failure_rolls_back_resolution_and_events() {
             session_id: Some(session.id),
             after: 0,
             limit: 100,
+            target_bytes: None,
         })
         .unwrap();
     assert_eq!(page.items[0].id, *approval_id);

@@ -14,6 +14,9 @@ pub struct ApprovalListParams {
     #[serde(default = "super::default_limit")]
     #[schemars(range(min = 1, max = 100))]
     pub limit: u32,
+    /// Compact items array byte target. A larger first approval still advances the cursor.
+    #[serde(default)]
+    pub target_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]

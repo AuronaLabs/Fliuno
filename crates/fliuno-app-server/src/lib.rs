@@ -358,6 +358,8 @@ impl RpcServer {
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
             capabilities["pendingApprovalInbox"] = json!(true);
+            capabilities["pendingApprovalListTargetBytes"] =
+                json!(fliuno_core::MAX_APPROVAL_LIST_TARGET_BYTES);
             capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
             capabilities["artifactByteReads"] = json!(true);

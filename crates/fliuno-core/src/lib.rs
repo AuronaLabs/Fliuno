@@ -14,6 +14,7 @@ mod policy;
 mod provider;
 mod query;
 pub use query::MAX_TASK_LIST_TARGET_BYTES;
+pub const MAX_APPROVAL_LIST_TARGET_BYTES: u32 = MAX_TASK_LIST_TARGET_BYTES;
 mod registry;
 mod storage;
 mod task;

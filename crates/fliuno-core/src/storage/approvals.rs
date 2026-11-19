@@ -156,10 +156,15 @@ impl Kernel {
             session_id,
             after,
             limit,
+            target_bytes,
         } = options;
-        if after > i64::MAX as u64 || !(1..=100).contains(&limit) {
+        if after > i64::MAX as u64
+            || !(1..=100).contains(&limit)
+            || target_bytes
+                .is_some_and(|bytes| !(1024..=MAX_APPROVAL_LIST_TARGET_BYTES).contains(&bytes))
+        {
             return Err(Error::Invalid(
-                "after must fit i64 and approval list limit must be 1..100".into(),
+                "approval cursor, limit, or targetBytes is out of range".into(),
             ));
         }
         let (scope, filter) = match (workspace_id.as_deref(), session_id.as_deref()) {
@@ -194,14 +199,16 @@ impl Kernel {
         let mut items = Vec::with_capacity(limit as usize);
         let mut next_after = after;
         let mut has_more = false;
+        let mut bytes = 2;
         while let Some(row) = rows.next()? {
-            if items.len() == limit as usize {
+            if items.len() == limit as usize
+                || target_bytes.is_some_and(|target| bytes >= target as usize)
+            {
                 has_more = true;
                 break;
             }
-            next_after = row.get::<_, i64>(0)? as u64;
             let kind = decode_kind(row.get(4)?)?;
-            items.push(ApprovalSummary {
+            let item = ApprovalSummary {
                 id: row.get(1)?,
                 task_id: row.get(2)?,
                 session_id: row.get(3)?,
@@ -210,7 +217,16 @@ impl Kernel {
                 expires_at_unix_ms: row
                     .get::<_, Option<i64>>(6)?
                     .map(|timestamp| timestamp as u64),
-            });
+            };
+            if let Some(target) = target_bytes {
+                bytes += crate::json_size(&item)? + usize::from(!items.is_empty());
+                if bytes > target as usize && !items.is_empty() {
+                    has_more = true;
+                    break;
+                }
+            }
+            next_after = row.get::<_, i64>(0)? as u64;
+            items.push(item);
         }
         Ok(ObjectPage {
             items,

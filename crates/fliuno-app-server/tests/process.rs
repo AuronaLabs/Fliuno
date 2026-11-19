@@ -146,6 +146,10 @@ impl Peer {
         assert_eq!(init["capabilities"]["maxContextCandidates"], 128);
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
         assert_eq!(init["capabilities"]["pendingApprovalInbox"], true);
+        assert_eq!(
+            init["capabilities"]["pendingApprovalListTargetBytes"],
+            8_388_608
+        );
         assert_eq!(init["capabilities"]["pendingApprovalDetails"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
         assert_eq!(init["capabilities"]["taskListTargetBytes"], 8_388_608);

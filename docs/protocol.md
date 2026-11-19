@@ -37,7 +37,7 @@
 | `task/continueAgentSession` | `{taskId,input,clientRequestId}` | 独立的本机 Task，在原 ACP 会话中发送新一轮，见 [ACP](acp.md#跨重启续接-agent-会话) |
 | `task/cancel` | `{taskId}` | Task；重复取消可安全调用 |
 | `task/resume` | `{taskId,retryUncertainModelStep?:false}` | Task；恢复后排队；外部未知结果不能重试；模型结果不确定时须显式传 true |
-| `approval/listPending` | `{workspaceId?,sessionId?,after?:0,limit?:100}` | `{items,nextAfter,hasMore}`，只包含当前待审批的摘要 |
+| `approval/listPending` | `{workspaceId?,sessionId?,after?:0,limit?:100,targetBytes?}` | `{items,nextAfter,hasMore}`，只包含当前待审批的摘要 |
 | `approval/get` | `{taskId,approvalId}` | `{kind,approval}`，包含指定待审批项的完整请求 |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
 | `events/list` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
@@ -94,6 +94,8 @@
 `initialize.capabilities.pendingApprovalInbox` 表示客户端可以读取待审批列表。省略两个范围参数时列出整个数据库的待审批项，传 `workspaceId` 或 `sessionId` 可缩小范围，两者只能选一个。每页最多 100 项，按加入列表的顺序返回。可沿用同一范围的 `nextAfter` 翻页或在重连后读取新项。从 `after:0` 读取可以重新核对整份当前列表。
 
 每项包含 `id`、`taskId`、`sessionId`、`kind`、`allowOnceAvailable` 和 `expiresAtUnixMs`。`kind` 为 `tool_call`、`agent_permission` 或 `host_tool`。工具审批没有到期时间。若 `initialize.capabilities.pendingApprovalDetails` 为 `true`，客户端可通过 `approval/get` 查看单项原请求，再用 `approval/respond` 提交决定。已解决、过期或属于其他任务的项返回 `-32004`。提交时仍以当时的任务状态、审批期限、工具注册和策略为准。已撤销、解决或过期的审批会从列表移除。服务重启后保留模型工具审批，已丢失的 Agent 运行结束时清除相应审批。
+
+`initialize.capabilities.pendingApprovalListTargetBytes` 给出审批列表的最大字节目标。`targetBytes` 接受 1024～8388608，按紧凑 JSON 数组 UTF-8 字节分页；首次遇到的单个大条目仍完整返回，`nextAfter` 可在同一 workspace 或 session 范围内续读。
 
 审批不提供“允许全部”模式。未来可新增策略接口，但不得把模型或 MCP 声明的工具注解当作授权来源。
 

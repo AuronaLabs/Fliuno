@@ -120,3 +120,57 @@ fn pending_approval_inbox_migrates_preserves_cursors_and_tracks_resolution() {
     drop(peer);
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn pending_approval_pages_respect_byte_targets_and_resume_after_restart() {
+    let directory = std::env::temp_dir()
+        .canonicalize()
+        .unwrap()
+        .join(format!("fliuno-approval-pages-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&directory).unwrap();
+    let db = directory.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":directory}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    for index in 0..12 {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":format!("approval {index}")}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval");
+    }
+    let full = peer.call(
+        "approval/listPending",
+        json!({"workspaceId":workspace["id"]}),
+    );
+    let expected = full["items"].as_array().unwrap();
+    assert_eq!(expected.len(), 12);
+    let count = (1..expected.len())
+        .find(|count| serde_json::to_vec(&expected[..*count]).unwrap().len() >= 1024)
+        .unwrap();
+    let target = serde_json::to_vec(&expected[..count]).unwrap().len() as u32;
+    let first = peer.call(
+        "approval/listPending",
+        json!({"workspaceId":workspace["id"],"targetBytes":target}),
+    );
+    assert_eq!(first["items"].as_array().unwrap(), &expected[..count]);
+    assert_eq!(first["hasMore"], true);
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    let second = peer.call(
+        "approval/listPending",
+        json!({"sessionId":session["id"],"after":first["nextAfter"],"targetBytes":target}),
+    );
+    assert_eq!(
+        second["items"].as_array().unwrap(),
+        &expected[count..count * 2]
+    );
+    let invalid = peer.request(
+        "approval/listPending",
+        json!({"workspaceId":workspace["id"],"targetBytes":1023}),
+    );
+    assert_eq!(invalid["error"]["code"], -32602);
+    drop(peer);
+    fs::remove_dir_all(directory).unwrap();
+}
