@@ -23,7 +23,7 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1","clientName":"my-client"}}
 ```
 
-然后依次调用 `workspace/open`、`session/create`、`task/start`。新任务先返回 `running`，后台步骤通过 `notifications/event` 实时送达，也可用 `task/get` 查询。任务进入 `waiting_approval` 后，客户端展示 `pendingApproval.call`，通过 `approval/respond` 允许一次或拒绝；允许后继续后台模型步骤。产物内容保存在 SQLite，通过 `artifacts/list` 读取。重连或收到 `notifications/eventGap` 时，用 `events/listAll` 按持久游标回放全局事件。
+然后依次调用 `workspace/open`、`session/create`、`task/start`。新任务先返回 `running`，后台步骤通过 `notifications/event` 实时送达，也可用 `task/get` 查询。任务进入 `waiting_approval` 后，客户端展示 `pendingApproval.call`，通过 `approval/respond` 允许一次或拒绝；允许后继续后台模型步骤。产物内容保存在 SQLite，通过 `artifacts/list` 读取。调用 `events/setScope` 可订阅任务、会话或工作区。重连或收到 `notifications/eventGap` 时，按订阅范围和持久游标补齐事件。
 
 ```powershell
 cargo run -p fliuno-app-server -- --schema
@@ -47,7 +47,7 @@ cargo run -p fliuno-app-server -- --schema
 | `fliuno-exec` | 主机注册的原生命令、逐任务审批、stdin/双流输出预算、超时取消与进程树回收 |
 | `fliuno-terminal` | 持久 PTY 监督进程、本机 IPC、逐操作审批、有界字节 spool、输出订阅与保留身份的归档回收 |
 | `fliuno-sandbox` | 原生启动与进程所有权；Windows host/AppContainer 共享 Job/reactor、Linux Landlock/seccomp、私有目录与受限句柄继承 |
-| `fliuno-tools` | 工作区目录、按行文本读取、新文件创建、有基线校验的补丁和全文替换 |
+| `fliuno-tools` | 工作区目录分页、元数据、文本和二进制读取、流式 SHA-256、文件创建和有基线校验的编辑 |
 | `fliuno-skills` | Agent Skills 元数据、指令与资源按需读取，单技能目录能力和来源绑定 |
 | `fliuno-app-server` | JSON-RPC 分发、stdio 传输、配置组装；不承载业务逻辑 |
 
@@ -85,7 +85,7 @@ cargo run -p fliuno-app-server
 cargo run -p fliuno-app-server -- --mcp-config <配置路径>
 ```
 
-配置结构见 [协议文档](docs/protocol.md) 和 [MCP 传输边界](docs/mcp.md)。stdio 进程的 `isolation` 必填：`trusted_host` 需要绝对路径的命令和工作目录，按宿主权限运行；Windows 使用 `windows_app_container`，Linux 使用 `linux_landlock`，均在私有目录启动且不授予 workspace/network。Linux 要求 Landlock ABI 6，并只开放系统运行目录读取/执行；隔离模式不能指定宿主 `cwd`。Streamable HTTP 服务器不启动本地进程，也不使用 `isolation`；仅允许 HTTPS 或字面 IP 回环 HTTP。隔离进程可通过宿主固定 SHA-256 的 `assets` 清单加载脚本、DLL 和数据，Windows 已验收真实 Node/CPython 多文件 MCP；MCP 工作区代理仍未实现；不支持的平台会拒绝隔离启动。详见 [沙箱边界](docs/sandbox.md)。
+配置结构见 [协议文档](docs/protocol.md) 和 [MCP 传输边界](docs/mcp.md)。stdio 进程的 `isolation` 必填：`trusted_host` 需要绝对路径的命令和工作目录，按宿主权限运行；Windows 使用 `windows_app_container`，Linux 使用 `linux_landlock`，均在私有目录启动且不授予 workspace/network。Linux 要求 Landlock ABI 6，并只开放系统运行目录读取/执行；隔离模式不能指定宿主 `cwd`。Streamable HTTP 服务器不启动本地进程，也不使用 `isolation`；仅允许 HTTPS 或字面 IP 回环 HTTP。隔离进程可通过宿主固定 SHA-256 的 `assets` 清单加载脚本、DLL 和数据，Windows 和 Debian Linux 来宾均已验收真实 Node/CPython 多文件 MCP；MCP 工作区代理仍未实现；不支持的平台会拒绝隔离启动。详见 [沙箱边界](docs/sandbox.md)。
 
 stdio 默认不继承 API key 等环境变量，额外变量通过 `envAllow` 明确指定。HTTP 凭据只从宿主环境变量读取，绝不写入任务数据。Streamable HTTP 接受 `application/json` 与 `text/event-stream`，支持现代无会话发现及受约束的旧版初始化协商；MCP 工具仍逐次审批。`timeoutMs` 默认为 30000，包含同一主机的排队等待；排队取消不发送请求，也不关闭主机。请求发出后的超时或取消会关闭 MCP 主机并保留“外部结果未知”状态，避免在不确定时自动重放。OAuth 与 MRTR 续交互尚未实现。普通构建不包含测试服务器；`--all-features` 会启用 MCP/ACP fixture，用于真实 stdio 进程、HTTP 协议与隔离契约测试。
 

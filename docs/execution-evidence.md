@@ -191,3 +191,7 @@ Windows 的完整检查脚本随后通过 382 项测试、两种 Clippy、Schema
 同一来宾随后通过工作区工具 21 项、会话 4 项、事件流 5 项，覆盖 `workspace_sha256` 审批、超限、FIFO 和相对路径边界，以及项目目录被移除后重启仍可由 `workspace/get` 取回记录。日志为 `D:/Fliuno-Native-Test/guest-workspace.log`。
 
 Node 24.4.1 和 Debian 系统 CPython 3.13.5 的真实 MCP 演示各通过允许、拒绝和篡改三个分支。CPython 探针现在从创建 socket 开始捕获拒绝。Linux 隔离进程能读取固定的私有伴随文件和写入私有目录，探针验证了文件读写、环境变量及回环连接的隔离。以前的未优化 Debug 构建运行 Node 演示时超过 45 秒测试上限。仅为 SHA-256 依赖启用编译优化后，同一来宾两次允许分支均约 21 秒，这是启动到演示结束的耗时。最终日志为 `D:/Fliuno-Native-Test/guest-runtime-final.log`。
+
+任务级订阅用例在 Windows 和 Debian 来宾都通过。该用例在一批请求中提交同会话的 72 个任务，再取消被订阅的任务，验证同会话其他事件不会占用订阅队列，回放能按切换水位补齐。Debian 的 6 项事件流测试全通过，日志为 `D:/Fliuno-Native-Test/guest-task-events-final.log`。
+
+Windows 完整 `scripts/check.ps1` 通过 385 项测试、格式检查、两种 Clippy、Schema 一致性和 26 个离线演示。日志为 `target/0.0.2-task-event-scope-windows.log`。随后对批量事件夹具的调整重跑了 6 项 Windows 事件流测试。运行时演示排除 Python 自动生成的 `__pycache__` 后，使用已构建 app-server 复跑了 Windows 上的 6 个 Node 和 CPython 分支，暂存清单回到预期的 3 项和 11 项。
