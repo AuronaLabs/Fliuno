@@ -15,6 +15,8 @@ use std::{
 
 #[path = "process/a2a.rs"]
 mod a2a;
+#[path = "process/ag_ui_sse.rs"]
+mod ag_ui_sse;
 #[path = "process/approvals.rs"]
 mod approvals;
 #[path = "process/artifacts.rs"]

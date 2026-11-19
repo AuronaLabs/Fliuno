@@ -4,7 +4,7 @@
 
 - **会话历史**。`session/listHistory` 按完成顺序倒序读取用户、助手消息和产物引用。客户端能保存固定水位和续页游标，重启后继续读取。单条记录超出页预算时保留任务 ID 和完成序号。[会话历史分页](docs/context.md#会话历史分页)
 - **模型用量**。`events/listModelUsage` 直接按任务分页读取已提交的用量事件，沿用全局事件序号。SQLite v37 为已有用量事件回填索引。[应用协议](docs/protocol.md#方法)
-- **AG-UI**。Rust 客户端可以把持久事件转换为带稳定 ID 的运行、完成文本和自定义事件。调用方可将事件交给 AG-UI 消费端。[事件投影](docs/ag-ui.md)
+- **AG-UI**。Rust 客户端可以把持久事件转换为带稳定 ID 的运行、完成文本和自定义事件。SSE 输出支持按单条消息续传，可以从一个完成事件的多条消息中间继续。[事件投影](docs/ag-ui.md)
 - **项目文档**。README 增加 Fliuno 封面和离线快速开始。文档中心按客户端接入、模型与工具、系统执行及内核开发组织内容。[文档中心](docs/README.md)
 
 应用协议仍为 `0.1`，客户端可通过 `initialize.capabilities` 发现新增 RPC。[验收记录](docs/execution-evidence.md)

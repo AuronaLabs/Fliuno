@@ -464,3 +464,11 @@ Windows `scripts/check.ps1` 以退出码 0 完成。448 项测试、26 个离线
 Windows `scripts/check.ps1` 以退出码 0 完成。450 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/fliuno-0.0.3-history-check.log`。
 
 Rust 客户端的续页测试先保存下一页参数，再模拟水位变化和重复完成序号，确认两次失败均不推进游标。真实 stdio 进程测试读回包含多字节和转义字符的完整对话，并核对产物引用。客户端和 app-server 的严格 Clippy、25 项库测试、stdio 进程测试和 RPC Schema 一致性均通过。
+
+## 0.0.3 AG-UI SSE 续传（2026-11-19）
+
+真实 app-server 进程测试从任务审批前的历史回放接到实时通知。任务完成后重启服务，使用该事件的第二条 SSE 消息 ID 续传，剩余两条消息与原流逐字节相同。短写故障注入在下一条消息中间断开，验证恢复后没有跳过或重复完整消息。测试也覆盖跨任务、无效编号和未找到的续传位置。
+
+Node EventSource 通过本机 HTTP 测试重连，自行带回最后一条完整消息的 `Last-Event-ID`。接收的五条 Rust 输出全部通过 `@ag-ui/core@1.0.5` 的运行时 Schema，并保留多字节和换行文本。日志为 `target/0.0.3-ag-ui-sse-sdk-contract.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成。454 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.3-ag-ui-sse-windows.log`。

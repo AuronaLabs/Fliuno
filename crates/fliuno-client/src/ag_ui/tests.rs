@@ -93,3 +93,98 @@ fn projector_rejects_missing_history_and_mixed_tasks_without_advancing() {
         ])
     );
 }
+
+#[test]
+fn sse_resumes_after_a_partial_write_inside_one_completion() {
+    struct Cutoff {
+        data: Vec<u8>,
+        remaining: usize,
+    }
+    impl std::io::Write for Cutoff {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            let count = self.remaining.min(bytes.len());
+            if count == 0 {
+                return Err(std::io::ErrorKind::BrokenPipe.into());
+            }
+            self.data.extend_from_slice(&bytes[..count]);
+            self.remaining -= count;
+            Ok(count)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let started = event(7, EventKind::TaskStarted);
+    let text = "你好\n\nid: foreign\r\n\0";
+    let finished = event(11, EventKind::TaskCompleted { text: text.into() });
+    let mut full = Vec::new();
+    let mut stream = AgUiSseStream::new(&task(), None).unwrap();
+    assert_eq!(stream.write_event(started.clone(), &mut full).unwrap(), 1);
+    assert_eq!(stream.write_event(finished.clone(), &mut full).unwrap(), 4);
+    let full = String::from_utf8(full).unwrap();
+    let frames = full
+        .trim_end_matches('\n')
+        .split("\n\n")
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 5);
+    let (last_id, data) = frames[2].split_once('\n').unwrap();
+    let last_id = last_id.strip_prefix("id: ").unwrap();
+    let content: Value = serde_json::from_str(data.strip_prefix("data: ").unwrap()).unwrap();
+    assert_eq!(last_id, "task-a:11:2");
+    assert_eq!(content["delta"], text);
+    let handled = frames[..3]
+        .iter()
+        .map(|frame| frame.len() + 2)
+        .sum::<usize>();
+    let mut partial = Cutoff {
+        data: Vec::new(),
+        remaining: handled + 3,
+    };
+    let mut stream = AgUiSseStream::new(&task(), None).unwrap();
+    stream.write_event(started.clone(), &mut partial).unwrap();
+    assert!(matches!(
+        stream.write_event(finished.clone(), &mut partial),
+        Err(AgUiSseError::Output(_))
+    ));
+    assert_eq!(partial.data, full.as_bytes()[..handled + 3]);
+    assert!(matches!(
+        stream.write_event(finished.clone(), &mut partial),
+        Err(AgUiSseError::Closed)
+    ));
+
+    let mut resumed = AgUiSseStream::new(&task(), Some(last_id)).unwrap();
+    let mut rest = Vec::new();
+    assert_eq!(resumed.write_event(started, &mut rest).unwrap(), 0);
+    assert_eq!(resumed.write_event(finished, &mut rest).unwrap(), 2);
+    resumed.finish_replay().unwrap();
+    partial.data.truncate(handled);
+    partial.data.extend(rest);
+    assert_eq!(partial.data, full.as_bytes());
+}
+
+#[test]
+fn sse_refuses_a_cursor_without_a_matching_emitted_frame() {
+    for id in ["task-b:7:1", "task-a:07:1", "task-a:7:0", "task-a:7:1\n"] {
+        assert!(matches!(
+            AgUiSseStream::new(&task(), Some(id)),
+            Err(AgUiSseError::InvalidResumeId)
+        ));
+    }
+    let mut output = Vec::new();
+    let mut invalid_slot = AgUiSseStream::new(&task(), Some("task-a:7:2")).unwrap();
+    assert!(matches!(
+        invalid_slot.write_event(event(7, EventKind::TaskStarted), &mut output),
+        Err(AgUiSseError::UnknownResumeId)
+    ));
+    let mut beyond_end = AgUiSseStream::new(&task(), Some("task-a:17:1")).unwrap();
+    beyond_end
+        .write_event(event(7, EventKind::TaskStarted), &mut output)
+        .unwrap();
+    assert!(matches!(
+        beyond_end.finish_replay(),
+        Err(AgUiSseError::UnknownResumeId)
+    ));
+    assert!(output.is_empty());
+}

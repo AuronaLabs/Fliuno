@@ -35,4 +35,12 @@ while let Some(page) = replay.next_page(&mut client, 64, Some(64 * 1024), &mut b
 
 当前适配覆盖持久的生命周期、完成文本和轻量引用。进度预览、宿主工具参数、远端原始载荷、AG-UI 的执行输入与中断恢复契约分别由调用方按各自协议处理。
 
+## SSE 输出与续传
+
+`fliuno_client::ag_ui::AgUiSseStream` 可以把投影写入实现 `Write` 的响应体。由宿主提供 HTTP 路由和连接，响应使用 `AG_UI_SSE_CONTENT_TYPE`（`text/event-stream`）。每条消息有一行 `id` 和一行 `data`。`data` 是 AG-UI 事件 JSON，`id` 由任务 ID、内核事件序号和该事件内从 1 开始的消息编号组成。
+
+重连时，用 `AgUiSseStream::new(&summary, last_event_id)` 读取消费端发送的 `Last-Event-ID`。将上文回放循环中的 `projection.project(event)` 换成 `stream.write_event(event, &mut response_body)`。和首次连接一样从 `TaskStarted` 回放，以重建执行段状态。输出从指定消息之后开始，即使它位于一个任务事件产生的多条消息中间。
+
+历史补读完成后，调用 `stream.finish_replay()` 确认找到了续传位置，再把暂存的实时事件按序写入同一个流。找不到 ID、任务不匹配或写入中断会返回错误。写入中断后，消费端用最后一条完整收到的 SSE ID 建立新流。SSE 流接收已提交事件，任务提交和审批通过本机应用协议完成。
+
 事件字段对照了 AG-UI 官方规范和官方 TypeScript Schema，固定在提交 `3416b86da4b3288e87f827c7f2759a7fa18b5231`。[事件规范](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/docs/concepts/events.mdx) · [SDK Schema](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/sdks/typescript/packages/core/src/generated/schemas.ts)

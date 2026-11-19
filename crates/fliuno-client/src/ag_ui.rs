@@ -1,4 +1,8 @@
 //! Read-only projection of committed task events into AG-UI events.
+mod sse;
+
+pub use sse::{AG_UI_SSE_CONTENT_TYPE, AgUiSseError, AgUiSseStream};
+
 use fliuno_protocol::{Event, EventKind, TaskSummary};
 use serde::Serialize;
 use serde_json::{Value, json};
