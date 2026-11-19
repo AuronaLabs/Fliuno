@@ -1,6 +1,6 @@
 //! A cursor-driven subscription that uses live notifications to locate durable pages.
 use super::{Client, Error, EventReplay, Notification, ReplayScope};
-use fliuno_protocol::{Event, TaskChange};
+use fliuno_protocol::{Event, TaskChange, TaskSummaryChangesPage};
 use std::io::{BufRead, Write};
 
 /// Bounded event delivery over a connection's current subscription scope.
@@ -94,6 +94,19 @@ impl EventFeed {
     ) -> Result<Option<Vec<TaskChange>>, Error> {
         self.next_with(client, on_notification, |replay, client, observe| {
             replay.next_task_changes(client, limit, observe)
+        })
+    }
+
+    /// Refresh changed tasks with one call per page through the known event
+    /// watermark. Shares the event cursor and gap recovery with `next_page`.
+    pub fn next_task_summary_changes<R: BufRead, W: Write>(
+        &mut self,
+        client: &mut Client<R, W>,
+        limit: u32,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<Option<TaskSummaryChangesPage>, Error> {
+        self.next_with(client, on_notification, |replay, client, observe| {
+            replay.next_task_summary_changes(client, limit, observe)
         })
     }
 

@@ -2328,6 +2328,56 @@
       },
       "additionalProperties": false
     },
+    "events/listTaskSummaryChanges": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskSummaryChangesParams",
+      "description": "The same replay window as `TaskChangesParams`, with a smaller response budget.",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "through": {
+          "description": "Inclusive end of the event window. Omit to capture the current watermark.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "limit": {
+          "description": "Maximum matching events to examine before deduplicating tasks.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 64,
+          "default": 64
+        }
+      },
+      "additionalProperties": false
+    },
     "events/listSession": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsListSessionParams",
@@ -4130,6 +4180,158 @@
           "required": [
             "taskId",
             "sequence"
+          ]
+        }
+      }
+    },
+    "TaskSummaryChangesPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskSummaryChangesPage",
+      "type": "object",
+      "properties": {
+        "changes": {
+          "description": "One summary per changed task, ordered by last event in this page.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskSummaryChange"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        },
+        "summaryThroughSequence": {
+          "description": "Current global event watermark from the read snapshot. Never a replay cursor.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "changes",
+        "nextAfter",
+        "throughSequence",
+        "hasMore",
+        "summaryThroughSequence"
+      ],
+      "$defs": {
+        "TaskSummaryChange": {
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "description": "Last event for this task in the scanned page, not its current revision.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "summary": {
+              "description": "Current summary at `summaryThroughSequence`, possibly newer than `sequence`.",
+              "$ref": "#/$defs/TaskSummary"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sequence",
+            "summary"
+          ]
+        },
+        "TaskSummary": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskStatus"
+            },
+            "backend": {
+              "$ref": "#/$defs/TaskBackend"
+            },
+            "inputPreview": {
+              "description": "At most 160 Unicode characters from the first user message.",
+              "type": "string"
+            },
+            "pendingApprovalCount": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "modelOutcomeUnknown": {
+              "type": "boolean"
+            },
+            "agentOutcomeUnknown": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "sessionId",
+            "status",
+            "backend",
+            "inputPreview",
+            "pendingApprovalCount",
+            "modelOutcomeUnknown",
+            "agentOutcomeUnknown"
+          ]
+        },
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
           ]
         }
       }

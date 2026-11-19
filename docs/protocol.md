@@ -5,7 +5,7 @@
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
 - **建立连接**：[stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
-- **搭工作台**：[工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [轻量回放](#任务变动回放) · [批量读取任务摘要](#批量读取任务摘要) · [待审批快照](#待审批快照) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
+- **搭工作台**：[工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [变动摘要](#任务变动摘要) · [轻量回放](#任务变动回放) · [批量读取任务摘要](#批量读取任务摘要) · [待审批快照](#待审批快照) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
 - **查方法**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [错误](#错误)
 - **配置能力**：[A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
@@ -224,6 +224,24 @@ Rust 的 `Client::subscribe_work` 返回 `WorkSubscription { snapshot, inbox, ev
 响应的 `changes` 只包含 `{taskId,sequence}`，每个任务保留其在**本页**的最后一个事件序号，按序号递增；同一任务可能在下一页再次出现。`hasMore` 为真时，沿用 `throughSequence` 作为 `through`，将 `nextAfter` 用作下一页 `after`。尾页的 `nextAfter` 直接推进到 `throughSequence`，即使该范围没有匹配项。更新摘要后保存已消费的回放游标；批量摘要返回的较新水位不会跳过其他任务的更新。
 
 Rust 的 `EventReplay::next_task_changes` 可从保存的窗口继续。`work/subscribe` 返回的 `EventFeed` 也可调用 `next_task_changes`，共用水位跟踪和缺口恢复。它与完整事件的 `next_page` 共用同一个游标；若两种视图都需完整处理，应使用独立的回放游标。
+
+#### 任务变动摘要
+
+`taskSummaryChangeReplay:true` 表示可用 `events/listTaskSummaryChanges` 一次获取变动任务及其当前摘要。与 `events/listTaskChanges` 使用相同的范围、窗口和页内去重规则；`limit` 限制扫描的匹配事件数，默认 64，范围 1..64，上限也可从 `maxTaskSummaryChangeEvents` 读取。没有匹配事件时，`changes` 为空且尾页游标仍推进。
+
+```json
+{"jsonrpc":"2.0","id":11,"method":"events/listTaskSummaryChanges","params":{"workspaceId":"<workspace-id>","after":120,"through":200,"limit":32}}
+```
+
+每个 `changes` 项含 `{sequence,summary}`；`sequence` 是该任务**本页**最后一次事件序号，`summary` 是当前的 `TaskSummary`，同一任务可以在后续页再次出现。SQLite 在同一读快照内选出变动任务并读取摘要投影，不返回事件正文。固定历史窗口只限制哪些任务入选；例如取消发生在 `through` 之后，选入的任务仍可返回 `cancelled`。
+
+| 字段 | 用法 |
+| --- | --- |
+| `throughSequence` | 事件窗口上界；有续页时作下一次请求的 `through`。 |
+| `nextAfter` | 更新本页任务后保存的消费游标；有续页时作下一次请求的 `after`。 |
+| `summaryThroughSequence` | 同一读快照的全局事件水位，至少等于 `throughSequence`，固定历史窗口内可能更大。用来判断摘要新旧，不能用于推进回放。 |
+
+Rust 的 `EventReplay::next_task_summary_changes` 与 `EventFeed::next_task_summary_changes` 会验证窗口、序号与重复任务，再推进消费游标。与读取完整事件或纯任务 ID 共用同一游标；需要分别消费时使用独立回放。老服务可用 [任务变动回放](#任务变动回放) 后接 [批量读取摘要](#批量读取任务摘要)。
 
 ### 审批收件箱与决定
 

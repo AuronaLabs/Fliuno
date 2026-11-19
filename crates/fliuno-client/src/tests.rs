@@ -542,3 +542,54 @@ fn invalid_task_change_page_preserves_the_replay_cursor() {
         assert_eq!(replay.cursor(), 4);
     }
 }
+
+#[test]
+fn malformed_summary_changes_do_not_move_the_event_cursor() {
+    let summary = |id: &str, session: &str| {
+        json!({
+            "id":id, "sessionId":session, "status":"running", "backend":{"type":"model"},
+            "inputPreview":"preview", "pendingApprovalCount":0,
+            "modelOutcomeUnknown":false, "agentOutcomeUnknown":false
+        })
+    };
+    for (changes, watermark, next_after) in [
+        (
+            json!([{"sequence":5,"summary":summary("one", "session")}]),
+            8,
+            9,
+        ),
+        (
+            json!([{"sequence":5,"summary":summary("one", "foreign")}]),
+            10,
+            9,
+        ),
+        (
+            json!([{"sequence":5,"summary":summary("one", "session")}]),
+            10,
+            10,
+        ),
+        (
+            json!([{"sequence":5,"summary":summary("one", "session")},
+                {"sequence":6,"summary":summary("one", "session")}]),
+            10,
+            9,
+        ),
+        (
+            json!([{"sequence":10,"summary":summary("one", "session")}]),
+            10,
+            9,
+        ),
+    ] {
+        let frame = json!({"jsonrpc":"2.0","id":2,"result":{
+            "changes":changes,"nextAfter":next_after,"throughSequence":9,"hasMore":false,
+            "summaryThroughSequence":watermark,
+        }});
+        let mut client = fake_client(format!("{frame}\n").as_bytes());
+        let mut replay = EventReplay::new(ReplayScope::Session("session".into()), 4, 9).unwrap();
+        assert!(matches!(
+            replay.next_task_summary_changes(&mut client, 10, |_| {}),
+            Err(Error::InvalidReplayPage)
+        ));
+        assert_eq!(replay.cursor(), 4);
+    }
+}
