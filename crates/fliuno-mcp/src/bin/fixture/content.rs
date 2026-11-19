@@ -33,7 +33,7 @@ impl ServerHandler for Fixture {
     }
     async fn listen(&self, context: SubscriptionContext) -> Result<(), ErrorData> {
         let uris = context.accepted().resource_subscriptions.as_deref();
-        if uris.is_some_and(|uris| uris == ["fixture:environment"]) {
+        if uris.is_some_and(|uris| uris.iter().any(|uri| uri == "fixture:environment")) {
             context
                 .sink()
                 .send(ServerNotification::ResourceUpdatedNotification(

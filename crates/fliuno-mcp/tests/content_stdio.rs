@@ -25,33 +25,43 @@ fn content_only_stdio_process_interoperates_in_host_and_isolated_modes() {
             .unwrap(),
         )
         .unwrap();
-        assert_eq!(tools.len(), 7);
-        let watch = tools
-            .iter()
-            .find(|tool| tool.spec().name == "mcp_content_resources_watch")
-            .unwrap();
-        let result = watch
-            .execute(
-                &ToolContext {
-                    session_id: "session",
-                    task_id: "task",
-                    workspace: &Workspace {
-                        id: "w".into(),
-                        root: root.display().to_string(),
+        assert_eq!(tools.len(), 8);
+        for (label, arguments, expected) in [
+            (
+                "resources_watch",
+                json!({"uri":"fixture:environment","waitMs":1000}),
+                json!({"uri":"fixture:environment","status":"updated"}),
+            ),
+            (
+                "resources_watch_many",
+                json!({"uris":["fixture:idle","fixture:environment"],"waitMs":1000}),
+                json!({"updatedUri":"fixture:environment","status":"updated"}),
+            ),
+        ] {
+            let watch = tools
+                .iter()
+                .find(|tool| tool.spec().name == format!("mcp_content_{label}"))
+                .unwrap();
+            let result = watch
+                .execute(
+                    &ToolContext {
+                        session_id: "session",
+                        task_id: "task",
+                        workspace: &Workspace {
+                            id: "w".into(),
+                            root: root.display().to_string(),
+                        },
                     },
-                },
-                &ToolCall {
-                    id: "watch".into(),
-                    name: watch.spec().name,
-                    arguments: json!({"uri":"fixture:environment","waitMs":1000}),
-                },
-                &CancellationToken::new(),
-            )
-            .unwrap();
-        assert_eq!(
-            result.output["result"],
-            json!({"uri":"fixture:environment","status":"updated"})
-        );
+                    &ToolCall {
+                        id: "watch".into(),
+                        name: watch.spec().name,
+                        arguments,
+                    },
+                    &CancellationToken::new(),
+                )
+                .unwrap();
+            assert_eq!(result.output["result"], expected);
+        }
         let mut private_directory = None;
         for (label, arguments, path) in [
             ("resources_list", json!({}), "/resources"),
