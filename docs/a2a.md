@@ -64,7 +64,7 @@ cargo run -p fliuno-app-server -- --a2a-config C:/absolute/path/to/agents.json
 
 ## 显式核对远端状态
 
-`initialize.capabilities.remoteTaskChecks` 为 true 时，客户端可用 `task/checkRemote` 传入 `{"taskId":"<本机任务 ID>"}`。该任务必须有已结束的 Agent 运行及已保存的远端身份，且当前宿主注册须与原任务的绑定一致。客户端不提供远端 ID、URL 或凭据。请求进入共享后台队列并立即返回 `{"checkId":"..."}`；同一任务已有在途核对或队列已满时返回状态冲突。
+`initialize.capabilities.remoteTaskChecks` 为 true 时，客户端可用 `task/checkRemote` 传入 `{"taskId":"<本机任务 ID>"}`。该任务必须有已结束的 Agent 运行及已保存的远端身份，且当前宿主注册须与原任务的绑定一致。客户端不提供远端 ID、URL 或凭据。请求进入独立的核对队列并立即返回 `{"checkId":"..."}`。服务同时运行一个核对并排队最多 8 个，由 `maxConcurrentRemoteTaskChecks` 和 `maxQueuedRemoteTaskChecks` 公布。同一任务已有在途核对或队列已满时返回状态冲突。
 
 配置了支持流式的 A2A Agent 时，`initialize.capabilities.remoteTaskWatch` 为 true。调用 `task/checkRemote` 时可加 `waitMs`（1～5000），对已绑定远端任务和上下文 ID、且上次记录尚非终态的已结束本机任务发起一次 `SubscribeToTask`。预算包含可选 Agent Card 检查和订阅建立。首帧必须是身份相符的任务快照。如果状态已变化，立即记录该状态。否则继续等到检测到变化，或到期记录已验证的状态。快照前超时、协议中断或身份不符记为 `unavailable`。观察只追加核对事件，产物和原运行保持原状。
 

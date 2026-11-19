@@ -336,6 +336,10 @@ impl RpcServer {
             capabilities["artifactMediaTypeFilter"] = json!(true);
             capabilities["remoteTaskWatch"] = json!(self.kernel()?.remote_task_watch_supported());
             capabilities["agentCapabilitiesById"] = json!(true);
+            let check_workers = self.scheduler.remote_check_workers();
+            capabilities["maxConcurrentRemoteTaskChecks"] = json!(check_workers);
+            capabilities["maxQueuedRemoteTaskChecks"] =
+                json!(check_workers * scheduler::REMOTE_CHECK_QUEUE_CAPACITY);
             capabilities["workspaceEventReplay"] = json!(true);
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);

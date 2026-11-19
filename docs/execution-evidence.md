@@ -241,3 +241,7 @@ Windows 的全量 `scripts/check.ps1` 通过 397 项测试和 26 个离线演示
 ## Agent 注册能力查询（2026-11-19）
 
 Windows 和 Debian 各通过 4 项实际进程用例。覆盖轮询 A2A、流式 A2A、隔离 ACP 和支持跨重启续接的可信 ACP。A2A 测试验证查询没有向对端发送请求，未知 Agent 返回 `-32004`。Debian 记录为 `D:/Fliuno-Native-Test/guest-agent-capabilities.log`。
+
+## 远端核对调度（2026-11-19）
+
+Windows app-server Clippy、15 项库测试和 65 项进程测试通过。Debian 通过 5 项调度库测试和 20 项 A2A 进程测试。并发用例让远端核对停在屏障处，同一任务再次核对被拒绝，普通模型任务同时到达待审批状态。记录在 `target/0.0.2-remote-queue-windows.log` 和 `D:/Fliuno-Native-Test/guest-remote-queue.log`。

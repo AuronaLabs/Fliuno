@@ -19,6 +19,7 @@ use std::{
 
 pub(super) const QUEUE_CAPACITY: usize = 32;
 pub(super) const WORKER_COUNT: usize = 4;
+pub(super) const REMOTE_CHECK_QUEUE_CAPACITY: usize = 8;
 const MAX_MODEL_PROGRESS_DELTA_BYTES: usize = 1024;
 type Cancellation = CancellationToken;
 type ActiveTasks = Arc<Mutex<HashMap<String, Reservation>>>;
@@ -54,6 +55,7 @@ struct ScheduledTask {
 
 pub(super) struct TaskScheduler {
     sender: Option<Sender<ScheduledTask>>,
+    remote: Option<(Sender<ScheduledTask>, JoinHandle<()>)>,
     active: ActiveTasks,
     stopping: Arc<AtomicBool>,
     kernel: Arc<Mutex<Kernel>>,
@@ -70,15 +72,15 @@ impl TaskScheduler {
         let (sender, receiver) = bounded::<ScheduledTask>(QUEUE_CAPACITY);
         let active = Arc::new(Mutex::new(HashMap::new()));
         let stopping = Arc::new(AtomicBool::new(false));
-        let workers = (0..worker_count)
-            .map(|index| {
+        let spawn_worker =
+            |name, queue: &Receiver<ScheduledTask>, submit: &Sender<ScheduledTask>| {
                 let worker_kernel = Arc::clone(&kernel);
-                let worker_receiver = receiver.clone();
-                let worker_sender = sender.clone();
+                let worker_receiver = queue.clone();
+                let worker_sender = submit.clone();
                 let worker_active = Arc::clone(&active);
                 let worker_stopping = Arc::clone(&stopping);
                 thread::Builder::new()
-                    .name(format!("fliuno-task-scheduler-{index}"))
+                    .name(name)
                     .spawn(move || {
                         run_worker(
                             worker_receiver,
@@ -89,15 +91,33 @@ impl TaskScheduler {
                         )
                     })
                     .expect("cannot start task scheduler worker")
-            })
+            };
+        let workers = (0..worker_count)
+            .map(|index| spawn_worker(format!("fliuno-task-scheduler-{index}"), &receiver, &sender))
             .collect();
+        // Long-poll reads must not hold a worker needed for a new model, tool,
+        // or agent step. The reservation and event commit rules are shared.
+        let remote = kernel
+            .lock()
+            .unwrap()
+            .remote_task_check_supported()
+            .then(|| {
+                let (submit, queue) = bounded(REMOTE_CHECK_QUEUE_CAPACITY);
+                let worker = spawn_worker("fliuno-remote-checks".into(), &queue, &submit);
+                (submit, worker)
+            });
         Self {
             sender: Some(sender),
+            remote,
             active,
             stopping,
             kernel,
             workers,
         }
+    }
+
+    pub(super) fn remote_check_workers(&self) -> usize {
+        usize::from(self.remote.is_some())
     }
 
     pub(super) fn schedule(&self, task_id: &str) -> Result<(), &'static str> {
@@ -132,6 +152,13 @@ impl TaskScheduler {
     }
 
     fn schedule_work(&self, task_id: &str, work: ScheduledWork) -> Result<bool, &'static str> {
+        let remote_check = matches!(&work, ScheduledWork::CheckRemote(_));
+        let sender = if remote_check {
+            self.remote.as_ref().map(|(submit, _)| submit)
+        } else {
+            self.sender.as_ref()
+        }
+        .ok_or("task scheduler is unavailable")?;
         let mut active = self
             .active
             .lock()
@@ -144,7 +171,7 @@ impl TaskScheduler {
             task_id.into(),
             Reservation {
                 cancellation: cancellation.clone(),
-                remote_check: matches!(&work, ScheduledWork::CheckRemote(_)),
+                remote_check,
             },
         );
         let job = ScheduledTask {
@@ -152,13 +179,10 @@ impl TaskScheduler {
             cancellation,
             work,
         };
-        let sender = self
-            .sender
-            .as_ref()
-            .ok_or("task scheduler is unavailable")?;
         if let Err(error) = sender.try_send(job) {
             active.remove(task_id);
             return Err(match error {
+                TrySendError::Full(_) if remote_check => "remote task check queue is full",
                 TrySendError::Full(_) => "task scheduler queue is full",
                 TrySendError::Disconnected(_) => "task scheduler is unavailable",
             });
@@ -194,22 +218,15 @@ impl Drop for TaskScheduler {
             }
         }
         if let Some(sender) = self.sender.take() {
-            for _ in 0..self.workers.len() {
-                if sender
-                    .try_send(ScheduledTask {
-                        id: String::new(),
-                        cancellation: CancellationToken::new(),
-                        work: ScheduledWork::Stop,
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
+            wake_workers(&sender, self.workers.len());
         }
+        let remote = self.remote.take().map(|(sender, worker)| {
+            wake_workers(&sender, 1);
+            worker
+        });
         // Joining prevents abandoned workers retaining the DB lock or running
         // queued requests; providers must observe cancellation to exit promptly.
-        for worker in self.workers.drain(..) {
+        for worker in self.workers.drain(..).chain(remote) {
             if worker.join().is_err() {
                 eprintln!("fliuno: task scheduler worker panicked");
             }
@@ -218,6 +235,22 @@ impl Drop for TaskScheduler {
             && let Err(error) = kernel.interrupt_running_tasks()
         {
             eprintln!("fliuno: cannot persist scheduler shutdown: {error}");
+        }
+    }
+}
+
+fn wake_workers(sender: &Sender<ScheduledTask>, count: usize) {
+    for _ in 0..count {
+        if sender
+            .try_send(ScheduledTask {
+                id: String::new(),
+                cancellation: CancellationToken::new(),
+                work: ScheduledWork::Stop,
+            })
+            .is_err()
+        {
+            // A full queue already has work to wake the stopped workers.
+            break;
         }
     }
 }
@@ -736,7 +769,9 @@ mod tests {
         }
     }
 
-    struct FaultyAgent;
+    struct FaultyAgent {
+        check_gate: Option<(Sender<()>, Receiver<()>)>,
+    }
 
     impl fliuno_core::AgentBackend for FaultyAgent {
         fn spec(&self) -> fliuno_protocol::AgentSpec {
@@ -754,9 +789,14 @@ mod tests {
 
         fn check_remote_task(
             &self,
-            _remote: &fliuno_protocol::AgentRemoteTask,
+            remote: &fliuno_protocol::AgentRemoteTask,
             _cancellation: &CancellationToken,
         ) -> Option<fliuno_protocol::AgentRemoteTask> {
+            if let Some((entered, release)) = &self.check_gate {
+                entered.send(()).unwrap();
+                release.recv_timeout(Duration::from_secs(8)).ok()?;
+                return Some(remote.clone());
+            }
             panic!("fixture check diagnostic");
         }
 
@@ -784,7 +824,9 @@ mod tests {
     fn adapter_panics_preserve_uncertain_outcomes_and_keep_the_only_worker_available() {
         let mut kernel = Kernel::in_memory(Box::new(FaultyModel)).unwrap();
         kernel.register_tool(Box::new(FaultyTool)).unwrap();
-        kernel.register_agent(Box::new(FaultyAgent)).unwrap();
+        kernel
+            .register_agent(Box::new(FaultyAgent { check_gate: None }))
+            .unwrap();
         let root = std::env::current_dir().unwrap();
         let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
         let session = kernel.create_session(&workspace.id).unwrap();
@@ -894,6 +936,11 @@ mod tests {
             wait(&healthy.id, TaskStatus::Completed).output.as_deref(),
             Some("worker still available")
         );
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !scheduler.is_idle() {
+            assert!(Instant::now() < deadline, "remote check did not finish");
+            thread::sleep(Duration::from_millis(5));
+        }
         let events = kernel
             .lock()
             .unwrap()
@@ -908,6 +955,68 @@ mod tests {
                 ..
             } if observed == &check_id
         )));
+    }
+
+    #[test]
+    fn an_in_flight_remote_check_does_not_occupy_the_task_worker() {
+        let (entered, checking) = bounded(1);
+        let (release, gate) = bounded(1);
+        let mut kernel = Kernel::in_memory(Box::new(DemoProvider)).unwrap();
+        kernel
+            .register_agent(Box::new(FaultyAgent {
+                check_gate: Some((entered, gate)),
+            }))
+            .unwrap();
+        let root = std::env::current_dir().unwrap();
+        let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
+        let session = kernel.create_session(&workspace.id).unwrap();
+        let agent = kernel
+            .create_task_with_backend(
+                &session.id,
+                "record an uncertain remote task",
+                None,
+                fliuno_protocol::TaskBackend::ExternalAgent {
+                    agent_id: "faulty-agent".into(),
+                },
+            )
+            .unwrap()
+            .0;
+        let model = kernel
+            .create_task_with_key(&session.id, "a separate task", None)
+            .unwrap()
+            .0;
+        let kernel = Arc::new(Mutex::new(kernel));
+        let scheduler = TaskScheduler::with_worker_count(Arc::clone(&kernel), 1);
+        let wait = |id: &str, expected| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                let task = kernel.lock().unwrap().get_task(id).unwrap();
+                if task.status == expected {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "task {id} remained {:?}",
+                    task.status
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        scheduler.schedule_agent(&agent.id).unwrap();
+        wait(&agent.id, TaskStatus::Interrupted);
+        let prepare_check = || {
+            kernel
+                .lock()
+                .unwrap()
+                .prepare_remote_task_check(&agent.id)
+                .unwrap()
+        };
+        scheduler.schedule_remote_check(prepare_check()).unwrap();
+        checking.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(scheduler.schedule_remote_check(prepare_check()).is_err());
+        scheduler.schedule(&model.id).unwrap();
+        wait(&model.id, TaskStatus::WaitingApproval);
+        release.send(()).unwrap();
     }
 
     #[test]
