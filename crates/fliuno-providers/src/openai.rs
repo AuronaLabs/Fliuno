@@ -151,10 +151,27 @@ fn parse(response: Value) -> Result<ModelTurn, String> {
     };
     Ok(ModelTurn {
         decision,
+        usage: model_usage(&response["usage"]),
         replay: Some(ProviderReplay {
             provider: "openai".into(),
             data: Value::Array(output.clone()),
         }),
+    })
+}
+
+fn model_usage(value: &Value) -> Option<fliuno_protocol::ModelUsage> {
+    let input_tokens = value["input_tokens"].as_u64()?;
+    let output_tokens = value["output_tokens"].as_u64()?;
+    Some(fliuno_protocol::ModelUsage {
+        provider: "openai".into(),
+        input_tokens,
+        output_tokens,
+        cached_input_tokens: value["input_tokens_details"]["cached_tokens"]
+            .as_u64()
+            .filter(|count| *count <= input_tokens),
+        reasoning_output_tokens: value["output_tokens_details"]["reasoning_tokens"]
+            .as_u64()
+            .filter(|count| *count <= output_tokens),
     })
 }
 

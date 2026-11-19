@@ -6,7 +6,7 @@ use fliuno_core::{
     CancellationToken, ModelDecision, ModelError, ModelProvider, ModelStreamEvent, ModelTurn,
     ProviderReplay, ToolSpec,
 };
-use fliuno_protocol::{Message, Task, ToolCall};
+use fliuno_protocol::{Message, ModelUsage, Task, ToolCall};
 use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -70,15 +70,17 @@ impl GeminiProvider {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        let response = if streaming {
+        let (response, usage) = if streaming {
             let mut stream = InteractionStream::default();
             self.http
                 .post_stream(&body, cancellation, |event| stream.event(event, progress))?
-                .map_or_else(|| stream.finish(), Ok)?
+                .map_or_else(|| stream.finish(), |response| Ok((response, None)))?
         } else {
-            self.http.post(&body, cancellation)?
+            (self.http.post(&body, cancellation)?, None)
         };
-        parse(response).map_err(ModelError::OutcomeUnknown)
+        let mut turn = parse(response).map_err(ModelError::OutcomeUnknown)?;
+        turn.usage = usage.or(turn.usage);
+        Ok(turn)
     }
 }
 
@@ -211,10 +213,26 @@ fn parse(mut response: Value) -> Result<ModelTurn, String> {
     };
     Ok(ModelTurn {
         decision,
+        usage: model_usage(&response["usage"]),
         replay: Some(ProviderReplay {
             provider: "gemini".into(),
             data: Value::Array(steps),
         }),
+    })
+}
+
+fn model_usage(value: &Value) -> Option<ModelUsage> {
+    let input_tokens = value["total_input_tokens"].as_u64()?;
+    let output_tokens = value["total_output_tokens"].as_u64()?;
+    Some(ModelUsage {
+        provider: "gemini".into(),
+        input_tokens,
+        output_tokens,
+        cached_input_tokens: value["total_cached_tokens"]
+            .as_u64()
+            .filter(|count| *count <= input_tokens),
+        // Interactions reports thought counts separately from reported output.
+        reasoning_output_tokens: None,
     })
 }
 
@@ -224,6 +242,7 @@ struct InteractionStream {
     active: BTreeSet<u64>,
     arguments: BTreeMap<u64, String>,
     status: Option<String>,
+    usage: Option<ModelUsage>,
 }
 
 impl InteractionStream {
@@ -331,6 +350,7 @@ impl InteractionStream {
                     return Err("Gemini interaction completed with unfinished steps".into());
                 }
                 self.status = event["interaction"]["status"].as_str().map(str::to_owned);
+                self.usage = model_usage(&event["interaction"]["usage"]);
                 if self.status.is_none() {
                     return Err("missing Gemini completion status".into());
                 }
@@ -343,7 +363,7 @@ impl InteractionStream {
         Ok(())
     }
 
-    fn finish(self) -> Result<Value, ModelError> {
+    fn finish(self) -> Result<(Value, Option<ModelUsage>), ModelError> {
         let status = self.status.ok_or_else(|| {
             ModelError::OutcomeUnknown("Gemini stream ended before completion".into())
         })?;
@@ -352,7 +372,10 @@ impl InteractionStream {
                 "Gemini stream ended within function arguments".into(),
             ));
         }
-        Ok(json!({"status":status,"steps":self.steps.into_values().collect::<Vec<_>>()}))
+        Ok((
+            json!({"status":status,"steps":self.steps.into_values().collect::<Vec<_>>()}),
+            self.usage,
+        ))
     }
 }
 
@@ -486,7 +509,7 @@ mod tests {
                 &mut emit,
             )
             .unwrap();
-        let response = stream.finish().unwrap();
+        let (response, _) = stream.finish().unwrap();
         assert_eq!(preview, "");
         assert_eq!(response["steps"][0]["signature"], "signed");
         assert_eq!(

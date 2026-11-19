@@ -498,6 +498,19 @@ pub struct ModelBudget {
     pub source: ModelBudgetSource,
 }
 
+/// Token counts reported by the provider for one model step.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelUsage {
+    pub provider: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_output_tokens: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(
     tag = "type",
@@ -565,6 +578,10 @@ pub enum EventKind {
     },
     ModelStarted {
         step: u32,
+    },
+    ModelUsageReported {
+        step: u32,
+        usage: ModelUsage,
     },
     ApprovalRequested {
         approval: Approval,

@@ -100,7 +100,7 @@ fn openai_streams_text_and_commits_only_the_completed_response() {
     let events = vec![
         json!({"type":"response.output_text.delta","delta":"Hel"}),
         json!({"type":"response.output_text.delta","delta":"lo"}),
-        json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Hello"}]}]}}),
+        json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":12,"output_tokens":4,"input_tokens_details":{"cached_tokens":13},"output_tokens_details":{"reasoning_tokens":3}}}}),
     ];
     let (base, handle) = sse_fixture(sse_body(&events));
     let provider = OpenAiProvider::new(&base, "fixture-key", "fixture-model").unwrap();
@@ -112,6 +112,10 @@ fn openai_streams_text_and_commits_only_the_completed_response() {
         })
         .unwrap();
     assert!(matches!(turn.decision, ModelDecision::Complete(text) if text == "Hello"));
+    let usage = turn.usage.unwrap();
+    assert_eq!((usage.input_tokens, usage.output_tokens), (12, 4));
+    assert_eq!(usage.cached_input_tokens, None);
+    assert_eq!(usage.reasoning_output_tokens, Some(3));
     assert_eq!(
         updates,
         vec![
@@ -372,7 +376,7 @@ fn cancelling_an_in_flight_count_is_known_before_generation() {
 #[test]
 fn anthropic_rebuilds_signed_tool_blocks_and_clears_text_preview() {
     let events = vec![
-        json!({"type":"message_start","message":{"id":"m","content":[]}}),
+        json!({"type":"message_start","message":{"id":"m","content":[],"usage":{"input_tokens":60,"cache_creation_input_tokens":40,"cache_read_input_tokens":20,"output_tokens":1}}}),
         json!({"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}),
         json!({"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"reason"}}),
         json!({"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig"}}),
@@ -380,7 +384,8 @@ fn anthropic_rebuilds_signed_tool_blocks_and_clears_text_preview() {
         json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_1","name":"artifact_create","input":{}}}),
         json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"title\":\"x\",\"content\":\"y\"}"}}),
         json!({"type":"content_block_stop","index":1}),
-        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"}}),
+        json!({"type":"message_delta","delta":{},"usage":{"output_tokens":2}}),
+        json!({"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8,"output_tokens_details":{"thinking_tokens":5}}}),
         json!({"type":"message_stop"}),
     ];
     let (base, handle) = sse_fixture(sse_body(&events));
@@ -402,6 +407,10 @@ fn anthropic_rebuilds_signed_tool_blocks_and_clears_text_preview() {
             {"type":"tool_use","id":"call_1","name":"artifact_create","input":{"title":"x","content":"y"}}
         ])
     );
+    let usage = turn.usage.unwrap();
+    assert_eq!((usage.input_tokens, usage.output_tokens), (120, 8));
+    assert_eq!(usage.cached_input_tokens, Some(20));
+    assert_eq!(usage.reasoning_output_tokens, Some(5));
     assert_eq!(updates, vec![ModelStreamEvent::Reset]);
     let (_, body) = handle.join().unwrap();
     assert_eq!(body["stream"], true);
@@ -411,7 +420,7 @@ fn anthropic_rebuilds_signed_tool_blocks_and_clears_text_preview() {
 fn anthropic_json_compatible_endpoint_still_uses_the_complete_response() {
     let (base, handle) = fixture(vec![(
         200,
-        json!({"stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}),
+        json!({"stop_reason":"end_turn","usage":{"input_tokens":34,"output_tokens":8,"cache_read_input_tokens":3},"content":[{"type":"text","text":"Done"}]}),
     )]);
     let provider = AnthropicProvider::new(&base, "fixture-key", "fixture-model").unwrap();
     let (task, tools) = prepared_model_step();
@@ -422,6 +431,8 @@ fn anthropic_json_compatible_endpoint_still_uses_the_complete_response() {
         })
         .unwrap();
     assert!(matches!(turn.decision, ModelDecision::Complete(text) if text == "Done"));
+    let usage = turn.usage.unwrap();
+    assert_eq!((usage.input_tokens, usage.output_tokens), (37, 8));
     assert!(updates.is_empty());
     let requests = handle.join().unwrap();
     assert_eq!(requests[0].1["stream"], true);
@@ -596,12 +607,16 @@ fn gemini_function_result_and_signed_steps_are_replayed_without_remote_storage()
         (200, json!({"status":"requires_action","steps":output})),
         (
             200,
-            json!({"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Done"}]}]}),
+            json!({"status":"completed","usage":{"total_input_tokens":90,"total_output_tokens":10},"steps":[{"type":"model_output","content":[{"type":"text","text":"Done"}]}]}),
         ),
     ]);
-    let (_kernel, _session, _) = roundtrip(Box::new(
+    let (kernel, _session, task) = roundtrip(Box::new(
         GeminiProvider::new(&base, "fixture-key", "fixture-model").unwrap(),
     ));
+    let events = kernel.list_events(&task.id, 0, 100).unwrap();
+    assert!(events.events.iter().any(|event| matches!(&event.data,
+        fliuno_protocol::EventKind::ModelUsageReported {step: 2, usage} if usage.input_tokens == 90 && usage.output_tokens == 10
+    )));
     let requests = handle.join().unwrap();
     assert!(requests[0].0.starts_with("POST /v1/interactions "));
     assert!(
@@ -634,7 +649,7 @@ fn gemini_streams_only_text_progress_and_sends_the_output_budget() {
         json!({"event_type":"step.delta","index":0,"delta":{"type":"text","text":"Do"}}),
         json!({"event_type":"step.delta","index":0,"delta":{"type":"text","text":"ne"}}),
         json!({"event_type":"step.stop","index":0}),
-        json!({"event_type":"interaction.completed","interaction":{"status":"completed"}}),
+        json!({"event_type":"interaction.completed","interaction":{"status":"completed","usage":{"total_input_tokens":30,"total_output_tokens":4,"total_cached_tokens":20,"total_thought_tokens":7}}}),
     ];
     let (base, handle) = sse_fixture(sse_body(&events));
     let provider = GeminiProvider::new(&base, "fixture-key", "fixture-model")
@@ -654,6 +669,10 @@ fn gemini_streams_only_text_progress_and_sends_the_output_budget() {
     assert_eq!(body["store"], false);
     assert_eq!(body["generation_config"]["max_output_tokens"], 512);
     assert!(matches!(turn.decision, ModelDecision::Complete(text) if text == "Done"));
+    let usage = turn.usage.unwrap();
+    assert_eq!((usage.input_tokens, usage.output_tokens), (30, 4));
+    assert_eq!(usage.cached_input_tokens, Some(20));
+    assert_eq!(usage.reasoning_output_tokens, None);
     assert_eq!(
         progress,
         [

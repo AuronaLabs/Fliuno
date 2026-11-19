@@ -11,6 +11,7 @@ use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
 mod metadata;
 mod stream;
+mod usage;
 
 pub struct AnthropicProvider {
     http: Http,
@@ -127,8 +128,11 @@ fn parse(response: Value) -> Result<ModelTurn, String> {
         }
         ModelDecision::Complete(text)
     };
+    let mut usage = usage::Usage::default();
+    usage.observe_complete(&response["usage"]);
     Ok(ModelTurn {
         decision,
+        usage: usage.report(),
         replay: Some(ProviderReplay {
             provider: "anthropic".into(),
             data: Value::Array(content.clone()),
@@ -202,11 +206,13 @@ impl ModelProvider for AnthropicProvider {
             let json_response = self
                 .http
                 .post_stream(&body, cancellation, |event| stream.event(event, progress))?;
-            parse(match json_response {
-                Some(response) => response,
+            let (response, usage) = match json_response {
+                Some(response) => (response, None),
                 None => stream.finish()?,
-            })
-            .map_err(ModelError::OutcomeUnknown)
+            };
+            let mut turn = parse(response).map_err(ModelError::OutcomeUnknown)?;
+            turn.usage = usage.or(turn.usage);
+            Ok(turn)
         })();
         match &result {
             Ok(turn) if matches!(&turn.decision, ModelDecision::Call(_)) => {

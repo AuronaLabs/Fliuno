@@ -1,5 +1,5 @@
 use crate::{ToolSpec, new_id};
-use fliuno_protocol::{Message, ModelBudget, Task, ToolCall};
+use fliuno_protocol::{Message, ModelBudget, ModelUsage, Task, ToolCall};
 use serde_json::json;
 
 pub use tokio_util::sync::CancellationToken;
@@ -18,6 +18,7 @@ pub struct ProviderReplay {
 pub struct ModelTurn {
     pub decision: ModelDecision,
     pub replay: Option<ProviderReplay>,
+    pub usage: Option<ModelUsage>,
 }
 
 /// Whether a failed provider step could have reached the remote model service.
@@ -69,6 +70,7 @@ impl From<ModelDecision> for ModelTurn {
         Self {
             decision,
             replay: None,
+            usage: None,
         }
     }
 }

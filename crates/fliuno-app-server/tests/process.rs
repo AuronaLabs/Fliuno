@@ -30,6 +30,8 @@ mod event_stream;
 mod execution;
 #[path = "process/model_budget.rs"]
 mod model_budget;
+#[path = "process/model_usage.rs"]
+mod model_usage;
 #[path = "process/sessions.rs"]
 mod sessions;
 #[path = "process/task_status.rs"]

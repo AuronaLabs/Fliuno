@@ -5787,6 +5787,28 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "model_usage_reported"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "usage": {
+                  "$ref": "#/$defs/ModelUsage"
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "usage"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "approval_requested"
                 },
                 "approval": {
@@ -6197,6 +6219,47 @@
             "failed",
             "outcome_unknown",
             "closed"
+          ]
+        },
+        "ModelUsage": {
+          "description": "Token counts reported by the provider for one model step.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "inputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "cachedInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "reasoningOutputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "inputTokens",
+            "outputTokens"
           ]
         },
         "Approval": {
@@ -6720,6 +6783,28 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "model_usage_reported"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "usage": {
+                  "$ref": "#/$defs/ModelUsage"
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "usage"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "approval_requested"
                 },
                 "approval": {
@@ -7130,6 +7215,47 @@
             "failed",
             "outcome_unknown",
             "closed"
+          ]
+        },
+        "ModelUsage": {
+          "description": "Token counts reported by the provider for one model step.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "inputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "cachedInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "reasoningOutputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "inputTokens",
+            "outputTokens"
           ]
         },
         "Approval": {

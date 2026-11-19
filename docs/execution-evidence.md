@@ -419,3 +419,10 @@ Windows `scripts/check.ps1` 退出码为 0，444 项测试、26 个离线演示�
 内核验收覆盖 16 项和 8 KiB 路径上限、遍历路径拒绝、拒绝审批没有结果、一次允许后按请求顺序报告文件、目录和不可用项。单路径查询沿用同一元数据读取函数。
 
 Windows `scripts/check.ps1` 退出码为 0，445 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 校验通过。Debian 来宾通过单路径及批量元数据两项测试。日志为 `target/0.0.2-batch-stat-windows.log` 和 `D:/Fliuno-Native-Test/guest-batch-stat.log`。
+
+
+## 模型步骤用量记录（2026-11-19）
+
+OpenAI Responses、Anthropic Messages 与 Gemini Interactions 的 JSON 和 SSE 响应可生成 `model_usage_reported` 持久事件。用量与对应的模型步骤结果同事务提交，工具调用随后被拒时仍可回放。Anthropic 合并累计用量及缓存输入，Gemini 使用其报告的输入和输出总量。供应商未报告用量或计数无效时，任务继续执行。SQLite v36 增加事件类型投影。
+
+Windows `scripts/check.ps1` 退出码为 0，446 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 校验通过。Debian 来宾通过 17 项模型 HTTP 契约测试和 1 项 app-server 用量持久回放进程测试。模型使用本地模拟服务，真实供应商验收待做。日志为 `target/0.0.2-provider-usage-windows.log`、`D:/Fliuno-Native-Test/guest-provider-usage.log` 和 `D:/Fliuno-Native-Test/guest-model-usage.log`。

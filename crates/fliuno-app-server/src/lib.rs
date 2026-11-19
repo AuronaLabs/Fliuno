@@ -365,6 +365,7 @@ impl RpcServer {
             capabilities["workspaceTaskSummaryOrdering"] = json!(true);
             capabilities["workspaceById"] = json!(true);
             capabilities["workspaceProfiles"] = json!(true);
+            capabilities["modelUsageEvents"] = json!(true);
             capabilities["maxWorkspaceTitleChars"] = json!(MAX_WORKSPACE_TITLE_CHARS);
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());

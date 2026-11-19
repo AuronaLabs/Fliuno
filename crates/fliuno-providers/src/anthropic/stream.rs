@@ -1,5 +1,7 @@
 //! Reconstruct complete provider blocks; partial tool JSON never becomes a call.
+use super::usage::Usage;
 use fliuno_core::ModelStreamEvent;
+use fliuno_protocol::ModelUsage;
 use serde_json::{Value, json};
 
 #[derive(Default)]
@@ -10,6 +12,7 @@ pub(super) struct Stream {
     open_block: Option<usize>,
     partial_json: Option<String>,
     stop_reason: Option<String>,
+    usage: Usage,
 }
 
 impl Stream {
@@ -39,6 +42,7 @@ impl Stream {
             {
                 return Err("invalid Anthropic message_start".into());
             }
+            self.usage.observe_input(&event["message"]["usage"]);
             self.started = true;
             return Ok(());
         }
@@ -144,6 +148,7 @@ impl Stream {
                 if self.open_block.is_some() {
                     return Err("Anthropic message_delta arrived before content_block_stop".into());
                 }
+                self.usage.observe_complete(&event["usage"]);
                 if let Some(reason) = event["delta"]["stop_reason"].as_str() {
                     self.stop_reason = Some(reason.into());
                 }
@@ -159,11 +164,14 @@ impl Stream {
         Ok(())
     }
 
-    pub(super) fn finish(self) -> Result<Value, String> {
+    pub(super) fn finish(self) -> Result<(Value, Option<ModelUsage>), String> {
         if !self.stopped {
             return Err("Anthropic event stream ended before message_stop".into());
         }
-        Ok(json!({"stop_reason":self.stop_reason,"content":self.content}))
+        Ok((
+            json!({"stop_reason":self.stop_reason,"content":self.content}),
+            self.usage.report(),
+        ))
     }
 }
 

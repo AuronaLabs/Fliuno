@@ -232,13 +232,22 @@ impl Kernel {
                 data: replay.data,
             });
         }
+        let mut events: Vec<_> = turn
+            .usage
+            .map(|usage| EventKind::ModelUsageReported {
+                step: task.model_steps,
+                usage,
+            })
+            .into_iter()
+            .collect();
         match turn.decision {
             ModelDecision::Complete(text) => {
                 task.status = TaskStatus::Completed;
                 task.output = Some(text.clone());
                 task.messages
                     .push(Message::Assistant { text: text.clone() });
-                self.commit(&task, &[EventKind::TaskCompleted { text }], &[])?;
+                events.push(EventKind::TaskCompleted { text });
+                self.commit(&task, &events, &[])?;
                 Ok(task)
             }
             ModelDecision::Call(call) => {
@@ -248,16 +257,24 @@ impl Kernel {
                         |m| matches!(m, Message::ToolCall {call: previous} if previous.id==call.id),
                     )
                 {
-                    return self.fail(task, "empty, oversized or reused tool call ID".into());
+                    return self.fail_with_events(
+                        task,
+                        "empty, oversized or reused tool call ID".into(),
+                        events,
+                    );
                 }
                 let Some(tool) = self.tools.get(&call.name) else {
-                    return self.fail(task, format!("unregistered tool: {}", call.name));
+                    return self.fail_with_events(
+                        task,
+                        format!("unregistered tool: {}", call.name),
+                        events,
+                    );
                 };
                 if let Err(message) = tool.validate(&call.arguments) {
-                    return self.fail(task, message);
+                    return self.fail_with_events(task, message, events);
                 }
                 if let PolicyDecision::Deny(message) = self.policy.evaluate(&tool.spec(), &call) {
-                    return self.fail(task, message);
+                    return self.fail_with_events(task, message, events);
                 }
                 let approval = Approval {
                     id: new_id("approval"),
@@ -268,7 +285,8 @@ impl Kernel {
                 task.messages.push(Message::ToolCall { call });
                 task.status = TaskStatus::WaitingApproval;
                 task.pending_approval = Some(approval.clone());
-                self.commit(&task, &[EventKind::ApprovalRequested { approval }], &[])?;
+                events.push(EventKind::ApprovalRequested { approval });
+                self.commit(&task, &events, &[])?;
                 Ok(task)
             }
         }

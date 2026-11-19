@@ -27,6 +27,7 @@ fn finish(kernel: &mut Kernel, id: &str, output: &str) -> Task {
         .apply_model_response(
             task,
             Ok(ModelTurn {
+                usage: None,
                 decision: ModelDecision::Complete(output.into()),
                 replay: Some(ProviderReplay {
                     provider: "test".into(),
