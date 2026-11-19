@@ -538,3 +538,7 @@ Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt�
 真实回环测试通过 `DELETE /runs/{run_id}` 取消任务。未登录和其他会话的调用失败。授权用户连续取消两次都收到 HTTP 204，SSE 只输出一次 `cancelled` 结果。已完成任务返回 HTTP 409。
 
 Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-http-cancel-windows.log`。
+
+## 0.0.3 AG-UI HTTP 宿主演示（2026-11-19）
+
+`python examples/ag_ui_http_demo.py` 启动独立 Rust 宿主及 app-server，在临时工作区完成任务提交、独立身份审批和 SSE 帧级续传。Windows `scripts/check.ps1` 通过 462 项测试和 27 个离线演示，日志为 `target/0.0.3-ag-ui-http-demo-windows.log`。

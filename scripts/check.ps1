@@ -13,6 +13,8 @@ try {
     # Build the demo binaries once so the examples never relink a running executable.
     cargo build --locked -p fliuno-app-server --features test-fixtures --bins
     if ($LASTEXITCODE -ne 0) { throw 'demo binaries build failed' }
+    cargo build --locked -p fliuno-ag-ui-http --example local_host
+    if ($LASTEXITCODE -ne 0) { throw 'AG-UI HTTP demo host build failed' }
     $metadataJson = cargo metadata --locked --no-deps --format-version 1
     if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
     $targetDirectory = ($metadataJson | ConvertFrom-Json).target_directory
@@ -24,6 +26,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'protocol schema is out of date' }
     python examples/demo.py
     if ($LASTEXITCODE -ne 0) { throw 'demo failed' }
+    python examples/ag_ui_http_demo.py
+    if ($LASTEXITCODE -ne 0) { throw 'AG-UI HTTP demo failed' }
     python examples/context_demo.py
     if ($LASTEXITCODE -ne 0) { throw 'context demo failed' }
     python examples/skills_demo.py

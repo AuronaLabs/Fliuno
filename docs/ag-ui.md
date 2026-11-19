@@ -101,6 +101,10 @@ while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &
 
 ## HTTP 接入
 
+在仓库根目录运行 `python examples/ag_ui_http_demo.py`。演示启动 Rust 宿主和内置模型，分别验证任务提交与审批身份，再从一个 SSE 帧续传。宿主使用临时数据库和本机回环地址。
+
+Rust 宿主演示位于 [`local_host.rs`](../crates/fliuno-ag-ui-http/examples/local_host.rs)，可以查看如何启动 app-server、连接 stdio 和挂载路由。
+
 `fliuno_ag_ui_http::router` 返回可挂载到 Axum 的路由。传入 `Arc<tokio::sync::Mutex<Client<_, _>>>` 及授权回调。回调根据请求头返回授权的本机会话 ID，返回 `None` 时请求在调用内核前被拒绝。宿主可以在两次 SSE 页读取之间通过同一个客户端处理任务审批。
 
 | 请求 | 行为 |
