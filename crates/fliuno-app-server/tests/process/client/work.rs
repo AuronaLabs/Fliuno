@@ -1,0 +1,169 @@
+use super::*;
+use fliuno_protocol::{
+    ApprovalInboxListParams, TaskStatusCounts, WorkSnapshot, WorkSnapshotParams,
+};
+
+#[test]
+fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
+    let root = std::env::temp_dir().join(format!("fliuno-work-snapshot-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(root.join("foreign")).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let ws = workspace["id"].as_str().unwrap();
+    let foreign = peer.call("workspace/open", json!({"root":root.join("foreign")}));
+    let first = peer.call("session/create", json!({"workspaceId":ws}));
+    let sibling = peer.call("session/create", json!({"workspaceId":ws}));
+    let other = peer.call("session/create", json!({"workspaceId":foreign["id"]}));
+    let first_id = first["id"].as_str().unwrap();
+    let start = |peer: &mut Peer, scope: &Value| {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId": scope["id"], "input":"build one artifact"}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval")
+    };
+    let complete = start(&mut peer, &first);
+    peer.call("approval/respond", json!({"taskId":complete["id"],"approvalId":complete["pendingApproval"]["id"],"decision":"allow_once"}));
+    peer.wait_for_status(complete["id"].as_str().unwrap(), "completed");
+    let failed = start(&mut peer, &first);
+    peer.call("approval/respond", json!({"taskId":failed["id"],"approvalId":failed["pendingApproval"]["id"],"decision":"deny"}));
+    let cancelled = start(&mut peer, &first);
+    peer.call("task/cancel", json!({"taskId":cancelled["id"]}));
+    let waiting = start(&mut peer, &first);
+    let later = start(&mut peer, &sibling);
+    start(&mut peer, &other);
+    peer.call(
+        "session/setArchived",
+        json!({"sessionId":sibling["id"],"archived":true}),
+    );
+    drop(peer);
+
+    // Recreate the last schema's layout without touching the existing task projection.
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch(
+            "BEGIN;
+         DROP TRIGGER work_status_insert;
+         DROP TRIGGER work_status_update;
+         DROP TRIGGER work_status_delete;
+         DROP TABLE work_status_counts;
+         PRAGMA user_version=41;
+         COMMIT;",
+        )
+        .unwrap();
+
+    let held = http_wire::Fixture::start(|_| http_wire::Response::hold());
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&held.url("/v1/")));
+    let empty_session = peer.call("session/create", json!({"workspaceId":ws}));
+    let empty: WorkSnapshot = serde_json::from_value(
+        peer.call("work/getSnapshot", json!({"sessionId":empty_session["id"]})),
+    )
+    .unwrap();
+    assert_eq!(empty.task_counts, TaskStatusCounts::default());
+    assert!(empty.approvals.page.items.is_empty());
+    let active = peer.call(
+        "task/start",
+        json!({"sessionId":first_id,"input":"hold this model request"}),
+    );
+    let active_id = active["id"].as_str().unwrap();
+    peer.wait_for_event(active_id, "model_started");
+    let live = peer.call(
+        "work/getSnapshot",
+        json!({"workspaceId":ws,"approvalLimit":1}),
+    );
+    assert_eq!(
+        live["taskCounts"],
+        json!({"running":1,"waitingApproval":2,"interrupted":0,"completed":1,"cancelled":1,"failed":1})
+    );
+    assert_eq!(
+        live["approvals"]["page"]["items"][0]["taskId"],
+        waiting["id"]
+    );
+    for invalid in [
+        json!({"workspaceId":ws,"sessionId":first_id}),
+        json!({"approvalLimit":101}),
+        json!({"approvalTargetBytes":1023}),
+    ] {
+        assert_eq!(
+            peer.request("work/getSnapshot", invalid)["error"]["code"],
+            -32602
+        );
+    }
+    assert_eq!(
+        peer.request("work/getSnapshot", json!({"workspaceId":"missing"}))["error"]["code"],
+        -32004
+    );
+    drop(peer);
+    drop(held);
+
+    let (server, mut client) = super::ag_ui_run::connect(&db);
+    assert_eq!(client.info().capabilities["workSnapshot"], true);
+    let request = WorkSnapshotParams {
+        workspace_id: Some(ws.into()),
+        session_id: None,
+        approval_limit: 1,
+        approval_target_bytes: Some(1024),
+    };
+    let (snapshot, inbox) = client.work_snapshot(&request, |_| {}).unwrap();
+    assert_eq!(
+        snapshot.task_counts,
+        TaskStatusCounts {
+            running: 0,
+            waiting_approval: 2,
+            interrupted: 1,
+            completed: 1,
+            cancelled: 1,
+            failed: 1
+        }
+    );
+    assert_eq!(snapshot.approvals.page.items[0].task_id, waiting["id"]);
+    let through = snapshot.approvals.snapshot.through_sequence;
+    let stamp = client.event_watermark(|_| {}).unwrap();
+    assert_eq!(through, stamp);
+    let checkpoint = serde_json::to_vec(inbox.next_request().unwrap()).unwrap();
+    let _: Value = client.call("approval/respond",&json!({"taskId":later["id"],"approvalId":later["pendingApproval"]["id"],"decision":"deny"}), |_| {}).unwrap();
+    let saved: ApprovalInboxListParams = serde_json::from_slice(&checkpoint).unwrap();
+    let mut resumed = fliuno_client::ApprovalInbox::new(saved);
+    let page = resumed.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert_eq!(page.snapshot, snapshot.approvals.snapshot);
+    assert_eq!(page.page.items[0].task_id, later["id"]);
+    assert!(resumed.next_page(&mut client, |_| {}).unwrap().is_none());
+    let (current, _) = client.work_snapshot(&request, |_| {}).unwrap();
+    assert_eq!(current.task_counts.waiting_approval, 1);
+    assert_eq!(current.task_counts.failed, 2);
+    let by_session = WorkSnapshotParams {
+        workspace_id: None,
+        session_id: Some(first_id.into()),
+        ..request.clone()
+    };
+    let (narrow, _) = client.work_snapshot(&by_session, |_| {}).unwrap();
+    assert_eq!(narrow.task_counts.failed, 1);
+    let all = WorkSnapshotParams {
+        workspace_id: None,
+        ..request
+    };
+    let (global, _) = client.work_snapshot(&all, |_| {}).unwrap();
+    assert_eq!(global.task_counts.waiting_approval, 2);
+    assert_eq!(global.task_counts.failed, 2);
+    let replay: fliuno_protocol::EventsPage = client
+        .call(
+            "events/listWorkspace",
+            &json!({"workspaceId":ws,"after":through}),
+            |_| {},
+        )
+        .unwrap();
+    assert!(
+        replay
+            .events
+            .iter()
+            .any(|event| event.task_id == later["id"]
+                && matches!(
+                    event.data,
+                    fliuno_protocol::EventKind::ApprovalResolved { .. }
+                ))
+    );
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}

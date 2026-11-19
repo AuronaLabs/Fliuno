@@ -10,6 +10,7 @@ mod replay;
 mod run_boundaries;
 mod sessions;
 mod task_summaries;
+mod work;
 mod workspaces;
 use super::*;
 pub use replay::MAX_EVENT_TARGET_BYTES;
@@ -19,7 +20,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 41;
+pub(crate) const SCHEMA_VERSION: u32 = 42;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -280,6 +281,9 @@ impl Kernel {
         }
         if version < 41 {
             approvals::migrate_snapshots(&mut db)?;
+        }
+        if version < 42 {
+            work::migrate(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

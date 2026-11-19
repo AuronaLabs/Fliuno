@@ -1,6 +1,8 @@
 //! Walk a durable view of one pending approval inbox.
 use crate::{Client, Error, Notification};
-use fliuno_protocol::{ApprovalInboxListParams, ApprovalInboxPage};
+use fliuno_protocol::{
+    ApprovalInboxListParams, ApprovalInboxPage, WorkSnapshot, WorkSnapshotParams,
+};
 use std::{
     collections::HashSet,
     io::{BufRead, Write},
@@ -30,11 +32,19 @@ impl ApprovalInbox {
         client: &mut Client<R, W>,
         on_notification: impl FnMut(Notification),
     ) -> Result<Option<ApprovalInboxPage>, Error> {
-        let Some(request) = &mut self.request else {
+        let Some(request) = &self.request else {
             return Ok(None);
         };
-        let reply: ApprovalInboxPage =
-            client.call("approval/listPendingSnapshot", request, on_notification)?;
+        let reply = client.call("approval/listPendingSnapshot", request, on_notification)?;
+        self.accept_page(&reply)?;
+        Ok(Some(reply))
+    }
+
+    fn accept_page(&mut self, reply: &ApprovalInboxPage) -> Result<(), Error> {
+        let request = self
+            .request
+            .as_mut()
+            .ok_or(Error::InvalidApprovalInboxPage)?;
         let page = &reply.page;
         if request
             .snapshot
@@ -71,6 +81,24 @@ impl ApprovalInbox {
         } else {
             self.request = None;
         }
-        Ok(Some(reply))
+        Ok(())
+    }
+}
+
+impl<R: BufRead, W: Write> Client<R, W> {
+    /// Read a work overview and an inbox pager already positioned after its
+    /// first page. Use the snapshot's global event sequence to resume delivery.
+    pub fn work_snapshot(
+        &mut self,
+        params: &WorkSnapshotParams,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<(WorkSnapshot, ApprovalInbox), Error> {
+        let snapshot: WorkSnapshot = self.call("work/getSnapshot", params, on_notification)?;
+        let mut inbox = ApprovalInbox::new(ApprovalInboxListParams {
+            page: params.approval_page(),
+            snapshot: None,
+        });
+        inbox.accept_page(&snapshot.approvals)?;
+        Ok((snapshot, inbox))
     }
 }

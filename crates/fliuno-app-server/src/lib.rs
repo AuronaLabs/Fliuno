@@ -391,6 +391,7 @@ impl RpcServer {
             capabilities["taskSummaryListTargetBytes"] =
                 json!(fliuno_core::MAX_TASK_LIST_TARGET_BYTES);
             capabilities["taskSummaryById"] = json!(true);
+            capabilities["workSnapshot"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["workspaceTaskSummaries"] = json!(true);
             capabilities["workspaceTaskSummaryOrdering"] = json!(true);
@@ -522,6 +523,10 @@ impl RpcServer {
                         .tail(&p.session_id, &p.terminal_id, p.limit)
                         .map_err(terminal_error)?
                 )
+            }
+            "work/getSnapshot" => {
+                let p: WorkSnapshotParams = decode(params)?;
+                json!(self.kernel()?.work_snapshot(&p)?)
             }
             "workspace/open" => {
                 let p: WorkspaceOpenParams = decode(params)?;

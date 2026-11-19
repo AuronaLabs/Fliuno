@@ -5,7 +5,7 @@
 应用协议连接本机客户端与 Fliuno 内核。先握手并读取服务能力，再发起任务、处理审批或订阅持久事件。
 
 - **建立连接**：[stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
-- **查接口**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [待审批快照](#待审批快照) · [模型用量](#模型用量) · [搜索历史](#查找历史任务) · [错误](#错误)
+- **查接口**：[工作区、会话与任务](#工作区会话与任务) · [审批、事件与产物](#审批事件与产物) · [工具、Agent 与终端](#工具agent-与终端) · [工作台快照](#工作台快照) · [待审批快照](#待审批快照) · [模型用量](#模型用量) · [搜索历史](#查找历史任务) · [错误](#错误)
 - **配置能力**：[A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
 ## 传输
@@ -54,6 +54,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `task/list` | `{sessionId,after?:0,limit?:100,targetBytes?}` | Task ObjectPage |
 | `task/listSummaries` | `{sessionId,status?,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,order?,after?,limit?,targetBytes?}` | 跨会话分页读取同一工作区的任务摘要，可按创建顺序正序或倒序返回 |
+| `work/getSnapshot` | `{workspaceId?,sessionId?,approvalLimit?,approvalTargetBytes?}` | 同一水位的任务状态计数与待审批首页 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `workspace/get` | `{workspaceId}` | 按 ID 读取已保存的 Workspace。查看 `initialize.capabilities.workspaceById` |
 | `workspace/getProfile` | `{workspaceId}` | 当前 WorkspaceProfile，包含原工作区和可选的显示名称 |
@@ -169,6 +170,20 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 `artifacts/digest` 对分块读取的原始字节计算 SHA-256。客户端可将拼接后的内容与 `{contentBytes,sha256}` 比对。`initialize.capabilities.maxArtifactDigestBytes` 公布整次摘要的上限，目前为 8 MiB。正文分块读入固定上限的缓冲区。
 
 `initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
+
+### 工作台快照
+
+服务声明 `workSnapshot` 后，可以用 `work/getSnapshot` 在一次读取中得到指定范围的状态计数和待审批首页。传 `workspaceId` 或 `sessionId` 限定范围，两个都省略时查询整个数据库；工作区包含已归档会话。不存在的范围返回 `-32004`，同时传两个 ID 返回 `-32602`。
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"work/getSnapshot","params":{"workspaceId":"<workspace-id>","approvalLimit":20}}
+```
+
+结果的 `taskCounts` 始终包含 `running`、`waitingApproval`、`interrupted`、`completed`、`cancelled` 和 `failed`。`waitingApproval` 是任务数：一个任务可能同时有多项审批，审批首页也会排除已到期项。`approvals` 是[待审批快照](#待审批快照)，其 `snapshot.throughSequence` 也是计数的事件水位。审批首页的条数和字节限制与原接口相同。
+
+Rust 的 `Client::work_snapshot` 返回 `(WorkSnapshot, ApprovalInbox)`。首页已经在 `WorkSnapshot.approvals` 中，`ApprovalInbox` 从下一页开始；也可以从 `throughSequence` 接上同范围的事件。需要刷新当前计数时重新调用 `work/getSnapshot`，旧审批游标仍可继续读取原来的列表。
+
+SQLite v42 从已有状态索引回填计数。平时只有创建任务或状态变化才改动对应范围的计数，读取时不扫描任务列表。
 
 ### 审批收件箱与决定
 

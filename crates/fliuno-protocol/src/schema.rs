@@ -15,6 +15,7 @@ fn schema<T: JsonSchema>() -> Value {
 pub fn schema_bundle() -> Value {
     let methods = schemas! {
         "initialize" => schema::<InitializeParams>(),
+        "work/getSnapshot" => schema::<WorkSnapshotParams>(),
         "workspace/open" => schema::<WorkspaceOpenParams>(),
         "workspace/searchHistory" => schema::<WorkspaceHistorySearchParams>(),
         "workspace/get" => schema::<WorkspaceIdParams>(),
@@ -101,6 +102,7 @@ pub fn schema_bundle() -> Value {
         "Task" => schema::<Task>(),
         "TaskSummary" => schema::<TaskSummary>(),
         "TaskSummariesPage" => schema::<ObjectPage<TaskSummary>>(),
+        "WorkSnapshot" => schema::<WorkSnapshot>(),
         "TaskContext" => schema::<TaskContext>(),
         "SessionHistoryListPage" => schema::<SessionHistoryListPage>(),
         "SessionHistoryEntry" => schema::<SessionHistoryEntry>(),

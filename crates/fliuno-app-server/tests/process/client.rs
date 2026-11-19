@@ -23,6 +23,8 @@ mod ag_ui_interrupt;
 mod ag_ui_run;
 #[path = "client/feed.rs"]
 mod feed;
+#[path = "client/work.rs"]
+mod work;
 
 #[test]
 fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {

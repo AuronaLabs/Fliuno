@@ -10,11 +10,13 @@ pub use schema::schema_bundle;
 mod session;
 pub use session::*;
 mod terminal;
+mod work;
 mod workspace;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub use terminal::*;
+pub use work::*;
 pub use workspace::*;
 
 pub const PROTOCOL_VERSION: &str = "0.1";

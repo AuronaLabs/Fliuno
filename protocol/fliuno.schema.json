@@ -19,6 +19,44 @@
         "clientName"
       ]
     },
+    "work/getSnapshot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkSnapshotParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "approvalLimit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        },
+        "approvalTargetBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
     "workspace/open": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "WorkspaceOpenParams",
@@ -3911,6 +3949,177 @@
                 "agentId"
               ]
             }
+          ]
+        }
+      }
+    },
+    "WorkSnapshot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkSnapshot",
+      "type": "object",
+      "properties": {
+        "taskCounts": {
+          "$ref": "#/$defs/TaskStatusCounts"
+        },
+        "approvals": {
+          "description": "Its stamp applies to the entire response. The inbox only includes\napprovals that had not expired when the snapshot was captured.",
+          "$ref": "#/$defs/ApprovalInboxPage"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskCounts",
+        "approvals"
+      ],
+      "$defs": {
+        "TaskStatusCounts": {
+          "type": "object",
+          "properties": {
+            "running": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "waitingApproval": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "interrupted": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "completed": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "cancelled": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "running",
+            "waitingApproval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "ApprovalInboxPage": {
+          "type": "object",
+          "properties": {
+            "snapshot": {
+              "$ref": "#/$defs/ApprovalInboxSnapshot"
+            },
+            "page": {
+              "$ref": "#/$defs/ObjectPage"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "snapshot",
+            "page"
+          ]
+        },
+        "ApprovalInboxSnapshot": {
+          "description": "The event and expiry-time boundaries of a read-only inbox snapshot.",
+          "type": "object",
+          "properties": {
+            "throughSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "capturedAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "throughSequence",
+            "capturedAtUnixMs"
+          ]
+        },
+        "ObjectPage": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ApprovalSummary"
+              }
+            },
+            "nextAfter": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "hasMore": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "items",
+            "nextAfter",
+            "hasMore"
+          ]
+        },
+        "ApprovalSummary": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/ApprovalKind"
+            },
+            "allowOnceAvailable": {
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "sessionId",
+            "kind",
+            "allowOnceAvailable"
+          ]
+        },
+        "ApprovalKind": {
+          "type": "string",
+          "enum": [
+            "tool_call",
+            "agent_permission",
+            "host_tool"
           ]
         }
       }
