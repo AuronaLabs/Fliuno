@@ -279,6 +279,26 @@ fn history_search_pages_keep_their_watermark_and_can_select_context_after_restar
     let mut frozen = request;
     frozen["throughSequence"] = first["throughSequence"].clone();
     assert_eq!(peer.call("session/searchHistory", frozen.clone()), first);
+    frozen["role"] = json!("user");
+    assert_eq!(peer.call("session/searchHistory", frozen.clone()), first);
+    let mut assistant = frozen.clone();
+    assistant["role"] = json!("assistant");
+    assert_eq!(
+        peer.call("session/searchHistory", assistant.clone())["matches"],
+        json!([])
+    );
+    assistant["query"] = json!("ARTIFACT CREATED");
+    assert_eq!(peer.call("session/searchHistory", assistant.clone()), first);
+    assistant["role"] = json!("user");
+    assert_eq!(
+        peer.call("session/searchHistory", assistant.clone())["matches"],
+        json!([])
+    );
+    assistant["role"] = json!("tool");
+    assert_eq!(
+        peer.request("session/searchHistory", assistant)["error"]["code"],
+        -32602
+    );
     frozen["beforeSequence"] = first["nextBeforeSequence"].clone();
     let next = peer.call("session/searchHistory", frozen.clone());
     assert_eq!(next["matches"][0]["taskId"], older["id"]);

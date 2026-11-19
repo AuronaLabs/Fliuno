@@ -300,6 +300,17 @@
           "description": "Literal substring in a user or assistant message, 1 to 256 UTF-8 bytes after trimming.",
           "type": "string"
         },
+        "role": {
+          "description": "Search only messages with this role. Omitting it searches both roles.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionHistoryRole"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "throughSequence": {
           "description": "Reuse the first page's completion watermark when fetching more results.",
           "type": [
@@ -335,7 +346,16 @@
       "required": [
         "sessionId",
         "query"
-      ]
+      ],
+      "$defs": {
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        }
+      }
     },
     "terminal/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

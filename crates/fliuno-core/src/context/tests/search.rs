@@ -17,6 +17,7 @@ fn search_can_page_past_empty_windows_and_reports_skipped_large_turns() {
     let mut params = SessionHistorySearchParams {
         session_id: session.id,
         query: " found ".into(),
+        role: None,
         through_sequence: None,
         before_sequence: None,
         limit: None,

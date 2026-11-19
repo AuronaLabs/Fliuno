@@ -1,7 +1,8 @@
 //! Read-only search within a snapshot of one session's completed history.
 use super::{Error, Kernel, Result};
 use fliuno_protocol::{
-    ContextMessage, SessionHistoryMatch, SessionHistorySearchPage, SessionHistorySearchParams,
+    ContextMessage, SessionHistoryMatch, SessionHistoryRole, SessionHistorySearchPage,
+    SessionHistorySearchParams,
 };
 
 const MAX_QUERY_BYTES: usize = 256;
@@ -52,11 +53,16 @@ impl Kernel {
             self.scan_conversation(&params.session_id, upper, |sequence, turn| {
                 page.scanned_turns += 1;
                 if let Some(turn) = turn {
-                    if turn.messages.iter().any(|message| match message {
-                        ContextMessage::User { text } | ContextMessage::Assistant { text } => {
-                            text.contains(&query) || text.to_lowercase().contains(&query)
-                        }
-                        _ => false,
+                    if turn.messages.iter().any(|message| {
+                        let (text, role) = match message {
+                            ContextMessage::User { text } => (text, SessionHistoryRole::User),
+                            ContextMessage::Assistant { text } => {
+                                (text, SessionHistoryRole::Assistant)
+                            }
+                            _ => return false,
+                        };
+                        params.role.is_none_or(|filter| filter == role)
+                            && (text.contains(&query) || text.to_lowercase().contains(&query))
                     }) {
                         page.matches.push(SessionHistoryMatch {
                             task_id: turn.task_id,

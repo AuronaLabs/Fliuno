@@ -138,12 +138,22 @@ pub struct SessionContextParams {
     pub options: ContextOptions,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionHistoryRole {
+    User,
+    Assistant,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionHistorySearchParams {
     pub session_id: String,
     /// Literal substring in a user or assistant message, 1 to 256 UTF-8 bytes after trimming.
     pub query: String,
+    /// Search only messages with this role. Omitting it searches both roles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<SessionHistoryRole>,
     /// Reuse the first page's completion watermark when fetching more results.
     #[serde(default)]
     pub through_sequence: Option<u64>,
