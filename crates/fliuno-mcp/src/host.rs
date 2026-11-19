@@ -11,6 +11,12 @@ use tokio::{runtime::Runtime, sync::Mutex};
 
 type Response<'a, T> = Pin<Box<dyn Future<Output = Result<Option<T>, ServiceError>> + 'a>>;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RequestMode {
+    Effectful,
+    ReadOnly,
+}
+
 pub(crate) type McpService = RunningService<RoleClient, ClientConfig>;
 
 /// Untagged SDK results can have a final payload shape and a non-final marker
@@ -35,6 +41,23 @@ impl Host {
         &self,
         cancellation: &CancellationToken,
         operation: impl for<'a> FnOnce(&'a McpService) -> Response<'a, T>,
+    ) -> Result<T, ToolError> {
+        self.request_with_mode(cancellation, operation, RequestMode::Effectful)
+    }
+
+    pub fn request_read<T: 'static>(
+        &self,
+        cancellation: &CancellationToken,
+        operation: impl for<'a> FnOnce(&'a McpService) -> Response<'a, T>,
+    ) -> Result<T, ToolError> {
+        self.request_with_mode(cancellation, operation, RequestMode::ReadOnly)
+    }
+
+    fn request_with_mode<T: 'static>(
+        &self,
+        cancellation: &CancellationToken,
+        operation: impl for<'a> FnOnce(&'a McpService) -> Response<'a, T>,
+        mode: RequestMode,
     ) -> Result<T, ToolError> {
         self.runtime.block_on(async {
             let deadline = tokio::time::Instant::now() + self.timeout;
@@ -64,6 +87,11 @@ impl Host {
             };
             let message = match response {
                 Some(Ok(Ok(Some(result)))) => return Ok(result),
+                Some(Ok(Err(ServiceError::McpError(_)))) if mode == RequestMode::ReadOnly => {
+                    return Err(ToolError::Failed(
+                        "MCP server rejected a read request".into(),
+                    ));
+                }
                 Some(Ok(Ok(None))) => {
                     "MCP continuation or response kind is unsupported; result unknown; host stopped"
                 }

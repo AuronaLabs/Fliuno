@@ -160,7 +160,7 @@ impl Tool for TaskTool {
         let output = match (self.action, parsed) {
             (Action::Get, ParsedArgs::TaskId(task_id)) => {
                 let request_task_id = task_id;
-                let response = self.host.request(cancellation, move |service| {
+                let response = self.host.request_read(cancellation, move |service| {
                     Box::pin(async move {
                         service
                             .get_task(GetTaskParams::new(request_task_id))

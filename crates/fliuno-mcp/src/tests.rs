@@ -141,6 +141,9 @@ impl ServerHandler for TasksFixture {
         request: GetTaskParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetTaskResult, ErrorData> {
+        if request.task_id != "remote-task-1" {
+            return Err(ErrorData::invalid_params("unknown task", None));
+        }
         assert_eq!(request.task_id, "remote-task-1");
         let task = Task::new(
             request.task_id,
@@ -230,6 +233,10 @@ fn official_sdk_tasks_create_read_update_and_cancel_roundtrip() {
         .iter()
         .find(|tool| tool.spec().name == "mcp_fixture_tasks_get")
         .unwrap();
+    let rejected = invoke_arguments(get.as_ref(), json!({"taskId":"missing-task"}));
+    assert!(
+        matches!(rejected, Err(ToolError::Failed(message)) if message.contains("rejected a read request"))
+    );
     let snapshot = invoke_arguments(get.as_ref(), json!({"taskId":"remote-task-1"})).unwrap();
     assert_eq!(snapshot.output["result"]["status"], "input_required");
     assert_eq!(
