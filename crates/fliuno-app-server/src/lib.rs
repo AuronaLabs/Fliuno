@@ -339,6 +339,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["sessionHistorySearch"] = json!(true);
+            capabilities["workspaceHistorySearch"] = json!(true);
             capabilities["contextMatchRecent"] = json!(true);
             capabilities["artifactMediaTypeFilter"] = json!(true);
             capabilities["remoteTaskWatch"] = json!(self.kernel()?.remote_task_watch_supported());
@@ -562,6 +563,10 @@ impl RpcServer {
             "session/searchHistory" => {
                 let p: SessionHistorySearchParams = decode(params)?;
                 json!(self.kernel()?.search_session_history(p)?)
+            }
+            "workspace/searchHistory" => {
+                let p: WorkspaceHistorySearchParams = decode(params)?;
+                json!(self.kernel()?.search_workspace_history(p)?)
             }
             "session/context" => {
                 let p: SessionContextParams = decode(params)?;

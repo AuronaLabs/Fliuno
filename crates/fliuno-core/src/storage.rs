@@ -14,7 +14,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 32;
+pub(crate) const SCHEMA_VERSION: u32 = 33;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -250,6 +250,9 @@ impl Kernel {
         if version < 32 {
             // Older readers reject partIndex in persisted agent artifact links.
             db.pragma_update(None, "user_version", 32)?;
+        }
+        if version < 33 {
+            context::migrate_workspace_turns(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

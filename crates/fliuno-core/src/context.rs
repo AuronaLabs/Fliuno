@@ -143,9 +143,9 @@ impl Kernel {
         if let Some(history) = &snapshot.options.history_query {
             let query = history.query.to_lowercase();
             self.scan_conversation(
-                session,
+                search::HistoryScope::Session(session),
                 through_sequence,
-                |sequence, turn, has_compact_projection| {
+                |sequence, turn, has_compact_projection, _| {
                     let Some(turn) = turn
                         .filter(|turn| search::matches_query(&turn.messages, &query, history.role))
                     else {

@@ -22,6 +22,7 @@
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,after?,limit?}` | 按创建顺序跨会话分页读取同一工作区的任务摘要 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `workspace/get` | `{workspaceId}` | 按 ID 读取已保存的 Workspace。查看 `initialize.capabilities.workspaceById` |
+| `workspace/searchHistory` | `{workspaceId,query,role?,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，跨会话查找已完成任务，命中包含 `sessionId` |
 | `session/create` | `{workspaceId,title?,clientRequestId?}` | Session |
 | `session/get` | `{sessionId}` | 单个 Session |
 | `session/rename` | `{sessionId,title}` | 持久化标题并返回 Session |
@@ -321,5 +322,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 `session/searchHistory` 只检查指定会话里已完成且有历史投影的用户与助手消息。查询去除首尾空白后须为 1～256 个 UTF-8 字节，按 Unicode 小写转换后的字面子串匹配，无词法或正则语法。`role` 可设为 `user` 或 `assistant`，省略就查两种消息。`limit` 默认为 16，接受 1～32。结果按完成序号从新到旧，包含 `taskId` 与 `completionSequence`。
 
 每页最多检查 128 条历史。超过 128 KiB 的精简对话投影会跳过并计入 `skippedOversizedTurns`。`scannedTurns` 包含这些记录。只要 `nextBeforeSequence` 有值就还能翻页，即使 `matches` 为空。翻页时沿用 `query` 和 `role`，同时传入首次返回的 `throughSequence` 和上一页的 `nextBeforeSequence` 作为 `beforeSequence`。调用方可用查到的 `taskId` 配合 `session/context` 的 `options.taskIds` 预览和选择历史，搜索本身只读取本机数据库。
+
+`initialize.capabilities.workspaceHistorySearch` 为真时，可用 `workspace/searchHistory` 搜索同一工作区的所有会话，包括已归档会话。每个命中同时返回 `sessionId`，可用它打开对应会话。查询规则、扫描上限和分页水位与 `session/searchHistory` 相同。SQLite v33 回填按工作区和完成序号排序的索引，现有会话搜索响应保持原样。搜索不会把其他会话内容自动加入模型上下文。
 
 `initialize.capabilities.contextMatchRecent` 表示上下文选项也支持 `selection: "match_recent"` 和 `historyQuery: {query,role?}`，将近期匹配记录直接冻结到新任务。匹配方式和扫描上限与历史搜索相同；具体预算和快照语义见[上下文](context.md)。

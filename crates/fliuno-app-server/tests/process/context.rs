@@ -408,3 +408,64 @@ fn history_search_pages_keep_their_watermark_and_can_select_context_after_restar
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn workspace_history_search_backfills_and_pages_across_sessions_without_crossing_workspaces() {
+    let root =
+        std::env::temp_dir().join(format!("fliuno-workspace-search-{}", uuid::Uuid::new_v4()));
+    let other_root = root.join("other");
+    fs::create_dir_all(&other_root).unwrap();
+    let db = root.join("kernel.db");
+    let method = "workspace/searchHistory";
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let other_ws = peer.call("workspace/open", json!({"root":other_root}));
+    let first_session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let second_session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let foreign_session = peer.call("session/create", json!({"workspaceId":other_ws["id"]}));
+    let first = approve_report(&mut peer, &first_session, "case A", "a");
+    let second = approve_report(&mut peer, &second_session, "case B", "b");
+    approve_report(
+        &mut peer,
+        &foreign_session,
+        "case other workspace",
+        "foreign",
+    );
+    peer.call(
+        "session/setArchived",
+        json!({"sessionId":second_session["id"],"archived":true}),
+    );
+    drop(peer);
+
+    rusqlite::Connection::open(&db).unwrap().execute_batch(
+        "DROP TRIGGER workspace_turn_index_insert; DROP TABLE workspace_turn_index; PRAGMA user_version=32;",
+    ).unwrap();
+    let mut peer = Peer::start(&db);
+    let request = json!({"workspaceId":workspace["id"],"query":" CASE ","role":"user","limit":1});
+    let page = peer.call(method, request.clone());
+    assert_eq!(page["scannedTurns"], 1);
+    assert_eq!(page["matches"][0]["taskId"], second["id"]);
+    assert_eq!(page["matches"][0]["sessionId"], second_session["id"]);
+    let late = approve_report(&mut peer, &first_session, "case later", "late");
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    let mut next = request.clone();
+    next["throughSequence"] = page["throughSequence"].clone();
+    assert_eq!(peer.call(method, next.clone()), page);
+    next["beforeSequence"] = page["nextBeforeSequence"].clone();
+    let second_page = peer.call(method, next);
+    assert_eq!(second_page["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(second_page["matches"][0]["taskId"], first["id"]);
+    assert_eq!(second_page["matches"][0]["sessionId"], first_session["id"]);
+    assert!(second_page["nextBeforeSequence"].is_null());
+    assert_eq!(
+        peer.call(method, request.clone())["matches"][0]["taskId"],
+        late["id"]
+    );
+    let mut invalid = request;
+    invalid["workspaceId"] = json!("missing-workspace");
+    assert_eq!(peer.request(method, invalid)["error"]["code"], -32004);
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

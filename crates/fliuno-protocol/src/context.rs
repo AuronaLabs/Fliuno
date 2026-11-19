@@ -181,9 +181,28 @@ pub struct SessionHistorySearchParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceHistorySearchParams {
+    pub workspace_id: String,
+    /// Literal substring in a user or assistant message, 1 to 256 UTF-8 bytes after trimming.
+    pub query: String,
+    #[serde(default)]
+    pub role: Option<SessionHistoryRole>,
+    #[serde(default)]
+    pub through_sequence: Option<u64>,
+    #[serde(default)]
+    pub before_sequence: Option<u64>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SessionHistoryMatch {
     pub task_id: String,
     pub completion_sequence: u64,
+    /// Included when searching across a workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

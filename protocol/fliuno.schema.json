@@ -33,6 +33,72 @@
         "root"
       ]
     },
+    "workspace/searchHistory": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceHistorySearchParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "query": {
+          "description": "Literal substring in a user or assistant message, 1 to 256 UTF-8 bytes after trimming.",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionHistoryRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "throughSequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "beforeSequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "limit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "query"
+      ],
+      "$defs": {
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        }
+      }
+    },
     "workspace/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "WorkspaceIdParams",
@@ -3293,6 +3359,13 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
+            },
+            "sessionId": {
+              "description": "Included when searching across a workspace.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "additionalProperties": false,
