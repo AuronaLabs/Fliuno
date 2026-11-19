@@ -52,3 +52,40 @@ fn oversize_frame_retires_the_connection_without_draining_more_bytes() {
     let (reader, _) = client.into_parts();
     assert_eq!(reader.position(), HANDSHAKE.len() as u64);
 }
+
+#[test]
+fn replay_rejects_an_inconsistent_page_and_advances_across_an_empty_scoped_tail() {
+    let mut client = fake_client(concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"events\":[],\"nextAfter\":4,\"hasMore\":true}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"events\":[],\"nextAfter\":4,\"hasMore\":false}}\n",
+    ).as_bytes());
+    let mut replay = EventReplay::new(ReplayScope::Workspace("workspace".into()), 4, 10).unwrap();
+    assert!(matches!(
+        replay.next_page(&mut client, 1, None, |_| {}),
+        Err(Error::InvalidReplayPage)
+    ));
+    assert_eq!(replay.cursor(), 4);
+    assert!(
+        replay
+            .next_page(&mut client, 1, None, |_| {})
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(replay.cursor(), 10);
+    assert!(
+        replay
+            .next_page(&mut client, 1, None, |_| {})
+            .unwrap()
+            .is_none()
+    );
+    let (_, written) = client.into_parts();
+    let sent: Vec<Value> = written
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(sent.len(), 3);
+    assert_eq!(sent[1]["method"], "events/listWorkspace");
+    assert_eq!(sent[1]["params"], sent[2]["params"]);
+    assert_eq!(sent[2]["params"]["through"], 10);
+}

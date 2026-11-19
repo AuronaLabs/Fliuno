@@ -1,5 +1,8 @@
 //! Blocking stdio client for Fliuno's local application protocol.
+mod replay;
 mod wire;
+
+pub use replay::{EventReplay, ReplayScope};
 
 use fliuno_protocol::{InitializeParams, PROTOCOL_VERSION};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -24,6 +27,10 @@ pub enum Error {
     InvalidFrame(&'static str),
     #[error("application result has the wrong type")]
     InvalidResult,
+    #[error("invalid event replay window")]
+    InvalidReplayWindow,
+    #[error("event page violates the requested replay window or scope")]
+    InvalidReplayPage,
     #[error("application RPC error {code}: {message}")]
     Rpc { code: i32, message: String },
 }

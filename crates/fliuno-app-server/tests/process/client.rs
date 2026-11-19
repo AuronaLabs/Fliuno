@@ -1,8 +1,8 @@
 use super::*;
-use fliuno_client::{Client, Error};
+use fliuno_client::{Client, Error, EventReplay, ReplayScope};
 use fliuno_protocol::{
-    ApprovalDecision, ApprovalGetParams, ApprovalRespondParams, Event, EventKind, Task,
-    TaskIdParams, TaskStatus, Workspace, WorkspaceOpenParams,
+    ApprovalDecision, ApprovalGetParams, ApprovalRespondParams, Event, EventKind,
+    EventSubscription, Task, TaskIdParams, TaskStatus, Workspace, WorkspaceOpenParams,
 };
 
 #[test]
@@ -98,7 +98,7 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
         .call(
             "approval/getDecision",
             &ApprovalGetParams {
-                task_id: task.id,
+                task_id: task.id.clone(),
                 approval_id: approval.id,
             },
             &mut observe,
@@ -111,6 +111,22 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
             ..
         }
     ));
+    let subscription: EventSubscription = client
+        .call("events/setScope", &json!({"taskId":task.id}), &mut observe)
+        .unwrap();
+    let mut replay =
+        EventReplay::new(ReplayScope::Task(task.id), 0, subscription.through_sequence).unwrap();
+    let mut read = Vec::new();
+    while let Some(page) = replay
+        .next_page(&mut client, 1, Some(4096), &mut observe)
+        .unwrap()
+    {
+        assert_eq!(page.len(), 1);
+        read.push(page[0].sequence);
+    }
+    assert!(read.contains(&event.sequence));
+    assert!(read.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(replay.cursor(), subscription.through_sequence);
     if sequences.is_empty() {
         let notification = client.read_notification().unwrap();
         assert_eq!(notification.method, "notifications/event");
