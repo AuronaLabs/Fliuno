@@ -50,6 +50,8 @@
 
 - [x] `events/listTaskSummaryChanges` 在一个 SQLite 读快照内找出变动任务并读取当前摘要，Rust 客户端区分已消费游标与摘要水位。
 
+- [x] `events/listTaskSummaryRevisions` 按实际摘要修订回放。SQLite v45 无需历史回扫；客户端可沿用先前的事件游标，并跨越升级边界继续读取。
+
 - [x] `artifacts/digest` 读取持久 SHA-256；旧产物按需补算，不增加启动扫描或改动目录游标，Rust 下载客户端继续验证实际字节。
 
 - [x] Rust 客户端可凭同一产物身份和固定摘要继续写入暂存文件。重启后只读缺失字节，最后校验整个文件。

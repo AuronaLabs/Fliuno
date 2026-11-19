@@ -127,15 +127,17 @@ pub(super) fn summarize(task: &Task) -> TaskSummary {
     }
 }
 
-pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
+/// True when the persisted summary was inserted or changed.
+pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<bool> {
     let summary = summarize(task);
-    tx.prepare_cached(
-        "INSERT INTO task_summaries(task_id,data) VALUES(?1,?2)
+    let changed = tx
+        .prepare_cached(
+            "INSERT INTO task_summaries(task_id,data) VALUES(?1,?2)
          ON CONFLICT(task_id) DO UPDATE SET data=excluded.data
          WHERE task_summaries.data<>excluded.data",
-    )?
-    .execute(params![task.id, serde_json::to_string(&summary)?])?;
-    Ok(())
+        )?
+        .execute(params![task.id, serde_json::to_string(&summary)?])?;
+    Ok(changed != 0)
 }
 
 impl Kernel {

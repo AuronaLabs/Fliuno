@@ -81,6 +81,7 @@ pub fn schema_bundle() -> Value {
         "events/listAll" => schema::<EventsListAllParams>(),
         "events/listTaskChanges" => schema::<TaskChangesParams>(),
         "events/listTaskSummaryChanges" => schema::<TaskSummaryChangesParams>(),
+        "events/listTaskSummaryRevisions" => schema::<TaskSummaryChangesParams>(),
         "events/listSession" => schema::<EventsListSessionParams>(),
         "events/listWorkspace" => schema::<EventsListWorkspaceParams>(),
         "events/getWatermark" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),

@@ -11,6 +11,7 @@ mod run_boundaries;
 mod sessions;
 mod task_cancel;
 mod task_changes;
+mod task_revisions;
 mod task_starts;
 mod task_summaries;
 mod work;
@@ -23,7 +24,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 44;
+pub(crate) const SCHEMA_VERSION: u32 = 45;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -62,7 +63,7 @@ fn write_transition(
         running,
         serde_json::to_string(task)?
     ])?;
-    task_summaries::record(tx, task)?;
+    let summary_changed = task_summaries::record(tx, task)?;
     if let Some(continuation) = &task.remote_continuation
         && continuation.expected.state == AgentTaskState::InputRequired
     {
@@ -124,6 +125,12 @@ fn write_transition(
             }
             sequences.push(sequence as u64);
         }
+    }
+    if summary_changed {
+        let sequence = sequences.last().ok_or_else(|| {
+            Error::Conflict("task summary change requires a durable event".into())
+        })?;
+        task_revisions::record(tx, task, *sequence as i64)?;
     }
     // Inbox transitions are stamped with the final event in this transaction.
     approvals::record(tx, task)?;
@@ -396,6 +403,9 @@ impl Kernel {
         }
         if version < 44 {
             task_starts::migrate(&mut db)?;
+        }
+        if version < 45 {
+            task_revisions::migrate(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

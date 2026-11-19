@@ -41,11 +41,43 @@ impl EventReplay {
         limit: u32,
         on_notification: impl FnMut(Notification),
     ) -> Result<Option<TaskSummaryChangesPage>, Error> {
+        self.read_task_summary_changes(
+            client,
+            "events/listTaskSummaryChanges",
+            limit,
+            on_notification,
+        )
+    }
+
+    /// Read only actual summary revisions recorded after the index was enabled.
+    /// Older windows are conservatively replayed from the event log. Check
+    /// `taskSummaryRevisionReplay` before selecting this reader.
+    pub fn next_task_summary_revisions<R: BufRead, W: Write>(
+        &mut self,
+        client: &mut Client<R, W>,
+        limit: u32,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<Option<TaskSummaryChangesPage>, Error> {
+        self.read_task_summary_changes(
+            client,
+            "events/listTaskSummaryRevisions",
+            limit,
+            on_notification,
+        )
+    }
+
+    fn read_task_summary_changes<R: BufRead, W: Write>(
+        &mut self,
+        client: &mut Client<R, W>,
+        method: &str,
+        limit: u32,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<Option<TaskSummaryChangesPage>, Error> {
         let Some(request) = self.task_changes_request(limit)? else {
             return Ok(None);
         };
         let page: TaskSummaryChangesPage = client.call(
-            "events/listTaskSummaryChanges",
+            method,
             &TaskSummaryChangesParams {
                 task_id: request.task_id,
                 session_id: request.session_id,

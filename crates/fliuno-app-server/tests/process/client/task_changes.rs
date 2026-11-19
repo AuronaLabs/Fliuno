@@ -391,3 +391,175 @@ fn task_summary_changes_catch_up_from_a_pinned_window_and_then_follow_live() {
     drop(server);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn summary_revision_replay_crosses_upgrade_and_skips_unchanged_commits() {
+    let root =
+        std::env::temp_dir().join(format!("fliuno-summary-revisions-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(root.join("foreign")).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}))["id"].clone();
+    let foreign = peer.call("workspace/open", json!({"root":root.join("foreign")}))["id"].clone();
+    let session = peer.call("session/create", json!({"workspaceId":workspace}))["id"].clone();
+    let other = peer.call("session/create", json!({"workspaceId":foreign}))["id"].clone();
+    let start = |peer: &mut Peer, session: &Value| {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session,"input":"make an artifact"}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval")
+    };
+    let first = start(&mut peer, &session);
+    let task_id = first["id"].as_str().unwrap();
+    let cut = peer.call("events/getWatermark", json!({}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    drop(peer);
+    let sqlite = rusqlite::Connection::open(&db).unwrap();
+    sqlite.execute_batch("DROP TABLE task_summary_revisions; DROP TABLE task_summary_revision_meta; PRAGMA user_version=44;").unwrap();
+    let mut peer = Peer::start(&db);
+    assert_eq!(sqlite.query_row::<(i64, i64),_,_>("SELECT legacy_through,(SELECT COUNT(*) FROM task_summary_revisions) FROM task_summary_revision_meta",[], |row| Ok((row.get(0)?,row.get(1)?))).unwrap(), (cut as i64,0));
+    peer.call("approval/respond", json!({"taskId":task_id,"approvalId":first["pendingApproval"]["id"],"decision":"allow_once"}));
+    peer.wait_for_status(task_id, "completed");
+    peer.call(
+        "session/setArchived",
+        json!({"sessionId":session,"archived":true}),
+    );
+    let unrelated = start(&mut peer, &other);
+    let through = peer.call("events/getWatermark", json!({}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    let events = peer.call("events/list", json!({"taskId":task_id,"after":cut}));
+    let rows = events["events"].as_array().unwrap();
+    let selected = rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row["data"]["type"].as_str(),
+                Some("approval_resolved" | "model_started" | "task_completed")
+            )
+        })
+        .map(|row| row["sequence"].as_u64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(selected.len(), 3);
+    assert!(rows.len() > selected.len()); // Tool and artifact commits remain in the full log.
+
+    let rpc = "events/listTaskSummaryRevisions";
+    let before = json!({"workspaceId":workspace,"after":cut-1,"through":cut,"limit":1});
+    assert_eq!(
+        peer.call(rpc, before.clone()),
+        peer.call("events/listTaskSummaryChanges", before)
+    );
+    let first_page = peer.call(
+        rpc,
+        json!({"workspaceId":workspace,"after":cut-1,"through":through,"limit":1}),
+    );
+    assert_eq!(first_page["nextAfter"], cut);
+    assert_eq!(first_page["hasMore"], true);
+    let crossing = peer.call(
+        rpc,
+        json!({"workspaceId":workspace,"after":cut-1,"through":through,"limit":2}),
+    );
+    assert_eq!(crossing["nextAfter"], selected[0]);
+    assert_eq!(crossing["changes"].as_array().unwrap().len(), 1);
+    assert_eq!(crossing["changes"][0]["sequence"], selected[0]);
+    assert_eq!(crossing["changes"][0]["summary"]["status"], "completed");
+    let task_page = peer.call(rpc, json!({"taskId":task_id,"after":cut,"through":through}));
+    assert_eq!(
+        task_page,
+        peer.call(
+            rpc,
+            json!({"sessionId":session,"after":cut,"through":through})
+        )
+    );
+    assert_eq!(task_page["nextAfter"], through);
+    assert_eq!(task_page["changes"][0]["sequence"], selected[2]);
+    let all = peer.call(rpc, json!({"after":cut,"through":through}));
+    assert_eq!(all["changes"][1]["summary"]["id"], unrelated["id"]);
+    let legacy = peer.call(
+        "events/listTaskSummaryChanges",
+        json!({"taskId":task_id,"after":selected[0],"through":selected[1]-1}),
+    );
+    assert!(!legacy["changes"].as_array().unwrap().is_empty());
+    let precise = peer.call(
+        rpc,
+        json!({"taskId":task_id,"after":selected[0],"through":selected[1]-1}),
+    );
+    assert!(precise["changes"].as_array().unwrap().is_empty());
+    assert_eq!(precise["nextAfter"], selected[1] - 1);
+    assert_eq!(precise["summaryThroughSequence"], through);
+    drop(peer);
+    drop(sqlite);
+
+    let (server, mut client) = super::ag_ui_run::connect(&db);
+    assert_eq!(
+        client.info().capabilities["taskSummaryRevisionReplay"],
+        true
+    );
+    let mut replay = EventReplay::new(
+        ReplayScope::Workspace(workspace.as_str().unwrap().into()),
+        cut,
+        through,
+    )
+    .unwrap();
+    for expected in selected {
+        let page = replay
+            .next_task_summary_revisions(&mut client, 1, |_| {})
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.changes[0].sequence, expected);
+        assert_eq!(page.changes[0].summary.id, task_id);
+    }
+    assert_eq!(replay.cursor(), through);
+    assert!(
+        replay
+            .next_task_summary_revisions(&mut client, 1, |_| {})
+            .unwrap()
+            .is_none()
+    );
+
+    let mut work = client
+        .subscribe_work(
+            &WorkSnapshotParams {
+                workspace_id: Some(foreign.as_str().unwrap().into()),
+                session_id: None,
+                approval_limit: 1,
+                approval_target_bytes: None,
+                recent_task_limit: None,
+            },
+            |_| {},
+        )
+        .unwrap();
+    let _: Value = client
+        .call(
+            "task/cancelSummary",
+            &json!({"taskId":unrelated["id"]}),
+            |note| {
+                work.events.observe(note);
+            },
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let live = loop {
+        client
+            .event_watermark(|note| {
+                work.events.observe(note);
+            })
+            .unwrap();
+        if let Some(page) = work
+            .events
+            .next_task_summary_revisions(&mut client, 1, |_| {})
+            .unwrap()
+        {
+            break page;
+        }
+        assert!(Instant::now() < deadline, "missing live revision");
+        thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(live.changes[0].summary.id, unrelated["id"]);
+    assert_eq!(live.changes[0].summary.status, TaskStatus::Cancelled);
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}

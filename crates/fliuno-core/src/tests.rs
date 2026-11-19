@@ -187,7 +187,16 @@ fn recovery_interrupts_running_tasks_without_reexecuting_tools() {
         call_id: "call".into(),
         output: json!({}),
     });
-    kernel.commit(&task, &[], &[]).unwrap();
+    kernel
+        .commit(
+            &task,
+            &[EventKind::ToolCompleted {
+                call_id: "call".into(),
+                output: json!({}),
+            }],
+            &[],
+        )
+        .unwrap();
     kernel.recover().unwrap();
     assert_eq!(
         kernel.get_task(&task.id).unwrap().status,
@@ -706,7 +715,12 @@ fn task_summary_backfill_and_rollback_preserve_cursor_and_state() {
 
     kernel
         .db
-        .execute_batch("DROP TABLE task_summaries; PRAGMA user_version=17;")
+        .execute_batch(
+            "DROP TABLE task_summary_revisions;
+             DROP TABLE task_summary_revision_meta;
+             DROP TABLE task_summaries;
+             PRAGMA user_version=17;",
+        )
         .unwrap();
     let db = std::mem::replace(
         &mut kernel.db,

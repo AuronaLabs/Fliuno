@@ -110,6 +110,19 @@ impl EventFeed {
         })
     }
 
+    /// Reconcile actual summary revisions after the index was enabled, using
+    /// the same durable cursor and gap recovery as `next_page`.
+    pub fn next_task_summary_revisions<R: BufRead, W: Write>(
+        &mut self,
+        client: &mut Client<R, W>,
+        limit: u32,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<Option<TaskSummaryChangesPage>, Error> {
+        self.next_with(client, on_notification, |replay, client, observe| {
+            replay.next_task_summary_revisions(client, limit, observe)
+        })
+    }
+
     fn next_with<R: BufRead, W: Write, T>(
         &mut self,
         client: &mut Client<R, W>,
