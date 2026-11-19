@@ -2,6 +2,8 @@
 
 ## 0.0.2：内核增量开发中
 
+- [x] 工作区和会话的产物清单支持按 `mediaType` 精确筛选。SQLite v28 回填索引并保留已有分页游标。
+
 - [x] 可信前台命令复用 Windows Job 和 Linux cgroup v2 启动层，可按宿主配置限制进程、内存及 Linux CPU。工程测试覆盖任务审批、原生进程限额和回收。
 
 - [x] 可信 MCP stdio 支持 Windows Job 和 Linux cgroup v2 的显式预算。通过真实 SDK 子进程验证宿主目录、Windows 进程限制、Linux 预算与回收。

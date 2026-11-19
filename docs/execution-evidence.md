@@ -213,3 +213,9 @@ Windows 的 `scripts/check.ps1` 退出码为 0，包含 388 项测试和 26 个�
 可信 MCP 在 Windows 的两项新增进程测试中验证了宿主目录和显式 Job 进程上限。Debian 通过三项可信 MCP 测试及一项 stdio 内容测试。委派用例确认 MCP 子进程加入 cgroup，读取 `pids.max=16` 和 `memory.max=268435456`，关闭后目录被回收。配置错误的委派目录在进程启动前被拒绝。Windows 完整脚本通过 390 项测试及 26 个离线演示。Linux 全工作区交叉 Clippy 通过。日志为 `target/0.0.2-trusted-mcp-windows.log`、`D:/Fliuno-Native-Test/guest-mcp-trusted.log` 和 `guest-mcp-trusted-clippy.log`。
 
 Debian 另通过前台命令的 12 项执行测试，覆盖管道、超时、取消、进程回收、隔离文件和审批。`pids.max=1` 的探针在受限用例里观察到内核拒绝 fork，未配置限制时额外子进程正常退出。日志为 `D:/Fliuno-Native-Test/guest-exec-final.log`。
+
+## 产物格式筛选（2026-11-19）
+
+Windows 和 Debian 各通过两项产物进程契约。测试覆盖旧版正文迁移、清单回填、跨作用域隔离、精确格式匹配，以及重启后从原分页位置继续。Debian 日志为 `D:/Fliuno-Native-Test/guest-artifact-types.log`。
+
+SQLite 3.49.1 内存数据库写入 10 万条模拟产物。两种查询都返回同一工作区的 51 条稀疏结果。复合索引可以同时定位工作区、类型和游标。61 轮交替采样中，首屏的中位数为 0.36 ms，使用仅工作区索引时为 7.59 ms。翻页查询分别为 0.32 ms 和 7.82 ms。日志为 `target/0.0.2-artifact-media-index-bench.log`。

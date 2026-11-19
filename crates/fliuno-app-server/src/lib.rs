@@ -333,6 +333,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["sessionHistorySearch"] = json!(true);
+            capabilities["artifactMediaTypeFilter"] = json!(true);
             capabilities["workspaceEventReplay"] = json!(true);
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);
@@ -728,10 +729,12 @@ impl RpcServer {
             }
             "artifacts/listScopedSummaries" => {
                 let p: ArtifactCatalogParams = decode(params)?;
-                json!(
-                    self.kernel()?
-                        .list_artifact_catalog(&p.scope, p.after, p.limit)?
-                )
+                json!(self.kernel()?.list_artifact_catalog_by_type(
+                    &p.scope,
+                    p.after,
+                    p.limit,
+                    p.media_type.as_deref()
+                )?)
             }
             "artifacts/read" => {
                 let p: ArtifactReadParams = decode(params)?;

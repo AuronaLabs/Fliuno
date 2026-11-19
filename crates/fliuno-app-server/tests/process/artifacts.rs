@@ -173,6 +173,7 @@ fn scoped_artifact_catalog_backfills_and_paginates_across_tasks() {
         json!({"workspaceId":foreign_workspace["id"]}),
     );
     let first = create_artifact(&mut peer, &first_session["id"], "First");
+    let mut alternate = create_artifact(&mut peer, &first_session["id"], "JSON report");
     let foreign = create_artifact(&mut peer, &foreign_session["id"], "Foreign");
     let second = create_artifact(&mut peer, &second_session["id"], "Second");
     peer.call(
@@ -181,10 +182,19 @@ fn scoped_artifact_catalog_backfills_and_paginates_across_tasks() {
     );
     drop(peer);
 
-    // Remove the new projection so this is a real backfill of existing rows.
-    rusqlite::Connection::open(&db).unwrap().execute_batch(
+    // Seed a distinct type, then rebuild the catalog from the same legacy records.
+    let connection = rusqlite::Connection::open(&db).unwrap();
+    connection
+        .execute(
+            "UPDATE artifacts SET data=json_set(data,'$.mediaType','application/json') WHERE id=?1",
+            [alternate["id"].as_str().unwrap()],
+        )
+        .unwrap();
+    alternate["mediaType"] = json!("application/json");
+    connection.execute_batch(
         "DROP TRIGGER artifact_catalog_insert; DROP TABLE artifact_catalog; PRAGMA user_version=25;",
     ).unwrap();
+    drop(connection);
     let mut peer = Peer::start(&db);
     let catalog = "artifacts/listScopedSummaries";
     let scope = json!({"kind":"workspace","workspaceId":workspace["id"]});
@@ -195,8 +205,21 @@ fn scoped_artifact_catalog_backfills_and_paginates_across_tasks() {
         catalog,
         json!({"scope":scope,"after":head["nextAfter"],"limit":1}),
     );
-    assert_eq!(tail["items"], json!([second]));
-    assert_eq!(tail["hasMore"], false);
+    assert_eq!(tail["items"], json!([alternate]));
+    assert_eq!(tail["hasMore"], true);
+    let typed_head = peer.call(
+        catalog,
+        json!({"scope":scope,"mediaType":first["mediaType"],"limit":1}),
+    );
+    assert_eq!(typed_head, head);
+    let typed_tail = peer.call(catalog,
+        json!({"scope":scope,"mediaType":first["mediaType"],"after":typed_head["nextAfter"],"limit":1}));
+    assert_eq!(typed_tail["items"], json!([second]));
+    assert_eq!(typed_tail["hasMore"], false);
+    assert_eq!(
+        peer.request(catalog, json!({"scope":scope,"mediaType":" "}))["error"]["code"],
+        -32602
+    );
     assert_eq!(
         peer.call(
             catalog,
@@ -211,11 +234,29 @@ fn scoped_artifact_catalog_backfills_and_paginates_across_tasks() {
             catalog,
             json!({"scope":{"kind":"session","sessionId":first_session["id"]}})
         )["items"],
-        json!([first, third])
+        json!([first, alternate, third])
     );
     drop(peer);
     let mut peer = Peer::start(&db);
-    let resumed = peer.call(catalog, json!({"scope":scope,"after":tail["nextAfter"]}));
+    let session_scope = json!({"kind":"session","sessionId":first_session["id"]});
+    assert_eq!(
+        peer.call(
+            catalog,
+            json!({"scope":session_scope,"mediaType":"application/json"})
+        )["items"],
+        json!([alternate])
+    );
+    assert_eq!(
+        peer.call(
+            catalog,
+            json!({"scope":session_scope,"mediaType":"Application/JSON"})
+        )["items"],
+        json!([])
+    );
+    let resumed = peer.call(
+        catalog,
+        json!({"scope":scope,"mediaType":first["mediaType"],"after":typed_tail["nextAfter"]}),
+    );
     assert_eq!(resumed["items"], json!([third]));
     assert_eq!(resumed["hasMore"], false);
     assert_eq!(

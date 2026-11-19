@@ -1286,6 +1286,14 @@
         "scope": {
           "$ref": "#/$defs/ArtifactCatalogScope"
         },
+        "mediaType": {
+          "description": "Match the stored media type exactly, including any parameters.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "after": {
           "type": "integer",
           "format": "uint64",

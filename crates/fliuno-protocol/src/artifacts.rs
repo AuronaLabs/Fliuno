@@ -18,6 +18,9 @@ pub enum ArtifactCatalogScope {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ArtifactCatalogParams {
     pub scope: ArtifactCatalogScope,
+    /// Match the stored media type exactly, including any parameters.
+    #[serde(default)]
+    pub media_type: Option<String>,
     #[serde(default)]
     pub after: u64,
     #[serde(default = "super::default_limit")]

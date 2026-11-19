@@ -50,6 +50,36 @@ pub(super) fn migrate_catalog(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn migrate_catalog_media_type(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    let has_media_type: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('artifact_catalog') WHERE name='media_type')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_media_type {
+        tx.execute_batch(
+            "ALTER TABLE artifact_catalog ADD COLUMN media_type TEXT NOT NULL DEFAULT '';",
+        )?;
+    }
+    // Keep the original catalog rowids so unfiltered cursors survive the migration.
+    tx.execute_batch(
+        "UPDATE artifact_catalog SET media_type=(SELECT json_extract(data,'$.mediaType')
+            FROM artifacts WHERE id=artifact_id);
+        CREATE INDEX IF NOT EXISTS artifact_catalog_session_type ON artifact_catalog(session_id,media_type);
+        CREATE INDEX IF NOT EXISTS artifact_catalog_workspace_type ON artifact_catalog(workspace_id,media_type);
+        DROP TRIGGER IF EXISTS artifact_catalog_insert;
+        CREATE TRIGGER artifact_catalog_insert AFTER INSERT ON artifacts BEGIN
+            INSERT INTO artifact_catalog(artifact_id,session_id,workspace_id,media_type)
+            SELECT NEW.id,t.session_id,s.workspace_id,json_extract(NEW.data,'$.mediaType') FROM tasks t
+            JOIN sessions s ON s.id=t.session_id WHERE t.id=NEW.task_id;
+        END;
+        PRAGMA user_version=28;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn catalog_cursor(after: u64, limit: u32) -> Result<i64> {
     let cursor =
         i64::try_from(after).map_err(|_| Error::Invalid("artifact cursor must fit i64".into()))?;
@@ -125,7 +155,7 @@ impl Kernel {
             "SELECT id,json_extract(data,'$.title'),json_extract(data,'$.mediaType'),
              json_extract(data,'$.contentBytes'),rowid,task_id FROM artifacts
              WHERE task_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3",
-            task_id,
+            params![task_id, cursor, limit + 1],
             cursor,
             limit,
         )
@@ -137,42 +167,67 @@ impl Kernel {
         after: u64,
         limit: u32,
     ) -> Result<ObjectPage<ArtifactSummary>> {
+        self.list_artifact_catalog_by_type(scope, after, limit, None)
+    }
+
+    pub fn list_artifact_catalog_by_type(
+        &self,
+        scope: &ArtifactCatalogScope,
+        after: u64,
+        limit: u32,
+        media_type: Option<&str>,
+    ) -> Result<ObjectPage<ArtifactSummary>> {
         let cursor = catalog_cursor(after, limit)?;
-        // Two fixed predicates let SQLite seek directly into the selected scope.
-        let (id, sql) = match scope {
+        if media_type.is_some_and(|value| {
+            value.trim().is_empty() || value.len() > 256 || value.chars().any(char::is_control)
+        }) {
+            return Err(Error::Invalid(
+                "mediaType must be 1 to 256 UTF-8 bytes without control characters".into(),
+            ));
+        }
+        let (column, id) = match scope {
             ArtifactCatalogScope::Session { session_id } => {
                 self.require_session(session_id)?;
-                (
-                    session_id,
-                    "SELECT a.id,json_extract(a.data,'$.title'),json_extract(a.data,'$.mediaType'),
-                 json_extract(a.data,'$.contentBytes'),c.sequence,a.task_id
-                 FROM artifact_catalog c JOIN artifacts a ON a.id=c.artifact_id
-                 WHERE c.session_id=?1 AND c.sequence>?2 ORDER BY c.sequence LIMIT ?3",
-                )
+                ("session_id", session_id)
             }
             ArtifactCatalogScope::Workspace { workspace_id } => {
                 self.require_workspace(workspace_id)?;
-                (
-                    workspace_id,
-                    "SELECT a.id,json_extract(a.data,'$.title'),json_extract(a.data,'$.mediaType'),
-                 json_extract(a.data,'$.contentBytes'),c.sequence,a.task_id
-                 FROM artifact_catalog c JOIN artifacts a ON a.id=c.artifact_id
-                 WHERE c.workspace_id=?1 AND c.sequence>?2 ORDER BY c.sequence LIMIT ?3",
-                )
+                ("workspace_id", workspace_id)
             }
         };
-        self.query_catalog_page(sql, id, cursor, limit)
+        // Use separate prepared queries so each scope/filter can seek into its index.
+        let media_predicate = if media_type.is_some() {
+            "AND c.media_type=?4"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT a.id,json_extract(a.data,'$.title'),c.media_type,
+             json_extract(a.data,'$.contentBytes'),c.sequence,a.task_id
+             FROM artifact_catalog c JOIN artifacts a ON a.id=c.artifact_id
+             WHERE c.{column}=?1 AND c.sequence>?2 {media_predicate} ORDER BY c.sequence LIMIT ?3"
+        );
+        if let Some(media_type) = media_type {
+            self.query_catalog_page(
+                &sql,
+                params![id, cursor, limit + 1, media_type],
+                cursor,
+                limit,
+            )
+        } else {
+            self.query_catalog_page(&sql, params![id, cursor, limit + 1], cursor, limit)
+        }
     }
 
     fn query_catalog_page(
         &self,
         sql: &str,
-        id: &str,
+        parameters: impl rusqlite::Params,
         cursor: i64,
         limit: u32,
     ) -> Result<ObjectPage<ArtifactSummary>> {
         let mut statement = self.db.prepare_cached(sql)?;
-        let mut rows = statement.query(params![id, cursor, limit + 1])?;
+        let mut rows = statement.query(parameters)?;
         let mut items = Vec::with_capacity(limit as usize);
         let mut next_after = cursor as u64;
         let mut has_more = false;
