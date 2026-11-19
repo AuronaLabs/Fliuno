@@ -129,6 +129,7 @@ impl Process {
                         program: program.config.command.clone(), args: argv,
                         env: program.environment.clone(), cwd: context.workspace.root.clone().into(),
                         resources: Default::default(),
+                        linux_cgroup_parent: None,
                     }).await.map(|(child, pipes)| Self::NativeHost(Box::new(child), Some(pipes)))
                         .map_err(|error| match error.stage {
                             fliuno_sandbox::AsyncSpawnStage::NativeLaunch => ToolError::Failed("cannot launch host program".into()),

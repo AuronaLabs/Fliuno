@@ -1,5 +1,4 @@
-//! Windows trusted host commands with the same reactor and ownership boundary
-//! as isolated commands. Job containment controls lifetime, never authority.
+//! Explicit trusted host commands with native process ownership and reactor pipes.
 use crate::{AsyncSpawnError, AsyncSpawnStage, AsyncStdio, LaunchSpec, ResourceLimits};
 use std::{collections::BTreeMap, io, path::PathBuf, process::ExitStatus};
 
@@ -10,6 +9,7 @@ pub struct HostLaunchSpec {
     pub env: BTreeMap<String, String>,
     pub cwd: PathBuf,
     pub resources: ResourceLimits,
+    pub linux_cgroup_parent: Option<PathBuf>,
 }
 impl HostLaunchSpec {
     fn validate(&self) -> io::Result<()> {
@@ -22,7 +22,7 @@ impl HostLaunchSpec {
             args: self.args.clone(),
             env: self.env.clone(),
             resources: self.resources,
-            linux_cgroup_parent: None,
+            linux_cgroup_parent: self.linux_cgroup_parent.clone(),
         }
         .validate()?;
         if !self.cwd.is_absolute() || !self.cwd.is_dir() {
@@ -31,6 +31,7 @@ impl HostLaunchSpec {
                 "host cwd must be an absolute existing directory",
             ));
         }
+        #[cfg(windows)]
         if !self
             .program
             .extension()
@@ -45,9 +46,12 @@ impl HostLaunchSpec {
     }
 }
 
-/// Owns a trusted process tree. Drop terminates its Job, including descendants.
+/// Owns a trusted program in a Windows Job or Linux process group and optional cgroup.
 pub struct HostChild {
+    #[cfg(windows)]
     pub(crate) inner: crate::windows::JobProcess,
+    #[cfg(target_os = "linux")]
+    inner: crate::linux::OwnedProcess,
 }
 impl HostChild {
     pub fn id(&self) -> u32 {
@@ -62,13 +66,20 @@ impl HostChild {
 }
 
 /// Uses full OS-user authority in the explicit cwd and environment. No PATH,
-/// shell or environment inheritance is implicit. Drop kills the owned tree.
+/// shell or environment inheritance is implicit. Drop cleans up owned processes.
 pub async fn spawn_host_async(
     spec: HostLaunchSpec,
 ) -> Result<(HostChild, AsyncStdio), AsyncSpawnError> {
     let (child, (input, output, error)) = tokio::task::spawn_blocking(move || {
         spec.validate()?;
-        crate::windows::host::spawn(&spec)
+        #[cfg(windows)]
+        {
+            crate::windows::host::spawn(&spec)
+        }
+        #[cfg(target_os = "linux")]
+        {
+            crate::linux::spawn_host(&spec).map(|(inner, pipes)| (HostChild { inner }, pipes))
+        }
     })
     .await
     .map_err(|_| {
@@ -78,7 +89,7 @@ pub async fn spawn_host_async(
         )
     })?
     .map_err(|error| AsyncSpawnError::new(AsyncSpawnStage::NativeLaunch, error))?;
-    let pipes = crate::windows::async_io::register(input, output, error)
+    let pipes = crate::async_stdio::register_pipes(input, output, error)
         .map_err(|error| AsyncSpawnError::new(AsyncSpawnStage::PipeRegistration, error))?;
     Ok((child, pipes))
 }

@@ -16,7 +16,6 @@ use std::{
 mod authority;
 #[path = "acp_process/context.rs"]
 mod context;
-#[cfg(windows)]
 #[path = "acp_process/persistence.rs"]
 mod persistence;
 

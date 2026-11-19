@@ -195,3 +195,9 @@ Node 24.4.1 和 Debian 系统 CPython 3.13.5 的真实 MCP 演示各通过允许
 任务级订阅用例在 Windows 和 Debian 来宾都通过。该用例在一批请求中提交同会话的 72 个任务，再取消被订阅的任务，验证同会话其他事件不会占用订阅队列，回放能按切换水位补齐。Debian 的 6 项事件流测试全通过，日志为 `D:/Fliuno-Native-Test/guest-task-events-final.log`。
 
 Windows 完整 `scripts/check.ps1` 通过 385 项测试、格式检查、两种 Clippy、Schema 一致性和 26 个离线演示。日志为 `target/0.0.2-task-event-scope-windows.log`。随后对批量事件夹具的调整重跑了 6 项 Windows 事件流测试。运行时演示排除 Python 自动生成的 `__pycache__` 后，使用已构建 app-server 复跑了 Windows 上的 6 个 Node 和 CPython 分支，暂存清单回到预期的 3 项和 11 项。
+
+## Linux 可信 ACP 续接（2026-11-19）
+
+Debian 实机来宾的 13 项 ACP app-server 契约通过。另以委派 cgroup v2、256 MiB 内存及 16 个进程或线程名额复跑两项续接测试。一次明确拒绝会释放续接名额，提交结果未知的上一轮在重启后不会重发。原生运行另通过 3 项异步管道探针及 5 项隔离探针。部分隔离探针按委派可用性选择分支。记录为 `D:/Fliuno-Native-Test/guest-acp-trusted.log` 和 `guest-acp-native.log`。
+
+Windows 全量 `scripts/check.ps1` 以退出码 0 完成，包括 385 项测试和 26 个离线演示。Linux 工作区交叉 Clippy 通过。记录分别为 `target/0.0.2-acp-trusted-linux-windows.log` 和 `D:/Fliuno-Native-Test/guest-acp-trusted-linux-clippy.log`。

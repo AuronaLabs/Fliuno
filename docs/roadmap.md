@@ -121,7 +121,7 @@
    - [x] ACP v1 Rust 客户端显式加载既有会话，按 ID 接收有界历史，成功后接受新 prompt，加载期间拒绝宿主操作。
    - [x] ACP v1 Rust 客户端可显式关闭空闲会话，按远端确认回收连接名额。使用真实隔离进程验证关闭后其他会话仍可用。
    - [x] ACP v1 Rust 客户端按能力显式恢复已知会话，无需回放历史。覆盖缺少能力、不允许的工作目录和真实隔离进程上的新 prompt。
-   - [x] Windows 可信 Agent 通过主机固定工作目录和 `task/continueAgentSession` 跨 app-server 重启续接。SQLite v25 持久化上一轮的唯一续接名额，实进程验证拒绝、重启及未知结果不重发。
+   - [x] Windows 和 Linux 可信 Agent 通过主机固定工作目录和 `task/continueAgentSession` 跨 app-server 重启续接。SQLite v25 持久化上一轮的唯一续接名额。两平台的实进程测试覆盖明确拒绝、重启及未知结果不重发。Linux 另在委派 cgroup 下复验。
    - [ ] 认证、隔离 Agent 的持久存储、受控网络/终端与真实 Agent 互操作；跟踪 v2 草案中以 MCP 提供宿主工具的变化。
 5. [ ] A2A 与后续事件通道。
    - [x] 独立 A2A 1.0 JSON-RPC 客户端、主机固定端点/凭据、可选同源卡片核验、一次提交/轮询/取消、远程状态与最终产物入库、重启不重放及真实 app-server 契约测试。

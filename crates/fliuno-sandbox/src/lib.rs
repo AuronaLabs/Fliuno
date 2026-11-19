@@ -20,9 +20,9 @@ mod async_stdio;
 pub use async_stdio::{
     AsyncSpawnError, AsyncSpawnStage, AsyncStdio, PipeReader, PipeWriter, spawn_async,
 };
-#[cfg(all(windows, feature = "async-io"))]
+#[cfg(all(any(windows, target_os = "linux"), feature = "async-io"))]
 mod host;
-#[cfg(all(windows, feature = "async-io"))]
+#[cfg(all(any(windows, target_os = "linux"), feature = "async-io"))]
 pub use host::{HostChild, HostLaunchSpec, spawn_host_async};
 
 #[cfg(target_os = "linux")]

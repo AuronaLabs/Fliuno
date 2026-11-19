@@ -120,9 +120,9 @@ impl Client {
         Self::connect_native(transport::Child::Isolated(child), pipes, options).await
     }
 
-    /// Connect to an explicitly trusted Windows program under the current
-    /// OS user's authority. The driver owns its Job and bounded stdio.
-    #[cfg(windows)]
+    /// Connect to an explicitly trusted program under the current OS user's
+    /// authority. The driver owns its native process and bounded stdio.
+    #[cfg(any(windows, target_os = "linux"))]
     pub async fn connect_trusted_host(
         spec: fliuno_sandbox::HostLaunchSpec,
         options: ClientOptions,

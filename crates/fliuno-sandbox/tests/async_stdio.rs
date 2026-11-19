@@ -14,33 +14,25 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[derive(Clone, Copy, Debug)]
 enum Mode {
     Isolated,
-    #[cfg(windows)]
     Host,
 }
 fn modes() -> &'static [Mode] {
-    &[
-        Mode::Isolated,
-        #[cfg(windows)]
-        Mode::Host,
-    ]
+    &[Mode::Isolated, Mode::Host]
 }
 enum NativeChild {
     Isolated(Child),
-    #[cfg(windows)]
     Host(fliuno_sandbox::HostChild),
 }
 impl NativeChild {
     fn try_wait(&mut self) -> io::Result<Option<std::process::ExitStatus>> {
         match self {
             Self::Isolated(child) => child.try_wait(),
-            #[cfg(windows)]
             Self::Host(child) => child.try_wait(),
         }
     }
     fn kill(&mut self) -> io::Result<()> {
         match self {
             Self::Isolated(child) => child.kill(),
-            #[cfg(windows)]
             Self::Host(child) => child.kill(),
         }
     }
@@ -53,7 +45,6 @@ async fn spawn(
         Mode::Isolated => fliuno_sandbox::spawn_async(spec(name))
             .await
             .map(|(child, pipes)| (NativeChild::Isolated(child), pipes)),
-        #[cfg(windows)]
         Mode::Host => {
             let spec = spec(name);
             fliuno_sandbox::spawn_host_async(fliuno_sandbox::HostLaunchSpec {
@@ -62,6 +53,7 @@ async fn spawn(
                 env: spec.env,
                 cwd: std::env::current_dir().unwrap(),
                 resources: Default::default(),
+                linux_cgroup_parent: None,
             })
             .await
             .map(|(child, pipes)| (NativeChild::Host(child), pipes))
@@ -292,6 +284,7 @@ fn trusted_resource_limits_are_enforced_by_the_windows_job() {
                 env: probe.env,
                 cwd: std::env::current_dir().unwrap(),
                 resources,
+                linux_cgroup_parent: None,
             })
             .await
             .unwrap();

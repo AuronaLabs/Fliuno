@@ -79,6 +79,14 @@ fn register(child: &mut Child) -> io::Result<AsyncStdio> {
     let input = child.stdin.take().ok_or_else(missing)?;
     let output = child.stdout.take().ok_or_else(missing)?;
     let error = child.stderr.take().ok_or_else(missing)?;
+    register_pipes(input, output, error)
+}
+
+pub(crate) fn register_pipes(
+    input: std::fs::File,
+    output: std::fs::File,
+    error: std::fs::File,
+) -> io::Result<AsyncStdio> {
     #[cfg(windows)]
     let pipes = crate::windows::async_io::register(input, output, error)?;
     #[cfg(target_os = "linux")]

@@ -157,14 +157,11 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             Isolation::NativeScratch if config.cwd.is_none() => None,
             Isolation::NativeScratch => return Err("ACP cwd requires trusted_host".into()),
             Isolation::TrustedHost => {
-                if !cfg!(windows) {
-                    return Err("ACP trusted_host is supported on Windows".into());
+                if !cfg!(any(windows, target_os = "linux")) {
+                    return Err("ACP trusted_host is supported on Windows and Linux".into());
                 }
-                if config.workspace_access
-                    || !config.assets.is_empty()
-                    || config.linux_cgroup_parent.is_some()
-                {
-                    return Err("ACP trusted_host does not accept sandbox options".into());
+                if config.workspace_access || !config.assets.is_empty() {
+                    return Err("ACP trusted_host does not accept workspaceAccess or assets".into());
                 }
                 let cwd = config
                     .cwd
@@ -262,7 +259,7 @@ impl AgentBackend for AcpBackend {
 
 impl AcpBackend {
     async fn connect(&self) -> Result<(Client, Events), fliuno_acp::Error> {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         if let Some(cwd) = &self.trusted_cwd {
             let program = self.launch.program.clone();
             let expected = self.launch.program_sha256.clone();
@@ -286,6 +283,7 @@ impl AcpBackend {
                     env: self.launch.env.clone(),
                     cwd: cwd.clone(),
                     resources: self.launch.resources,
+                    linux_cgroup_parent: self.launch.linux_cgroup_parent.clone(),
                 },
                 self.options.clone(),
             )

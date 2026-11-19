@@ -24,7 +24,7 @@ pub(crate) fn lines(
 
 pub(crate) enum Child {
     Isolated(fliuno_sandbox::Child),
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     Trusted(fliuno_sandbox::HostChild),
 }
 
@@ -46,7 +46,7 @@ impl NativePeer {
         let mut stderr = pipes.stderr;
         let directory = match &child {
             Child::Isolated(child) => Some(child.private_directory().to_owned()),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             Child::Trusted(_) => None,
         };
         let stderr =
@@ -69,7 +69,7 @@ impl Drop for NativePeer {
         // without a blocking join, even if the native stop request fails.
         let _ = match &mut self.child {
             Child::Isolated(child) => child.kill(),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             Child::Trusted(child) => child.kill(),
         };
         if let Some(stderr) = self.stderr.take() {

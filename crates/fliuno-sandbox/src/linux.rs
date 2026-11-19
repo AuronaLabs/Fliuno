@@ -105,16 +105,14 @@ impl Drop for PrivateDirectory {
 }
 
 pub(super) struct Process {
-    child: NativeChild,
+    // Drop the owner before the directory so workers cannot outlive their files.
+    owner: OwnedProcess,
     directory: PrivateDirectory,
-    cgroup: Option<cgroup::CgroupV2>,
-    status: Option<ExitStatus>,
-    reaped: bool,
 }
 
 impl Process {
     pub(super) fn id(&self) -> u32 {
-        self.child.id()
+        self.owner.id()
     }
 
     pub(super) fn directory(&self) -> &Path {
@@ -122,7 +120,46 @@ impl Process {
     }
 
     pub(super) fn uses_cgroup_v2(&self) -> bool {
-        self.cgroup.is_some()
+        self.owner.cgroup.is_some()
+    }
+
+    pub(super) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        self.owner.try_wait()
+    }
+
+    pub(super) fn kill(&mut self) -> io::Result<()> {
+        self.owner.kill().inspect_err(|_| self.directory.preserve())
+    }
+}
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        if let Err(error) = self.kill() {
+            eprintln!("fliuno: Linux sandbox process cleanup failed: {error}");
+        }
+    }
+}
+
+// Keep the root PID reserved until group cleanup, including after natural exit.
+pub(super) struct OwnedProcess {
+    child: NativeChild,
+    cgroup: Option<cgroup::CgroupV2>,
+    status: Option<ExitStatus>,
+    reaped: bool,
+}
+
+impl OwnedProcess {
+    fn new(child: NativeChild, cgroup: Option<cgroup::CgroupV2>) -> Self {
+        Self {
+            child,
+            cgroup,
+            status: None,
+            reaped: false,
+        }
+    }
+
+    pub(super) fn id(&self) -> u32 {
+        self.child.id()
     }
 
     pub(super) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
@@ -209,18 +246,16 @@ impl Process {
         self.status = Some(self.child.wait()?);
         self.reaped = true;
         if let Some(error) = cleanup_error {
-            self.directory.preserve();
             return Err(error);
         }
         Ok(())
     }
 }
 
-impl Drop for Process {
+impl Drop for OwnedProcess {
     fn drop(&mut self) {
         if let Err(error) = self.kill() {
-            self.directory.preserve();
-            eprintln!("fliuno: Linux sandbox process cleanup failed: {error}");
+            eprintln!("fliuno: Linux process cleanup failed: {error}");
         }
     }
 }
@@ -326,33 +361,18 @@ fn signal_service_group(pid: u32) -> io::Result<()> {
     }
 }
 
-pub(super) fn spawn_service(spec: &LaunchSpec) -> io::Result<super::ServiceProcess> {
-    let cgroup = cgroup::CgroupV2::try_create(
-        spec.linux_cgroup_parent.as_deref(),
-        &spec.resources,
-        guardian::Lifetime::Service,
-    )?;
+fn prepare_child_process(
+    command: &mut Command,
+    cgroup: Option<&cgroup::CgroupV2>,
+) -> io::Result<()> {
     let cgroup_join = cgroup
-        .as_ref()
         .map(cgroup::CgroupV2::duplicate_join_handle)
         .transpose()?;
     let guardian_control = cgroup
-        .as_ref()
         .map(cgroup::CgroupV2::duplicate_guardian_control)
         .transpose()?;
-    let mut command = Command::new(&spec.program);
-    command
-        .args(&spec.args)
-        .env_clear()
-        .envs(&spec.env)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0);
-
-    // Attach before exec so every worker child inherits the same cgroup.
-    // SAFETY: this callback uses only pre-opened handles, stack buffers and
-    // syscalls. No host descriptors can survive the worker's exec.
+    // SAFETY: only pre-opened handles and async-signal-safe syscalls are used
+    // after fork. CLOEXEC preserves Rust's exec-error pipe until exec succeeds.
     unsafe {
         command.pre_exec(move || {
             if libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 1u32 << 2) == -1 {
@@ -367,6 +387,61 @@ pub(super) fn spawn_service(spec: &LaunchSpec) -> io::Result<super::ServiceProce
             Ok(())
         });
     }
+    Ok(())
+}
+
+#[cfg(feature = "async-io")]
+pub(super) fn spawn_host(
+    spec: &crate::HostLaunchSpec,
+) -> io::Result<(OwnedProcess, (File, File, File))> {
+    let cgroup = cgroup::CgroupV2::try_create(
+        spec.linux_cgroup_parent.as_deref(),
+        &spec.resources,
+        guardian::Lifetime::Host,
+    )?;
+    let mut command = Command::new(&spec.program);
+    command
+        .args(&spec.args)
+        .current_dir(&spec.cwd)
+        .env_clear()
+        .envs(&spec.env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    prepare_child_process(&mut command, cgroup.as_ref())?;
+    let mut owner = OwnedProcess::new(command.spawn()?, cgroup);
+    let missing_pipe = || io::Error::other("host stdio pipe missing");
+    let input = owner.child.stdin.take().ok_or_else(missing_pipe)?;
+    let output = owner.child.stdout.take().ok_or_else(missing_pipe)?;
+    let error = owner.child.stderr.take().ok_or_else(missing_pipe)?;
+    Ok((
+        owner,
+        (
+            File::from(OwnedFd::from(input)),
+            File::from(OwnedFd::from(output)),
+            File::from(OwnedFd::from(error)),
+        ),
+    ))
+}
+
+pub(super) fn spawn_service(spec: &LaunchSpec) -> io::Result<super::ServiceProcess> {
+    let cgroup = cgroup::CgroupV2::try_create(
+        spec.linux_cgroup_parent.as_deref(),
+        &spec.resources,
+        guardian::Lifetime::Service,
+    )?;
+    let mut command = Command::new(&spec.program);
+    command
+        .args(&spec.args)
+        .env_clear()
+        .envs(&spec.env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0);
+
+    prepare_child_process(&mut command, cgroup.as_ref())?;
 
     let mut child = command.spawn()?;
     drop(command);
@@ -394,14 +469,6 @@ pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
         &spec.resources,
         guardian::Lifetime::Host,
     )?;
-    let cgroup_join = cgroup
-        .as_ref()
-        .map(cgroup::CgroupV2::duplicate_join_handle)
-        .transpose()?;
-    let guardian_control = cgroup
-        .as_ref()
-        .map(cgroup::CgroupV2::duplicate_guardian_control)
-        .transpose()?;
     let ruleset = create_ruleset(&directory.path)?;
     let seccomp = sandbox_filter();
     let mut command = Command::new(&staged);
@@ -419,6 +486,8 @@ pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
         .stderr(Stdio::piped())
         .process_group(0);
 
+    prepare_child_process(&mut command, cgroup.as_ref())?;
+
     // The callback uses only async-signal-safe syscalls and prebuilt data.
     // SAFETY: no allocation, locks, or non-syscall Rust APIs are used after fork.
     unsafe {
@@ -429,17 +498,6 @@ pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
             };
             let fd = ruleset.as_raw_fd();
 
-            // All descriptors above stderr are made close-on-exec. This keeps
-            // host handles out of the workload while preserving Rust's exec-error pipe.
-            if libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 1u32 << 2) == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            if let Some(join) = &cgroup_join {
-                cgroup::attach_current_process(join.as_raw_fd())?;
-            }
-            if let Some(control) = &guardian_control {
-                guardian::attach(control.as_raw_fd())?;
-            }
             if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == -1 {
                 return Err(io::Error::last_os_error());
             }
@@ -511,11 +569,8 @@ pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
         stdout,
         stderr,
         inner: Process {
-            child,
+            owner: OwnedProcess::new(child, cgroup),
             directory,
-            cgroup,
-            status: None,
-            reaped: false,
         },
     })
 }

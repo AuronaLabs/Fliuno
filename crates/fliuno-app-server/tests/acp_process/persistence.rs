@@ -1,17 +1,26 @@
-//! Explicitly trusted Windows ACP turns retain one durable session across processes.
+//! Explicitly trusted ACP turns retain one durable session across processes.
 use super::*;
 
 fn trusted_config(directory: &Directory) -> PathBuf {
     let path = directory.0.join("state");
     fs::create_dir(&path).unwrap();
+    let mut agent = json!({
+        "id":"fixture", "command":env!("CARGO_BIN_EXE_fliuno-app-acp-fixture"),
+        "args":["--persistent-fixture"], "isolation":"trusted_host", "cwd":path,
+        "promptTimeoutMs":30000
+    });
+    if cfg!(windows) {
+        agent["resources"] = json!({"memoryMaxBytes":67108864,"pidsMax":1});
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(parent) = std::env::var_os("FLIUNO_ACP_TEST_CGROUP_PARENT") {
+        agent["linuxCgroupParent"] = json!(PathBuf::from(parent));
+        // The Linux pids controller accounts for library and runtime threads.
+        agent["resources"] = json!({"memoryMaxBytes":268435456,"pidsMax":16});
+    }
     fs::write(
         directory.0.join("agents.json"),
-        serde_json::to_vec(&json!({"agents":[{
-            "id":"fixture", "command":env!("CARGO_BIN_EXE_fliuno-app-acp-fixture"),
-            "args":["--persistent-fixture"], "isolation":"trusted_host", "cwd":path,
-            "promptTimeoutMs":30000, "resources":{"memoryMaxBytes":67108864,"pidsMax":1}
-        }]}))
-        .unwrap(),
+        serde_json::to_vec(&json!({"agents":[agent]})).unwrap(),
     )
     .unwrap();
     path
