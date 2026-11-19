@@ -28,6 +28,8 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 
 `EventReplay` 接收作用域、本地序号和包含式服务水位，按对应方法逐页读取。每页检查任务归属（任务范围）、序号、游标和页大小。`cursor()` 可随已消费事件一起持久化。范围内没有更多事件时，游标直接推进到服务水位。补读期间到达的实时通知仍交给调用方暂存。
 
+`Client::artifact_digest` 读取产物的正文长度和 SHA-256，调用方也可直接提供已保存的摘要。`Client::download_artifact` 按 64 KiB 分段读取，检查每段的长度和偏移，将原始字节写入调用方提供的 `Write`，返回前校验完整 SHA-256。需要在验证完成后才对外可见时，先写到临时文件，再由调用方发布。失败时输出中可能已有部分字节。
+
 ## 方法
 
 | 方法 | params | result |

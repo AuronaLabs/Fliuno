@@ -1,4 +1,5 @@
 //! Blocking stdio client for Fliuno's local application protocol.
+mod download;
 mod replay;
 mod wire;
 
@@ -31,6 +32,14 @@ pub enum Error {
     InvalidReplayWindow,
     #[error("event page violates the requested replay window or scope")]
     InvalidReplayPage,
+    #[error("invalid expected artifact SHA-256")]
+    InvalidArtifactDigest,
+    #[error("artifact chunk violates the requested range or content length")]
+    InvalidArtifactChunk,
+    #[error("artifact SHA-256 does not match the expected digest")]
+    ArtifactDigestMismatch,
+    #[error("writing artifact output: {0}")]
+    ArtifactOutput(#[source] io::Error),
     #[error("application RPC error {code}: {message}")]
     Rpc { code: i32, message: String },
 }

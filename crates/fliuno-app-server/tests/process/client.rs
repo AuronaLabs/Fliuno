@@ -1,8 +1,9 @@
 use super::*;
 use fliuno_client::{Client, Error, EventReplay, ReplayScope};
 use fliuno_protocol::{
-    ApprovalDecision, ApprovalGetParams, ApprovalRespondParams, Event, EventKind,
-    EventSubscription, Task, TaskIdParams, TaskStatus, Workspace, WorkspaceOpenParams,
+    ApprovalDecision, ApprovalGetParams, ApprovalRespondParams, ArtifactGetParams, ArtifactSummary,
+    Event, EventKind, EventSubscription, Task, TaskIdParams, TaskStatus, Workspace,
+    WorkspaceOpenParams,
 };
 
 #[test]
@@ -63,10 +64,11 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
             &mut observe,
         )
         .unwrap();
+    let content = "中🌿\0\n".repeat(9_000);
     let task: Task = client
         .call(
             "task/start",
-            &json!({"sessionId":session.id,"input":"stdio client"}),
+            &json!({"sessionId":session.id,"input":content}),
             &mut observe,
         )
         .unwrap();
@@ -111,6 +113,30 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
             ..
         }
     ));
+    loop {
+        let current: Task = client.call("task/get", &task_params, &mut observe).unwrap();
+        if current.status == TaskStatus::Completed {
+            break;
+        }
+        assert_eq!(current.status, TaskStatus::Running);
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(10));
+    }
+    let summaries: fliuno_protocol::ObjectPage<ArtifactSummary> = client
+        .call("artifacts/listSummaries", &task_params, &mut observe)
+        .unwrap();
+    assert_eq!(summaries.items.len(), 1);
+    let artifact = ArtifactGetParams {
+        task_id: task.id.clone(),
+        artifact_id: summaries.items[0].id.clone(),
+    };
+    let expected = client.artifact_digest(&artifact, &mut observe).unwrap();
+    assert_eq!(expected.content_bytes, content.len() as u64);
+    let mut output = Vec::new();
+    client
+        .download_artifact(&artifact, &expected, &mut output, &mut observe)
+        .unwrap();
+    assert_eq!(output, content.as_bytes());
     let subscription: EventSubscription = client
         .call("events/setScope", &json!({"taskId":task.id}), &mut observe)
         .unwrap();

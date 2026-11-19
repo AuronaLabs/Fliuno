@@ -111,3 +111,74 @@ fn borrowed_envelopes_preserve_null_results_and_reject_conflicting_fields() {
     ));
     assert!(matches!(client.read_notification(), Err(Error::Closed)));
 }
+
+#[test]
+fn artifact_download_rejects_malformed_ranges_before_writing_and_keeps_connection() {
+    use fliuno_protocol::{ArtifactDigest, ArtifactGetParams};
+    let first = json!({"offset":0,"nextOffset":2,"contentBytes":2,"dataBase64":"AAE="});
+    for (field, invalid) in [
+        ("offset", json!(1)),
+        ("nextOffset", json!(0)),
+        ("contentBytes", json!(3)),
+        ("dataBase64", json!("!!!!")),
+        ("dataBase64", json!("AA==")),
+    ] {
+        let mut chunk = first.clone();
+        chunk[field] = invalid;
+        let frames = format!(
+            "{}\n{{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":true}}\n",
+            json!({"jsonrpc":"2.0","id":2,"result":chunk})
+        );
+        let mut client = fake_client(frames.as_bytes());
+        let key = ArtifactGetParams {
+            task_id: "t".into(),
+            artifact_id: "a".into(),
+        };
+        let digest = ArtifactDigest {
+            content_bytes: 2,
+            sha256: "0".repeat(64),
+        };
+        let mut output = Vec::new();
+        assert!(
+            matches!(
+                client.download_artifact(&key, &digest, &mut output, |_| {}),
+                Err(Error::InvalidArtifactChunk)
+            ),
+            "{field}"
+        );
+        assert!(output.is_empty());
+        assert!(client.call::<_, bool>("probe", &json!({}), |_| {}).unwrap());
+    }
+}
+
+#[test]
+fn artifact_download_checks_empty_body_against_pinned_digest() {
+    use fliuno_protocol::{ArtifactDigest, ArtifactGetParams};
+    let mut client = fake_client(concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"offset\":0,\"nextOffset\":0,\"contentBytes\":0,\"dataBase64\":\"\"}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"offset\":0,\"nextOffset\":0,\"contentBytes\":0,\"dataBase64\":\"\"}}\n"
+    ).as_bytes());
+    let key = ArtifactGetParams {
+        task_id: "t".into(),
+        artifact_id: "a".into(),
+    };
+    let mut digest = ArtifactDigest {
+        content_bytes: 0,
+        sha256: "not-a-hash".into(),
+    };
+    let mut output = Vec::new();
+    assert!(matches!(
+        client.download_artifact(&key, &digest, &mut output, |_| {}),
+        Err(Error::InvalidArtifactDigest)
+    ));
+    digest.sha256 = "0".repeat(64);
+    assert!(matches!(
+        client.download_artifact(&key, &digest, &mut output, |_| {}),
+        Err(Error::ArtifactDigestMismatch)
+    ));
+    digest.sha256 = "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855".into();
+    client
+        .download_artifact(&key, &digest, &mut output, |_| {})
+        .unwrap();
+    assert!(output.is_empty());
+}

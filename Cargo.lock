@@ -840,9 +840,11 @@ dependencies = [
 name = "fliuno-client"
 version = "0.0.2"
 dependencies = [
+ "base64 0.22.1",
  "fliuno-protocol",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
 ]
 
