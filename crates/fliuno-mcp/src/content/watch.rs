@@ -1,9 +1,9 @@
-//! An approved watch observes at most one update to one remote URI.
+//! An approved watch observes at most one notification from one subscription.
 use super::{Host, Tool, ToolContext, ToolError, ToolOutput, ToolSpec, arguments, authority};
 use fliuno_core::{CancellationToken, ToolEffect};
 use fliuno_protocol::ToolCall;
 use rmcp::{
-    model::{ServerNotification, SubscriptionFilter},
+    model::{ServerCapabilities, ServerNotification, SubscriptionFilter},
     service::SubscriptionEnd,
 };
 use serde::Deserialize;
@@ -16,55 +16,193 @@ const MAX_WAIT_MS: u64 = 5_000;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Args {
+struct ResourceArgs {
     uri: String,
     wait_ms: u64,
 }
 
-pub(super) struct ResourceWatch {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CatalogArgs {
+    wait_ms: u64,
+}
+
+#[derive(Clone, Copy)]
+enum Kind {
+    ResourceUri,
+    Catalog(Catalog),
+}
+
+#[derive(Clone, Copy)]
+enum Catalog {
+    Resources,
+    Prompts,
+    Tools,
+}
+
+impl Kind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::ResourceUri => "resources_watch",
+            Self::Catalog(Catalog::Resources) => "resources_watch_list",
+            Self::Catalog(Catalog::Prompts) => "prompts_watch_list",
+            Self::Catalog(Catalog::Tools) => "tools_watch_list",
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::ResourceUri => {
+                "Watch one remote resource URI for one update during the approved wait. The notification contains no fetched resource body."
+            }
+            Self::Catalog(Catalog::Resources) => {
+                "Watch the remote resource catalog for one change. List resources separately to fetch the current catalog."
+            }
+            Self::Catalog(Catalog::Prompts) => {
+                "Watch the remote prompt catalog for one change. List prompts separately to fetch the current catalog."
+            }
+            Self::Catalog(Catalog::Tools) => "Watch the remote tool catalog for one change.",
+        }
+    }
+}
+
+#[derive(Clone)]
+enum Target {
+    ResourceUri(String),
+    Catalog(Catalog),
+}
+
+impl Target {
+    fn filter(&self) -> SubscriptionFilter {
+        let builder = SubscriptionFilter::builder();
+        match self {
+            Self::ResourceUri(uri) => builder.resource_subscription(uri),
+            Self::Catalog(Catalog::Resources) => builder.resources_list_changed(),
+            Self::Catalog(Catalog::Prompts) => builder.prompts_list_changed(),
+            Self::Catalog(Catalog::Tools) => builder.tools_list_changed(),
+        }
+        .build()
+    }
+
+    fn matches(&self, notification: &ServerNotification) -> bool {
+        match (self, notification) {
+            (Self::ResourceUri(uri), ServerNotification::ResourceUpdatedNotification(update)) => {
+                update.params.uri == *uri
+            }
+            (
+                Self::Catalog(Catalog::Resources),
+                ServerNotification::ResourceListChangedNotification(_),
+            )
+            | (
+                Self::Catalog(Catalog::Prompts),
+                ServerNotification::PromptListChangedNotification(_),
+            )
+            | (Self::Catalog(Catalog::Tools), ServerNotification::ToolListChangedNotification(_)) => {
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn result(&self, status: &str) -> Value {
+        match self {
+            Self::ResourceUri(uri) => json!({"uri":uri,"status":status}),
+            Self::Catalog(_) => json!({"status":status}),
+        }
+    }
+}
+
+pub(super) fn register(
     host: Arc<Host>,
+    server: &str,
+    caps: &ServerCapabilities,
+) -> Vec<Box<dyn Tool>> {
+    // Keep part of the call deadline for opening and closing the subscription.
+    let max_wait_ms = MAX_WAIT_MS.min(host.timeout.as_millis() as u64 / 2);
+    [
+        (
+            Kind::ResourceUri,
+            caps.resources.as_ref().and_then(|r| r.subscribe),
+        ),
+        (
+            Kind::Catalog(Catalog::Resources),
+            caps.resources.as_ref().and_then(|r| r.list_changed),
+        ),
+        (
+            Kind::Catalog(Catalog::Prompts),
+            caps.prompts.as_ref().and_then(|p| p.list_changed),
+        ),
+        (
+            Kind::Catalog(Catalog::Tools),
+            caps.tools.as_ref().and_then(|t| t.list_changed),
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, enabled)| *enabled == Some(true))
+    .map(|(kind, _)| {
+        Box::new(Watch {
+            host: Arc::clone(&host),
+            kind,
+            server: server.into(),
+            max_wait_ms,
+        }) as Box<dyn Tool>
+    })
+    .collect()
+}
+
+struct Watch {
+    host: Arc<Host>,
+    kind: Kind,
     server: String,
     max_wait_ms: u64,
 }
 
-impl ResourceWatch {
-    pub(super) fn new(host: Arc<Host>, server: &str) -> Self {
-        // Leave part of this call's transport budget for the acknowledgment
-        // and cleanup. Queue time still shares the existing Host deadline.
-        let max_wait_ms = MAX_WAIT_MS.min(host.timeout.as_millis() as u64 / 2);
-        Self {
-            host,
-            server: server.into(),
-            max_wait_ms,
-        }
-    }
-
-    fn args(&self, value: &Value) -> Result<Args, String> {
-        let invalid = || "invalid MCP watch URI or waitMs".to_owned();
-        let args = Args::deserialize(value).map_err(|_| invalid())?;
-        if !arguments::valid_uri(&args.uri) || !(1..=self.max_wait_ms).contains(&args.wait_ms) {
+impl Watch {
+    fn args(&self, value: &Value) -> Result<(Target, u64), String> {
+        let invalid = || match self.kind {
+            Kind::ResourceUri => "invalid MCP watch URI or waitMs".to_owned(),
+            Kind::Catalog(_) => "invalid MCP catalog watch waitMs".to_owned(),
+        };
+        let (target, wait_ms) = match self.kind {
+            Kind::ResourceUri => {
+                let args = ResourceArgs::deserialize(value).map_err(|_| invalid())?;
+                if !arguments::valid_uri(&args.uri) {
+                    return Err(invalid());
+                }
+                (Target::ResourceUri(args.uri), args.wait_ms)
+            }
+            Kind::Catalog(catalog) => {
+                let args = CatalogArgs::deserialize(value).map_err(|_| invalid())?;
+                (Target::Catalog(catalog), args.wait_ms)
+            }
+        };
+        if !(1..=self.max_wait_ms).contains(&wait_ms) {
             return Err(invalid());
         }
-        Ok(args)
+        Ok((target, wait_ms))
     }
 }
 
-impl Tool for ResourceWatch {
+impl Tool for Watch {
     fn authority(&self) -> String {
         authority(&self.host, &self.spec(), METHOD)
     }
 
     fn spec(&self) -> ToolSpec {
+        let mut required = vec!["waitMs"];
+        let mut properties =
+            json!({"waitMs":{"type":"integer","minimum":1,"maximum":self.max_wait_ms}});
+        if matches!(self.kind, Kind::ResourceUri) {
+            required.insert(0, "uri");
+            properties["uri"] = json!({"type":"string","minLength":1,"maxLength":4096});
+        }
         ToolSpec {
-            name: format!("mcp_{}_resources_watch", self.server),
-            description: "Watch one remote resource URI for one update during the approved wait. The notification contains no fetched resource body.".into(),
+            name: format!("mcp_{}_{}", self.server, self.kind.label()),
+            description: self.kind.description().into(),
             effect: ToolEffect::External,
             input_schema: json!({
-                "type":"object","required":["uri","waitMs"],"additionalProperties":false,
-                "properties": {
-                    "uri":{"type":"string","minLength":1,"maxLength":4096},
-                    "waitMs":{"type":"integer","minimum":1,"maximum":self.max_wait_ms}
-                }
+                "type":"object","required":required,"additionalProperties":false,
+                "properties":properties
             }),
         }
     }
@@ -79,27 +217,18 @@ impl Tool for ResourceWatch {
         call: &ToolCall,
         cancellation: &CancellationToken,
     ) -> Result<ToolOutput, ToolError> {
-        let Args { uri, wait_ms } = self.args(&call.arguments)?;
-        let watched_uri = uri.clone();
+        let (target, wait_ms) = self.args(&call.arguments)?;
+        let watched = target.clone();
         let status = self.host.request(cancellation, move |service| {
             Box::pin(async move {
-                let filter = SubscriptionFilter::builder()
-                    .resource_subscription(&watched_uri)
-                    .build();
-                let mut watch = service.listen_with_capacity(filter, CAPACITY).await?;
-                let accepted = watch
-                    .acknowledged()
-                    .resource_subscriptions
-                    .as_ref()
-                    .is_some_and(|uris| uris.iter().any(|candidate| candidate == &watched_uri));
-                let status = if accepted {
+                let filter = watched.filter();
+                let mut watch = service
+                    .listen_with_capacity(filter.clone(), CAPACITY)
+                    .await?;
+                let status = if filter.is_subset_of(watch.acknowledged()) {
                     match tokio::time::timeout(Duration::from_millis(wait_ms), watch.next()).await {
                         Err(_) => "elapsed",
-                        Ok(Ok(Some(ServerNotification::ResourceUpdatedNotification(update))))
-                            if update.params.uri == watched_uri =>
-                        {
-                            "updated"
-                        }
+                        Ok(Ok(Some(notification))) if watched.matches(&notification) => "updated",
                         Ok(Ok(None))
                             if matches!(watch.end(), Some(SubscriptionEnd::Graceful(_))) =>
                         {
@@ -117,7 +246,7 @@ impl Tool for ResourceWatch {
         })?;
         Ok(ToolOutput {
             output: json!({"serverId":self.server,"method":METHOD,
-                "result":{"uri":uri,"status":status},"grantsPermissions":false}),
+                "result":target.result(status),"grantsPermissions":false}),
             artifacts: Vec::new(),
         })
     }

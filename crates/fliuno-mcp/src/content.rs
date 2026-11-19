@@ -154,13 +154,8 @@ pub(crate) fn tools(host: Arc<Host>, server: &str, peer: &ServerPeerInfo) -> Vec
             }) as Box<dyn Tool>
         })
         .collect();
-    if peer.protocol_version >= ProtocolVersion::V_2026_07_28
-        && capabilities
-            .resources
-            .as_ref()
-            .is_some_and(|r| r.subscribe == Some(true))
-    {
-        tools.push(Box::new(watch::ResourceWatch::new(host, server)));
+    if peer.protocol_version >= ProtocolVersion::V_2026_07_28 {
+        tools.extend(watch::register(host, server, capabilities));
     }
     tools
 }

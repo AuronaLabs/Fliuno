@@ -35,6 +35,11 @@ impl ServerHandler for Peer {
             ServerCapabilities::builder()
                 .enable_resources()
                 .enable_resources_subscribe()
+                .enable_resources_list_changed()
+                .enable_prompts()
+                .enable_prompts_list_changed()
+                .enable_tools()
+                .enable_tool_list_changed()
                 .build(),
         )
     }
@@ -54,8 +59,11 @@ impl ServerHandler for Peer {
         &self,
         requested: &SubscriptionFilter,
     ) -> Option<SubscriptionFilter> {
-        let uri = &requested.resource_subscriptions.as_ref().unwrap()[0];
-        Some(if uri == "fixture:declined" {
+        let declined_uri = requested
+            .resource_subscriptions
+            .as_ref()
+            .is_some_and(|uris| uris == &["fixture:declined"]);
+        Some(if declined_uri {
             SubscriptionFilter::new()
         } else {
             requested.clone()
@@ -81,6 +89,12 @@ impl ServerHandler for Peer {
                     .await
                     .unwrap();
             }
+        } else if context.accepted().resources_list_changed == Some(true) {
+            context.sink().notify_resource_list_changed().await.unwrap();
+        } else if context.accepted().prompts_list_changed == Some(true) {
+            context.sink().notify_prompt_list_changed().await.unwrap();
+        } else if context.accepted().tools_list_changed == Some(true) {
+            context.sink().notify_tool_list_changed().await.unwrap();
         }
         context.cancelled().await;
         self.closed.fetch_add(1, Ordering::Relaxed);
@@ -146,6 +160,14 @@ fn watch(
     wait_ms: u64,
     cancellation: &CancellationToken,
 ) -> Result<ToolOutput, ToolError> {
+    call_watch(tool, json!({"uri":uri,"waitMs":wait_ms}), cancellation)
+}
+
+fn call_watch(
+    tool: &dyn Tool,
+    arguments: serde_json::Value,
+    cancellation: &CancellationToken,
+) -> Result<ToolOutput, ToolError> {
     let workspace = Workspace {
         id: "w".into(),
         root: "unused".into(),
@@ -159,7 +181,7 @@ fn watch(
         &ToolCall {
             id: "call".into(),
             name: tool.spec().name,
-            arguments: json!({"uri":uri,"waitMs":wait_ms}),
+            arguments,
         },
         cancellation,
     )
@@ -232,6 +254,38 @@ fn cancellation_after_dispatch_closes_the_host_without_resending() {
         Err(ToolError::Failed(message)) if message.contains("closed"))
     );
     assert_eq!(peer.started.load(Ordering::Relaxed), 1);
+    drop(tools);
+    stop.cancel();
+    runtime.block_on(server).unwrap();
+}
+
+#[test]
+fn catalog_watches_observe_one_advertised_list_and_release_the_stream() {
+    let peer = Peer::default();
+    let stop = CancellationToken::new();
+    let (runtime, server, tools) = connect(&peer, &stop);
+    for (catalog, expected) in [
+        ("resources", "updated"),
+        ("prompts", "updated"),
+        ("tools", "updated"),
+    ] {
+        let name = format!("mcp_sdk_{catalog}_watch_list");
+        let tool = tools.iter().find(|tool| tool.spec().name == name).unwrap();
+        assert!(tool.validate(&json!({"uri":null,"waitMs":1000})).is_err());
+        let result = call_watch(
+            tool.as_ref(),
+            json!({"waitMs":1000}),
+            &CancellationToken::new(),
+        )
+        .unwrap_or_else(|err| panic!("{catalog}: {err}"));
+        assert_eq!(
+            result.output,
+            json!({"serverId":"sdk","method":"subscriptions/listen", "result":{"status":expected},"grantsPermissions":false})
+        );
+        assert!(result.artifacts.is_empty());
+    }
+    wait_for(&peer.closed, 3);
+    assert_eq!(peer.started.load(Ordering::Relaxed), 3);
     drop(tools);
     stop.cancel();
     runtime.block_on(server).unwrap();
