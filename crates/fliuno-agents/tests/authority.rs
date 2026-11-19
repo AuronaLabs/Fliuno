@@ -2,15 +2,19 @@
 use fliuno_core::{CancellationToken, DemoProvider, Kernel};
 use fliuno_protocol::TaskBackend;
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static NEXT_FIXTURE: AtomicUsize = AtomicUsize::new(0);
 
 fn cannot_rebind(before: Value, after: Value, acp: bool) {
     let directory = std::env::temp_dir().join(format!(
-        "fliuno-agent-identity-{}-{}",
+        "fliuno-agent-identity-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()
+            .as_nanos(),
+        NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir(&directory).unwrap();
     let database = directory.join("kernel.db");
