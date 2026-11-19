@@ -157,6 +157,7 @@ fn artifact_import_is_atomic_bounded_and_keeps_local_and_remote_identities_separ
         title: "report".into(),
         media_type: "application/json".into(),
         content: json!({"url":"file:///must-not-open","text":"review only"}).to_string(),
+        parts: Vec::new(),
     };
     let count = kernel.list_events(&task.id, 0, 100).unwrap().events.len();
     assert!(
@@ -185,6 +186,37 @@ fn artifact_import_is_atomic_bounded_and_keeps_local_and_remote_identities_separ
             .is_err()
     );
     assert!(kernel.list_artifacts(&task.id).unwrap().is_empty());
+    let part = |index, size| IncomingAgentArtifactPart {
+        index,
+        title: "attachment".into(),
+        media_type: "application/octet-stream".into(),
+        bytes: vec![0; size],
+    };
+    for parts in [
+        vec![part(0, 1), part(0, 1)],
+        (0..257).map(|index| part(index, 0)).collect(),
+        vec![part(0, fliuno_protocol::MAX_BINARY_ARTIFACT_BYTES + 1)],
+        (0..24)
+            .map(|index| part(index, fliuno_protocol::MAX_BINARY_ARTIFACT_BYTES))
+            .collect(),
+    ] {
+        let mut invalid = make("invalid-parts");
+        invalid.parts = parts;
+        assert!(
+            kernel
+                .observe_agent(
+                    &task.id,
+                    &run.request.run_id,
+                    AgentObservation::Artifacts(vec![make("valid"), invalid]),
+                )
+                .is_err()
+        );
+        assert!(kernel.list_artifacts(&task.id).unwrap().is_empty());
+        assert_eq!(
+            kernel.list_events(&task.id, 0, 100).unwrap().events.len(),
+            count
+        );
+    }
     kernel
         .observe_agent(
             &task.id,

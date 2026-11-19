@@ -83,6 +83,18 @@ fn required_id(value: &Value, key: &str) -> Result<String> {
     optional_id(value, key)?.ok_or(Error::Protocol)
 }
 
+/// ProtoJSON bytes accept either Base64 alphabet, with optional padding.
+pub fn decode_raw_part(encoded: &str) -> Result<Vec<u8>> {
+    const CONFIG: GeneralPurposeConfig =
+        GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent);
+    const STANDARD: GeneralPurpose = GeneralPurpose::new(&alphabet::STANDARD, CONFIG);
+    const URL_SAFE: GeneralPurpose = GeneralPurpose::new(&alphabet::URL_SAFE, CONFIG);
+    STANDARD
+        .decode(encoded)
+        .or_else(|_| URL_SAFE.decode(encoded))
+        .map_err(|_| Error::Protocol)
+}
+
 /// Exactly one content field, including explicit JSON null for `data`. This
 /// deliberately rejects the obsolete v0.3 `kind`/`file` representation.
 fn parts(value: &Value) -> Result<&[Value]> {
@@ -113,18 +125,7 @@ fn parts(value: &Value) -> Result<&[Value]> {
             }
         }
         if let Some(raw) = map.get("raw") {
-            // Decode only to validate the representation; never write bytes or
-            // open files. The bounded HTTP body also bounds this allocation.
-            // ProtoJSON permits standard or URL-safe base64, with or without
-            // padding. Do not reject a canonical protobuf implementation merely
-            // because it chooses another valid alphabet/padding representation.
-            let config = GeneralPurposeConfig::new()
-                .with_decode_padding_mode(DecodePaddingMode::Indifferent);
-            let encoded = raw.as_str().ok_or(Error::Protocol)?;
-            GeneralPurpose::new(&alphabet::STANDARD, config)
-                .decode(encoded)
-                .or_else(|_| GeneralPurpose::new(&alphabet::URL_SAFE, config).decode(encoded))
-                .map_err(|_| Error::Protocol)?;
+            decode_raw_part(raw.as_str().ok_or(Error::Protocol)?)?;
         }
     }
     Ok(parts)

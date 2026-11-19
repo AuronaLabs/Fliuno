@@ -12,7 +12,20 @@ pub struct IncomingAgentArtifact {
     pub title: String,
     pub media_type: String,
     pub content: String,
+    pub parts: Vec<IncomingAgentArtifactPart>,
 }
+
+pub struct IncomingAgentArtifactPart {
+    pub index: u32,
+    pub title: String,
+    pub media_type: String,
+    pub bytes: Vec<u8>,
+}
+
+const MAX_IMPORTED_SOURCES: usize = 64;
+const MAX_IMPORTED_PARTS: usize = 256;
+const MAX_SOURCE_BYTES: usize = 256 * 1024;
+
 fn valid_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control)
 }
@@ -91,49 +104,81 @@ impl Kernel {
             .as_mut()
             .filter(|r| r.id == run_id && !r.finished)
             .ok_or_else(|| Error::Conflict("artifact import belongs to an inactive run".into()))?;
-        if !run.artifacts.is_empty() || incoming.len() > 64 {
+        if !run.artifacts.is_empty() || incoming.len() > MAX_IMPORTED_SOURCES {
             return Err(Error::Conflict(
                 "duplicate or oversized agent artifact import".into(),
             ));
         }
+        let part_count = incoming
+            .iter()
+            .map(|source| source.parts.len())
+            .sum::<usize>();
+        if part_count > MAX_IMPORTED_PARTS {
+            return Err(Error::Conflict("agent artifact part limit exceeded".into()));
+        }
         let mut sources = BTreeSet::new();
-        let mut artifacts = Vec::new();
-        let mut links = Vec::new();
+        let mut artifacts = Vec::with_capacity(incoming.len() + part_count);
+        let mut links = Vec::with_capacity(artifacts.capacity());
         let mut bytes = 0_u64;
         for source in incoming {
             if !valid_id(&source.source_id)
                 || !sources.insert(source.source_id.clone())
-                || source.title.trim().is_empty()
-                || source.title.len() > 256
-                || source.media_type.is_empty()
-                || source.media_type.len() > 128
-                || source.media_type.chars().any(char::is_control)
-                || source.content.len() > 262_144
+                || source.content.len() > MAX_SOURCE_BYTES
             {
                 return Err(Error::Invalid(
                     "invalid agent artifact or import budget exceeded".into(),
                 ));
             }
-            let artifact = Artifact {
-                id: new_id("artifact"),
-                task_id: task_id.into(),
-                title: source.title,
-                media_type: source.media_type,
-                body: ArtifactBody::Text {
+            let primary = (
+                None,
+                source.title,
+                source.media_type,
+                ArtifactBody::Text {
                     content: source.content,
                 },
-            };
-            links.push(AgentArtifactLink {
-                source_id: source.source_id,
-                artifact_id: artifact.id.clone(),
+            );
+            let parts = source.parts.into_iter().map(|part| {
+                (
+                    Some(part.index),
+                    part.title,
+                    part.media_type,
+                    ArtifactBody::Binary { bytes: part.bytes },
+                )
             });
-            bytes += json_size(&artifact)? as u64;
-            artifacts.push(artifact);
-        }
-        if run.recorded_bytes + bytes > agent::MAX_RECORDED_BYTES {
-            return Err(Error::Conflict(
-                "agent artifact aggregate budget exceeded".into(),
-            ));
+            let mut indexes = BTreeSet::new();
+            for (part_index, title, media_type, body) in std::iter::once(primary).chain(parts) {
+                if part_index.is_some_and(|index| {
+                    !indexes.insert(index)
+                        || body.as_bytes().len() > fliuno_protocol::MAX_BINARY_ARTIFACT_BYTES
+                }) || title.trim().is_empty()
+                    || title.len() > 256
+                    || media_type.trim().is_empty()
+                    || media_type.len() > 128
+                    || media_type.chars().any(char::is_control)
+                {
+                    return Err(Error::Invalid("invalid agent artifact or part".into()));
+                }
+                let artifact = Artifact {
+                    id: new_id("artifact"),
+                    task_id: task_id.into(),
+                    title,
+                    media_type,
+                    body,
+                };
+                let link = AgentArtifactLink {
+                    source_id: source.source_id.clone(),
+                    part_index,
+                    artifact_id: artifact.id.clone(),
+                };
+                bytes += (json_size(&artifact)? + json_size(&link)?) as u64;
+                if run.recorded_bytes + bytes > agent::MAX_RECORDED_BYTES {
+                    return Err(Error::Conflict(
+                        "agent artifact aggregate budget exceeded".into(),
+                    ));
+                }
+                links.push(link);
+                artifacts.push(artifact);
+            }
         }
         run.recorded_bytes += bytes;
         run.artifacts = links;

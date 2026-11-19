@@ -168,12 +168,21 @@ def main():
                     assert "GetTask" in handler.methods
                 assert handler.methods.count("CancelTask") == (1 if args.cancel else 0)
                 artifacts = kernel.call("artifacts/list", {"taskId": task["id"]})
-                assert len(artifacts) == (0 if args.cancel else 1)
+                assert len(artifacts) == (0 if args.cancel else 2)
                 print("Result:", done["status"])
                 print("Remote task:", json.dumps(done["agentRun"]["remoteTask"], ensure_ascii=False))
                 print("Methods:", " -> ".join(handler.methods))
-                for artifact in artifacts:
-                    print("Artifact:", artifact["title"], artifact["content"])
+                if artifacts:
+                    source, attachment = artifacts
+                    assert json.loads(source["content"])["artifactId"] == "report"
+                    part_index = 3 if args.streaming else 2
+                    assert done["agentRun"]["artifacts"] == [
+                        {"sourceId": "report", "artifactId": source["id"]},
+                        {"sourceId": "report", "artifactId": attachment["id"], "partIndex": part_index},
+                    ]
+                    assert attachment["title"] == "hi.txt" and attachment["contentBase64"] == "aGk="
+                    print("Artifact:", source["title"], source["content"])
+                    print("Attachment:", attachment["title"], attachment["mediaType"])
     finally:
         server.shutdown()
         server.server_close()

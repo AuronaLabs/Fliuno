@@ -427,7 +427,7 @@ fn task_polling_artifact_parts_history_idempotency_and_restart_are_durable() {
                 assert!(parts[0]["text"].as_str().unwrap().contains("report text"));
                 response(
                     request,
-                    json!({"message":{"messageId":"next-reply","role":"ROLE_AGENT","contextId":"new-context","parts":[{"text":"follow-up"},{"data":{"answer":2}}]}}),
+                    json!({"message":{"messageId":"next-reply","role":"ROLE_AGENT","contextId":"new-context","parts":[{"text":"follow-up"},{"data":{"answer":2}},{"raw":"_w","mediaType":""}]}}),
                 )
             }
             "GetTask" => {
@@ -475,21 +475,46 @@ fn task_polling_artifact_parts_history_idempotency_and_restart_are_durable() {
     );
     assert_eq!(completed["agentRun"]["outcomeUnknown"], false);
     let artifacts = peer.call("artifacts/list", json!({"taskId":first["id"]}));
-    assert_eq!(artifacts.as_array().unwrap().len(), 1);
+    assert_eq!(artifacts.as_array().unwrap().len(), 2);
     assert_ne!(artifacts[0]["id"], "peer-report");
+    let links = json!([
+        {"sourceId":"peer-report","artifactId":artifacts[0]["id"]},
+        {"sourceId":"peer-report","partIndex":2,"artifactId":artifacts[1]["id"]}
+    ]);
+    assert_eq!(completed["agentRun"]["artifacts"], links);
+    let attachment = json!({"taskId":first["id"],"artifactId":artifacts[1]["id"]});
     assert_eq!(
-        completed["agentRun"]["artifacts"][0]["artifactId"],
-        artifacts[0]["id"]
+        peer.call("artifacts/getSummary", attachment.clone()),
+        json!({"id":artifacts[1]["id"],"taskId":first["id"],"title":"hi.txt",
+            "mediaType":"text/plain","binary":true,"contentBytes":2})
     );
     let content: Value = serde_json::from_str(artifacts[0]["content"].as_str().unwrap()).unwrap();
     assert_eq!(content["parts"][1]["data"]["count"], 4);
     assert_eq!(content["parts"][2]["raw"], "aGk=");
+    assert!(
+        content["parts"][3]["url"]
+            .as_str()
+            .unwrap()
+            .ends_with("/do-not-fetch")
+    );
     assert_eq!(content["metadata"]["vendor"], "retained");
     assert_eq!(start(&mut peer, &session, "one")["id"], first["id"]);
     let second = start(&mut peer, &session, "two");
+    let reply = peer.wait_for_status(second["id"].as_str().unwrap(), "completed");
+    assert_eq!(reply["output"], "follow-up");
+    let message = peer.call("artifacts/list", json!({"taskId":second["id"]}));
+    assert_eq!(message.as_array().unwrap().len(), 2);
+    let raw: Value = serde_json::from_str(message[0]["content"].as_str().unwrap()).unwrap();
+    assert_eq!(raw["parts"][2], json!({"raw":"_w","mediaType":""}));
+    assert_eq!(message[1]["mediaType"], "application/octet-stream");
+    assert_eq!(message[1]["title"], "A2A attachment 3");
+    assert_eq!(message[1]["contentBase64"], "/w==");
     assert_eq!(
-        peer.wait_for_status(second["id"].as_str().unwrap(), "completed")["output"],
-        "follow-up"
+        reply["agentRun"]["artifacts"],
+        json!([
+            {"sourceId":"next-reply","artifactId":message[0]["id"]},
+            {"sourceId":"next-reply","partIndex":2,"artifactId":message[1]["id"]}
+        ])
     );
     assert_eq!(sends.load(Ordering::SeqCst), 2);
     drop(peer);
@@ -498,6 +523,14 @@ fn task_polling_artifact_parts_history_idempotency_and_restart_are_durable() {
     assert_eq!(
         peer.call("artifacts/list", json!({"taskId":first["id"]})),
         artifacts
+    );
+    assert_eq!(
+        peer.call("task/get", json!({"taskId":first["id"]}))["agentRun"]["artifacts"],
+        links
+    );
+    assert_eq!(
+        peer.call("artifacts/read", attachment),
+        json!({"offset":0,"nextOffset":2,"contentBytes":2,"dataBase64":"aGk="})
     );
     let events = peer.call("events/list", json!({"taskId":first["id"]}));
     assert_eq!(
@@ -510,6 +543,12 @@ fn task_polling_artifact_parts_history_idempotency_and_restart_are_durable() {
         3
     );
     assert_eq!(sends.load(Ordering::SeqCst), 2);
+    assert_eq!(polls.load(Ordering::SeqCst), 2);
+    assert!(
+        wire.requests()
+            .iter()
+            .all(|req| req.path != "/do-not-fetch")
+    );
     assert!(!events.to_string().contains("fixture-a2a-private"));
 }
 
@@ -521,8 +560,8 @@ fn streaming_status_and_chunked_artifacts_are_persisted_without_polling() {
         let id = request.body["id"].as_str().unwrap();
         let results = [
             json!({"task":task("TASK_STATE_WORKING")}),
-            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","name":"report.txt","parts":[{"text":"stream "}]},"append":false,"lastChunk":false}}),
-            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","parts":[{"text":"result"}]},"append":true,"lastChunk":true}}),
+            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","name":"report.txt","parts":[{"text":"stream "},{"raw":"AAE"}]},"append":false,"lastChunk":false}}),
+            json!({"artifactUpdate":{"taskId":"remote-task","contextId":"remote-context","artifact":{"artifactId":"stream-report","parts":[{"text":"result"},{"raw":"AgM=","filename":"second.bin"}]},"append":true,"lastChunk":true}}),
             json!({"statusUpdate":{"taskId":"remote-task","contextId":"remote-context","status":{"state":"TASK_STATE_COMPLETED","message":{"messageId":"stream-final","taskId":"remote-task","contextId":"remote-context","role":"ROLE_AGENT","parts":[{"text":"done"}]}}}}),
         ];
         let body: String = results
@@ -549,10 +588,23 @@ fn streaming_status_and_chunked_artifacts_are_persisted_without_polling() {
     );
     assert_eq!(completed["agentRun"]["outcomeUnknown"], false);
     let stored = peer.call("artifacts/list", json!({"taskId":submitted["id"]}));
-    assert_eq!(stored.as_array().unwrap().len(), 1);
+    assert_eq!(stored.as_array().unwrap().len(), 3);
     let raw: Value = serde_json::from_str(stored[0]["content"].as_str().unwrap()).unwrap();
     assert_eq!(raw["artifactId"], "stream-report");
-    assert_eq!(raw["parts"], json!([{"text":"stream "},{"text":"result"}]));
+    assert_eq!(
+        raw["parts"],
+        json!([{"text":"stream "},{"raw":"AAE"},{"text":"result"},{"raw":"AgM=","filename":"second.bin"}])
+    );
+    assert_eq!(stored[1]["contentBase64"], "AAE=");
+    assert_eq!(stored[2]["contentBase64"], "AgM=");
+    assert_eq!(
+        completed["agentRun"]["artifacts"],
+        json!([
+            {"sourceId":"stream-report","artifactId":stored[0]["id"]},
+            {"sourceId":"stream-report","partIndex":1,"artifactId":stored[1]["id"]},
+            {"sourceId":"stream-report","partIndex":3,"artifactId":stored[2]["id"]}
+        ])
+    );
     let requests = wire.requests();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].body["method"], "SendStreamingMessage");

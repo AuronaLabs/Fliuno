@@ -330,6 +330,9 @@ pub struct RemoteTaskCheckParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentArtifactLink {
     pub source_id: String,
+    /// Zero-based position in the original remote container, if projected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_index: Option<u32>,
     pub artifact_id: String,
 }
 

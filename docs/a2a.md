@@ -89,7 +89,7 @@ cargo run -p fliuno-app-server -- --a2a-config C:/absolute/path/to/agents.json
 
 最终 Task 快照中的产物一次性导入：源 `artifactId` 与新生成的本地 Artifact ID 分开保存到 `agentRun.artifacts`，产物、链接、预算及 `artifact_created` 事件在同一事务提交。重复源 ID、重复导入、数量/字节超限会拒绝。运行可能在导入后、完成前中断；已提交的产物保留供检查，任务不会因此被自动标记完成。
 
-本地 Artifact 的 `mediaType` 为 `application/json`，`content` 是完整的 A2A Artifact JSON，保留 Part、文件名、媒体类型、metadata 等字段。`raw` 只校验 ProtoJSON base64，不写入本机文件；`url` 只保存，不下载或打开，即使它指向本机或工作区。文本 Part 也投影到任务输出。立即 Message 以同样方式保留完整消息 JSON，并投影其文本。只有终态导入 Task 产物，暂停态的部分产物不宣称为最终交付。
+每个 A2A Artifact 或立即 Message 保留一份 `application/json` 产物，包括 Part、文件名、媒体类型和 metadata。每个 `raw` Part 另外解码为一个二进制产物，可通过 `artifacts/read` 分段读取，或通过 `artifacts/digest` 校验。链接的 `sourceId` 是原 `artifactId` 或 `messageId`，`partIndex` 是原件 `parts` 数组中从 0 开始的索引；原件链接省略 `partIndex`。SSE 追加保留各 Part 的边界。文件名只用作标题，缺失或不符合本地显示限制时使用默认标题；缺失或不符合限制的媒体类型使用 `application/octet-stream`。附件字节入库，不写为工作区文件；`url` 只随 JSON 保存，不下载或打开。文本 Part 也投影到任务输出。Task 产物只在终态导入。SQLite v32 拒绝旧版内核读取包含新链接字段的数据库；已有原件链接无需回填。
 
 ## 有界传输
 
@@ -97,7 +97,7 @@ cargo run -p fliuno-app-server -- --a2a-config C:/absolute/path/to/agents.json
 - 不使用环境 HTTP 代理，不跟随重定向，不自动重试。请求与响应只接受当前 JSON 模式。
 - 每次请求超时 100..3600000 ms；任务总时限同范围，默认 300000 ms。轮询间隔 25..30000 ms，最多 4096 次。
 - 请求最多 1 MiB；响应默认 1 MiB，可配置 1024..4194304 字节，头部长度与逐块读取均校验。
-- 每个 Task 最多 64 个产物、每个产物 256 KiB、每个内容容器最多 256 个 Part。内核另有 8 MiB 记录、1 MiB 文本、4096 条更新预算。
+- 每个 Task 最多 64 个远端产物；每个内容容器最多 256 个 Part。一次导入最多额外保存 256 个二进制附件；原件 JSON 和单个附件各自限制为 256 KiB。内核的 8 MiB 记录预算按序列化大小计算，包含原件、附件及链接；另有 1 MiB 文本和 4096 条更新预算。
 - 远端错误只保留固定错误类型与数值 code；HTTP/JSON 解析异常不会输出响应体或 URL。凭据由 HTTP 层发送，不作为运行配置或事件存储。
 
 ## 验证与演示

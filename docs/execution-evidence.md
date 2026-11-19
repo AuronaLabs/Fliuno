@@ -302,6 +302,10 @@ Windows `scripts/check.ps1` 退出码为 0：423 项 workspace 测试、26 个�
 
 Windows `scripts/check.ps1` 退出码为 0：425 项 workspace 测试、26 个离线演示、rustfmt、两组严格 Clippy 与生成的 RPC Schema 均通过。此轮未在 Debian Linux 来宾复验。
 
+## A2A 内联附件（2026-11-19）
+
+20 项 A2A app-server 进程测试通过：轮询、立即消息及 SSE 追加保留原件 JSON 和 Part 边界，重启后可以用原本地产物 ID 读取字节；URL 没有触发额外请求。内核测试覆盖重复索引、数量、单件与总预算的整批拒绝。Windows 全工作区 425 项测试、两组严格 Clippy、rustfmt 和 Schema 一致性通过。更新离线 A2A 演示的清单断言后，轮询、SSE 及两种取消演示均通过。
+
 ## Gemini Interactions 与 MCP 只读失败（2026-11-19）
 
 Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。

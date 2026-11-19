@@ -86,6 +86,8 @@
 
 `initialize.capabilities.binaryArtifacts` 为真时，二进制产物的清单项包含 `binary:true`，完整响应以 `contentBase64` 返回标准 Base64。文本产物沿用 `content`，清单省略 `binary`。SQLite v31 为二进制正文标记版本；旧产物及游标无需迁移。
 
+A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可选的 `partIndex` 对应到原消息或产物。`partIndex` 从 0 开始；省略时表示源容器本身。原件和附件拥有各自的本地产物 ID。
+
 `scopedArtifactSummaries` 表示支持 `artifacts/listScopedSummaries`。每页最多 100 项，包含归档会话中的产物。从 `after:0` 开始，使用同一查询范围的 `nextAfter` 翻页。SQLite v26 为此清单新增索引并回填已有产物。任务级清单的游标独立于此接口。
 
 `artifactMediaTypeFilter` 表示 `artifacts/listScopedSummaries` 支持 `mediaType`。筛选条件和已有产物的值完全匹配，包含大小写和参数。筛选词最多 256 个 UTF-8 字节，须包含可见内容。翻页时沿用相同筛选条件和作用域。SQLite v28 为会话和工作区分别建立类型索引，并保留原有游标。

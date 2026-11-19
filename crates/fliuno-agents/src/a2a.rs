@@ -2,10 +2,11 @@
 //! deadlines are host-owned; cards/messages never confer local tool authority.
 use fliuno_a2a::{
     Client, Message, MessageTarget, Options, SendResponse, StreamEvent, Task, TaskState,
+    decode_raw_part,
 };
 use fliuno_core::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
-    CancellationToken, IncomingAgentArtifact, Kernel,
+    CancellationToken, IncomingAgentArtifact, IncomingAgentArtifactPart, Kernel,
 };
 use fliuno_protocol::{
     AgentRemoteTask, AgentSpec, AgentStopReason, AgentTaskState, RemoteContinuation,
@@ -441,11 +442,36 @@ fn finish_stream_snapshot(
 }
 
 fn artifact(source_id: String, title: String, raw: &Value) -> Result<IncomingAgentArtifact, ()> {
+    fn display_field(value: &Value, max_bytes: usize) -> Option<&str> {
+        value.as_str().filter(|value| {
+            !value.trim().is_empty()
+                && value.len() <= max_bytes
+                && !value.chars().any(char::is_control)
+        })
+    }
+
+    let content = serde_json::to_string(raw).map_err(|_| ())?;
+    let mut parts = Vec::new();
+    for (index, part) in raw["parts"].as_array().ok_or(())?.iter().enumerate() {
+        if let Some(encoded) = part.get("raw") {
+            parts.push(IncomingAgentArtifactPart {
+                index: u32::try_from(index).map_err(|_| ())?,
+                title: display_field(&part["filename"], 256)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("A2A attachment {}", index + 1)),
+                media_type: display_field(&part["mediaType"], 128)
+                    .unwrap_or("application/octet-stream")
+                    .into(),
+                bytes: decode_raw_part(encoded.as_str().ok_or(())?).map_err(|_| ())?,
+            });
+        }
+    }
     Ok(IncomingAgentArtifact {
         source_id,
         title,
         media_type: "application/json".into(),
-        content: serde_json::to_string(raw).map_err(|_| ())?,
+        content,
+        parts,
     })
 }
 fn finish_snapshot(observer: &dyn AgentObserver, task: Task) -> Result<AgentOutcome, ()> {

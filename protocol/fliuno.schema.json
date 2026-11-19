@@ -2580,6 +2580,15 @@
             "sourceId": {
               "type": "string"
             },
+            "partIndex": {
+              "description": "Zero-based position in the original remote container, if projected.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
             "artifactId": {
               "type": "string"
             }
