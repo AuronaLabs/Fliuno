@@ -132,12 +132,19 @@ impl RpcServer {
     fn replace_event_subscription(
         &mut self,
         scope: EventScope,
+        after: Option<u64>,
     ) -> Result<EventSubscription, RpcError> {
         let (through_sequence, receiver) = {
             // Committing workers hold this lock. The watermark and
             // subscription therefore cover adjacent event ranges.
             let kernel = self.kernel()?;
             let through_sequence = kernel.event_watermark()?;
+            if after.is_some_and(|cursor| cursor > through_sequence) {
+                return Err(Error::Conflict(
+                    "event cursor is ahead of the database watermark".into(),
+                )
+                .into());
+            }
             let receiver = match &scope {
                 EventScope::Task(id) => kernel.subscribe_task_events(id)?,
                 EventScope::Session(id) => kernel.subscribe_session_events(id)?,
@@ -352,6 +359,7 @@ impl RpcServer {
             capabilities["workspaceEventReplay"] = json!(true);
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);
+            capabilities["eventSubscriptionCursor"] = json!(true);
             capabilities["workspaceEventSubscription"] = json!(true);
             capabilities["taskEventSubscription"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
@@ -776,7 +784,7 @@ impl RpcServer {
                         );
                     }
                 };
-                json!(self.replace_event_subscription(scope)?)
+                json!(self.replace_event_subscription(scope, p.after)?)
             }
             "events/resubscribe" => {
                 if params != json!({}) {
@@ -785,7 +793,7 @@ impl RpcServer {
                 if !self.event_stream_gap {
                     return Err(Error::Conflict("event stream is already subscribed".into()).into());
                 }
-                json!(self.replace_event_subscription(self.event_scope.clone())?)
+                json!(self.replace_event_subscription(self.event_scope.clone(), None)?)
             }
             "modelProgress/resubscribe" => {
                 if params != json!({}) {

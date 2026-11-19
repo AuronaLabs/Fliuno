@@ -431,3 +431,10 @@ Windows `scripts/check.ps1` 退出码为 0，446 项测试、26 个离线演示�
 ## 0.0.2 发布前复验（2026-11-19）
 
 清理 Cargo 的 Windows 开发、发布与 Linux 交叉构建产物后，在 Windows 重新运行 `scripts/check.ps1`。脚本以退出码 0 完成，446 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和生成的 RPC Schema 一致性均通过。日志为 `target/0.0.2-release-check-windows.log`。
+
+
+## 事件订阅交接与 v0.0.2 验收（2026-11-19）
+
+真实 app-server 进程测试先建立会话订阅，再提交超出数据库水位的游标尝试切换到单任务。服务返回冲突并保留会话范围。切换请求之后新提交的任务通过实时通知送达，回放只读到建立订阅时的水位。
+
+Windows `scripts/check.ps1` 以退出码 0 完成。446 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.2-checked-subscription-windows.log`。

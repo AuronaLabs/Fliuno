@@ -1570,6 +1570,15 @@
       "title": "EventsSetScopeParams",
       "type": "object",
       "properties": {
+        "after": {
+          "description": "If supplied, reject subscription changes when this cursor is ahead of the database.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "taskId": {
           "type": [
             "string",

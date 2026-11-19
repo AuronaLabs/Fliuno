@@ -865,6 +865,10 @@ pub struct EventsListWorkspaceParams {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventsSetScopeParams {
+    /// If supplied, reject subscription changes when this cursor is ahead of the database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<u64>,
+
     #[serde(default)]
     pub task_id: Option<String>,
     #[serde(default)]

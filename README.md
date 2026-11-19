@@ -4,7 +4,7 @@
 
 Fliuno 把模型、工具和外部 Agent 接进同一套任务流程。任务可等待人工审批，事件和交付物持久保存，客户端重连后可以接着读。桌面端和 CLI 可通过本机 stdio JSON-RPC 接入。
 
-`0.0.2 开发版` · `应用协议 0.1` · `Windows / Linux`
+`内核 0.0.2` · `应用协议 0.1` · `Windows / Linux`
 
 [快速开始](#快速开始) · [文档首页](docs/README.md) · [应用协议](docs/protocol.md) · [版本更新记录](CHANGELOG.md)
 

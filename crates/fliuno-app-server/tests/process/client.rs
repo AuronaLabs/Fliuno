@@ -1,9 +1,8 @@
 use super::*;
-use fliuno_client::{Client, Error, EventReplay, ReplayScope};
+use fliuno_client::{Client, Error, Notification, ReplayScope};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalGetParams, ApprovalRespondParams, ArtifactGetParams, ArtifactSummary,
-    Event, EventKind, EventSubscription, Task, TaskIdParams, TaskStatus, Workspace,
-    WorkspaceOpenParams,
+    Event, EventKind, Task, TaskIdParams, TaskStatus, Workspace, WorkspaceOpenParams,
 };
 
 #[test]
@@ -40,6 +39,7 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
     let mut client = Client::connect(reader, writer, "rust-client-test", &mut observe).unwrap();
     assert_eq!(client.info().server_name, "fliuno-app-server");
     assert_eq!(client.info().capabilities["approvalDecisionLookup"], true);
+    assert_eq!(client.info().capabilities["eventSubscriptionCursor"], true);
     let invalid: Result<Value, _> = client.call(
         "task/get",
         &TaskIdParams {
@@ -137,28 +137,72 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
         .download_artifact(&artifact, &expected, &mut output, &mut observe)
         .unwrap();
     assert_eq!(output, content.as_bytes());
-    let subscription: EventSubscription = client
-        .call("events/setScope", &json!({"taskId":task.id}), &mut observe)
+    let mut replay = client
+        .subscribe_events(ReplayScope::Session(session.id.clone()), 0, &mut observe)
         .unwrap();
-    let mut replay =
-        EventReplay::new(ReplayScope::Task(task.id), 0, subscription.through_sequence).unwrap();
-    let mut read = Vec::new();
+    let through = replay.through();
+    assert!(through > event.sequence);
+    assert!(sequences.iter().all(|sequence| *sequence <= through));
+    assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
+
+    let mut live = Vec::new();
+    let observe_live = |live: &mut Vec<Event>, note: Notification| {
+        if note.method == "notifications/event" {
+            let event: Event = serde_json::from_value(note.params["event"].clone()).unwrap();
+            assert!(event.sequence > through);
+            live.push(event);
+        }
+    };
+    // A stale cursor from a newer database must leave the existing session scope live.
+    assert!(matches!(
+        client.subscribe_events(ReplayScope::Task(task.id.clone()), through + 1, |note| {
+            observe_live(&mut live, note);
+        }),
+        Err(Error::Rpc { code: -32009, .. })
+    ));
+    let newer: Task = client
+        .call(
+            "task/start",
+            &json!({"sessionId": session.id, "input": "Committed after subscription"}),
+            |note| observe_live(&mut live, note),
+        )
+        .unwrap();
+    let mut historical = Vec::new();
     while let Some(page) = replay
-        .next_page(&mut client, 1, Some(4096), &mut observe)
+        .next_page(&mut client, 1, Some(4096), |note| {
+            observe_live(&mut live, note)
+        })
         .unwrap()
     {
         assert_eq!(page.len(), 1);
-        read.push(page[0].sequence);
+        assert_eq!(page[0].task_id, task.id);
+        historical.push(page[0].sequence);
     }
-    assert!(read.contains(&event.sequence));
-    assert!(read.windows(2).all(|pair| pair[0] < pair[1]));
-    assert_eq!(replay.cursor(), subscription.through_sequence);
-    if sequences.is_empty() {
-        let notification = client.read_notification().unwrap();
-        assert_eq!(notification.method, "notifications/event");
-        sequences.push(notification.params["event"]["sequence"].as_u64().unwrap());
+    assert!(historical.contains(&event.sequence));
+    assert!(historical.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(historical.last(), Some(&through));
+    assert_eq!(replay.cursor(), through);
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !live
+        .iter()
+        .any(|event| event.task_id == newer.id && matches!(event.data, EventKind::TaskStarted))
+    {
+        assert!(
+            Instant::now() < deadline,
+            "missing live event after watermark"
+        );
+        thread::sleep(Duration::from_millis(10));
+        let _: Task = client
+            .call(
+                "task/get",
+                &TaskIdParams {
+                    task_id: newer.id.clone(),
+                },
+                |note| observe_live(&mut live, note),
+            )
+            .unwrap();
     }
-    assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
     let (mut reader, writer) = client.into_parts();
     // Close stdin so shutdown begins, and keep stdout open for queued notifications.
     drop(writer);
