@@ -1,5 +1,7 @@
 use super::*;
-use fliuno_client::ag_ui::{AgUiRunError, AgUiRunPhase, AgUiSseError, AgUiSseFeedError};
+use fliuno_client::ag_ui::{
+    AgUiRunError, AgUiRunPhase, AgUiSseError, AgUiSseFeedError, AgUiSseReplay,
+};
 use fliuno_protocol::Session;
 use std::process::ChildStdout;
 
@@ -194,6 +196,21 @@ fn ag_ui_sse_feed_delivers_live_approval_and_resumes_inside_completion() {
             |_| {},
         )
         .unwrap();
+    let other: Task = client
+        .call(
+            "task/start",
+            &json!({"sessionId":session.id,"input":"other task on the same connection"}),
+            |_| {},
+        )
+        .unwrap();
+    approve(&mut client, &other.id);
+    let other: TaskSummary = client
+        .call(
+            "task/getSummary",
+            &TaskIdParams { task_id: other.id },
+            |_| {},
+        )
+        .unwrap();
     let body = serde_json::to_vec(&json!({
         "threadId":session.id,"runId":"feed-run",
         "messages":[{"id":"u","role":"user","content":"stream this result"}]
@@ -215,6 +232,44 @@ fn ag_ui_sse_feed_delivers_live_approval_and_resumes_inside_completion() {
         .unwrap()
         .is_some()
     {}
+    assert_eq!(client.info().capabilities["eventWatermarkQuery"], true);
+    let through = client
+        .event_watermark(|note| {
+            feed.observe(note);
+        })
+        .unwrap();
+    let mut replay = run.replay_sse(through, None).unwrap();
+    let mut other_replay = AgUiSseReplay::new(&other, through, None).unwrap();
+    let mut snapshot = Vec::new();
+    let mut other_output = Vec::new();
+    loop {
+        let own_chunk = replay
+            .next_chunk(&mut client, |note| {
+                feed.observe(note);
+            })
+            .unwrap();
+        let other_chunk = other_replay
+            .next_chunk(&mut client, |note| {
+                feed.observe(note);
+            })
+            .unwrap();
+        if own_chunk.is_none() && other_chunk.is_none() {
+            break;
+        }
+        snapshot.extend(own_chunk.into_iter().flatten());
+        other_output.extend(other_chunk.into_iter().flatten());
+    }
+    assert_eq!(snapshot, bytes);
+    let other_wire = String::from_utf8(other_output).unwrap();
+    let other_prefix = format!("id: {}:", other.id);
+    let other_frames: Vec<_> = other_wire.split_terminator("\n\n").collect();
+    assert!(!other_frames.is_empty());
+    assert!(
+        other_frames
+            .iter()
+            .all(|frame| frame.starts_with(&other_prefix))
+    );
+    assert!(other_frames.last().unwrap().contains("RUN_FINISHED"));
     let before_approval = String::from_utf8_lossy(&bytes);
     assert!(before_approval.contains("fliuno.approval_requested"));
     assert!(!before_approval.contains("RUN_FINISHED"));
@@ -258,6 +313,22 @@ fn ag_ui_sse_feed_delivers_live_approval_and_resumes_inside_completion() {
         thread::sleep(Duration::from_millis(10));
     }
 
+    let through = client
+        .event_watermark(|note| {
+            feed.observe(note);
+        })
+        .unwrap();
+    replay.advance_through(through).unwrap();
+    while let Some(chunk) = replay
+        .next_chunk(&mut client, |note| {
+            feed.observe(note);
+        })
+        .unwrap()
+    {
+        snapshot.extend(chunk);
+    }
+    assert_eq!(snapshot, bytes);
+    assert_eq!(replay.run_phase(), Some(AgUiRunPhase::Finished));
     let frames: Vec<_> = std::str::from_utf8(&bytes)
         .unwrap()
         .split_terminator("\n\n")

@@ -98,6 +98,10 @@ impl AgUiSseStream {
         })
     }
 
+    pub(super) fn task_id(&self) -> &str {
+        &self.projector.task_id
+    }
+
     pub(super) fn run_phase(&self) -> AgUiRunPhase {
         self.projector.run_phase()
     }

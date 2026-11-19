@@ -85,6 +85,12 @@ while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &
 
 读完当前可用的页后，宿主可用 `feed.run_phase()` 决定是否结束响应。`Finished` 表示任务已结束，`Interrupted` 表示当前执行段因本机中断而结束。恢复后，新的执行段会回到 `Running`。宿主主动取消时，对已绑定的任务调用 `task/cancel`，然后用同一订阅输出取消结果。
 
+### 在一条连接上交错回放多个任务
+
+宿主需要服务多个读取方时，可以用 `client.event_watermark` 读一次已提交水位，再为每个任务建立 `run.replay_sse(through, last_event_id)`。各个 `AgUiSseReplay` 共用 stdio 连接，但各自保存投影和游标。`next_chunk` 每次读取并编码一页，由宿主释放客户端借用后再将字节写给消费者。
+
+读完窗口后，用 `advance_through` 接入新的已提交水位。宿主可以查询水位，或从自己维护的实时通知中得到水位。每个读取方只读所属任务，回放和水位查询都保留现有实时订阅。
+
 ### 帧格式和底层接口
 
 `fliuno_client::ag_ui::AgUiSseStream` 可以把单个持久事件的投影写入实现 `Write` 的响应体。由宿主提供 HTTP 路由和连接，响应使用 `AG_UI_SSE_CONTENT_TYPE`（`text/event-stream`）。每条消息有一行 `id` 和一行 `data`。`data` 是 AG-UI 事件 JSON，`id` 由任务 ID、内核事件序号和该事件内从 1 开始的消息编号组成。

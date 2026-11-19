@@ -380,6 +380,7 @@ impl RpcServer {
             capabilities["eventSubscriptionScope"] = json!(true);
             capabilities["eventSubscriptionCursor"] = json!(true);
             capabilities["eventWatermarkNotifications"] = json!(true);
+            capabilities["eventWatermarkQuery"] = json!(true);
             capabilities["workspaceEventSubscription"] = json!(true);
             capabilities["taskEventSubscription"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
@@ -811,6 +812,14 @@ impl RpcServer {
                     p.limit,
                     p.target_bytes
                 )?)
+            }
+            "events/getWatermark" => {
+                if params != json!({}) {
+                    return Err(Error::Invalid("events/getWatermark takes no params".into()).into());
+                }
+                json!(EventWatermark {
+                    through_sequence: self.kernel()?.event_watermark()?
+                })
             }
             "events/setScope" => {
                 let p: EventsSetScopeParams = decode(params)?;

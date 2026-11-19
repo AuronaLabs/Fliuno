@@ -79,6 +79,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
 | `events/list` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
 | `events/listModelUsage` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | 仅返回该任务的模型用量事件，沿用全局序号 |
+| `events/getWatermark` | `{}` | 当前已提交的全局 `throughSequence`，供多个回放读取方共用 |
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
 | `events/get` | `{sequence}` | 按全局序号读取一条持久事件 |
 | `events/listSession` | `{sessionId, after?:0, through?, limit?:100, targetBytes?}` | 单个会话的持久事件页，沿用全局序号 |
@@ -257,6 +258,8 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 若客户端消费过慢导致订阅队列溢出，服务先排空已排队通知，再发 `notifications/eventGap`。参数 `{afterSequence}` 是本连接最后成功写出的序号。客户端从自身已提交的游标调用 `events/listAll` 补齐。SQLite 日志是事实来源，通知可能丢失。事件按 `sequence` 排序，`after` 为严格大于且须在非负 i64 范围，`limit` 在 1..1000。客户端保存 `nextAfter`、处理 `hasMore` 并按序号去重。
 
 `initialize.capabilities.eventReplayTargetBytes` 表示回放方法支持的最大字节目标。客户端可设置 `targetBytes` 为 1024..8388608，按紧凑 JSON 的 `events` 数组大小分页。单个事件已超过目标时，该页完整返回该事件，游标仍会前进。
+
+服务声明 `eventWatermarkQuery` 时，可用 `events/getWatermark` 读取当前水位。该方法保留连接现有的订阅、通知队列和缺口状态。多个读取方可把同一水位传给各自的 `events/list*` 请求，按各自的游标独立翻页。
 
 支持 `eventSubscriptionScope` 的 stdio 连接可请求 `events/setScope`。传入现有 `sessionId` 即可订阅该会话的持久事件。如有 `workspaceEventSubscription`，也可传入 `workspaceId` 订阅整个工作区。如有 `taskEventSubscription`，可传入 `taskId` 订阅单个任务，并用 `events/list` 的 `through` 参数限定回放上界。至多指定一个范围。三个范围参数均省略或为 `null` 时恢复全局范围。声明 `eventSubscriptionCursor` 的服务接受可选的 `after`。如果该序号超过切换时的水位，返回 `-32009` 并保留原有订阅。请求成功时服务替换旧队列，并返回切换时的全局水位 `throughSequence`。在响应之后暂存新通知。按当前范围用 `events/list`、`events/listSession`、`events/listWorkspace` 或 `events/listAll` 补齐至这个水位，再按序号处理暂存通知。队列中尚未发送的旧通知可从持久回放读取。实时模型预览和终端通知各自独立。批量请求依次执行，实时队列使用最后一次成功切换的范围。
 

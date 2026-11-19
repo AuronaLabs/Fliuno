@@ -1,8 +1,8 @@
 //! Checked paging of durable events through an inclusive server watermark.
 use super::{Client, Error, Notification};
 use fliuno_protocol::{
-    Event, EventSubscription, EventsListAllParams, EventsListParams, EventsListSessionParams,
-    EventsListWorkspaceParams, EventsPage, EventsSetScopeParams,
+    Event, EventSubscription, EventWatermark, EventsListAllParams, EventsListParams,
+    EventsListSessionParams, EventsListWorkspaceParams, EventsPage, EventsSetScopeParams,
 };
 use std::io::{BufRead, Write};
 
@@ -15,6 +15,22 @@ pub enum ReplayScope {
 }
 
 impl<R: BufRead, W: Write> Client<R, W> {
+    /// Read the committed event watermark without changing the live subscription.
+    pub fn event_watermark(
+        &mut self,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<u64, Error> {
+        let watermark: EventWatermark = self.call(
+            "events/getWatermark",
+            &serde_json::json!({}),
+            on_notification,
+        )?;
+        if watermark.through_sequence > i64::MAX as u64 {
+            return Err(Error::InvalidReplayWindow);
+        }
+        Ok(watermark.through_sequence)
+    }
+
     /// Install a live subscription and open the matching replay window. `after`
     /// is the last consumed sequence for this scope, or zero for full replay.
     /// Calling again with the same scope also covers recovery from a queue gap.

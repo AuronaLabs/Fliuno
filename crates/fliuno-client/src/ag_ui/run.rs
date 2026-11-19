@@ -1,5 +1,7 @@
 //! Bind the AG-UI text input profile to a durable local task request.
-use super::{AgUiProjector, AgUiSseError, AgUiSseFeed, AgUiSseFeedError, AgUiSseStream};
+use super::{
+    AgUiProjector, AgUiSseError, AgUiSseFeed, AgUiSseFeedError, AgUiSseReplay, AgUiSseStream,
+};
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
     MAX_APP_REQUEST_BYTES, TaskRequestLookupParams, TaskStartParams, TaskSummary,
@@ -170,6 +172,15 @@ impl AgUiRun {
 
     pub fn sse(&self, last_event_id: Option<&str>) -> Result<AgUiSseStream, AgUiSseError> {
         AgUiSseStream::with_projector(self.projector(), last_event_id)
+    }
+
+    /// Replay this run through a committed watermark without changing the subscription.
+    pub fn replay_sse(
+        &self,
+        through: u64,
+        last_event_id: Option<&str>,
+    ) -> Result<AgUiSseReplay, AgUiSseFeedError> {
+        AgUiSseReplay::with_stream(self.sse(last_event_id)?, through)
     }
 
     /// Drive this run's SSE output through one connection's task subscription.

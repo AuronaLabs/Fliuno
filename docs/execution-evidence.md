@@ -500,3 +500,9 @@ Windows `scripts/check.ps1` 通过 460 项测试、26 个离线演示、rustfmt�
 真实 stdio 进程测试回放任务启动和待审批事件，再通过应用协议取消任务。SSE 以原运行 ID 输出带 `cancelled` 结果的 `RUN_FINISHED`，订阅报告已结束。从取消帧的 ID 续传时，执行段状态仍恢复到已结束，输出不会重复。`@ag-ui/core@1.0.5` 的事件 Schema 保留该取消结果。
 
 Windows `scripts/check.ps1` 通过 461 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-lifecycle-windows.log`。
+
+## 0.0.3 AG-UI 共享连接回放（2026-11-19）
+
+真实 stdio 进程测试在同一连接上交错回放两个任务，并保留第一个任务的实时订阅。推进共享水位后，独立回放得到的字节与该任务的实时输出一致。第二个读取方只收到自己任务的帧。
+
+Windows `scripts/check.ps1` 通过 461 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-shared-replay-windows.log`。

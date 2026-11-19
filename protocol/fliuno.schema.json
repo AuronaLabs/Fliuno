@@ -1879,6 +1879,11 @@
         "workspaceId"
       ]
     },
+    "events/getWatermark": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
     "events/setScope": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsSetScopeParams",

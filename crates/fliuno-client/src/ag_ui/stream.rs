@@ -4,8 +4,8 @@ use crate::{Client, Error, EventFeed, Notification, ReplayScope};
 use fliuno_protocol::TaskSummary;
 use std::io::{BufRead, Write};
 
-const PAGE_EVENTS: u32 = 64;
-const PAGE_BYTES: u32 = 64 * 1024;
+pub(super) const PAGE_EVENTS: u32 = 64;
+pub(super) const PAGE_BYTES: u32 = 64 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgUiSseFeedError {

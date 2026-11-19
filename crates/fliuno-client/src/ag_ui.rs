@@ -1,8 +1,10 @@
 //! Bind AG-UI requests to tasks and project committed events.
+mod replay;
 mod run;
 mod sse;
 mod stream;
 
+pub use replay::AgUiSseReplay;
 pub use run::{AgUiRun, AgUiRunError};
 pub use sse::{AG_UI_SSE_CONTENT_TYPE, AgUiSseError, AgUiSseStream};
 pub use stream::{AgUiSseFeed, AgUiSseFeedError};
