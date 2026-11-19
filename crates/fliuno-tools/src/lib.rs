@@ -3,6 +3,7 @@
 mod directory_page;
 mod file_io;
 mod hash;
+mod import_artifact;
 mod search;
 mod stat;
 mod workspace;
@@ -93,6 +94,7 @@ pub fn register(kernel: &mut Kernel) -> fliuno_core::Result<()> {
     tools.push(Box::new(directory_page::ListPage));
     tools.push(Box::new(stat::Stat));
     tools.push(Box::new(hash::Hash));
+    tools.push(Box::new(import_artifact::ImportArtifact));
     tools.push(Box::new(search::Search));
     kernel.register_tools(tools)
 }

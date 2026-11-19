@@ -391,3 +391,9 @@ Windows 全量检查通过 438 项测试、26 个离线演示、rustfmt、两组
 同一真实进程用例在 `events/setScope` 后按任务范围每页读取一条事件，核对审批决定已包含在固定水位内、序号递增、最终游标到达水位。客户端单元用例验证无进展的下一页被拒绝，随后可从原游标补读稀疏范围。
 
 Windows 客户端 4 项单元测试、app-server 真实进程用例、两包严格 Clippy 和全仓格式检查通过。Debian Linux 6.12.107 来宾的真实进程用例通过。日志为 `target/0.0.2-client-event-replay-targeted.log`、`target/0.0.2-client-event-replay-clippy.log` 和 `D:/Fliuno-Native-Test/guest-client-event-replay.log`。
+
+## 工作区文件导入产物（2026-11-19）
+
+真实 app-server 进程测试验证拒绝及超限都无产物，恰好 256 KiB 的文件可以持久保存，模型仅收到四个引用与校验字段。删除原文件并重启后，从目录快照找到产物，分四段下载并与原始字节核对，独立 SHA-256 相同。
+
+Windows `scripts/check.ps1` 退出码为 0。440 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 通过。Debian Linux 6.12.107 来宾复验通过。日志为 `target/0.0.2-workspace-import-windows.log` 和 `D:/Fliuno-Native-Test/guest-workspace-import.log`。

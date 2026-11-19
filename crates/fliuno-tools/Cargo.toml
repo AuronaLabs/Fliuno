@@ -10,6 +10,7 @@ fliuno-core.workspace = true
 fliuno-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 cap-std = "4.0.3"
 cap-fs-ext = "4.0.3"
 diffy = "0.5.2"
