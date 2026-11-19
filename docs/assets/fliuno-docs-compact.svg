@@ -1,19 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="440" height="190" viewBox="0 0 440 190" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="220" viewBox="0 0 480 220" role="img" aria-labelledby="title desc">
   <title id="title">Fliuno field guide</title>
-  <desc id="desc">Run a task, connect a client, or explore the kernel.</desc>
+  <desc id="desc">Three paths: run a task, connect a client, or build the kernel.</desc>
   <defs>
-    <clipPath id="frame"><rect x="1" y="1" width="438" height="188" rx="23"/></clipPath>
-    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0v24" fill="none" stroke="#344759" stroke-opacity=".44"/></pattern>
+    <clipPath id="frame"><rect x="0.5" y="0.5" width="479" height="219" rx="23" fill="#151417" stroke="none"/></clipPath>
+    <pattern id="grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#35313c"/></pattern>
   </defs>
-  <g clip-path="url(#frame)" fill="#eff7fb" font-family="system-ui, 'Segoe UI', sans-serif">
-    <rect x="0" y="0" width="440" height="190" rx="23" fill="#101923"/>
-    <g transform="translate(24 22)"><rect x="0" y="0" width="40" height="40" rx="11" fill="#a9f0cd"/><path d="M11 30V15l4-4h15M11 21h12" fill="none" stroke="#153428" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="29" cy="21" r="2" fill="#153428"/></g>
-    <text x="79" y="47" font-size="15" fill="#a9f0cd" font-weight="700" letter-spacing="2" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">FLIUNO DOCS</text>
-    <text x="24" y="107" font-size="49" font-weight="750" letter-spacing="-1.8">Field guide</text>
-    <path d="M34 148h365" stroke="#344759" stroke-width="2"/>
-    <g transform="translate(24 130)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="111" height="38" rx="9" fill="#1a2b3b" stroke="#344759"/><text x="11" y="24" font-size="10" fill="#acd4ff" font-weight="700">01</text><text x="30" y="24" font-size="13" font-weight="700">Run</text></g>
-    <g transform="translate(163 130)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="111" height="38" rx="9" fill="#1a2b3b" stroke="#344759"/><text x="11" y="24" font-size="10" fill="#ffd0a2" font-weight="700">02</text><text x="30" y="24" font-size="13" font-weight="700">Connect</text></g>
-    <g transform="translate(303 130)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="111" height="38" rx="9" fill="#1a2b3b" stroke="#344759"/><text x="11" y="24" font-size="10" fill="#a9f0cd" font-weight="700">03</text><text x="30" y="24" font-size="13" font-weight="700">Kernel</text></g>
+  <g clip-path="url(#frame)">
+    <rect x="0" y="0" width="480" height="220" rx="23" fill="#151417" stroke="none"/>
+    <rect x="225.6" y="0" width="254.4" height="220" rx="0" fill="url(#grid)" stroke="none"/>
+    <g transform="translate(24 24)"><rect x="0" y="0" width="34" height="34" rx="9" fill="#ffb789" stroke="none"/><path d="M9 25V13l4-4h12M9 17h10" fill="none" stroke="#151417" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24.5" cy="17" r="1.7" fill="#151417"/></g>
+    <text x="72" y="46" font-family="'Cascadia Mono', Consolas, monospace" font-size="12" fill="#ffb789" font-weight="650" letter-spacing="1.4" text-anchor="start">FLIUNO / DOCUMENTATION</text>
+    <text x="22" y="117" font-family="system-ui, 'Segoe UI', sans-serif" font-size="52" fill="#fff5ec" font-weight="750" letter-spacing="-2" text-anchor="start">Field guide</text>
+    <rect x="24" y="144" width="136" height="48" rx="9" fill="#201e25" stroke="#494454"/>
+    <rect x="35" y="157" width="24" height="22" rx="5" fill="#34303b" stroke="none"/>
+    <text x="47" y="172" font-family="'Cascadia Mono', Consolas, monospace" font-size="11" fill="#9de2d1" font-weight="650" letter-spacing="0" text-anchor="middle">01</text>
+    <text x="67" y="173" font-family="system-ui, 'Segoe UI', sans-serif" font-size="14" fill="#fff5ec" font-weight="650" letter-spacing="0" text-anchor="start">Run a task</text>
+    <rect x="172" y="144" width="136" height="48" rx="9" fill="#201e25" stroke="#494454"/>
+    <rect x="183" y="157" width="24" height="22" rx="5" fill="#34303b" stroke="none"/>
+    <text x="195" y="172" font-family="'Cascadia Mono', Consolas, monospace" font-size="11" fill="#ffb789" font-weight="650" letter-spacing="0" text-anchor="middle">02</text>
+    <text x="215" y="173" font-family="system-ui, 'Segoe UI', sans-serif" font-size="14" fill="#fff5ec" font-weight="650" letter-spacing="0" text-anchor="start">Connect</text>
+    <rect x="320" y="144" width="136" height="48" rx="9" fill="#201e25" stroke="#494454"/>
+    <rect x="331" y="157" width="24" height="22" rx="5" fill="#34303b" stroke="none"/>
+    <text x="343" y="172" font-family="'Cascadia Mono', Consolas, monospace" font-size="11" fill="#c3baca" font-weight="650" letter-spacing="0" text-anchor="middle">03</text>
+    <text x="363" y="173" font-family="system-ui, 'Segoe UI', sans-serif" font-size="14" fill="#fff5ec" font-weight="650" letter-spacing="0" text-anchor="start">Build</text>
   </g>
-  <rect x="1" y="1" width="438" height="188" rx="23" fill="none" stroke="#344759"/>
+  <rect x="0.5" y="0.5" width="479" height="219" rx="23" fill="none" stroke="#494454"/>
 </svg>

@@ -1,27 +1,25 @@
 <p align="center">
   <picture>
-    <source media="(max-width: 540px) and (prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-compact-light.svg">
-    <source media="(max-width: 540px)" srcset="docs/assets/fliuno-cover-compact.svg">
+    <source media="(max-width: 600px) and (prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-compact-light.svg">
+    <source media="(max-width: 600px)" srcset="docs/assets/fliuno-cover-compact.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-light.svg">
-    <img src="docs/assets/fliuno-cover.svg" alt="Fliuno · Rust Agent kernel. Submit, approve, deliver." width="960">
+    <img src="docs/assets/fliuno-cover.svg" alt="Fliuno — 提交任务、审批操作、收取交付物" width="960">
   </picture>
 </p>
 
 # Fliuno · 面向工作任务的 Rust Agent 内核
 
-Fliuno 是为桌面工作台和宿主应用设计的 Rust Agent 内核。交给它一项工作：需要授权时由人决定，完成后在本机留下交付物和执行记录。
+Fliuno 为桌面工作台和宿主应用运行任务。在执行前向用户请求所需授权，把进度、审批和交付物保存在本机，方便宿主在重连后继续读取。
 
-**[跑一次离线任务 ↓](#跑一次离线任务)** · **[接入自己的客户端 ↓](#接入自己的客户端)** · [文档中心 →](docs/README.md)
+**[运行离线演示](#跑一次离线任务)** · **[接入客户端](#接入自己的客户端)** · **[浏览文档](docs/README.md)**
 
-| 开发版本 | 已发布 | 应用协议 | 本机执行 |
-| --- | --- | --- | --- |
-| `0.0.3` | [`0.0.2`](CHANGELOG.md#002) | [`0.1`](docs/protocol.md) | [Windows / Linux](docs/sandbox.md) |
+`0.0.3` 开发中 · [已发布 0.0.2](CHANGELOG.md#002) · [应用协议 0.1](docs/protocol.md) · [Windows / Linux](docs/sandbox.md)
 
 ## 快速开始
 
 ### 跑一次离线任务
 
-在仓库根目录运行。请先准备 **Rust 1.89+**、C/C++ 构建工具和 Python。演示用内置模型和临时数据库启动真实的本机服务，无需 API Key。
+在仓库根目录运行。需要 **Rust 1.89+**、平台的 C/C++ 构建工具和 Python。首次运行会构建应用服务，演示使用内置模型与临时数据库，无需 API Key。
 
 ```sh
 python examples/demo.py
@@ -34,20 +32,13 @@ Result: completed
 Artifacts: 1
 ```
 
-看到 `waiting_approval` 后，脚本会先确认没有交付物，再批准一次 `artifact_create`。最后的 `Artifacts: 1` 表示产物已保存。
+脚本先验证任务在 `waiting_approval` 时没有交付物，再允许一次 `artifact_create`，确认任务完成并保存了产物。运行 `python examples/demo.py --deny` 可以验证另一条路径：任务结束为 `failed`，产物为 `0`。
 
-<details>
-<summary>试试拒绝审批</summary>
-
-运行 `python examples/demo.py --deny`。任务以 `failed` 结束，产物为 `0`。
-
-</details>
-
-[环境与配置](docs/setup.md) · [示例源码](examples/demo.py)
+[安装与配置](docs/setup.md#快速开始) · [示例源码](examples/demo.py)
 
 ### 接入自己的客户端
 
-启动应用服务，再向它的 **stdin** 发送一行握手请求。响应和通知从 **stdout** 读取。
+把应用服务作为子进程启动，通过 **stdin** 逐行发送 JSON-RPC，通过 **stdout** 读取响应和通知。
 
 ```sh
 cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
@@ -57,30 +48,25 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1","clientName":"my-client"}}
 ```
 
-读取返回的 `capabilities`，再依次调用 `workspace/open`、`session/create` 和 `task/start`。Rust 宿主可以使用类型化客户端；需要 HTTP 和 SSE 时，可在宿主中挂载 AG-UI 路由。
+读到 `capabilities` 后，用 `workspace/open` → `session/create` → `task/start` 提交第一项工作。
 
-[完整协议](docs/protocol.md) · [Rust 客户端](docs/protocol.md#rust-调用方) · [AG-UI HTTP](docs/ag-ui.md#http-接入)
+[完整接入步骤](docs/setup.md#再启动自己的服务) · [Rust 客户端](docs/protocol.md#rust-调用方) · [AG-UI HTTP / SSE](docs/ag-ui.md#http-接入)
 
 ## 一项任务如何运行
 
-```mermaid
-flowchart LR
-  Task[提交任务] --> Agent[Agent 推进任务]
-  Agent -->|需要授权| Approval{人工审批}
-  Approval -->|允许一次| Tool[执行操作]
-  Tool -->|返回结果| Agent
-  Approval -->|拒绝| Decision[保存拒绝记录]
-  Agent -->|完成| Artifact[保存交付物]
-```
-
-SQLite 持久保存任务、审批、事件和交付物。客户端重连后可从上次消费的位置补读，再接上实时通知。
-
-| 要做的事 | 从这里接入 |
+| 阶段 | 内核做什么 |
 | --- | --- |
-| **搭建工作台** | [最近任务、状态计数与待审批](docs/protocol.md#工作台实时订阅)、[会话历史](docs/context.md#会话历史分页)、[历史搜索](docs/protocol.md#查找历史任务)、[任务摘要刷新](docs/protocol.md#任务变动摘要) |
-| **连接模型、工具或 Agent** | [OpenAI、Anthropic、Gemini](docs/setup.md#真实模型)，以及 [MCP、ACP、A2A](docs/README.md#模型工具与-agent) |
-| **执行本机操作** | [宿主注册的命令与 PTY](docs/README.md#本机执行与隔离)，支持按平台配置隔离和资源预算 |
-| **收取交付物** | [订阅目录](docs/protocol.md#交付物目录订阅) · [分段下载和 SHA-256 校验](docs/protocol.md#审批事件与产物) |
+| **01 · 提交** | 在指定工作区和会话中运行任务，可按配置使用模型或外部 Agent。 |
+| **02 · 审批** | 操作需要授权时暂停任务。宿主展示提议，由用户允许或拒绝。 |
+| **03 · 交付** | 保存结果与执行事件。客户端按游标恢复进度，按目录收取交付物。 |
+
+## 按用途查文档
+
+| 如果你在做… | 建议接着看 |
+| --- | --- |
+| **桌面工作台** | [任务、审批和交付物的接入顺序](docs/README.md#工作台要展示什么) |
+| **模型或工具集成** | [OpenAI、Anthropic、Gemini、MCP、ACP、A2A](docs/README.md#模型工具与-agent) |
+| **本机执行** | [命令注册、终端和平台隔离](docs/README.md#本机执行与隔离) |
 
 ## 开发与验证
 

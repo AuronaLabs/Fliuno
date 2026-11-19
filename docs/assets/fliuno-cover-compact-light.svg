@@ -1,21 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="440" height="260" viewBox="0 0 440 260" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 480 360" role="img" aria-labelledby="title desc">
   <title id="title">Fliuno — Rust agent kernel</title>
-  <desc id="desc">Local execution for agent work. Submit a task, approve a tool call, and collect the result.</desc>
+  <desc id="desc">Submit a task, approve an operation, and collect a deliverable.</desc>
   <defs>
-    <clipPath id="frame"><rect x="1" y="1" width="438" height="258" rx="23"/></clipPath>
-    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0v24" fill="none" stroke="#adc1ce" stroke-opacity=".44"/></pattern>
+    <clipPath id="frame"><rect x="0.5" y="0.5" width="479" height="359" rx="23" fill="#fff7ed" stroke="none"/></clipPath>
+    <pattern id="grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#eadbd0"/></pattern>
   </defs>
-  <g clip-path="url(#frame)" fill="#142b3b" font-family="system-ui, 'Segoe UI', sans-serif">
-    <rect x="0" y="0" width="440" height="260" rx="23" fill="#f4f8fa"/>
-    <rect x="16" y="173" width="408" height="70" rx="13" fill="url(#grid)"/>
-    <g transform="translate(24 23)"><rect x="0" y="0" width="40" height="40" rx="11" fill="#14654d"/><path d="M11 30V15l4-4h15M11 21h12" fill="none" stroke="#f5fffa" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="29" cy="21" r="2" fill="#f5fffa"/></g>
-    <text x="78" y="49" font-size="15" fill="#14654d" font-weight="700" letter-spacing="2" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace">RUST AGENT KERNEL</text>
-    <text x="23" y="130" font-size="72" font-weight="750" letter-spacing="-3">Fliuno</text>
-    <text x="26" y="158" font-size="17" fill="#375268">Local work. Human approval.</text>
-    <path d="M59 205h322" stroke="#adc1ce" stroke-width="2"/>
-    <g transform="translate(24 186)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="117" height="38" rx="9" fill="#eef4f9" stroke="#adc1ce"/><text x="11" y="24" font-size="10" fill="#285e9b" font-weight="700">01</text><text x="30" y="24" font-size="13" font-weight="700">Submit</text></g>
-    <g transform="translate(161 186)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="117" height="38" rx="9" fill="#eef4f9" stroke="#adc1ce"/><text x="11" y="24" font-size="10" fill="#8d451e" font-weight="700">02</text><text x="30" y="24" font-size="13" font-weight="700">Approve</text></g>
-    <g transform="translate(298 186)" font-family="ui-monospace, 'Cascadia Mono', Consolas, monospace"><rect x="0" y="0" width="117" height="38" rx="9" fill="#eef4f9" stroke="#adc1ce"/><text x="11" y="24" font-size="10" fill="#14654d" font-weight="700">03</text><text x="30" y="24" font-size="13" font-weight="700">Deliver</text></g>
+  <g clip-path="url(#frame)">
+    <rect x="0" y="0" width="480" height="360" rx="23" fill="#fff7ed" stroke="none"/>
+    <rect x="216.0" y="0" width="264.0" height="360" rx="0" fill="url(#grid)" stroke="none"/>
+    <g transform="translate(24 23)"><rect x="0" y="0" width="34" height="34" rx="9" fill="#983c17" stroke="none"/><path d="M9 25V13l4-4h12M9 17h10" fill="none" stroke="#fff7ed" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24.5" cy="17" r="1.7" fill="#fff7ed"/></g>
+    <text x="72" y="45" font-family="'Cascadia Mono', Consolas, monospace" font-size="12" fill="#983c17" font-weight="650" letter-spacing="1.4" text-anchor="start">RUST AGENT KERNEL</text>
+    <text x="20" y="130" font-family="system-ui, 'Segoe UI', sans-serif" font-size="74" fill="#29222b" font-weight="800" letter-spacing="-4" text-anchor="start">Fliuno</text>
+    <text x="24" y="163" font-family="system-ui, 'Segoe UI', sans-serif" font-size="21" fill="#615561" font-weight="500" letter-spacing="0" text-anchor="start">From task to deliverable.</text>
+    <g transform="translate(24 185)">
+    <rect x="0" y="0" width="432" height="149" rx="15" fill="#fffdf8" stroke="#d9c9bf"/>
+    <rect x="1" y="1" width="430" height="147" rx="14" fill="url(#grid)" stroke="none"/>
+    <text x="15" y="29" font-family="'Cascadia Mono', Consolas, monospace" font-size="11" fill="#615561" font-weight="650" letter-spacing="1.5" text-anchor="start">TASK LIFECYCLE</text>
+    <rect x="15" y="47" width="123" height="67" rx="9" fill="#fff7ed" stroke="#615561"/>
+    <g transform="translate(26 57)"><path d="M4 6h16v12H4zM4 6l8 6 8-6" fill="none" stroke="#615561" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <text x="128" y="72" font-family="'Cascadia Mono', Consolas, monospace" font-size="10" fill="#615561" font-weight="650" letter-spacing="0" text-anchor="end">01</text>
+    <text x="26" y="98" font-family="system-ui, 'Segoe UI', sans-serif" font-size="14" fill="#29222b" font-weight="650" letter-spacing="0" text-anchor="start">Submit</text>
+    <path d="M141 81h10m-4-4 4 4-4 4" fill="none" stroke="#615561" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="154" y="47" width="123" height="67" rx="9" fill="#fff7ed" stroke="#983c17"/>
+    <g transform="translate(165 57)"><path d="M7 11V8a5 5 0 0110 0v3M5 11h14v10H5zM12 15v2" fill="none" stroke="#983c17" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <text x="267" y="72" font-family="'Cascadia Mono', Consolas, monospace" font-size="10" fill="#983c17" font-weight="650" letter-spacing="0" text-anchor="end">02</text>
+    <text x="165" y="98" font-family="system-ui, 'Segoe UI', sans-serif" font-size="14" fill="#29222b" font-weight="650" letter-spacing="0" text-anchor="start">Approve</text>
+    <path d="M280 81h10m-4-4 4 4-4 4" fill="none" stroke="#615561" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="293" y="47" width="123" height="67" rx="9" fill="#fff7ed" stroke="#17695a"/>
+    <g transform="translate(304 57)"><path d="M5 3h9l5 5v13H5zM14 3v6h5M9 14h6M9 17h6" fill="none" stroke="#17695a" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <text x="406" y="72" font-family="'Cascadia Mono', Consolas, monospace" font-size="10" fill="#17695a" font-weight="650" letter-spacing="0" text-anchor="end">03</text>
+    <text x="304" y="98" font-family="system-ui, 'Segoe UI', sans-serif" font-size="14" fill="#29222b" font-weight="650" letter-spacing="0" text-anchor="start">Deliver</text>
+    <text x="15" y="134" font-family="'Cascadia Mono', Consolas, monospace" font-size="10" fill="#615561" font-weight="650" letter-spacing="0.8" text-anchor="start">LOCAL RUN  /  DURABLE RECEIPTS</text>
+    </g>
   </g>
-  <rect x="1" y="1" width="438" height="258" rx="23" fill="none" stroke="#adc1ce"/>
+  <rect x="0.5" y="0.5" width="479" height="359" rx="23" fill="none" stroke="#d9c9bf"/>
 </svg>
