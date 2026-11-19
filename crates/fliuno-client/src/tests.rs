@@ -293,3 +293,57 @@ fn event_feed_coalesces_notices_and_recovers_from_the_delivered_cursor() {
     assert_eq!(sent[4]["method"], "events/setScope");
     assert_eq!(sent[5]["params"]["after"], 12);
 }
+
+#[test]
+fn ag_ui_run_rejects_unsupported_authority_before_sending_a_request() {
+    use crate::ag_ui::AgUiRunError;
+    let mut client = fake_client(&[]);
+    let body = json!({"threadId":"chosen-session","runId":"chosen-run",
+        "messages":[{"id":"u1","role":"user","content":"hello"}]});
+    for (field, value) in [
+        (
+            "tools",
+            json!([{"name":"remote-tool","description":"not registered"}]),
+        ),
+        (
+            "context",
+            json!([{"description":"client context","value":"override"}]),
+        ),
+        ("parentRunId", json!("outside-run")),
+        ("resume", json!([{"interruptId":"old","status":"resolved"}])),
+        ("state", json!({"unexpected": true})),
+    ] {
+        let mut changed = body.clone();
+        changed[field] = value;
+        assert!(matches!(
+            client.start_ag_ui_run(
+                "chosen-session",
+                &serde_json::to_vec(&changed).unwrap(),
+                |_| {}
+            ),
+            Err(AgUiRunError::UnsupportedInput)
+        ));
+    }
+    let mut wrong_role = body.clone();
+    wrong_role["messages"][0]["role"] = json!("assistant");
+    assert!(matches!(
+        client.start_ag_ui_run(
+            "chosen-session",
+            &serde_json::to_vec(&wrong_role).unwrap(),
+            |_| {}
+        ),
+        Err(AgUiRunError::UserText)
+    ));
+    let mut encrypted = body;
+    encrypted["messages"][0]["encryptedValue"] = json!("encrypted");
+    assert!(matches!(
+        client.start_ag_ui_run(
+            "chosen-session",
+            &serde_json::to_vec(&encrypted).unwrap(),
+            |_| {}
+        ),
+        Err(AgUiRunError::UnsupportedInput)
+    ));
+    let (_, written) = client.into_parts();
+    assert_eq!(written.iter().filter(|&&byte| byte == b'\n').count(), 1);
+}

@@ -359,6 +359,8 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["taskStartSummary"] = json!(true);
+            capabilities["taskSummaryByRequest"] = json!(true);
             capabilities["sessionHistoryList"] = json!(true);
             capabilities["maxSessionHistoryBytes"] = json!(MAX_SESSION_HISTORY_BYTES);
             capabilities["maxSessionHistoryEntries"] = json!(MAX_SESSION_HISTORY_ENTRIES);
@@ -629,7 +631,7 @@ impl RpcServer {
                     p.through_sequence,
                 )?)
             }
-            "task/start" => {
+            "task/start" | "task/startSummary" => {
                 let p: TaskStartParams = decode(params)?;
                 let (task, created) = self.kernel()?.create_task_with_context(
                     &p.session_id,
@@ -638,11 +640,23 @@ impl RpcServer {
                     p.backend,
                     p.context,
                 )?;
-                json!(if created {
+                let task = if created {
                     self.schedule_or_fail(task)?
                 } else {
                     task
-                })
+                };
+                if method == "task/startSummary" {
+                    json!(self.kernel()?.get_task_summary(&task.id)?)
+                } else {
+                    json!(task)
+                }
+            }
+            "task/getSummaryByRequest" => {
+                let p: TaskRequestLookupParams = decode(params)?;
+                json!(
+                    self.kernel()?
+                        .get_task_summary_by_request(&p.session_id, &p.client_request_id)?
+                )
             }
             "task/getSummary" => {
                 let p: TaskIdParams = decode(params)?;

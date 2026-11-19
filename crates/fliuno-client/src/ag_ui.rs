@@ -1,6 +1,8 @@
-//! Read-only projection of committed task events into AG-UI events.
+//! Bind AG-UI requests to tasks and project committed events.
+mod run;
 mod sse;
 
+pub use run::{AgUiRun, AgUiRunError};
 pub use sse::{AG_UI_SSE_CONTENT_TYPE, AgUiSseError, AgUiSseStream};
 
 use fliuno_protocol::{Event, EventKind, TaskSummary};
@@ -56,7 +58,7 @@ pub enum AgUiProjectionError {
 #[derive(Clone, Copy)]
 enum RunState {
     Pending,
-    Running { start_sequence: u64 },
+    Running { start_sequence: u64, initial: bool },
     Interrupted,
     Finished,
 }
@@ -67,6 +69,7 @@ enum RunState {
 pub struct AgUiProjector {
     task_id: String,
     thread_id: String,
+    external_run_id: Option<String>,
     sequence: u64,
     state: RunState,
 }
@@ -76,8 +79,16 @@ impl AgUiProjector {
         Self {
             task_id: task.id.clone(),
             thread_id: task.session_id.clone(),
+            external_run_id: None,
             sequence: 0,
             state: RunState::Pending,
+        }
+    }
+
+    fn for_external_run(task: &TaskSummary, run_id: &str) -> Self {
+        Self {
+            external_run_id: Some(run_id.to_owned()),
+            ..Self::new(task)
         }
     }
 
@@ -94,15 +105,23 @@ impl AgUiProjector {
         let output = match (event.data, self.state) {
             (EventKind::TaskStarted, RunState::Pending)
             | (EventKind::TaskResumed, RunState::Interrupted) => {
+                let initial = matches!(self.state, RunState::Pending);
                 self.state = RunState::Running {
                     start_sequence: sequence,
+                    initial,
                 };
                 vec![AgUiEvent::RunStarted {
                     thread_id: self.thread_id.clone(),
-                    run_id: self.run_id(sequence),
+                    run_id: self.run_id(sequence, initial),
                 }]
             }
-            (EventKind::TaskCompleted { text }, RunState::Running { start_sequence }) => {
+            (
+                EventKind::TaskCompleted { text },
+                RunState::Running {
+                    start_sequence,
+                    initial,
+                },
+            ) => {
                 self.state = RunState::Finished;
                 let mut output = Vec::with_capacity(if text.is_empty() { 1 } else { 4 });
                 if !text.is_empty() {
@@ -121,7 +140,7 @@ impl AgUiProjector {
                 }
                 output.push(AgUiEvent::RunFinished {
                     thread_id: self.thread_id.clone(),
-                    run_id: self.run_id(start_sequence),
+                    run_id: self.run_id(start_sequence, initial),
                 });
                 output
             }
@@ -204,7 +223,10 @@ impl AgUiProjector {
         Ok(output)
     }
 
-    fn run_id(&self, start_sequence: u64) -> String {
+    fn run_id(&self, start_sequence: u64, initial: bool) -> String {
+        if initial && let Some(run_id) = &self.external_run_id {
+            return run_id.clone();
+        }
         format!("{}:run:{start_sequence}", self.task_id)
     }
 }

@@ -998,6 +998,221 @@
         }
       }
     },
+    "task/startSummary": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskStartParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "backend": {
+          "$ref": "#/$defs/TaskBackend",
+          "default": {
+            "type": "model"
+          }
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContextOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "input"
+      ],
+      "$defs": {
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
+          ]
+        },
+        "ContextOptions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/ContextMode",
+              "default": "session"
+            },
+            "maxTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 16
+            },
+            "maxBytes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 131072
+            },
+            "selection": {
+              "description": "FitRecent may skip whole records within a bounded recent window.",
+              "$ref": "#/$defs/ContextSelection"
+            },
+            "detail": {
+              "$ref": "#/$defs/ContextDetail"
+            },
+            "taskIds": {
+              "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "historyQuery": {
+              "description": "Required in match_recent mode; searches only user and assistant text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextHistoryQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContextMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "isolated"
+          ]
+        },
+        "ContextSelection": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "recent",
+                "fit_recent"
+              ]
+            },
+            {
+              "description": "Fit recent records whose conversation matches an explicit query.",
+              "type": "string",
+              "const": "match_recent"
+            }
+          ]
+        },
+        "ContextDetail": {
+          "description": "Controls which parts of a completed record count toward the context budget.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            },
+            {
+              "description": "Keep user and assistant messages and artifact references.",
+              "type": "string",
+              "const": "conversation"
+            }
+          ]
+        },
+        "ContextHistoryQuery": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionHistoryRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        }
+      }
+    },
+    "task/getSummaryByRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskRequestLookupParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clientRequestId"
+      ]
+    },
     "task/continueRemote": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskContinueRemoteParams",

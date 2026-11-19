@@ -68,22 +68,30 @@ pub struct AgUiSseStream {
 impl AgUiSseStream {
     /// Pass the consumer's `Last-Event-ID` when reconnecting to this task.
     pub fn new(task: &TaskSummary, last_event_id: Option<&str>) -> Result<Self, AgUiSseError> {
-        if task.id.is_empty()
-            || !task
-                .id
+        Self::with_projector(AgUiProjector::new(task), last_event_id)
+    }
+
+    pub(super) fn with_projector(
+        projector: AgUiProjector,
+        last_event_id: Option<&str>,
+    ) -> Result<Self, AgUiSseError> {
+        if projector.task_id.is_empty()
+            || !projector
+                .task_id
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
         {
             return Err(AgUiSseError::InvalidTaskId);
         }
         let resume = match last_event_id {
-            Some(id) if !id.is_empty() => {
-                Some(FramePosition::parse(&task.id, id).ok_or(AgUiSseError::InvalidResumeId)?)
-            }
+            Some(id) if !id.is_empty() => Some(
+                FramePosition::parse(&projector.task_id, id)
+                    .ok_or(AgUiSseError::InvalidResumeId)?,
+            ),
             _ => None,
         };
         Ok(Self {
-            projector: AgUiProjector::new(task),
+            projector,
             resume,
             closed: false,
             frame: Vec::new(),

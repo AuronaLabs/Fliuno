@@ -15,6 +15,8 @@ impl Drop for Server {
     }
 }
 
+#[path = "client/ag_ui_run.rs"]
+mod ag_ui_run;
 #[path = "client/feed.rs"]
 mod feed;
 

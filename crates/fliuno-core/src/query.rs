@@ -98,6 +98,21 @@ impl Kernel {
         Ok(serde_json::from_str(data)?)
     }
 
+    /// Find a request's current summary without reading the task snapshot or context.
+    pub fn get_task_summary_by_request(&self, session_id: &str, key: &str) -> Result<TaskSummary> {
+        crate::task::validate_key(key)?;
+        let mut statement = self.db.prepare_cached(
+            "SELECT s.data FROM task_requests r JOIN task_summaries s ON s.task_id=r.task_id
+             WHERE r.session_id=?1 AND r.request_key=?2",
+        )?;
+        let mut rows = statement.query(params![session_id, key])?;
+        let row = rows
+            .next()?
+            .ok_or_else(|| Error::NotFound("task request".into()))?;
+        let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+        Ok(serde_json::from_str(data)?)
+    }
+
     pub fn list_task_summaries(
         &self,
         session: &str,

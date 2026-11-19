@@ -680,6 +680,13 @@ pub struct TaskStartParams {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskRequestLookupParams {
+    pub session_id: String,
+    pub client_request_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskContinueRemoteParams {
     pub task_id: String,
     pub input: String,

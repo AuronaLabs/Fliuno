@@ -482,3 +482,9 @@ Windows `scripts/check.ps1` 以退出码 0 完成。454 项测试、26 个离线
 `watermarkOnly` 订阅让内核按匹配任务的每次提交发送一个序号。内核测试用构造计数确认，只有水位订阅时不会构造事件正文。真实 stdio 测试对照同一个包含 128 KiB 文本的审批事件。完整通知的序列化大小为 131,577 字节，水位通知实际为 89 字节，正文仍由回放完整读取。测试覆盖无效游标保留现有订阅、切回完整通知，以及紧凑队列溢出后的会话内补读。
 
 Windows `scripts/check.ps1` 以退出码 0 完成。457 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.3-event-watermarks-windows.log`。
+
+## 0.0.3 AG-UI 文本任务与重连（2026-11-19）
+
+真实 stdio 进程测试先完成一条历史任务，再用 AG-UI 文本请求创建新任务。重复提交绑定同一任务，跨会话查找请求键失败，外部传入的对话正文未进入冻结上下文。关闭并重启应用服务后，用原运行 ID 找回任务，确认 SSE 输出保留首次执行的运行 ID。客户端单元测试验证不支持的输入在发出 RPC 前被拒绝。
+
+Windows `scripts/check.ps1` 以退出码 0 完成。459 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。接入文档的 JSON 示例通过 `@ag-ui/core@1.0.5` 的 `RunAgentInputSchema` 验证。日志为 `target/0.0.3-ag-ui-run-windows.log`。

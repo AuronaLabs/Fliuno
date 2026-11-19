@@ -63,6 +63,8 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `session/listHistory` | `{sessionId,throughSequence?,beforeSequence?,limit?,maxBytes?}` | SessionHistoryListPage，按完成序号倒序分页读取精简对话。见[会话历史分页](context.md#会话历史分页)。 |
 | `session/searchHistory` | `{sessionId,query,role?,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
+| `task/startSummary` | 与 `task/start` 相同 | 使用同一任务创建和调度流程，返回 `TaskSummary` |
+| `task/getSummaryByRequest` | `{sessionId,clientRequestId}` | 通过会话和请求键读取当前 `TaskSummary` |
 | `task/get` | `{taskId}` | Task |
 | `task/getSummary` | `{taskId}` | 单条 `TaskSummary`，可以轻量轮询任务状态 |
 | `task/checkRemote` | `{taskId,waitMs?}` | `{checkId}`；后台只读核对，结果经事件返回，见 [A2A](a2a.md#显式核对远端状态) |
@@ -368,6 +370,8 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 路径使用相对的正斜杠形式。绝对路径、`..`、反斜杠、ADS、Windows 设备名等被拒绝，目录能力继续约束实际路径解析。
 
 对象分页返回 `{items,nextAfter,hasMore}`，对象列表 limit 在 1..100；after 是数据库局部游标，不应解析其数值意义。`clientRequestId` 为会话内 1..128 可打印 ASCII 字节；重试必须使用相同输入、后端与上下文选项。新任务省略 context 和显式默认选项等价；升级前 context=null 的旧任务仅接受未显式指定 context 的原样重试。没有提供幂等键的 task/start 每次都创建新任务。
+
+`initialize.capabilities.taskStartSummary` 和 `initialize.capabilities.taskSummaryByRequest` 分别表示两个摘要方法可用。`task/startSummary` 与 `task/start` 共用幂等键和重试规则。已有请求会返回原任务的当前摘要。`task/getSummaryByRequest` 只查找已有任务，请求键未知或属于另一会话时返回 `-32004`。
 
 `initialize.capabilities.taskListTargetBytes` 给出 `task/list` 支持的最大字节目标。传入 `targetBytes`（1024～8388608）时，`items` 按紧凑 JSON 的 UTF-8 长度分页。单项已超过目标时仍完整返回该项。字节目标和行数上限共用原始 `nextAfter` 游标，可用 `task/listSummaries` 在相同位置读取摘要。
 

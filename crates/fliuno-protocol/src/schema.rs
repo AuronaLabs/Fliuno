@@ -41,6 +41,8 @@ pub fn schema_bundle() -> Value {
         "terminal/archiveBatch" => schema::<TerminalArchiveBatchParams>(),
         "terminal/archives" => schema::<TerminalArchivesParams>(),
         "task/start" => schema::<TaskStartParams>(),
+        "task/startSummary" => schema::<TaskStartParams>(),
+        "task/getSummaryByRequest" => schema::<TaskRequestLookupParams>(),
         "task/continueRemote" => schema::<TaskContinueRemoteParams>(),
         "task/continueAgentSession" => schema::<TaskContinueAgentSessionParams>(),
         "task/list" => schema::<TaskListParams>(),
