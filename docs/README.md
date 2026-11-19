@@ -17,6 +17,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [应用协议 0.1](protocol.md) · [JSON Schema](../protocol/fliuno.schema.json) | stdio 握手、RPC 方法、审批、产物和事件回放 |
+| [会话历史分页](context.md#会话历史分页) | 用固定水位读取已完成对话和交付物引用 |
 | [Rust 客户端](protocol.md#rust-调用方) | 类型化调用、订阅和回放交接、分段下载和摘要校验 |
 | [AG-UI 事件投影](ag-ui.md) | 把已提交的任务生命周期、完成文本和自定义事件转成 AG-UI 对象 |
 

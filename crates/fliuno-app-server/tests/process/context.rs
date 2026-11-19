@@ -1,6 +1,9 @@
 //! Exercise frozen context through the executable, including reopen and errors.
 use super::*;
 
+#[path = "context/history_list.rs"]
+mod history_list;
+
 fn approve_report(peer: &mut Peer, session: &Value, input: &str, key: &str) -> Value {
     let task = peer.call(
         "task/start",

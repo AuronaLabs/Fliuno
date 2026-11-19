@@ -456,3 +456,9 @@ Windows `scripts/check.ps1` 以退出码 0 完成。446 项测试、26 个离线
 真实 app-server 进程测试通过 Rust 客户端分页回放带审批和产物的已完成任务，验证运行开始、审批引用、产物引用、提交文本和运行完成依序生成。单元测试覆盖中断、显式恢复、稳定 ID、乱序及跨任务输入。与 Rust 序列化结果逐项相等的八个事件样例通过 `@ag-ui/core@1.0.5` 的运行时 Schema 检查。SDK 验证日志为 `target/0.0.3-ag-ui-sdk-contract.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成。448 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.3-ag-ui-windows.log`。
+
+## 0.0.3 会话历史分页（2026-11-19）
+
+真实 app-server 进程测试覆盖任务创建和完成顺序不同、会话隔离、后续完成后冻结的分页水位、重启后继续翻页和无效游标。字节预算测试包含多字节文本和 JSON 转义，验证超预算引用、延后完整记录和扩大预算后的重读。SQLite 3.49.1 的查询计划使用 `session_turns_cursor` 范围扫描和 `conversation_turns` 主键查找。
+
+Windows `scripts/check.ps1` 以退出码 0 完成。450 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/fliuno-0.0.3-history-check.log`。

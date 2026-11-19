@@ -480,6 +480,60 @@
         }
       }
     },
+    "session/listHistory": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionHistoryListParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "throughSequence": {
+          "description": "Global event watermark. Required when continuing a page.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "beforeSequence": {
+          "description": "Exclusive completion cursor returned by the previous page.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "limit": {
+          "description": "Defaults to 16 and accepts 1 to 32 entries.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
+        "maxBytes": {
+          "description": "Compact JSON byte limit for the entries array. Defaults to 64 KiB.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
     "session/searchHistory": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "SessionHistorySearchParams",
@@ -3406,6 +3460,314 @@
           "enum": [
             "user",
             "assistant"
+          ]
+        },
+        "ContextTurn": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "backend": {
+              "$ref": "#/$defs/TaskBackend"
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextMessage"
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextArtifact"
+              }
+            },
+            "hostTools": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentHostTool"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence",
+            "backend",
+            "messages",
+            "artifacts",
+            "hostTools"
+          ]
+        },
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
+          ]
+        },
+        "ContextMessage": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "user"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "assistant"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "tool_call"
+                },
+                "call": {
+                  "$ref": "#/$defs/ToolCall"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "const": "tool_result"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "additionalProperties": false,
+              "required": [
+                "role",
+                "callId",
+                "output"
+              ]
+            }
+          ]
+        },
+        "ToolCall": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "arguments"
+          ]
+        },
+        "ContextArtifact": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "title",
+            "mediaType"
+          ]
+        },
+        "AgentHostTool": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "status": {
+              "$ref": "#/$defs/AgentHostToolStatus"
+            },
+            "output": true,
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "call",
+            "status"
+          ]
+        },
+        "AgentHostToolStatus": {
+          "type": "string",
+          "enum": [
+            "awaiting_approval",
+            "approved",
+            "running",
+            "succeeded",
+            "denied",
+            "failed",
+            "outcome_unknown",
+            "closed"
+          ]
+        }
+      }
+    },
+    "SessionHistoryListPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionHistoryListPage",
+      "type": "object",
+      "properties": {
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionHistoryEntry"
+          }
+        },
+        "nextBeforeSequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "throughSequence",
+        "entries"
+      ],
+      "$defs": {
+        "SessionHistoryEntry": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "turn"
+                },
+                "turn": {
+                  "$ref": "#/$defs/ContextTurn"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "turn"
+              ]
+            },
+            {
+              "description": "The individual turn exceeded the requested budget even on an empty page.",
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "oversized"
+                },
+                "taskId": {
+                  "type": "string"
+                },
+                "completionSequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "taskId",
+                "completionSequence"
+              ]
+            }
           ]
         },
         "ContextTurn": {

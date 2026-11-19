@@ -83,6 +83,18 @@ SQLite v22 从已完成记录回填精简投影。只有包含工具或宿主操
 
 `contextAtSequence:true` 表示 `session/context` 支持顶层参数 `throughSequence`。传入预览返回的 `throughSequence` 和同一组选项，可以在后续任务完成后重新查看当时的历史。内核只统计该全局序号及之前完成的记录。`0` 对应空历史。超出当前已提交事件的序号返回 `-32602`。
 
+## 会话历史分页
+
+客户端可以用 `initialize.capabilities.sessionHistoryList` 发现 `session/listHistory`。接口按完成序号倒序读取指定会话的持久对话，包括已归档会话。每条 `kind:"turn"` 的 `turn` 对象包含用户和助手消息、来源后端、完成序号和产物引用，格式与 `detail:"conversation"` 一致。
+
+```json
+{"jsonrpc":"2.0","id":3,"method":"session/listHistory","params":{"sessionId":"<session-id>","limit":16,"maxBytes":65536}}
+```
+
+首次请求省略 `throughSequence`，服务端返回当时的全局事件水位。在下一页沿用它，并把 `nextBeforeSequence` 作为排他的 `beforeSequence`。后续完成的任务会出现在新的分页视图里。`nextBeforeSequence:null` 表示当前快照已经读完。在显式水位 `0` 时返回空历史。
+
+`limit` 默认 16，范围 1 至 32。`maxBytes` 默认 64 KiB，范围 1 至 256 KiB，计算 `entries` 数组的紧凑 UTF-8 JSON 字节数，包括方括号和分隔符。能单独放进一页的记录会完整返回，剩余空间不足时留到下一页。如果单条记录超过整页预算，返回 `{"kind":"oversized","taskId":"…","completionSequence":123}`。客户端可以增大预算，在同一快照重新读取该页。所有记录都使用现有的完成投影和索引，历史分页与模型上下文选择是独立操作。
+
 ## 冻结与幂等
 
 任务创建时先选择历史，再将快照、任务、初始事件与幂等键一并提交。后续任务并发完成不会修改它，显式恢复、审批继续和服务重启也沿用原快照。预览是当前读取结果，不预留输入；预览之后可能有任务完成，因此提交时以返回的 `Task.context` 为准。

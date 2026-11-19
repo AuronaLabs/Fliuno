@@ -152,6 +152,53 @@ pub struct SessionContextParams {
     pub options: ContextOptions,
 }
 
+pub const MAX_SESSION_HISTORY_BYTES: u32 = 256 * 1024;
+pub const MAX_SESSION_HISTORY_ENTRIES: u32 = 32;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistoryListParams {
+    pub session_id: String,
+    /// Global event watermark. Required when continuing a page.
+    #[serde(default)]
+    pub through_sequence: Option<u64>,
+    /// Exclusive completion cursor returned by the previous page.
+    #[serde(default)]
+    pub before_sequence: Option<u64>,
+    /// Defaults to 16 and accepts 1 to 32 entries.
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// Compact JSON byte limit for the entries array. Defaults to 64 KiB.
+    #[serde(default)]
+    pub max_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum SessionHistoryEntry {
+    Turn {
+        turn: ContextTurn,
+    },
+    /// The individual turn exceeded the requested budget even on an empty page.
+    Oversized {
+        task_id: String,
+        completion_sequence: u64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistoryListPage {
+    pub through_sequence: u64,
+    pub entries: Vec<SessionHistoryEntry>,
+    pub next_before_sequence: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionHistoryRole {

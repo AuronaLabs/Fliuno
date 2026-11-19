@@ -5,6 +5,7 @@ use crate::context::search::{HistoryScope, MAX_SEARCH_TURN_BYTES, MAX_SEARCH_TUR
 use rusqlite::Transaction;
 
 mod conversation;
+mod history_list;
 pub(super) use conversation::migrate as migrate_conversations;
 
 fn projection(detail: ContextDetail, budget: &str, extra_columns: &str) -> String {
