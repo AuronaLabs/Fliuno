@@ -3,6 +3,36 @@ use super::*;
 use crate::json_size;
 
 impl Kernel {
+    /// Fetch a single completed conversation without opening the full task snapshot.
+    pub fn get_session_history_turn(
+        &self,
+        request: &SessionHistoryGetParams,
+    ) -> Result<SessionHistoryEntry> {
+        let max_bytes = history_budget(request.max_bytes)?;
+        let watermark = self.event_watermark()?;
+        let through = request.through_sequence.unwrap_or(watermark);
+        if through > watermark {
+            return Err(Error::Invalid(
+                "throughSequence exceeds the current event sequence".into(),
+            ));
+        }
+        let projection =
+            conversation_projection("?4", ", s.task_id, s.sequence", "session_turns s");
+        let sql = format!("{projection} WHERE s.session_id=?1 AND s.task_id=?2 AND s.sequence<=?3");
+        let mut statement = self.db.prepare_cached(&sql)?;
+        let mut rows = statement.query(params![
+            request.session_id,
+            request.task_id,
+            validate_event_cursor(through)?,
+            max_bytes
+        ])?;
+        let row = rows
+            .next()?
+            .ok_or_else(|| Error::NotFound("completed conversation turn".into()))?;
+        let (entry, _) = decode_entry(row, max_bytes as usize)?;
+        Ok(entry)
+    }
+
     /// List completed conversation turns in descending completion order.
     pub fn list_session_history(
         &self,
@@ -12,12 +42,7 @@ impl Kernel {
         if !(1..=MAX_SESSION_HISTORY_ENTRIES).contains(&limit) {
             return Err(Error::Invalid("history limit must be 1 to 32".into()));
         }
-        let max_bytes = request.max_bytes.unwrap_or(64 * 1024);
-        if !(1024..=MAX_SESSION_HISTORY_BYTES).contains(&max_bytes) {
-            return Err(Error::Invalid(
-                "history maxBytes must be 1024 to 262144".into(),
-            ));
-        }
+        let max_bytes = history_budget(request.max_bytes)?;
         if request.before_sequence.is_some() && request.through_sequence.is_none() {
             return Err(Error::Invalid(
                 "beforeSequence requires throughSequence".into(),
@@ -66,21 +91,7 @@ impl Kernel {
                 break;
             }
             let sequence = row.get::<_, i64>(2)? as u64;
-            let value = row.get_ref(0)?;
-            let data = value.as_str_or_null().map_err(|error| {
-                rusqlite::Error::FromSqlConversionFailure(0, value.data_type(), Box::new(error))
-            })?;
-            let mut entry = match data {
-                Some(data) => SessionHistoryEntry::Turn {
-                    turn: serde_json::from_str(data)?,
-                },
-                None => oversized(row, sequence)?,
-            };
-            let mut entry_bytes = json_size(&entry)?;
-            if entry_bytes + 2 > max_bytes as usize {
-                entry = oversized(row, sequence)?;
-                entry_bytes = json_size(&entry)?;
-            }
+            let (entry, entry_bytes) = decode_entry(row, max_bytes as usize - 2)?;
             let next_bytes = bytes + usize::from(last_sequence.is_some()) + entry_bytes;
             if next_bytes > max_bytes as usize {
                 page.next_before_sequence = last_sequence;
@@ -92,6 +103,35 @@ impl Kernel {
         }
         Ok(page)
     }
+}
+
+fn history_budget(max_bytes: Option<u32>) -> Result<u32> {
+    let max_bytes = max_bytes.unwrap_or(64 * 1024);
+    if !(1024..=MAX_SESSION_HISTORY_BYTES).contains(&max_bytes) {
+        return Err(Error::Invalid(
+            "history maxBytes must be 1024 to 262144".into(),
+        ));
+    }
+    Ok(max_bytes)
+}
+
+fn decode_entry(row: &rusqlite::Row<'_>, budget: usize) -> Result<(SessionHistoryEntry, usize)> {
+    let value = row.get_ref(0)?;
+    let data = value.as_str_or_null().map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, value.data_type(), Box::new(error))
+    })?;
+    if let Some(data) = data {
+        let turn = SessionHistoryEntry::Turn {
+            turn: serde_json::from_str(data)?,
+        };
+        let bytes = json_size(&turn)?;
+        if bytes <= budget {
+            return Ok((turn, bytes));
+        }
+    }
+    let entry = oversized(row, row.get::<_, i64>(2)? as u64)?;
+    let bytes = json_size(&entry)?;
+    Ok((entry, bytes))
 }
 
 fn oversized(row: &rusqlite::Row<'_>, completion_sequence: u64) -> Result<SessionHistoryEntry> {

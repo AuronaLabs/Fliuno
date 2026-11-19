@@ -40,6 +40,27 @@ fn pages_actual_completions_after_restart() {
     let artifacts = peer.call("artifacts/list", json!({"taskId":newer["id"]}));
     assert_eq!(turn["artifacts"][0]["id"], artifacts[0]["id"]);
 
+    let lookup = "session/getHistoryTurn";
+    let mut lookup_params = json!({"sessionId":session["id"],"taskId":newer["id"],"throughSequence":page["throughSequence"]});
+    assert_eq!(peer.call(lookup, lookup_params.clone()), page["entries"][0]);
+    for (session_id, task_id) in [
+        (&other["id"], &newer["id"]),
+        (&session["id"], &pending["id"]),
+        (&session["id"], &json!("missing")),
+    ] {
+        assert_eq!(
+            peer.request(lookup, json!({"sessionId":session_id,"taskId":task_id}))["error"]["code"],
+            -32004
+        );
+    }
+    assert_eq!(
+        peer.request(
+            lookup,
+            json!({"sessionId":session["id"],"taskId":newer["id"],"throughSequence":u64::MAX})
+        )["error"]["code"],
+        -32602
+    );
+
     let decision =
         json!({"taskId":id,"approvalId":waiting["pendingApproval"]["id"],"decision":"allow_once"});
     peer.call("approval/respond", decision);
@@ -54,6 +75,9 @@ fn pages_actual_completions_after_restart() {
     let mut frozen = request;
     frozen["throughSequence"] = page["throughSequence"].clone();
     assert_eq!(peer.call(method, frozen.clone()), page);
+    assert_eq!(peer.call(lookup, lookup_params.clone()), page["entries"][0]);
+    lookup_params["taskId"] = json!(id);
+    assert_eq!(peer.request(lookup, lookup_params)["error"]["code"], -32004);
     frozen["beforeSequence"] = page["nextBeforeSequence"].clone();
     let last = peer.call(method, frozen.clone());
     assert_eq!(last["entries"][0]["turn"]["taskId"], older["id"]);
@@ -107,6 +131,24 @@ fn byte_budget_defers_a_turn_instead_of_dropping_or_truncating_it() {
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0]["kind"], "oversized");
     assert_eq!(entries[0]["taskId"], largest["id"]);
+    let mut lookup = json!({"sessionId":session["id"],"taskId":largest["id"],"throughSequence":first["throughSequence"],"maxBytes":1024});
+    assert_eq!(
+        peer.call("session/getHistoryTurn", lookup.clone()),
+        entries[0]
+    );
+    lookup["maxBytes"] = json!(4096);
+    let read = peer.call("session/getHistoryTurn", lookup.clone());
+    assert_eq!(read["turn"]["messages"][0]["text"], "界".repeat(600));
+    assert_eq!(
+        read["turn"]["completionSequence"],
+        entries[0]["completionSequence"]
+    );
+    assert!(serde_json::to_vec(&read).unwrap().len() <= 4096);
+    lookup["maxBytes"] = json!(1023);
+    assert_eq!(
+        peer.request("session/getHistoryTurn", lookup)["error"]["code"],
+        -32602
+    );
     assert!(
         entries[0]["completionSequence"].as_u64().unwrap()
             > first["nextBeforeSequence"].as_u64().unwrap()

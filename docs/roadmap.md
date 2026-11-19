@@ -24,6 +24,8 @@
 
 - [x] Rust 客户端将持久任务事件转换为 AG-UI 运行、文本和自定义事件。重放时使用稳定的运行和消息 ID。
 
+- [x] Rust 客户端可保存会话及工作区历史搜索游标。搜索命中可用 `session/getHistoryTurn` 在同一水位直接读取。
+
 - [x] `events/listModelUsage` 按任务直接读取模型用量，支持有界分页和持久回放游标。SQLite v37 为旧事件回填索引。
 
 ## 0.0.2

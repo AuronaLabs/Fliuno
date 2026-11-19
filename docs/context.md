@@ -4,7 +4,7 @@
 
 同一 `Session` 的后续任务默认接收此前已完成工作的有界历史。历史由 Fliuno 保存和选择，OpenAI、Anthropic 与 ACP 后端使用同一份中性记录。每个任务仍有自己的执行、审批和供应商续接状态。
 
-[创建任务](#协议与使用) · [读取历史](#会话历史分页) · [冻结快照](#冻结与幂等) · [选择与预算](#选择预算与省略) · [持久化](#持久化与迁移)
+[创建任务](#协议与使用) · [读取历史](#会话历史分页) · [打开单条记录](#打开一条历史记录) · [冻结快照](#冻结与幂等) · [选择与预算](#选择预算与省略) · [持久化](#持久化与迁移)
 
 ## 协议与使用
 
@@ -98,6 +98,18 @@ SQLite v22 从已完成记录回填精简投影。只有包含工具或宿主操
 `limit` 默认 16，范围 1 至 32。`maxBytes` 默认 64 KiB，范围 1 至 256 KiB，计算 `entries` 数组的紧凑 UTF-8 JSON 字节数，包括方括号和分隔符。能单独放进一页的记录会完整返回，剩余空间不足时留到下一页。如果单条记录超过整页预算，返回 `{"kind":"oversized","taskId":"…","completionSequence":123}`。客户端可以增大预算，在同一快照重新读取该页。所有记录都使用现有的完成投影和索引，历史分页与模型上下文选择是独立操作。
 
 Rust 客户端可将 `SessionHistoryListParams` 交给 `fliuno_client::SessionHistory::new`，逐次调用 `next_page`。持久化已消费记录时一并保存 `next_request()`，重连后把保存的参数交给同一构造函数即可续读。客户端核对水位、完成顺序和续页游标，请求失败时保留原参数。`through()` 提供固定水位，可用于从该位置补读新提交的会话事件。
+
+## 打开一条历史记录
+
+按关键词查找时，先用 [`session/searchHistory` 或 `workspace/searchHistory`](protocol.md#查找历史任务) 获得任务 ID 和完成序号。服务声明 `sessionHistoryGet` 后，客户端可以按命中直接读取对话，无需翻过前面的历史页。
+
+```json
+{"jsonrpc":"2.0","id":4,"method":"session/getHistoryTurn","params":{"sessionId":"<session-id>","taskId":"<task-id>","throughSequence":320,"maxBytes":65536}}
+```
+
+`throughSequence` 沿用原搜索页的水位，省略时使用当前水位。`maxBytes` 默认 64 KiB，范围 1 至 256 KiB，计算单个 `SessionHistoryEntry` 的紧凑 JSON 字节数。记录太大时返回 `kind:"oversized"` 和原任务引用。可增大预算，在同一水位重新读取。记录包含产物引用，下载正文仍使用产物接口。
+
+其他会话的记录、未完成的任务、缺失项和水位之后的记录统一返回 `-32004`；超出当前水位或字节预算范围则返回 `-32602`。读取复用持久对话投影和任务索引，无需数据库迁移。
 
 ## 冻结与幂等
 

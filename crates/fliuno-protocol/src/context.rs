@@ -154,6 +154,20 @@ pub struct SessionContextParams {
 
 pub const MAX_SESSION_HISTORY_BYTES: u32 = 256 * 1024;
 pub const MAX_SESSION_HISTORY_ENTRIES: u32 = 32;
+pub const MAX_HISTORY_SEARCH_TURNS: u32 = 128;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistoryGetParams {
+    pub session_id: String,
+    pub task_id: String,
+    /// Optionally restrict the lookup to an earlier listing or search snapshot.
+    #[serde(default)]
+    pub through_sequence: Option<u64>,
+    /// Compact JSON byte limit for the returned entry. Defaults to 64 KiB.
+    #[serde(default)]
+    pub max_bytes: Option<u32>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

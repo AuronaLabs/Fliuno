@@ -1,7 +1,8 @@
 //! Walk a fixed view of completed session history over the local RPC stream.
 use super::{Client, Error, Notification};
 use fliuno_protocol::{
-    ContextMessage, SessionHistoryEntry, SessionHistoryListPage, SessionHistoryListParams,
+    ContextMessage, SessionHistoryEntry, SessionHistoryGetParams, SessionHistoryListPage,
+    SessionHistoryListParams,
 };
 use std::io::{BufRead, Write};
 
@@ -53,25 +54,7 @@ impl SessionHistory {
         }
         let mut previous = self.request.before_sequence;
         for entry in &page.entries {
-            let sequence = match entry {
-                SessionHistoryEntry::Turn { turn } => {
-                    if !turn.host_tools.is_empty()
-                        || turn.messages.iter().any(|message| {
-                            !matches!(
-                                message,
-                                ContextMessage::User { .. } | ContextMessage::Assistant { .. }
-                            )
-                        })
-                    {
-                        return Err(Error::InvalidHistoryPage);
-                    }
-                    turn.completion_sequence
-                }
-                SessionHistoryEntry::Oversized {
-                    completion_sequence,
-                    ..
-                } => *completion_sequence,
-            };
+            let (_, sequence) = history_identity(entry)?;
             if sequence == 0
                 || sequence > page.through_sequence
                 || previous.is_some_and(|prev| sequence >= prev)
@@ -90,5 +73,51 @@ impl SessionHistory {
         self.request.before_sequence = page.next_before_sequence;
         self.exhausted = page.next_before_sequence.is_none();
         Ok(Some(page))
+    }
+}
+
+pub(super) fn history_identity(entry: &SessionHistoryEntry) -> Result<(&str, u64), Error> {
+    let (id, sequence) = match entry {
+        SessionHistoryEntry::Turn { turn } => {
+            if !turn.host_tools.is_empty()
+                || turn.messages.iter().any(|message| {
+                    !matches!(
+                        message,
+                        ContextMessage::User { .. } | ContextMessage::Assistant { .. }
+                    )
+                })
+            {
+                return Err(Error::InvalidHistoryPage);
+            }
+            (turn.task_id.as_str(), turn.completion_sequence)
+        }
+        SessionHistoryEntry::Oversized {
+            task_id,
+            completion_sequence,
+        } => (task_id.as_str(), *completion_sequence),
+    };
+    if id.is_empty() || !(1..=i64::MAX as u64).contains(&sequence) {
+        return Err(Error::InvalidHistoryPage);
+    }
+    Ok((id, sequence))
+}
+
+impl<R: BufRead, W: Write> Client<R, W> {
+    /// Read one bounded, compact conversation entry in the selected session.
+    pub fn get_history_turn(
+        &mut self,
+        request: &SessionHistoryGetParams,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<SessionHistoryEntry, Error> {
+        let entry = self.call("session/getHistoryTurn", request, on_notification)?;
+        let (id, sequence) = history_identity(&entry)?;
+        if id != request.task_id
+            || request
+                .through_sequence
+                .is_some_and(|through| sequence > through)
+        {
+            return Err(Error::InvalidHistoryPage);
+        }
+        Ok(entry)
     }
 }

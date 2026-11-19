@@ -6,7 +6,7 @@ use fliuno_protocol::{
 };
 
 const MAX_QUERY_BYTES: usize = 256;
-pub(crate) const MAX_SEARCH_TURNS: u32 = 128;
+pub(crate) use fliuno_protocol::MAX_HISTORY_SEARCH_TURNS as MAX_SEARCH_TURNS;
 pub(crate) const MAX_SEARCH_TURN_BYTES: u32 = 128 * 1024;
 
 #[derive(Clone, Copy)]

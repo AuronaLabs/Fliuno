@@ -3,6 +3,8 @@ use super::*;
 
 #[path = "context/history_list.rs"]
 mod history_list;
+#[path = "context/history_search.rs"]
+mod history_search;
 
 fn approve_report(peer: &mut Peer, session: &Value, input: &str, key: &str) -> Value {
     let task = peer.call(

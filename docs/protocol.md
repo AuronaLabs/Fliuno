@@ -38,6 +38,8 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 
 `Client::subscribe_events(scope, after, callback)` 建立实时订阅，并用同一范围和服务端返回的水位构造 `EventReplay`。首次连接、重连或收到队列缺口后，都可以从该范围已消费的序号开始。订阅响应之前的持久通知仍归前一个订阅。得到响应后，先完成回放至 `through()`，再处理回放期间暂存的新通知。支持 `eventSubscriptionCursor` 的服务会在切换之前拒绝过新的本地序号。连接旧服务时，客户端改在收到水位后检查。
 
+`HistorySearch` 可以按会话或工作区搜索已完成的对话。将 `HistorySearchRequest` 交给 `HistorySearch::new`，每次 `next_page` 读取一个搜索窗口。空窗口可能仍可继续；只有 `next_page` 返回 `None` 时才无需再发请求。随已消费结果保存可序列化的 `next_request()`；请求失败或返回不一致时保留原游标。`Client::get_history_turn` 可按命中的会话和任务 ID 直接读取一条对话。
+
 `Client::artifact_digest` 读取产物的正文长度和 SHA-256，调用方也可直接提供已保存的摘要。`Client::download_artifact` 按 64 KiB 分段读取，检查每段的长度和偏移，将原始字节写入调用方提供的 `Write`，返回前校验完整 SHA-256。需要在验证完成后才对外可见时，先写到临时文件，再由调用方发布。失败时输出中可能已有部分字节。
 
 ## 方法
@@ -65,6 +67,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `session/setArchivedBatch` | `{sessionIds,archived}` | 原子更新 1..32 个会话，并按请求顺序返回 Session |
 | `session/context` | `{sessionId,throughSequence?,options?:{mode?,maxTurns?,maxBytes?,selection?,detail?,taskIds?}}` | TaskContext，预览指定序号的历史 |
 | `session/listHistory` | `{sessionId,throughSequence?,beforeSequence?,limit?,maxBytes?}` | SessionHistoryListPage，按完成序号倒序分页读取精简对话。见[会话历史分页](context.md#会话历史分页)。 |
+| `session/getHistoryTurn` | `{sessionId,taskId,throughSequence?,maxBytes?}` | `SessionHistoryEntry`，直接读一条对话或返回超限引用。见[打开搜索命中](context.md#打开一条历史记录)。 |
 | `session/searchHistory` | `{sessionId,query,role?,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/startSummary` | 与 `task/start` 相同 | 使用同一任务创建和调度流程，返回 `TaskSummary` |
@@ -416,5 +419,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 每页最多检查 128 条历史。超过 128 KiB 的精简对话投影会跳过并计入 `skippedOversizedTurns`。`scannedTurns` 包含这些记录。只要 `nextBeforeSequence` 有值就还能翻页，即使 `matches` 为空。翻页时沿用 `query` 和 `role`，同时传入首次返回的 `throughSequence` 和上一页的 `nextBeforeSequence` 作为 `beforeSequence`。调用方可用查到的 `taskId` 配合 `session/context` 的 `options.taskIds` 预览和选择历史，搜索本身只读取本机数据库。
 
 `initialize.capabilities.workspaceHistorySearch` 为真时，可用 `workspace/searchHistory` 搜索同一工作区的所有会话，包括已归档会话。每个命中同时返回 `sessionId`，可用它打开对应会话。查询规则、扫描上限和分页水位与 `session/searchHistory` 相同。SQLite v33 回填按工作区和完成序号排序的索引，现有会话搜索响应保持原样。搜索不会把其他会话内容自动加入模型上下文。
+
+要查看某一条命中，检查 `sessionHistoryGet`，将命中的 `taskId`、所属 `sessionId` 及搜索页的 `throughSequence` 传给 `session/getHistoryTurn`。会话搜索沿用原请求的 `sessionId`，工作区搜索则使用该命中的 `sessionId`。[请求示例与错误边界](context.md#打开一条历史记录)。
 
 `initialize.capabilities.contextMatchRecent` 表示上下文选项也支持 `selection: "match_recent"` 和 `historyQuery: {query,role?}`，将近期匹配记录直接冻结到新任务。匹配方式和扫描上限与历史搜索相同；具体预算和快照语义见[上下文](context.md)。

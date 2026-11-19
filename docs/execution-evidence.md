@@ -6,7 +6,7 @@
 
 - **命令执行**：[预算和停止顺序](#预算和停止顺序) · [报告字段](#报告字段) · [工程验证](#工程验证2026-11-18)
 - **发布验收**：[0.0.2 Windows 与 Linux 双平台验收](#002-windows-与-linux-双平台验收)
-- **0.0.3 验收**：[会话历史分页](#003-会话历史分页2026-11-19) · [AG-UI SSE 续传](#003-ag-ui-sse-续传2026-11-19) · [HTTP 宿主演示](#003-ag-ui-http-宿主演示2026-11-19) · [审批中断与续跑](#003-ag-ui-审批中断与续跑2026-11-19)
+- **0.0.3 验收**：[会话历史分页](#003-会话历史分页2026-11-19) · [历史搜索与直读](#003-历史搜索与直读2026-11-19) · [AG-UI SSE 续传](#003-ag-ui-sse-续传2026-11-19) · [HTTP 宿主演示](#003-ag-ui-http-宿主演示2026-11-19) · [审批中断与续跑](#003-ag-ui-审批中断与续跑2026-11-19)
 
 ## 预算和停止顺序
 
@@ -573,3 +573,9 @@ Windows `scripts/check.ps1` 通过 464 项测试、28 个离线演示、rustfmt�
 Windows `scripts/check.ps1` 通过 465 项测试、28 个离线演示、rustfmt、两组严格 Clippy 和协议 Schema 检查。日志：`target/0.0.3-ag-ui-approval-scope-windows.log`。
 
 Debian Linux 6.12.107 来宾使用 `4a600db` 构建的原生 app-server 和进程测试二进制，四项定向测试全部通过：v37/v38 迁移与重启去重、连续审批与拒绝、按帧重连及旧 HTTP 审批模式。交叉构建使用 Zig 0.15.2 与 cargo-zigbuild 0.24.1；QEMU 本机回环测试以 `FLIUNO_RESULT=0` 结束。日志：`D:/Fliuno-Native-Test/guest-ag-ui-approval-scope-build.log` 与 `D:/Fliuno-Native-Test/guest-ag-ui-approval-scope.log`。
+
+## 0.0.3 历史搜索与直读（2026-11-19）
+
+通过实际 app-server 进程创建并完成任务，再保存会话、工作区两种搜索的游标。新任务完成后重启进程，原游标仍读取旧快照；重新搜索可以看到新任务。对工作区搜索命中直接读取对话，完成序号和产物引用与命中对应。独立验证覆盖超限引用和增大预算后重读，以及拒绝其他会话、未完成、缺失或快照之后的任务。Rust 客户端还用受控响应校验空页续读和无效响应后的原游标重试。
+
+Windows `scripts/check.ps1` 以退出码 0 完成，467 项测试、28 个离线演示、rustfmt、两组严格 Clippy 及应用协议 Schema 一致性检查全部通过。日志：`target/0.0.3-history-lookup-windows.log`。

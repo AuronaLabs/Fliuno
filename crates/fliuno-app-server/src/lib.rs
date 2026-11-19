@@ -363,6 +363,7 @@ impl RpcServer {
             capabilities["taskCancelSummary"] = json!(true);
             capabilities["taskSummaryByRequest"] = json!(true);
             capabilities["sessionHistoryList"] = json!(true);
+            capabilities["sessionHistoryGet"] = json!(true);
             capabilities["maxSessionHistoryBytes"] = json!(MAX_SESSION_HISTORY_BYTES);
             capabilities["maxSessionHistoryEntries"] = json!(MAX_SESSION_HISTORY_ENTRIES);
             capabilities["sessionHistorySearch"] = json!(true);
@@ -620,6 +621,10 @@ impl RpcServer {
             "session/listHistory" => {
                 let p: SessionHistoryListParams = decode(params)?;
                 json!(self.kernel()?.list_session_history(&p)?)
+            }
+            "session/getHistoryTurn" => {
+                let p: SessionHistoryGetParams = decode(params)?;
+                json!(self.kernel()?.get_session_history_turn(&p)?)
             }
             "session/searchHistory" => {
                 let p: SessionHistorySearchParams = decode(params)?;

@@ -3,11 +3,13 @@ pub mod ag_ui;
 mod download;
 mod feed;
 mod history;
+mod history_search;
 mod replay;
 mod wire;
 
 pub use feed::EventFeed;
 pub use history::SessionHistory;
+pub use history_search::{HistorySearch, HistorySearchRequest};
 pub use replay::{EventReplay, ReplayScope};
 
 use fliuno_protocol::{InitializeParams, PROTOCOL_VERSION};

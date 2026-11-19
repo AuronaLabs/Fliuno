@@ -347,3 +347,60 @@ fn ag_ui_run_rejects_unsupported_authority_before_sending_a_request() {
     let (_, written) = client.into_parts();
     assert_eq!(written.iter().filter(|&&byte| byte == b'\n').count(), 1);
 }
+
+#[test]
+fn history_search_resumes_an_empty_window_and_retries_the_same_cursor() {
+    use fliuno_protocol::{MAX_HISTORY_SEARCH_TURNS, WorkspaceHistorySearchParams};
+
+    let replies = [
+        json!({"throughSequence":500,"matches":[],"scannedTurns":MAX_HISTORY_SEARCH_TURNS,"skippedOversizedTurns":4,"nextBeforeSequence":300}),
+        json!({"throughSequence":501,"matches":[],"scannedTurns":MAX_HISTORY_SEARCH_TURNS,"skippedOversizedTurns":4,"nextBeforeSequence":150}),
+        json!({"throughSequence":500,"matches":[{"taskId":"needle","sessionId":"session","completionSequence":220}],"scannedTurns":1,"skippedOversizedTurns":0,"nextBeforeSequence":null}),
+    ];
+    let mut wire = Vec::new();
+    for (index, page) in replies.into_iter().enumerate() {
+        serde_json::to_writer(
+            &mut wire,
+            &json!({"jsonrpc":"2.0","id":index+2,"result":page}),
+        )
+        .unwrap();
+        wire.push(b'\n');
+    }
+    let mut client = fake_client(&wire);
+    let mut search = HistorySearch::new(HistorySearchRequest::Workspace(
+        WorkspaceHistorySearchParams {
+            workspace_id: "workspace".into(),
+            query: "needle".into(),
+            role: None,
+            through_sequence: None,
+            before_sequence: None,
+            limit: None,
+        },
+    ));
+    let empty = search.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert!(empty.matches.is_empty());
+    let checkpoint = serde_json::to_value(search.next_request().unwrap()).unwrap();
+    assert_eq!(checkpoint["params"]["throughSequence"], 500);
+    assert_eq!(checkpoint["params"]["beforeSequence"], 300);
+    assert!(matches!(
+        search.next_page(&mut client, |_| {}),
+        Err(Error::InvalidHistoryPage)
+    ));
+    assert_eq!(
+        serde_json::to_value(search.next_request().unwrap()).unwrap(),
+        checkpoint
+    );
+    let hit = search.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert_eq!(hit.matches[0].task_id, "needle");
+    assert!(search.next_page(&mut client, |_| {}).unwrap().is_none());
+    assert!(search.next_request().is_none());
+    let (_, written) = client.into_parts();
+    let sent: Vec<Value> = written
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(sent.len(), 4);
+    assert_eq!(sent[2]["params"], checkpoint["params"]);
+    assert_eq!(sent[2]["params"], sent[3]["params"]);
+}
