@@ -3,7 +3,7 @@ use fliuno_protocol::{EventsPage, WorkSnapshotParams};
 use std::{cell::RefCell, io, rc::Rc};
 
 // Submit one notification batch in front of a normal RPC request. The batch
-// fills the server's live queue while still using the same stdio connection.
+// commits several changes before the server can write another notification.
 struct BatchWriter {
     stdin: ChildStdin,
     queued: Rc<RefCell<Option<Vec<u8>>>>,
@@ -22,107 +22,131 @@ impl Write for BatchWriter {
     }
 }
 
+fn wait_for_watermark<R: BufRead, W: Write>(
+    client: &mut Client<R, W>,
+    feed: &mut fliuno_client::EventFeed,
+    workspace_id: &str,
+) -> Vec<u64> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut watermarks = Vec::new();
+    while watermarks.is_empty() {
+        let _: Value = client
+            .call(
+                "workspace/get",
+                &json!({"workspaceId":workspace_id}),
+                |note| {
+                    assert_ne!(note.method, "notifications/event");
+                    assert_ne!(note.method, "notifications/eventGap");
+                    if note.method == "notifications/eventWatermark" {
+                        assert_eq!(note.params.as_object().unwrap().len(), 1);
+                        watermarks.push(note.params["throughSequence"].as_u64().unwrap());
+                    }
+                    let _ = feed.observe(note);
+                },
+            )
+            .unwrap();
+        assert!(
+            !watermarks.is_empty() || Instant::now() < deadline,
+            "missing watermarks"
+        );
+        if watermarks.is_empty() {
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+    watermarks
+}
+
 #[test]
-fn work_feed_repairs_real_server_overflow_in_the_same_scope() {
+fn work_feed_coalesces_a_burst_and_replays_every_matching_commit() {
     let root = std::env::temp_dir().join(format!("fliuno-rust-feed-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
-    let mut server = Server(
-        Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
-            .arg("--db")
-            .arg(root.join("kernel.db"))
-            .env("FLIUNO_PROVIDER", "demo")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap(),
-    );
-    let queued = Rc::new(RefCell::new(None));
-    let writer = BatchWriter {
-        stdin: server.0.stdin.take().unwrap(),
-        queued: Rc::clone(&queued),
+    let db = root.join("kernel.db");
+    // All tasks are waiting before the burst, so no background model commits
+    // interfere with measuring exactly one wake for the framed batch.
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let foreign = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let start = |peer: &mut Peer, session: &Value, input: String| {
+        let task = peer.call(
+            "task/startSummary",
+            json!({"sessionId":session["id"],"input":input,"context":{"mode":"isolated"}}),
+        );
+        let id = task["id"].as_str().unwrap().to_owned();
+        peer.wait_for_status(&id, "waiting_approval");
+        id
     };
-    let reader = BufReader::new(server.0.stdout.take().unwrap());
-    let mut client = Client::connect(reader, writer, "rust-feed-test", |_| {}).unwrap();
-    let workspace: Workspace = client
-        .call("workspace/open", &json!({"root":root}), |_| {})
-        .unwrap();
-    let session: fliuno_protocol::Session = client
-        .call(
-            "session/create",
-            &json!({"workspaceId":workspace.id}),
-            |_| {},
-        )
-        .unwrap();
-    let foreign: fliuno_protocol::Session = client
-        .call(
-            "session/create",
-            &json!({"workspaceId":workspace.id}),
-            |_| {},
-        )
-        .unwrap();
-    let mut feed = client
+    const MATCHING: usize = 72;
+    let mut ids = (0..=MATCHING)
+        .map(|i| start(&mut peer, &session, format!("artifact {i}")))
+        .collect::<Vec<_>>();
+    let next = ids.pop().unwrap();
+    ids.insert(
+        MATCHING / 2,
+        start(&mut peer, &foreign, "foreign artifact".into()),
+    );
+    drop(peer);
+
+    let queued = Rc::new(RefCell::new(None));
+    let (mut server, mut client) =
+        super::ag_ui_run::connect_with_writer(&db, |stdin| BatchWriter {
+            stdin,
+            queued: Rc::clone(&queued),
+        });
+    assert_eq!(client.info().capabilities["coalescedEventWatermarks"], true);
+    let session_id = session["id"].as_str().unwrap();
+    let workspace_id = workspace["id"].as_str().unwrap();
+    let view = client
         .subscribe_work(
             &WorkSnapshotParams {
                 workspace_id: None,
-                session_id: Some(session.id.clone()),
+                session_id: Some(session_id.into()),
                 approval_limit: 10,
                 approval_target_bytes: None,
             },
             |_| {},
         )
-        .unwrap()
-        .events;
-    assert_eq!(feed.cursor(), 0);
+        .unwrap();
+    assert_eq!(
+        view.snapshot.task_counts.waiting_approval,
+        (MATCHING + 1) as u64
+    );
+    let mut feed = view.events;
+    let base = feed.cursor();
     assert!(
         feed.next_page(&mut client, 10, None, |_| {})
             .unwrap()
             .is_none()
     );
 
-    let mut batch: Vec<_> = (0..72).map(|i| json!({"jsonrpc":"2.0","method":"task/start",
-        "params":{"sessionId":session.id,"input":format!("task {i}"),"context":{"mode":"isolated"}}})).collect();
-    batch.push(json!({"jsonrpc":"2.0","method":"task/start",
-        "params":{"sessionId":foreign.id,"input":"excluded","context":{"mode":"isolated"}}}));
+    let batch = ids
+        .iter()
+        .map(|id| json!({"jsonrpc":"2.0","method":"task/cancelSummary","params":{"taskId":id}}))
+        .collect::<Vec<_>>();
     let mut frame = serde_json::to_vec(&batch).unwrap();
     frame.push(b'\n');
     *queued.borrow_mut() = Some(frame);
-    let mut gap = false;
-    let mut observed_watermarks = 0;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !gap {
-        let _: Value = client
-            .call(
-                "workspace/get",
-                &json!({"workspaceId":workspace.id}),
-                |note| {
-                    assert_ne!(note.method, "notifications/event");
-                    if note.method == "notifications/eventWatermark" {
-                        assert_eq!(note.params.as_object().unwrap().len(), 1);
-                        assert!(note.params["throughSequence"].is_u64());
-                        observed_watermarks += 1;
-                    }
-                    gap |= note.method == "notifications/eventGap";
-                    assert!(feed.observe(note).is_none());
-                },
-            )
-            .unwrap();
-        if !gap {
-            assert!(Instant::now() < deadline, "missing event overflow notice");
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-    assert_eq!(observed_watermarks, 64);
+    let through = base + ids.len() as u64;
+    assert_eq!(
+        wait_for_watermark(&mut client, &mut feed, workspace_id),
+        [through]
+    );
     let mut delivered = Vec::new();
-    while let Some(page) = feed.next_page(&mut client, 11, Some(4096), |_| {}).unwrap() {
+    while let Some(page) = feed
+        .next_page(&mut client, 11, Some(4096), |note| {
+            assert_ne!(note.method, "notifications/eventGap");
+        })
+        .unwrap()
+    {
         assert!(!page.is_empty() && page.len() <= 11);
         delivered.extend(page);
     }
-    let through = feed.cursor();
+    assert_eq!(feed.cursor(), through);
     let exact: EventsPage = client
         .call(
             "events/listSession",
             &json!({
-                "sessionId":session.id,"after":0,"through":through,"limit":1000,
+                "sessionId":session_id,"after":base,"through":through,"limit":100,
             }),
             |_| {},
         )
@@ -131,18 +155,44 @@ fn work_feed_repairs_real_server_overflow_in_the_same_scope() {
         serde_json::to_value(&delivered).unwrap(),
         serde_json::to_value(exact.events).unwrap()
     );
-    assert_eq!(
-        delivered
-            .iter()
-            .filter(|event| matches!(event.data, EventKind::TaskStarted))
-            .count(),
-        72
-    );
+    assert_eq!(delivered.len(), MATCHING);
     assert!(
         delivered
-            .windows(2)
-            .all(|events| events[0].sequence < events[1].sequence)
+            .iter()
+            .all(|event| matches!(event.data, EventKind::TaskCancelled))
     );
+    assert!(
+        !delivered
+            .iter()
+            .any(|event| event.task_id == ids[MATCHING / 2])
+    );
+
+    let mut after_burst = Vec::new();
+    let _: TaskSummary = client
+        .call(
+            "task/cancelSummary",
+            &TaskIdParams {
+                task_id: next.clone(),
+            },
+            |note| {
+                if note.method == "notifications/eventWatermark" {
+                    after_burst.push(note.params["throughSequence"].as_u64().unwrap());
+                }
+                let _ = feed.observe(note);
+            },
+        )
+        .unwrap();
+    if after_burst.is_empty() {
+        after_burst = wait_for_watermark(&mut client, &mut feed, workspace_id);
+    }
+    assert_eq!(after_burst, [through + 1]);
+    let final_page = feed
+        .next_page(&mut client, 11, None, |_| {})
+        .unwrap()
+        .unwrap();
+    assert_eq!(final_page.len(), 1);
+    assert_eq!(final_page[0].task_id, next);
+    assert_eq!(feed.cursor(), through + 1);
     let (mut reader, writer) = client.into_parts();
     drop(writer);
     io::copy(&mut reader, &mut io::sink()).unwrap();

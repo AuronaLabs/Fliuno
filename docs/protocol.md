@@ -204,11 +204,11 @@ SQLite v42 从已有状态索引回填计数。平时只有创建任务或状态
 
 #### 工作台实时订阅
 
-当 `initialize.capabilities.workSubscription` 为 `true` 时，`work/subscribe` 使用相同参数，返回相同的 `WorkSnapshot`，并一次建立同范围的事件订阅。内核在同一提交锁下读取快照、挂接订阅。快照水位以内的状态已经计入首屏；后续只发出序号大于该水位的 `notifications/eventWatermark`，由客户端按相同范围补读正文。参数或范围无效时，当前订阅保持不变。
+当 `initialize.capabilities.workSubscription` 为 `true` 时，`work/subscribe` 使用相同参数，返回相同的 `WorkSnapshot`，并一次建立同范围的事件订阅。内核在同一提交锁下读取快照、挂接订阅。快照水位以内的状态已经计入首屏；后续只发出序号大于该水位的 `notifications/eventWatermark`，由客户端按相同范围补读正文。多次提交可能合并为一次水位通知。参数或范围无效时，当前订阅保持不变。
 
 响应之前收到的持久通知仍属于旧订阅；通过响应拿到新水位后，再处理新订阅的通知。若使用批请求，同批只发一次切换订阅的调用。之后可通过 `events/setScope` 显式切换范围。遇到 `notifications/eventGap`，从最后已处理的事件游标重新建立同范围订阅并补读。
 
-Rust 的 `Client::subscribe_work` 返回 `WorkSubscription { snapshot, inbox, events }`。先展示 `snapshot`，用 `inbox.next_page()` 续读原审批列表，把后续 RPC 和 `read_notification()` 收到的通知传给 `events.observe()`。`events.next_page()` 从快照水位之后分页；溢出时会重新订阅同一范围。界面如果只需要刷新计数，仍可调用 `work/getSnapshot`，该方法不切换现有订阅。
+Rust 的 `Client::subscribe_work` 返回 `WorkSubscription { snapshot, inbox, events }`。先展示 `snapshot`，用 `inbox.next_page()` 续读原审批列表，把后续 RPC 和 `read_notification()` 收到的通知传给 `events.observe()`。`events.next_page()` 从快照水位之后分页；收到缺口时会重新订阅同一范围。界面如果只需要刷新计数，仍可调用 `work/getSnapshot`，该方法不切换现有订阅。
 
 ### 审批收件箱与决定
 
@@ -372,7 +372,7 @@ SQLite v40 为任务、会话和工作区建立用量索引。v37–v39 的数�
 
 支持 `eventResubscribe` 的连接收到 `notifications/eventGap` 后，可用 `events/resubscribe` 重新订阅。先暂存恢复后的实时通知，再从本地游标调用当前范围对应的回放方法，传入返回的 `throughSequence` 作为包含式 `through`。回放结束后按序号处理暂存通知。服务在同一内核锁下采集水位并建立订阅，实时通知从该水位之后开始，沿用恢复前的范围。若实时队列再次溢出，可重新建立订阅并从已保存游标补齐。订阅仍有效时重复调用返回 -32009。
 
-服务声明 `eventWatermarkNotifications:true` 时，`events/setScope` 支持 `watermarkOnly:true`。每次匹配范围内的提交发送一条 `notifications/eventWatermark`，参数为 `{throughSequence}`。该序号是本次提交的最后一个事件。工具输出等正文只在分页回放中读取。收到缺口后，`events/resubscribe` 延续原来的范围与通知模式。省略 `watermarkOnly` 的订阅继续使用完整事件通知。
+服务声明 `eventWatermarkNotifications:true` 时，`events/setScope` 支持 `watermarkOnly:true`。匹配范围内的提交推动 `notifications/eventWatermark`，参数为 `{throughSequence}`。声明 `coalescedEventWatermarks:true` 时，待发提醒只保留最新的匹配事件序号。客户端按序号回放事件，不应把通知数量或序号跳跃视为提交数或缺口。工具输出等正文只在分页回放中读取。收到缺口后，`events/resubscribe` 延续原来的范围与通知模式。省略 `watermarkOnly` 的订阅继续使用完整事件通知。
 
 Rust 调用方可用 `fliuno_client::EventFeed::subscribe` 建立订阅，将其他 RPC 的通知回调和连接空闲时的通知交给 `observe`。`next_page` 从当前水位读取已提交事件，在收到缺口后按同一范围重新订阅并补读。事件通知只更新最高序号，客户端不会缓冲通知正文。调用方可将处理后的页面和 `cursor()` 一起保存，重连时从保存位置继续。`None` 表示已经读到目前收到通知的水位。`EventFeed` 管理当前连接的订阅范围，在服务支持时选用水位通知。模型预览和终端通知照常交给调用方。
 

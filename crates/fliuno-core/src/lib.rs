@@ -33,7 +33,8 @@ pub use approval::{ApprovalOutcome, PreparedToolExecution};
 pub use context::{MAX_CONTEXT_BYTES, MAX_CONTEXT_CANDIDATES, MAX_CONTEXT_TURNS, context_prompt};
 pub use error::{Error, Result};
 pub use events::{
-    EventReceiver, EventScope, EventWatermarkReceiver, ProgressPublisher, ProgressReceiver,
+    EventReceiver, EventScope, EventWatermarkReceiver, PendingEventWatermark, ProgressPublisher,
+    ProgressReceiver,
 };
 pub use policy::{AskForWrites, PolicyDecision, PolicyEngine};
 pub use provider::{

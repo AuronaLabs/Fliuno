@@ -194,7 +194,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             },
             recv(watermark_rx) -> watermark => match watermark {
-                Ok(through_sequence) => {
+                Ok(pending) => {
+                    let through_sequence = pending.through_sequence();
                     last_event_sequence = through_sequence;
                     write_notification(&mut stdout, "notifications/eventWatermark", EventWatermark { through_sequence })?;
                 }

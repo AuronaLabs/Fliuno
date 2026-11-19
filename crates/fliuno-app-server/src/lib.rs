@@ -414,6 +414,7 @@ impl RpcServer {
             capabilities["eventSubscriptionScope"] = json!(true);
             capabilities["eventSubscriptionCursor"] = json!(true);
             capabilities["eventWatermarkNotifications"] = json!(true);
+            capabilities["coalescedEventWatermarks"] = json!(true);
             capabilities["eventWatermarkQuery"] = json!(true);
             capabilities["workspaceEventSubscription"] = json!(true);
             capabilities["taskEventSubscription"] = json!(true);

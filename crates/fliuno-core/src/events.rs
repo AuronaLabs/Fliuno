@@ -1,9 +1,13 @@
 //! Bounded in-process event fan-out; SQLite remains the replay source of truth.
+mod watermark;
+
 use crate::{Error, Result};
 use crossbeam_channel::{Receiver, Sender, bounded};
 use fliuno_protocol::{Event, ModelProgress};
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, Weak};
+pub use watermark::PendingEventWatermark;
+use watermark::WatermarkSender;
 
 const MAX_SUBSCRIBERS: usize = 8;
 const SUBSCRIBER_CAPACITY: usize = 64;
@@ -14,7 +18,7 @@ pub struct SubscriptionReceiver<T> {
 }
 
 pub type EventReceiver = SubscriptionReceiver<Event>;
-pub type EventWatermarkReceiver = SubscriptionReceiver<u64>;
+pub type EventWatermarkReceiver = SubscriptionReceiver<PendingEventWatermark>;
 
 pub struct ProgressReceiver {
     receiver: Receiver<ModelProgress>,
@@ -60,7 +64,7 @@ pub enum EventScope {
 
 enum EventSender {
     Full(Sender<Event>),
-    Watermark(Sender<u64>),
+    Watermark(WatermarkSender),
 }
 
 struct EventSubscriber {
@@ -93,17 +97,23 @@ impl EventHub {
     }
 
     pub(crate) fn subscribe(&self, scope: EventScope) -> Result<EventReceiver> {
-        self.subscribe_with(scope, EventSender::Full)
+        self.subscribe_with(scope, || {
+            let (sender, receiver) = bounded(SUBSCRIBER_CAPACITY);
+            (EventSender::Full(sender), receiver)
+        })
     }
 
     pub(crate) fn subscribe_watermarks(&self, scope: EventScope) -> Result<EventWatermarkReceiver> {
-        self.subscribe_with(scope, EventSender::Watermark)
+        self.subscribe_with(scope, || {
+            let (sender, receiver) = WatermarkSender::new();
+            (EventSender::Watermark(sender), receiver)
+        })
     }
 
     fn subscribe_with<T>(
         &self,
         scope: EventScope,
-        sender_for: impl FnOnce(Sender<T>) -> EventSender,
+        channel: impl FnOnce() -> (EventSender, Receiver<T>),
     ) -> Result<SubscriptionReceiver<T>> {
         let mut subscribers = self
             .subscribers
@@ -115,10 +125,10 @@ impl EventHub {
                 "maximum event subscriber count reached".into(),
             ));
         }
-        let (sender, receiver) = bounded(SUBSCRIBER_CAPACITY);
+        let (sender, receiver) = channel();
         let active = Arc::new(());
         subscribers.push(EventSubscriber {
-            sender: sender_for(sender),
+            sender,
             active: Arc::downgrade(&active),
             scope,
         });
@@ -168,7 +178,7 @@ impl EventHub {
                     .copied()
                     .enumerate()
                     .all(|(index, sequence)| sender.try_send(event_at(index, sequence)).is_ok()),
-                EventSender::Watermark(sender) => sender.try_send(through).is_ok(),
+                EventSender::Watermark(sender) => sender.publish(through),
             }
         });
     }
@@ -312,20 +322,27 @@ mod tests {
             .subscribe_watermarks(EventScope::Session("current".into()))
             .unwrap();
         hub.publish("task_test", "current", &[1, 2], event_at, || unreachable!());
+        hub.publish(
+            "foreign_task",
+            "third_session",
+            &[3],
+            event_at,
+            || unreachable!(),
+        );
         assert_eq!(copies.get(), 0);
-        assert_eq!(watermark.try_recv().unwrap(), 2);
+        assert_eq!(watermark.try_recv().unwrap().through_sequence(), 2);
         assert!(watermark.is_empty());
 
         let global = hub.subscribe(EventScope::All).unwrap();
         let matching = hub
             .subscribe(EventScope::Session("current".into()))
             .unwrap();
-        hub.publish("task_test", "current", &[3], event_at, || unreachable!());
+        hub.publish("task_test", "current", &[4], event_at, || unreachable!());
         assert_eq!(copies.get(), 2);
         assert!(scoped.is_empty());
-        assert_eq!(global.try_recv().unwrap().sequence, 3);
-        assert_eq!(matching.try_recv().unwrap().sequence, 3);
-        assert_eq!(watermark.try_recv().unwrap(), 3);
+        assert_eq!(global.try_recv().unwrap().sequence, 4);
+        assert_eq!(matching.try_recv().unwrap().sequence, 4);
+        assert_eq!(watermark.try_recv().unwrap().through_sequence(), 4);
     }
 
     #[test]
