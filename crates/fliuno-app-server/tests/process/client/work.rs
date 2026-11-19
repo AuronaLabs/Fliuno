@@ -68,6 +68,16 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     );
     let active_id = active["id"].as_str().unwrap();
     peer.wait_for_event(active_id, "model_started");
+    // ModelStarted is durable before the HTTP send. Let the fixture receive
+    // the complete request so shutdown tests an in-flight model response.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while held.requests().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "model request did not reach fixture"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
     let live = peer.call(
         "work/getSnapshot",
         json!({"workspaceId":ws,"approvalLimit":1}),
