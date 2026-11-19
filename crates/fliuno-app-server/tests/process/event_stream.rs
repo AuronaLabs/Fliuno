@@ -535,3 +535,81 @@ fn workspace_replay_preserves_the_global_watermark_after_migration() {
     assert_eq!(root.parent(), Some(temp.as_path()));
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn watermark_delivery_omits_the_committed_approval_body() {
+    let root =
+        std::env::temp_dir().join(format!("fliuno-event-watermark-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let mut peer = Peer::start(&root.join("kernel.db"));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let scope = json!({"sessionId":session["id"],"watermarkOnly":true});
+    assert_eq!(peer.call("events/setScope", scope)["throughSequence"], 0);
+    assert_eq!(
+        peer.request("events/setScope", json!({"after":1}))["error"]["code"],
+        -32009
+    );
+
+    let body = "x".repeat(128 * 1024);
+    let task = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":body}),
+    );
+    let id = task["id"].as_str().unwrap();
+    peer.wait_for_status(id, "waiting_approval");
+    let history = peer.call("events/list", json!({"taskId":id}));
+    let event = history["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["data"]["type"] == "approval_requested")
+        .unwrap();
+    assert_eq!(
+        event["data"]["approval"]["call"]["arguments"]["content"],
+        body
+    );
+    let through = &event["sequence"];
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut notes = std::mem::take(&mut peer.notifications).into_iter();
+    let mut compact = Vec::new();
+    loop {
+        let note = notes.next().unwrap_or_else(|| {
+            peer.output
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .unwrap()
+        });
+        assert_eq!(note["method"], "notifications/eventWatermark");
+        assert_eq!(note["params"].as_object().unwrap().len(), 1);
+        let done = note["params"]["throughSequence"] == *through;
+        compact.push(note);
+        if done {
+            break;
+        }
+    }
+    let full_bytes = serde_json::to_vec(
+        &json!({"jsonrpc":"2.0","method":"notifications/event","params":{"event":event}}),
+    )
+    .unwrap()
+    .len()
+        + 1;
+    let compact_bytes = serde_json::to_vec(compact.last().unwrap()).unwrap().len() + 1;
+    assert!(full_bytes > 128 * 1024);
+    assert!(compact_bytes < 100);
+    eprintln!(
+        "Approval notification bytes on stdio: {full_bytes} for the full shape, {compact_bytes} for the watermark."
+    );
+
+    peer.call(
+        "events/setScope",
+        json!({"sessionId":session["id"],"after":through}),
+    );
+    let next = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"full subscriber"}),
+    );
+    let live = peer.wait_for_event(next["id"].as_str().unwrap(), "task_started");
+    assert!(live["params"]["event"]["sequence"].as_u64() > through.as_u64());
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

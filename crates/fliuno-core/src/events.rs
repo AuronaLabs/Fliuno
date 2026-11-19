@@ -8,10 +8,13 @@ use std::sync::{Arc, Mutex, Weak};
 const MAX_SUBSCRIBERS: usize = 8;
 const SUBSCRIBER_CAPACITY: usize = 64;
 
-pub struct EventReceiver {
-    receiver: Receiver<Event>,
-    _active: Arc<()>,
+pub struct SubscriptionReceiver<T> {
+    receiver: Receiver<T>,
+    active: Arc<()>,
 }
+
+pub type EventReceiver = SubscriptionReceiver<Event>;
+pub type EventWatermarkReceiver = SubscriptionReceiver<u64>;
 
 pub struct ProgressReceiver {
     receiver: Receiver<ModelProgress>,
@@ -32,29 +35,36 @@ impl Deref for ProgressReceiver {
     }
 }
 
-impl Deref for EventReceiver {
-    type Target = Receiver<Event>;
+impl<T> Deref for SubscriptionReceiver<T> {
+    type Target = Receiver<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.receiver
     }
 }
 
-impl EventReceiver {
-    pub fn into_parts(self) -> (Receiver<Event>, Arc<()>) {
-        (self.receiver, self._active)
+impl<T> SubscriptionReceiver<T> {
+    pub fn into_parts(self) -> (Receiver<T>, Arc<()>) {
+        (self.receiver, self.active)
     }
 }
 
-pub(crate) enum EventScope {
+/// Select the tasks whose commits a subscription will observe.
+#[derive(Clone)]
+pub enum EventScope {
     All,
     Task(String),
     Session(String),
     Workspace(String),
 }
 
+enum EventSender {
+    Full(Sender<Event>),
+    Watermark(Sender<u64>),
+}
+
 struct EventSubscriber {
-    sender: Sender<Event>,
+    sender: EventSender,
     active: Weak<()>,
     scope: EventScope,
 }
@@ -83,6 +93,18 @@ impl EventHub {
     }
 
     pub(crate) fn subscribe(&self, scope: EventScope) -> Result<EventReceiver> {
+        self.subscribe_with(scope, EventSender::Full)
+    }
+
+    pub(crate) fn subscribe_watermarks(&self, scope: EventScope) -> Result<EventWatermarkReceiver> {
+        self.subscribe_with(scope, EventSender::Watermark)
+    }
+
+    fn subscribe_with<T>(
+        &self,
+        scope: EventScope,
+        sender_for: impl FnOnce(Sender<T>) -> EventSender,
+    ) -> Result<SubscriptionReceiver<T>> {
         let mut subscribers = self
             .subscribers
             .lock()
@@ -96,24 +118,25 @@ impl EventHub {
         let (sender, receiver) = bounded(SUBSCRIBER_CAPACITY);
         let active = Arc::new(());
         subscribers.push(EventSubscriber {
-            sender,
+            sender: sender_for(sender),
             active: Arc::downgrade(&active),
             scope,
         });
-        Ok(EventReceiver {
-            receiver,
-            _active: active,
-        })
+        Ok(SubscriptionReceiver { receiver, active })
     }
 
-    /// Evaluate the iterator only when delivering to a matching subscriber.
+    /// Materialize bodies only for matching full-event subscribers.
     pub(crate) fn publish(
         &self,
         task_id: &str,
         session_id: &str,
-        mut events: impl Iterator<Item = Event> + Clone,
+        sequences: &[u64],
+        event_at: impl Fn(usize, u64) -> Event,
         lookup_workspace: impl FnOnce() -> Result<String>,
     ) {
+        let Some(&through) = sequences.last() else {
+            return;
+        };
         let Ok(mut subscribers) = self.subscribers.lock() else {
             return;
         };
@@ -135,23 +158,18 @@ impl EventHub {
             None
         };
         let workspace = workspace.as_deref();
-        if let [subscriber] = subscribers.as_slice() {
-            // A stdio server normally has one subscriber. Move the committed
-            // event directly into its queue, even for large tool payloads.
-            if subscriber.accepts(task_id, session_id, workspace)
-                && events.any(|event| subscriber.sender.try_send(event).is_err())
-            {
-                subscribers.clear();
-            }
-            return;
-        }
         subscribers.retain(|subscriber| {
             if !subscriber.accepts(task_id, session_id, workspace) {
                 return true;
             }
-            events
-                .clone()
-                .all(|event| subscriber.sender.try_send(event).is_ok())
+            match &subscriber.sender {
+                EventSender::Full(sender) => sequences
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .all(|(index, sequence)| sender.try_send(event_at(index, sequence)).is_ok()),
+                EventSender::Watermark(sender) => sender.try_send(through).is_ok(),
+            }
         });
     }
 }
@@ -258,13 +276,18 @@ mod tests {
     fn slow_subscriber_is_disconnected_without_blocking_event_commit() {
         let hub = EventHub::new();
         let receiver = hub.subscribe(EventScope::All).unwrap();
-        let events = (1..=SUBSCRIBER_CAPACITY + 1).map(|sequence| Event {
-            sequence: sequence as u64,
-            task_id: "task_test".into(),
-            data: fliuno_protocol::EventKind::TaskStarted,
-        });
-
-        hub.publish("task_test", "session_test", events, || unreachable!());
+        let sequences = (1..=SUBSCRIBER_CAPACITY as u64 + 1).collect::<Vec<_>>();
+        hub.publish(
+            "task_test",
+            "session_test",
+            &sequences,
+            |_, sequence| Event {
+                sequence,
+                task_id: "task_test".into(),
+                data: fliuno_protocol::EventKind::TaskStarted,
+            },
+            || unreachable!(),
+        );
 
         for sequence in 1..=SUBSCRIBER_CAPACITY {
             assert_eq!(receiver.recv().unwrap().sequence, sequence as u64);
@@ -277,28 +300,32 @@ mod tests {
         let hub = EventHub::new();
         let scoped = hub.subscribe(EventScope::Session("other".into())).unwrap();
         let copies = std::cell::Cell::new(0);
-        let events = || {
-            std::iter::once_with(|| {
-                copies.set(copies.get() + 1);
-                Event {
-                    sequence: 1,
-                    task_id: "task_test".into(),
-                    data: fliuno_protocol::EventKind::TaskStarted,
-                }
-            })
+        let event_at = |_, sequence| {
+            copies.set(copies.get() + 1);
+            Event {
+                sequence,
+                task_id: "task_test".into(),
+                data: fliuno_protocol::EventKind::TaskStarted,
+            }
         };
-        hub.publish("task_test", "current", events(), || unreachable!());
+        let watermark = hub
+            .subscribe_watermarks(EventScope::Session("current".into()))
+            .unwrap();
+        hub.publish("task_test", "current", &[1, 2], event_at, || unreachable!());
         assert_eq!(copies.get(), 0);
+        assert_eq!(watermark.try_recv().unwrap(), 2);
+        assert!(watermark.is_empty());
 
         let global = hub.subscribe(EventScope::All).unwrap();
         let matching = hub
             .subscribe(EventScope::Session("current".into()))
             .unwrap();
-        hub.publish("task_test", "current", events(), || unreachable!());
+        hub.publish("task_test", "current", &[3], event_at, || unreachable!());
         assert_eq!(copies.get(), 2);
         assert!(scoped.is_empty());
-        assert_eq!(global.try_recv().unwrap().sequence, 1);
-        assert_eq!(matching.try_recv().unwrap().sequence, 1);
+        assert_eq!(global.try_recv().unwrap().sequence, 3);
+        assert_eq!(matching.try_recv().unwrap().sequence, 3);
+        assert_eq!(watermark.try_recv().unwrap(), 3);
     }
 
     #[test]

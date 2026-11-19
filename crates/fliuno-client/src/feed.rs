@@ -19,23 +19,22 @@ struct Signals {
 
 impl Signals {
     fn observe(&mut self, notification: Notification) -> Option<Notification> {
-        match notification.method.as_str() {
-            "notifications/event" => {
-                let sequence = notification.params["event"]["sequence"].as_u64();
-                match sequence {
-                    Some(sequence) if (1..=i64::MAX as u64).contains(&sequence) => {
-                        self.through = self.through.max(sequence);
-                    }
-                    _ => self.gap = true,
-                }
-                None
-            }
+        let sequence = match notification.method.as_str() {
+            "notifications/event" => notification.params["event"]["sequence"].as_u64(),
+            "notifications/eventWatermark" => notification.params["throughSequence"].as_u64(),
             "notifications/eventGap" => {
                 self.gap = true;
-                None
+                return None;
             }
-            _ => Some(notification),
+            _ => return Some(notification),
+        };
+        match sequence {
+            Some(sequence) if (1..=i64::MAX as u64).contains(&sequence) => {
+                self.through = self.through.max(sequence);
+            }
+            _ => self.gap = true,
         }
+        None
     }
 }
 
@@ -108,10 +107,16 @@ fn subscribe<R: BufRead, W: Write>(
 ) -> Result<EventReplay, Error> {
     // These notifications belong to the prior subscription. Its durable events
     // are covered by the new replay window, and its gaps no longer apply.
-    client.subscribe_events(scope.clone(), after, |note| {
+    let watermark_only = client
+        .info()
+        .capabilities
+        .get("eventWatermarkNotifications")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    client.subscribe_events_with_watermarks(scope.clone(), after, watermark_only, |note| {
         if !matches!(
             note.method.as_str(),
-            "notifications/event" | "notifications/eventGap"
+            "notifications/event" | "notifications/eventWatermark" | "notifications/eventGap"
         ) {
             on_notification(note);
         }

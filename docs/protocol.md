@@ -81,7 +81,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `events/get` | `{sequence}` | 按全局序号读取一条持久事件 |
 | `events/listSession` | `{sessionId, after?:0, through?, limit?:100, targetBytes?}` | 单个会话的持久事件页，沿用全局序号 |
 | `events/listWorkspace` | `{workspaceId,after?,through?,limit?,targetBytes?}` | 按全局游标回放工作区各会话的持久事件 |
-| `events/setScope` | `{taskId?,sessionId?,workspaceId?,after?}` | 将实时持久事件限定到一个任务、会话或工作区，也可恢复全局范围，返回 `{throughSequence}` |
+| `events/setScope` | `{taskId?,sessionId?,workspaceId?,after?,watermarkOnly?}` | 将实时持久事件限定到一个任务、会话或工作区，也可恢复全局范围，返回 `{throughSequence}` |
 | `events/resubscribe` | `{}` | 在队列溢出后恢复实时通知，返回 `{throughSequence}` |
 | `artifacts/list` | `{taskId}` | Artifact 数组 |
 | `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
@@ -260,7 +260,9 @@ PTY 输出按字节追加到 SQLite，游标是单调绝对 byte offset；默认
 
 支持 `eventResubscribe` 的连接收到 `notifications/eventGap` 后，可用 `events/resubscribe` 重新订阅。先暂存恢复后的实时通知，再从本地游标调用当前范围对应的回放方法，传入返回的 `throughSequence` 作为包含式 `through`。回放结束后按序号处理暂存通知。服务在同一内核锁下采集水位并建立订阅，实时通知从该水位之后开始，沿用恢复前的范围。若实时队列再次溢出，可重新建立订阅并从已保存游标补齐。订阅仍有效时重复调用返回 -32009。
 
-Rust 调用方可用 `fliuno_client::EventFeed::subscribe` 建立订阅，将其他 RPC 的通知回调和连接空闲时的通知交给 `observe`。`next_page` 从当前水位读取已提交事件，在收到缺口后按同一范围重新订阅并补读。事件通知只更新最高序号，客户端不会缓冲通知正文。调用方可将处理后的页面和 `cursor()` 一起保存，重连时从保存位置继续。`None` 表示已经读到目前收到通知的水位。`EventFeed` 管理当前连接的订阅范围，模型预览和终端通知照常交给调用方。
+服务声明 `eventWatermarkNotifications:true` 时，`events/setScope` 支持 `watermarkOnly:true`。每次匹配范围内的提交发送一条 `notifications/eventWatermark`，参数为 `{throughSequence}`。该序号是本次提交的最后一个事件。工具输出等正文只在分页回放中读取。收到缺口后，`events/resubscribe` 延续原来的范围与通知模式。省略 `watermarkOnly` 的订阅继续使用完整事件通知。
+
+Rust 调用方可用 `fliuno_client::EventFeed::subscribe` 建立订阅，将其他 RPC 的通知回调和连接空闲时的通知交给 `observe`。`next_page` 从当前水位读取已提交事件，在收到缺口后按同一范围重新订阅并补读。事件通知只更新最高序号，客户端不会缓冲通知正文。调用方可将处理后的页面和 `cursor()` 一起保存，重连时从保存位置继续。`None` 表示已经读到目前收到通知的水位。`EventFeed` 管理当前连接的订阅范围，在服务支持时选用水位通知。模型预览和终端通知照常交给调用方。
 
 ## 错误
 

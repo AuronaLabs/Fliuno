@@ -113,6 +113,7 @@ pub fn schema_bundle() -> Value {
         "ArtifactCatalogSnapshotPage" => schema::<ArtifactCatalogSnapshotPage>(),
         "Event" => schema::<Event>(),
         "EventSubscription" => schema::<EventSubscription>(),
+        "EventWatermark" => schema::<EventWatermark>(),
         "ModelProgress" => schema::<ModelProgress>(),
         "ModelBudget" => schema::<ModelBudget>(),
         "EventsPage" => schema::<EventsPage>()

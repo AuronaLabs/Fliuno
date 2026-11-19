@@ -4,7 +4,10 @@ mod scheduler;
 mod terminal_subscriptions;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use fliuno_core::{ApprovalOutcome, Error, EventReceiver, Kernel, ProgressReceiver};
+use fliuno_core::{
+    ApprovalOutcome, Error, EventReceiver, EventScope, EventWatermarkReceiver, Kernel,
+    ProgressReceiver,
+};
 use fliuno_protocol::*;
 use scheduler::TaskScheduler;
 use serde::de::DeserializeOwned;
@@ -13,20 +16,14 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 const MAX_BATCH_ITEMS: usize = 128;
 
-#[derive(Clone)]
-enum EventScope {
-    All,
-    Task(String),
-    Session(String),
-    Workspace(String),
-}
-
 pub struct RpcServer {
     kernel: Arc<Mutex<Kernel>>,
     scheduler: TaskScheduler,
     agent_catalog: Option<agent_catalog::Catalog>,
     event_receiver: Option<(u64, EventReceiver)>,
+    watermark_receiver: Option<(u64, EventWatermarkReceiver)>,
     event_scope: EventScope,
+    watermark_only: bool,
     event_stream_gap: bool,
     progress_receiver: Option<ProgressReceiver>,
     progress_stream_gap: bool,
@@ -104,7 +101,9 @@ impl RpcServer {
             scheduler,
             agent_catalog,
             event_receiver: Some((0, event_receiver)),
+            watermark_receiver: None,
             event_scope: EventScope::All,
+            watermark_only: false,
             event_stream_gap: false,
             progress_receiver: Some(progress_receiver),
             progress_stream_gap: false,
@@ -129,12 +128,17 @@ impl RpcServer {
         self.event_receiver.take()
     }
 
+    pub fn take_pending_watermark_subscription(&mut self) -> Option<(u64, EventWatermarkReceiver)> {
+        self.watermark_receiver.take()
+    }
+
     fn replace_event_subscription(
         &mut self,
         scope: EventScope,
         after: Option<u64>,
+        watermark_only: bool,
     ) -> Result<EventSubscription, RpcError> {
-        let (through_sequence, receiver) = {
+        let (through_sequence, events, watermarks) = {
             // Committing workers hold this lock. The watermark and
             // subscription therefore cover adjacent event ranges.
             let kernel = self.kernel()?;
@@ -145,16 +149,26 @@ impl RpcServer {
                 )
                 .into());
             }
-            let receiver = match &scope {
-                EventScope::Task(id) => kernel.subscribe_task_events(id)?,
-                EventScope::Session(id) => kernel.subscribe_session_events(id)?,
-                EventScope::Workspace(id) => kernel.subscribe_workspace_events(id)?,
-                EventScope::All => kernel.subscribe_events()?,
-            };
-            (through_sequence, receiver)
+            if watermark_only {
+                (
+                    through_sequence,
+                    None,
+                    Some(kernel.subscribe_event_watermarks(scope.clone())?),
+                )
+            } else {
+                let receiver = match &scope {
+                    EventScope::Task(id) => kernel.subscribe_task_events(id)?,
+                    EventScope::Session(id) => kernel.subscribe_session_events(id)?,
+                    EventScope::Workspace(id) => kernel.subscribe_workspace_events(id)?,
+                    EventScope::All => kernel.subscribe_events()?,
+                };
+                (through_sequence, Some(receiver), None)
+            }
         };
-        self.event_receiver = Some((through_sequence, receiver));
+        self.event_receiver = events.map(|receiver| (through_sequence, receiver));
+        self.watermark_receiver = watermarks.map(|receiver| (through_sequence, receiver));
         self.event_scope = scope;
+        self.watermark_only = watermark_only;
         self.event_stream_gap = false;
         Ok(EventSubscription { through_sequence })
     }
@@ -363,6 +377,7 @@ impl RpcServer {
             capabilities["eventBySequence"] = json!(true);
             capabilities["eventSubscriptionScope"] = json!(true);
             capabilities["eventSubscriptionCursor"] = json!(true);
+            capabilities["eventWatermarkNotifications"] = json!(true);
             capabilities["workspaceEventSubscription"] = json!(true);
             capabilities["taskEventSubscription"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
@@ -796,7 +811,11 @@ impl RpcServer {
                         );
                     }
                 };
-                json!(self.replace_event_subscription(scope, p.after)?)
+                json!(self.replace_event_subscription(
+                    scope,
+                    p.after,
+                    p.watermark_only.unwrap_or(false)
+                )?)
             }
             "events/resubscribe" => {
                 if params != json!({}) {
@@ -805,7 +824,11 @@ impl RpcServer {
                 if !self.event_stream_gap {
                     return Err(Error::Conflict("event stream is already subscribed".into()).into());
                 }
-                json!(self.replace_event_subscription(self.event_scope.clone(), None)?)
+                json!(self.replace_event_subscription(
+                    self.event_scope.clone(),
+                    None,
+                    self.watermark_only
+                )?)
             }
             "modelProgress/resubscribe" => {
                 if params != json!({}) {

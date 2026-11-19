@@ -67,15 +67,7 @@ impl Kernel {
         )?
         .execute(params![task_id, check_id, sequence])?;
         tx.commit()?;
-        self.publish_task_events(
-            task_id,
-            &session_id,
-            std::iter::once(Event {
-                sequence: sequence as u64,
-                task_id: task_id.into(),
-                data,
-            }),
-        );
+        self.publish_task_events(task_id, &session_id, &[sequence as u64], &[data]);
         Ok(())
     }
 }

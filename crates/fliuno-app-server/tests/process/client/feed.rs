@@ -82,6 +82,7 @@ fn event_feed_repairs_real_server_overflow_in_the_same_scope() {
     frame.push(b'\n');
     *queued.borrow_mut() = Some(frame);
     let mut gap = false;
+    let mut observed_watermarks = 0;
     let deadline = Instant::now() + Duration::from_secs(5);
     while !gap {
         let _: Value = client
@@ -89,6 +90,12 @@ fn event_feed_repairs_real_server_overflow_in_the_same_scope() {
                 "workspace/get",
                 &json!({"workspaceId":workspace.id}),
                 |note| {
+                    assert_ne!(note.method, "notifications/event");
+                    if note.method == "notifications/eventWatermark" {
+                        assert_eq!(note.params.as_object().unwrap().len(), 1);
+                        assert!(note.params["throughSequence"].is_u64());
+                        observed_watermarks += 1;
+                    }
                     gap |= note.method == "notifications/eventGap";
                     assert!(feed.observe(note).is_none());
                 },
@@ -99,6 +106,7 @@ fn event_feed_repairs_real_server_overflow_in_the_same_scope() {
             thread::sleep(Duration::from_millis(10));
         }
     }
+    assert_eq!(observed_watermarks, 64);
     let mut delivered = Vec::new();
     while let Some(page) = feed.next_page(&mut client, 11, Some(4096), |_| {}).unwrap() {
         assert!(!page.is_empty() && page.len() <= 11);

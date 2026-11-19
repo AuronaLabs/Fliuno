@@ -2,7 +2,7 @@
 mod configuration;
 use fliuno_app_server::RpcServer;
 use fliuno_core::Kernel;
-use fliuno_protocol::{Event, MAX_APP_REQUEST_BYTES, ModelProgress};
+use fliuno_protocol::{Event, EventWatermark, MAX_APP_REQUEST_BYTES, ModelProgress};
 use serde::Serialize;
 use serde_json::json;
 use std::{
@@ -140,6 +140,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut stdout = BufWriter::with_capacity(64 * 1024, io::stdout().lock());
     let mut last_event_sequence = 0;
     let mut event_rx = event_rx;
+    let mut watermark_rx = crossbeam_channel::never();
     let mut progress_rx = progress_rx;
     loop {
         crossbeam_channel::select! {
@@ -157,6 +158,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         last_event_sequence = through_sequence;
                         let (new_rx, subscription) = receiver.into_parts();
                         event_rx = new_rx;
+                        watermark_rx = crossbeam_channel::never();
+                        event_subscription = Some(subscription);
+                    } else if let Some((through_sequence, receiver)) = server.take_pending_watermark_subscription() {
+                        last_event_sequence = through_sequence;
+                        let (new_rx, subscription) = receiver.into_parts();
+                        watermark_rx = new_rx;
+                        event_rx = crossbeam_channel::never();
                         event_subscription = Some(subscription);
                     }
                     if let Some(receiver) = server.take_pending_progress_receiver() {
@@ -179,12 +187,21 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     write_notification(&mut stdout, "notifications/event", EventParams { event })?;
                 }
                 Err(_) => {
-                    write_frame(&mut stdout, &json!({
-                        "jsonrpc":"2.0", "method":"notifications/eventGap",
-                        "params":{"afterSequence":last_event_sequence}
-                    }))?;
+                    write_event_gap(&mut stdout, last_event_sequence)?;
                     drop(event_subscription.take());
                     event_rx = crossbeam_channel::never();
+                    server.mark_event_stream_gap();
+                }
+            },
+            recv(watermark_rx) -> watermark => match watermark {
+                Ok(through_sequence) => {
+                    last_event_sequence = through_sequence;
+                    write_notification(&mut stdout, "notifications/eventWatermark", EventWatermark { through_sequence })?;
+                }
+                Err(_) => {
+                    write_event_gap(&mut stdout, last_event_sequence)?;
+                    drop(event_subscription.take());
+                    watermark_rx = crossbeam_channel::never();
                     server.mark_event_stream_gap();
                 }
             },
@@ -262,6 +279,16 @@ struct EventParams {
 #[derive(Serialize)]
 struct ProgressParams {
     progress: ModelProgress,
+}
+
+fn write_event_gap(stdout: &mut impl Write, after_sequence: u64) -> io::Result<()> {
+    write_frame(
+        stdout,
+        &json!({
+            "jsonrpc":"2.0", "method":"notifications/eventGap",
+            "params":{"afterSequence":after_sequence}
+        }),
+    )
 }
 
 fn write_notification(

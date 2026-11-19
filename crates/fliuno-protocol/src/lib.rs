@@ -868,6 +868,9 @@ pub struct EventsSetScopeParams {
     /// If supplied, reject subscription changes when this cursor is ahead of the database.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after: Option<u64>,
+    /// Request one compact watermark notification per matching commit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watermark_only: Option<bool>,
 
     #[serde(default)]
     pub task_id: Option<String>,
@@ -881,6 +884,12 @@ pub struct EventsSetScopeParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventSubscription {
     /// Replay through this sequence. Live notifications cover later events.
+    pub through_sequence: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EventWatermark {
     pub through_sequence: u64,
 }
 

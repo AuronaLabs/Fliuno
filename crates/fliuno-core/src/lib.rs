@@ -32,7 +32,9 @@ pub use agent_tools::AgentToolObservation;
 pub use approval::{ApprovalOutcome, PreparedToolExecution};
 pub use context::{MAX_CONTEXT_BYTES, MAX_CONTEXT_CANDIDATES, MAX_CONTEXT_TURNS, context_prompt};
 pub use error::{Error, Result};
-pub use events::{EventReceiver, ProgressPublisher, ProgressReceiver};
+pub use events::{
+    EventReceiver, EventScope, EventWatermarkReceiver, ProgressPublisher, ProgressReceiver,
+};
 pub use policy::{AskForWrites, PolicyDecision, PolicyEngine};
 pub use provider::{
     CancellationToken, DemoProvider, ModelDecision, ModelError, ModelProvider, ModelStreamEvent,
@@ -107,6 +109,17 @@ impl Kernel {
         self.require_workspace(workspace_id)?;
         self.events
             .subscribe(events::EventScope::Workspace(workspace_id.into()))
+    }
+
+    /// Subscribe to compact commit watermarks using the same event scope rules.
+    pub fn subscribe_event_watermarks(&self, scope: EventScope) -> Result<EventWatermarkReceiver> {
+        match &scope {
+            EventScope::All => {}
+            EventScope::Task(id) => self.require_task(id)?,
+            EventScope::Session(id) => self.require_session(id)?,
+            EventScope::Workspace(id) => self.require_workspace(id)?,
+        }
+        self.events.subscribe_watermarks(scope)
     }
 
     pub fn subscribe_model_progress(&self) -> Result<ProgressReceiver> {

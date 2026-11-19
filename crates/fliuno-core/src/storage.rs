@@ -423,18 +423,7 @@ impl Kernel {
             }
         }
         tx.commit()?;
-        if !sequences.is_empty() {
-            let committed = sequences
-                .iter()
-                .copied()
-                .zip(events)
-                .map(|(sequence, data)| Event {
-                    sequence,
-                    task_id: task.id.clone(),
-                    data: data.clone(),
-                });
-            self.publish_task_events(&task.id, &task.session_id, committed);
-        }
+        self.publish_task_events(&task.id, &task.session_id, &sequences, events);
         Ok(())
     }
 
@@ -442,14 +431,25 @@ impl Kernel {
         &self,
         task_id: &str,
         session_id: &str,
-        events: impl Iterator<Item = Event> + Clone,
+        sequences: &[u64],
+        events: &[EventKind],
     ) {
-        self.events.publish(task_id, session_id, events, || {
-            Ok(self
-                .db
-                .prepare_cached("SELECT workspace_id FROM sessions WHERE id=?1")?
-                .query_row([session_id], |row| row.get(0))?)
-        });
+        self.events.publish(
+            task_id,
+            session_id,
+            sequences,
+            |index, sequence| Event {
+                sequence,
+                task_id: task_id.to_owned(),
+                data: events[index].clone(),
+            },
+            || {
+                Ok(self
+                    .db
+                    .prepare_cached("SELECT workspace_id FROM sessions WHERE id=?1")?
+                    .query_row([session_id], |row| row.get(0))?)
+            },
+        );
     }
 
     pub(crate) fn recover(&mut self) -> Result<()> {

@@ -30,6 +30,16 @@ impl<R: BufRead, W: Write> Client<R, W> {
         after: u64,
         on_notification: impl FnMut(Notification),
     ) -> Result<EventReplay, Error> {
+        self.subscribe_events_with_watermarks(scope, after, false, on_notification)
+    }
+
+    pub(crate) fn subscribe_events_with_watermarks(
+        &mut self,
+        scope: ReplayScope,
+        after: u64,
+        watermark_only: bool,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<EventReplay, Error> {
         if after > i64::MAX as u64 {
             return Err(Error::InvalidReplayWindow);
         }
@@ -41,6 +51,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
                 .then_some(after),
+            watermark_only: watermark_only.then_some(true),
             task_id: None,
             session_id: None,
             workspace_id: None,
