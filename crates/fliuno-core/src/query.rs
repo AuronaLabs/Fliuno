@@ -1,7 +1,9 @@
 //! Read queries and pagination. Cursors are database-local opaque row positions.
 use super::*;
 use rusqlite::{OptionalExtension, params};
-use serde::de::DeserializeOwned;
+use serde::{Serialize, de::DeserializeOwned};
+
+pub const MAX_TASK_LIST_TARGET_BYTES: u32 = 8 * 1024 * 1024;
 
 impl Kernel {
     /// Read the saved workspace identity without accessing the host path.
@@ -63,12 +65,27 @@ impl Kernel {
     }
 
     pub fn list_tasks(&self, session: &str, after: u64, limit: u32) -> Result<ObjectPage<Task>> {
+        self.list_tasks_with_target(session, after, limit, None)
+    }
+
+    pub fn list_tasks_with_target(
+        &self,
+        session: &str,
+        after: u64,
+        limit: u32,
+        target_bytes: Option<u32>,
+    ) -> Result<ObjectPage<Task>> {
+        if target_bytes.is_some_and(|n| !(1024..=MAX_TASK_LIST_TARGET_BYTES).contains(&n)) {
+            return Err(Error::Invalid("targetBytes must be 1024..8388608".into()));
+        }
         self.require_session(session)?;
-        self.object_page(
+        let (cursor, fetch) = page_range(after, limit)?;
+        self.query_object_page(
             "SELECT rowid,data FROM tasks WHERE session_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3",
-            Some(session),
+            params![session, cursor, fetch],
             after,
             limit,
+            target_bytes,
         )
     }
 
@@ -110,6 +127,7 @@ impl Kernel {
                 params![session, status.as_str(), cursor, fetch],
                 after,
                 limit,
+                None,
             );
         }
         // Keep the row cursor shared with task/list and load only the summary.
@@ -143,6 +161,7 @@ impl Kernel {
                 params![workspace, status.as_str(), cursor, fetch],
                 after,
                 limit,
+                None,
             );
         }
         self.object_page(
@@ -156,7 +175,7 @@ impl Kernel {
         )
     }
 
-    fn object_page<T: DeserializeOwned>(
+    fn object_page<T: DeserializeOwned + Serialize>(
         &self,
         sql: &str,
         scope: Option<&str>,
@@ -164,28 +183,41 @@ impl Kernel {
         limit: u32,
     ) -> Result<ObjectPage<T>> {
         let (cursor, fetch) = page_range(after, limit)?;
-        self.query_object_page(sql, params![scope, cursor, fetch], after, limit)
+        self.query_object_page(sql, params![scope, cursor, fetch], after, limit, None)
     }
 
-    fn query_object_page<T: DeserializeOwned>(
+    fn query_object_page<T: DeserializeOwned + Serialize>(
         &self,
         sql: &str,
         params: impl rusqlite::Params,
         after: u64,
         limit: u32,
+        target_bytes: Option<u32>,
     ) -> Result<ObjectPage<T>> {
         let mut statement = self.db.prepare_cached(sql)?;
         let mut rows = statement.query(params)?;
         let mut items = Vec::with_capacity(limit as usize);
         let mut next_after = after;
         let mut has_more = false;
+        let mut bytes = 2; // Array brackets.
         while let Some(row) = rows.next()? {
-            if items.len() == limit as usize {
+            if items.len() == limit as usize
+                || target_bytes.is_some_and(|target| bytes >= target as usize)
+            {
                 has_more = true;
                 break;
             }
             let data = row.get_ref(1)?.as_str().map_err(rusqlite::Error::from)?;
-            items.push(serde_json::from_str(data)?);
+            let item = serde_json::from_str(data)?;
+            if let Some(target) = target_bytes {
+                bytes += json_size(&item)? + usize::from(!items.is_empty());
+                if bytes > target as usize && !items.is_empty() {
+                    // Keep the candidate for the next page, even if it is large.
+                    has_more = true;
+                    break;
+                }
+            }
+            items.push(item);
             next_after = row.get::<_, i64>(0)? as u64;
         }
         Ok(ObjectPage {

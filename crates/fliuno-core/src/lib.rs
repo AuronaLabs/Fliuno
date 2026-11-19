@@ -13,6 +13,7 @@ pub use json_size::json_size;
 mod policy;
 mod provider;
 mod query;
+pub use query::MAX_TASK_LIST_TARGET_BYTES;
 mod registry;
 mod storage;
 mod task;

@@ -17,7 +17,7 @@
 | `initialize` | `{protocolVersion, clientName}` | 服务身份与能力 |
 | `workspace/list` | `{after?:0,limit?:100}` | Workspace ObjectPage |
 | `session/list` | `{workspaceId,archived?,after?:0,limit?:100}` | Session ObjectPage，可按归档状态筛选 |
-| `task/list` | `{sessionId,after?:0,limit?:100}` | Task ObjectPage |
+| `task/list` | `{sessionId,after?:0,limit?:100,targetBytes?}` | Task ObjectPage |
 | `task/listSummaries` | `{sessionId,status?,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,after?,limit?}` | 按创建顺序跨会话分页读取同一工作区的任务摘要 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
@@ -291,6 +291,8 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 路径使用相对的正斜杠形式。绝对路径、`..`、反斜杠、ADS、Windows 设备名等被拒绝，目录能力继续约束实际路径解析。
 
 对象分页返回 `{items,nextAfter,hasMore}`，对象列表 limit 在 1..100；after 是数据库局部游标，不应解析其数值意义。`clientRequestId` 为会话内 1..128 可打印 ASCII 字节；重试必须使用相同输入、后端与上下文选项。新任务省略 context 和显式默认选项等价；升级前 context=null 的旧任务仅接受未显式指定 context 的原样重试。没有提供幂等键的 task/start 每次都创建新任务。
+
+`initialize.capabilities.taskListTargetBytes` 给出 `task/list` 支持的最大字节目标。传入 `targetBytes`（1024～8388608）时，`items` 按紧凑 JSON 的 UTF-8 长度分页。单项已超过目标时仍完整返回该项。字节目标和行数上限共用原始 `nextAfter` 游标，可用 `task/listSummaries` 在相同位置读取摘要。
 
 ### 查找历史任务
 

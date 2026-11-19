@@ -766,6 +766,16 @@
           "format": "uint32",
           "minimum": 0,
           "default": 100
+        },
+        "targetBytes": {
+          "description": "Compact items array byte target. A larger first task still advances the cursor.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
         }
       },
       "additionalProperties": false,

@@ -342,6 +342,7 @@ impl RpcServer {
             capabilities["taskEventSubscription"] = json!(true);
             capabilities["contextConversationDetail"] = json!(true);
             capabilities["contextAtSequence"] = json!(true);
+            capabilities["taskListTargetBytes"] = json!(fliuno_core::MAX_TASK_LIST_TARGET_BYTES);
             capabilities["taskSummaryById"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["workspaceTaskSummaries"] = json!(true);
@@ -472,7 +473,12 @@ impl RpcServer {
             }
             "task/list" => {
                 let p: TaskListParams = decode(params)?;
-                json!(self.kernel()?.list_tasks(&p.session_id, p.after, p.limit)?)
+                json!(self.kernel()?.list_tasks_with_target(
+                    &p.session_id,
+                    p.after,
+                    p.limit,
+                    p.target_bytes,
+                )?)
             }
             "task/listSummaries" => {
                 let p: TaskSummaryListParams = decode(params)?;

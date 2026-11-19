@@ -135,3 +135,66 @@ fn filtered_task_summaries_keep_the_catalog_cursor_across_migration_and_updates(
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn full_task_pages_respect_compact_bytes_and_advance_past_an_oversized_task() {
+    let root = std::env::temp_dir().join(format!("fliuno-task-pages-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let session_id = &session["id"];
+    let input = "报告\t\"".repeat(32);
+    for input in [&input, &input, &"很大的快照".repeat(512), &input] {
+        let task = peer.call("task/start", json!({"sessionId":session_id,"input":input}));
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval");
+    }
+    let full = peer.call("task/list", json!({"sessionId":session_id}));
+    let all = full["items"].as_array().unwrap();
+    assert_eq!(all.len(), 4);
+    let target = serde_json::to_vec(&all[..2]).unwrap().len();
+    assert!(target > 1024);
+    assert!(serde_json::to_vec(&all[2..3]).unwrap().len() > target);
+    let first = peer.call(
+        "task/list",
+        json!({"sessionId":session_id,"targetBytes":target}),
+    );
+    assert_eq!(first["items"].as_array().unwrap(), &all[..2]);
+    assert_eq!(first["hasMore"], true);
+    let smaller = peer.call(
+        "task/list",
+        json!({"sessionId":session_id,"targetBytes":target-1}),
+    );
+    assert_eq!(smaller["items"].as_array().unwrap(), &all[..1]);
+    let by_count = peer.call(
+        "task/list",
+        json!({"sessionId":session_id,"limit":1,"targetBytes":target}),
+    );
+    assert_eq!(by_count, smaller);
+    let second = peer.call(
+        "task/list",
+        json!({"sessionId":session_id,"after":first["nextAfter"],"targetBytes":target}),
+    );
+    assert_eq!(second["items"].as_array().unwrap(), &all[2..3]);
+    assert_eq!(second["hasMore"], true);
+    let last = peer.call(
+        "task/list",
+        json!({"sessionId":session_id,"after":second["nextAfter"],"targetBytes":target}),
+    );
+    assert_eq!(last["items"].as_array().unwrap(), &all[3..]);
+    assert_eq!(last["hasMore"], false);
+    let summaries = peer.call(
+        "task/listSummaries",
+        json!({"sessionId":session_id,"after":second["nextAfter"]}),
+    );
+    assert_eq!(summaries["items"][0]["id"], all[3]["id"]);
+    assert_eq!(summaries["nextAfter"], last["nextAfter"]);
+    let invalid = peer.request(
+        "task/list",
+        json!({"sessionId":session_id,"targetBytes":1023}),
+    );
+    assert_eq!(invalid["error"]["code"], -32602);
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

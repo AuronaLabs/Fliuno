@@ -612,6 +612,9 @@ pub struct TaskListParams {
     pub after: u64,
     #[serde(default = "default_limit")]
     pub limit: u32,
+    /// Compact items array byte target. A larger first task still advances the cursor.
+    #[serde(default)]
+    pub target_bytes: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

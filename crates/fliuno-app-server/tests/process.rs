@@ -148,6 +148,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["pendingApprovalInbox"], true);
         assert_eq!(init["capabilities"]["pendingApprovalDetails"], true);
         assert_eq!(init["capabilities"]["artifactSummaries"], true);
+        assert_eq!(init["capabilities"]["taskListTargetBytes"], 8_388_608);
         assert_eq!(init["capabilities"]["artifactSummaryById"], true);
         assert_eq!(init["capabilities"]["artifactByteReads"], true);
         assert_eq!(init["capabilities"]["maxArtifactReadBytes"], 65_536);

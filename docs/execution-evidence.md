@@ -225,3 +225,9 @@ Windows 随后以 `target/0.0.2-native-exec-artifact-types-windows.log` 完成�
 ## A2A 短时状态观察（2026-11-19）
 
 Windows 全量检查通过 396 项测试和 26 个离线演示，记录在 `target/0.0.2-a2a-watch-windows.log`。Windows 和 Debian 各通过 20 项 app-server A2A 进程测试，验证订阅形成独立的持久核对事件、原运行和产物保持原状、重启可回放核对结果。Debian 的 `D:/Fliuno-Native-Test/guest-a2a-watch.log` 同轮有两个普通 JSON-RPC 用例失败，其中一个报传输错误。普通 fixture 请求时限从 300 ms 调到 3 秒，专门的超时用例仍使用 300 ms。最终 Windows 和 Debian 各通过 16 项 JSON-RPC 用例，Debian 复跑记录在 `D:/Fliuno-Native-Test/guest-a2a-watch-confirm.log`。
+
+## 历史角色筛选和任务快照字节分页（2026-11-19）
+
+Windows 和 Debian 各通过 4 项上下文进程测试和 2 项任务清单进程测试。检索用例验证按角色查找、排除另一角色和重启后的快照游标。任务清单用例覆盖 JSON 转义及 UTF-8 字节数、恰好达到目标、单项超额、数量上限和摘要游标。Debian 记录为 `D:/Fliuno-Native-Test/guest-context-task-pages.log`。
+
+Windows 调试构建用同一批 32 个模拟任务快照交替请求 21 次。默认首屏返回 7,894,655 字节，客户端收到并解析响应的中位时间为 668.08 ms。指定 256 KiB 后首屏返回 1 个任务，共 246,706 字节，中位时间为 46.89 ms。该结果只比较首屏，读取全部任务仍需继续翻页。记录为 `target/0.0.2-task-pages-benchmark.log`。
