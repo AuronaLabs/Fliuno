@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 import time
 
+from rpc_client import build_server
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -17,10 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--deny", action="store_true", help="Reject the proposed artifact instead")
     args = parser.parse_args()
-    subprocess.run(["cargo", "build", "--quiet", "--locked", "-p", "fliuno-app-server"], cwd=ROOT, check=True)
-    # Resolve Cargo's target directory instead of assuming the host's layout.
-    metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=ROOT))
-    exe = Path(metadata["target_directory"]) / "debug" / ("fliuno-app-server.exe" if os.name == "nt" else "fliuno-app-server")
+    exe = build_server()
     with tempfile.TemporaryDirectory(prefix="fliuno-demo-") as directory:
         env = dict(os.environ, FLIUNO_PROVIDER="demo")
         child = subprocess.Popen([str(exe), "--db", str(Path(directory) / "kernel.db")],

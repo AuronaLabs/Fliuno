@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$previousDemoBinDir = $env:FLIUNO_DEMO_BIN_DIR
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     cargo fmt --all -- --check
@@ -9,7 +10,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'standalone sandbox Clippy failed' }
     cargo test --workspace --all-features --locked
     if ($LASTEXITCODE -ne 0) { throw 'tests failed' }
-    python scripts/export_schema.py --check
+    # Build the demo binaries once so the examples never relink a running executable.
+    cargo build --locked -p fliuno-app-server --features test-fixtures --bins
+    if ($LASTEXITCODE -ne 0) { throw 'demo binaries build failed' }
+    $metadataJson = cargo metadata --locked --no-deps --format-version 1
+    if ($LASTEXITCODE -ne 0) { throw 'cargo metadata failed' }
+    $targetDirectory = ($metadataJson | ConvertFrom-Json).target_directory
+    $env:FLIUNO_DEMO_BIN_DIR = Join-Path $targetDirectory 'debug'
+    $hostWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+    $serverName = if ($hostWindows) { 'fliuno-app-server.exe' } else { 'fliuno-app-server' }
+    $server = Join-Path $env:FLIUNO_DEMO_BIN_DIR $serverName
+    python scripts/export_schema.py --check --app-server $server
     if ($LASTEXITCODE -ne 0) { throw 'protocol schema is out of date' }
     python examples/demo.py
     if ($LASTEXITCODE -ne 0) { throw 'demo failed' }
@@ -49,7 +60,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'A2A streaming demo failed' }
     python examples/a2a_demo.py --streaming --cancel
     if ($LASTEXITCODE -ne 0) { throw 'A2A streaming cancellation demo failed' }
-    if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+    if ($hostWindows) {
         python examples/bundle_demo.py --runtime python
         if ($LASTEXITCODE -ne 0) { throw 'Python companion demo failed' }
         python examples/bundle_demo.py --runtime python --deny
@@ -66,5 +77,6 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'ACP workspace denial demo failed' }
     }
 } finally {
+    $env:FLIUNO_DEMO_BIN_DIR = $previousDemoBinDir
     Pop-Location
 }

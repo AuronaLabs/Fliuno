@@ -11,9 +11,12 @@ TARGET = ROOT / "protocol" / "fliuno.schema.json"
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--app-server", type=Path, help="Use an already built app-server")
     args = parser.parse_args()
+    command = ([str(args.app_server.resolve(strict=True)), "--schema"] if args.app_server else
+               ["cargo", "run", "--quiet", "--locked", "-p", "fliuno-app-server", "--", "--schema"])
     output = subprocess.run(
-        ["cargo", "run", "--quiet", "--locked", "-p", "fliuno-app-server", "--", "--schema"],
+        command,
         cwd=ROOT, capture_output=True, check=True,
     )
     schema = json.loads(output.stdout)

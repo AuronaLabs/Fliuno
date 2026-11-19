@@ -10,16 +10,23 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def build_server():
-    subprocess.run(
-        ["cargo", "build", "--quiet", "--locked", "-p", "fliuno-app-server"],
-        cwd=ROOT, check=True,
-    )
+def build_binaries(*, fixtures=False):
+    prepared = os.environ.get("FLIUNO_DEMO_BIN_DIR")
+    if prepared:
+        return Path(prepared).resolve(strict=True)
+    command = ["cargo", "build", "--quiet", "--locked", "-p", "fliuno-app-server"]
+    if fixtures:
+        command += ["--features", "test-fixtures", "--bins"]
+    subprocess.run(command, cwd=ROOT, check=True)
     metadata = json.loads(subprocess.check_output(
         ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=ROOT,
     ))
+    return Path(metadata["target_directory"]) / "debug"
+
+
+def build_server():
     name = "fliuno-app-server.exe" if os.name == "nt" else "fliuno-app-server"
-    return Path(metadata["target_directory"]) / "debug" / name
+    return (build_binaries() / name).resolve(strict=True)
 
 
 class LocalKernel:

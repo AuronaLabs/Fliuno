@@ -14,6 +14,8 @@ import tempfile
 import threading
 import time
 
+from rpc_client import build_binaries
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -24,14 +26,7 @@ def main():
     args = parser.parse_args()
     if os.name != "nt":
         raise SystemExit("This demo requires the Windows AppContainer backend.")
-    subprocess.run(
-        ["cargo", "build", "--quiet", "--locked", "-p", "fliuno-app-server",
-         "--features", "test-fixtures", "--bins"], cwd=ROOT, check=True,
-    )
-    metadata = json.loads(subprocess.check_output(
-        ["cargo", "metadata", "--no-deps", "--format-version", "1"], cwd=ROOT,
-    ))
-    binaries = Path(metadata["target_directory"]) / "debug"
+    binaries = build_binaries(fixtures=True)
     with tempfile.TemporaryDirectory(prefix="fliuno-agent-demo-") as directory:
         directory = Path(directory)
         config = directory / "agents.json"
