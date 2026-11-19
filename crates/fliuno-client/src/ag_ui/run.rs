@@ -5,8 +5,9 @@ use super::{
 };
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
-    ApprovalRun, ApprovalRunWindow, MAX_APP_REQUEST_BYTES, TaskIdParams, TaskRequestLookupParams,
-    TaskStartParams, TaskStatus, TaskSummary,
+    ApprovalDetails, ApprovalRun, ApprovalRunPendingParams, ApprovalRunWindow,
+    MAX_APP_REQUEST_BYTES, TaskIdParams, TaskRequestLookupParams, TaskStartParams, TaskStatus,
+    TaskSummary,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -293,6 +294,35 @@ impl AgUiRun {
 }
 
 impl<R: BufRead, W: Write> Client<R, W> {
+    /// Read the pending model approval that ended this run. Hosts must authorize
+    /// the reviewer before calling this method.
+    pub fn get_ag_ui_interrupt_approval(
+        &mut self,
+        session_id: &str,
+        run_id: &str,
+        approval_id: &str,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<ApprovalDetails, AgUiRunError> {
+        if session_id.is_empty() {
+            return Err(AgUiRunError::WrongThread);
+        }
+        validate_run_id(run_id)?;
+        let details: ApprovalDetails = self.call(
+            "approval/getRunPending",
+            &ApprovalRunPendingParams {
+                session_id: session_id.to_owned(),
+                client_request_id: request_key(run_id, true),
+                approval_id: approval_id.to_owned(),
+            },
+            on_notification,
+        )?;
+        if !matches!(&details, ApprovalDetails::ToolCall { approval } if approval.id == approval_id)
+        {
+            return Err(AgUiRunError::InvalidResult);
+        }
+        Ok(details)
+    }
+
     /// Submit a bounded AG-UI JSON body for a session selected by the host.
     pub fn start_ag_ui_run(
         &mut self,

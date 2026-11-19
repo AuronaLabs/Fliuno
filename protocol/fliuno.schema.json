@@ -1766,6 +1766,28 @@
         "clientRequestId"
       ]
     },
+    "approval/getRunPending": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalRunPendingParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        },
+        "approvalId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clientRequestId",
+        "approvalId"
+      ]
+    },
     "approval/cancelRun": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskRequestLookupParams",

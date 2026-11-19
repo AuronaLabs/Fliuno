@@ -15,16 +15,23 @@ pub(super) fn connect_with_writer<W: Write>(
     db: &std::path::Path,
     wrap: impl FnOnce(ChildStdin) -> W,
 ) -> (Server, Client<BufReader<ChildStdout>, W>) {
-    let mut server = Server(
-        Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
-            .arg("--db")
-            .arg(db)
-            .env("FLIUNO_PROVIDER", "demo")
-            .stdout(Stdio::piped())
-            .stdin(Stdio::piped())
-            .spawn()
-            .unwrap(),
-    );
+    connect_with_command(db, |_| {}, wrap)
+}
+
+pub(super) fn connect_with_command<W: Write>(
+    db: &std::path::Path,
+    configure: impl FnOnce(&mut Command),
+    wrap: impl FnOnce(ChildStdin) -> W,
+) -> (Server, Client<BufReader<ChildStdout>, W>) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"));
+    command
+        .arg("--db")
+        .arg(db)
+        .env("FLIUNO_PROVIDER", "demo")
+        .stdout(Stdio::piped())
+        .stdin(Stdio::piped());
+    configure(&mut command);
+    let mut server = Server(command.spawn().unwrap());
     let client = Client::connect(
         BufReader::new(server.0.stdout.take().unwrap()),
         wrap(server.0.stdin.take().unwrap()),

@@ -564,3 +564,10 @@ Windows `scripts/check.ps1` 通过 464 项测试、28 个离线演示、rustfmt�
 另外用 60,004 条事件的合成数据库核对 SQL 查询计划：结束索引只存两条边界记录，查找按任务和序号使用主键范围。查询计划未扫描或排序事件历史。该探针验证查询路径，未测量 HTTP 延迟。日志：`target/0.0.3-ag-ui-indexed-replay-sqlite-plan.log`。
 
 Windows `scripts/check.ps1` 通过 464 项测试、28 个离线演示、rustfmt、两组严格 Clippy 和协议 Schema 检查。日志：`target/0.0.3-ag-ui-indexed-replay-windows.log`。
+
+
+## 0.0.3 AG-UI 连续两次审批（2026-11-19）
+
+真实 app-server 接入本机模型对端，连续请求两次产物工具调用。HTTP 测试验证已解决审批不可读取，父运行 ID 既不能读取后续工具参数，也不能替子运行处理第二个审批。用正确的子运行拒绝第二次调用，新的 SSE 段以 `RUN_ERROR` 结束。重复拒绝回放同一执行段；数据库中只记录一次工具启动和一次拒绝决定。
+
+Windows `scripts/check.ps1` 通过 465 项测试、28 个离线演示、rustfmt、两组严格 Clippy 和协议 Schema 检查。日志：`target/0.0.3-ag-ui-approval-scope-windows.log`。

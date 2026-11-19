@@ -128,9 +128,9 @@ Rust 宿主演示位于 [`local_host.rs`](../crates/fliuno-ag-ui-http/examples/l
 
 ### 审批中断与续跑
 
-新宿主可选择 `router_with_interrupts(client, authorize, reviewer)`。需要 app-server 声明 `approvalResumeRun`。现有 `router_with_approvals` 继续使用上一节的行为；两个模式的运行 ID 各自查找。
+新宿主可选择 `router_with_interrupts(client, authorize, reviewer)`。需要 app-server 声明 `approvalResumeRun` 和 `approvalRunPending`。现有 `router_with_approvals` 继续使用上一节的行为；两个模式的运行 ID 各自查找。
 
-1. 提交者向 `POST /run` 发送文本任务。需要审批时，父流在已提交的审批请求处输出 `RUN_FINISHED`，随后关闭。`outcome` 中含有一项 `interrupts`；详情（包括工具参数）仍通过审批者专用的 `GET /runs/{run_id}/approvals/{approval_id}` 读取。
+1. 提交者向 `POST /run` 发送文本任务。需要审批时，父流在已提交的审批请求处输出 `RUN_FINISHED`，随后关闭。`outcome` 中含有一项 `interrupts`；详情（包括工具参数）仍通过审批者专用的 `GET /runs/{run_id}/approvals/{approval_id}` 读取。运行 ID 必须是发出该审批的执行段；已处理的审批和其他执行段的 ID 都返回 `404`。
 2. 审批者向 `POST /run` 发送下方 JSON。`threadId` 必须匹配其授权的会话，`parentRunId` 引用刚结束的执行段，`runId` 是新的 ID。每次续跑只接受一个中断答复，`messages` 为空。
 3. 响应从子运行的 `RUN_STARTED` 开始，继续同一内核任务。子运行若再次需要审批，可以用它作为下一次续跑的父运行。每条 SSE 响应最多包含自己的执行段，重连时使用对应的 `runId` 与 `Last-Event-ID`。
 

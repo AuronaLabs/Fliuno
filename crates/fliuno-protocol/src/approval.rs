@@ -31,6 +31,14 @@ pub struct ApprovalRunWindow {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalRunPendingParams {
+    pub session_id: String,
+    pub client_request_id: String,
+    pub approval_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApprovalListParams {
     #[serde(default)]
     pub workspace_id: Option<String>,

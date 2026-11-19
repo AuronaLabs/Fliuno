@@ -63,6 +63,7 @@ pub fn schema_bundle() -> Value {
         "approval/resumeRun" => schema::<ApprovalResumeParams>(),
         "approval/getRun" => schema::<TaskRequestLookupParams>(),
         "approval/getRunWindow" => schema::<TaskRequestLookupParams>(),
+        "approval/getRunPending" => schema::<ApprovalRunPendingParams>(),
         "approval/cancelRun" => schema::<TaskRequestLookupParams>(),
         "events/get" => schema::<EventGetParams>(),
         "events/list" => schema::<EventsListParams>(),

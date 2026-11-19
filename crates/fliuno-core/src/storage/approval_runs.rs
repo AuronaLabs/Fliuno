@@ -40,6 +40,24 @@ pub(super) fn record(
 }
 
 impl Kernel {
+    /// Only return the still-pending approval that sealed this run.
+    pub fn get_approval_run_pending(
+        &self,
+        p: &ApprovalRunPendingParams,
+    ) -> Result<ApprovalDetails> {
+        let window = self.get_approval_run_window(&p.session_id, &p.client_request_id)?;
+        let missing = || Error::NotFound("pending approval for this run".into());
+        let boundary = window.last_sequence.ok_or_else(missing)?;
+        let matching: bool = self.db.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE sequence=?1 AND task_id=?2
+               AND json_extract(data,'$.type')='approval_requested' AND json_extract(data,'$.approval.id')=?3)",
+        )?.query_row(params![validate_event_cursor(boundary)?, window.task_id, p.approval_id], |row| row.get(0))?;
+        if !matching {
+            return Err(missing());
+        }
+        self.get_pending_approval(&window.task_id, &p.approval_id)
+    }
+
     pub fn get_approval_run(&self, session: &str, key: &str) -> Result<ApprovalRun> {
         crate::task::validate_key(key)?;
         let mut statement = self.db.prepare_cached(
