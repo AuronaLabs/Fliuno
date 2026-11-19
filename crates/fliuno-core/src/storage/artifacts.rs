@@ -94,22 +94,26 @@ pub(super) fn record(tx: &Transaction<'_>, task_id: &str, artifact: &Artifact) -
     if artifact.task_id != task_id {
         return Err(Error::Invalid("artifact belongs to another task".into()));
     }
-    // Keep the existing metadata rowid as the catalog cursor. Body bytes live
-    // separately so paging and context projection never touch the body pages.
+    // Keep metadata and its byte identity together in the same commit as the
+    // body. The optional metadata field needs no migration or body backfill.
+    let bytes = artifact.body.as_bytes();
+    let sha256 =
+        (bytes.len() <= MAX_ARTIFACT_DIGEST_BYTES).then(|| format!("{:x}", Sha256::digest(bytes)));
     tx.prepare_cached(
         "INSERT INTO artifacts(id,task_id,data) VALUES(?1,?2,
-            json_object('title',?3,'mediaType',?4,'contentBytes',?5,'binary',?6))",
+            json_object('title',?3,'mediaType',?4,'contentBytes',?5,'binary',?6,'sha256',?7))",
     )?
     .execute(params![
         artifact.id,
         task_id,
         artifact.title,
         artifact.media_type,
-        artifact.body.as_bytes().len() as i64,
+        bytes.len() as i64,
         matches!(artifact.body, ArtifactBody::Binary { .. }),
+        sha256,
     ])?;
     tx.prepare_cached("INSERT INTO artifact_bodies(artifact_id,body) VALUES(?1,?2)")?
-        .execute(params![artifact.id, artifact.body.as_bytes()])?;
+        .execute(params![artifact.id, bytes])?;
     Ok(())
 }
 
@@ -139,6 +143,21 @@ fn summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ArtifactSummary> {
         content_bytes: row.get::<_, i64>(3)? as u64,
         binary: row.get(6)?,
     })
+}
+
+fn hash_artifact_body(body: &Blob<'_>) -> rusqlite::Result<String> {
+    let length = body.len();
+    let mut sha256 = Sha256::new();
+    let mut buffer = vec![0; length.min(MAX_ARTIFACT_READ_BYTES as usize)];
+    let mut offset = 0;
+    while offset < length {
+        let count = buffer.len().min(length - offset);
+        let chunk = &mut buffer[..count];
+        body.read_at_exact(chunk, offset)?;
+        sha256.update(chunk);
+        offset += count;
+    }
+    Ok(format!("{:x}", sha256.finalize()))
 }
 
 impl Kernel {
@@ -355,29 +374,59 @@ impl Kernel {
         Ok((length as u64, data))
     }
 
-    /// Hash the same immutable body read by artifacts/read using one reusable buffer.
+    /// Read the committed SHA-256 without reopening the body. Older artifacts
+    /// get a bounded, persisted digest on their first lookup.
     pub fn digest_artifact(&self, task_id: &str, artifact_id: &str) -> Result<ArtifactDigest> {
-        let body = self.artifact_body(task_id, artifact_id)?;
-        let length = body.len();
-        if length > MAX_ARTIFACT_DIGEST_BYTES {
+        let (content_bytes, sha256): (i64, Option<String>) = self
+            .db
+            .prepare_cached(
+                "SELECT json_extract(data,'$.contentBytes'),json_extract(data,'$.sha256')
+                 FROM artifacts WHERE task_id=?1 AND id=?2",
+            )?
+            .query_row(params![task_id, artifact_id], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .optional()?
+            .ok_or_else(|| Error::NotFound("artifact".into()))?;
+        let content_bytes =
+            u64::try_from(content_bytes).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        if content_bytes > MAX_ARTIFACT_DIGEST_BYTES as u64 {
             return Err(Error::Invalid(
                 "artifact exceeds the digest byte budget".into(),
             ));
         }
-        let mut sha256 = Sha256::new();
-        let mut buffer = vec![0; length.min(MAX_ARTIFACT_READ_BYTES as usize)];
-        let mut offset = 0;
-        while offset < length {
-            let count = buffer.len().min(length - offset);
-            let chunk = &mut buffer[..count];
-            body.read_at_exact(chunk, offset)?;
-            sha256.update(chunk);
-            offset += count;
-        }
+        let sha256 = match sha256 {
+            Some(sha256) => sha256,
+            None => self.backfill_artifact_digest(task_id, artifact_id, content_bytes)?,
+        };
         Ok(ArtifactDigest {
-            content_bytes: length as u64,
-            sha256: format!("{:x}", sha256.finalize()),
+            content_bytes,
+            sha256,
         })
+    }
+
+    fn backfill_artifact_digest(
+        &self,
+        task_id: &str,
+        artifact_id: &str,
+        length: u64,
+    ) -> Result<String> {
+        // Pin the legacy bytes while computing the hash. Close the read-only
+        // blob handle before writing the metadata on this same connection.
+        let tx = self.db.unchecked_transaction()?;
+        let sha256 = {
+            let body = self.artifact_body(task_id, artifact_id)?;
+            if body.len() as u64 != length {
+                return Err(rusqlite::Error::InvalidQuery.into());
+            }
+            hash_artifact_body(&body)?
+        };
+        tx.prepare_cached(
+            "UPDATE artifacts SET data=json_set(data,'$.sha256',?3) WHERE task_id=?1 AND id=?2",
+        )?
+        .execute(params![task_id, artifact_id, sha256])?;
+        tx.commit()?;
+        Ok(sha256)
     }
 
     fn artifact_body(&self, task_id: &str, artifact_id: &str) -> Result<Blob<'_>> {

@@ -462,6 +462,7 @@ impl RpcServer {
             capabilities["maxSessionArchiveBatch"] =
                 json!(fliuno_protocol::MAX_SESSION_ARCHIVE_BATCH);
             capabilities["artifactByteReads"] = json!(true);
+            capabilities["storedArtifactDigests"] = json!(true);
             capabilities["binaryArtifacts"] = json!(true);
             capabilities["maxBinaryArtifactBytes"] = json!(MAX_BINARY_ARTIFACT_BYTES);
             capabilities["artifactCatalogSnapshots"] = json!(true);

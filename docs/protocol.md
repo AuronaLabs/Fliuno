@@ -171,7 +171,9 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 
 客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节。若产物是文本，再按 UTF-8 解码，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。SQLite v21 将已有正文移到独立 BLOB 表，保留产物 ID、清单游标和字节偏移。升级在一个事务内完成，迁移中数据库需要空间写入新正文。
 
-`artifacts/digest` 对分块读取的原始字节计算 SHA-256。客户端可将拼接后的内容与 `{contentBytes,sha256}` 比对。`initialize.capabilities.maxArtifactDigestBytes` 公布整次摘要的上限，目前为 8 MiB。正文分块读入固定上限的缓冲区。
+`artifacts/digest` 返回原始字节的 `{contentBytes,sha256}`。`initialize.capabilities.maxArtifactDigestBytes` 公布支持摘要的大小上限，目前为 8 MiB。若服务声明 `storedArtifactDigests:true`，新产物在提交正文时同时保存摘要，后续读取不再打开正文；没有保存摘要的旧产物在第一次查询时分块计算并保存。升级无需启动时扫描正文，不改变目录游标，也不会为补算摘要新增事件。调用形式和返回字段与旧服务相同。
+
+下载方仍需对自己实际收到的字节计算 SHA-256 并比对。摘要描述提交时的内容（旧产物为首次计算时的内容）；它不表示服务刚刚校验了磁盘上的正文。
 
 `initialize.capabilities.taskSummaryById` 表示客户端可以通过任务 ID 查询 `TaskSummary`。内容与 `task/listSummaries` 的单项一致，包括状态、后端、输入预览、待审批数量和结果是否未知。需要正文或历史时可使用 `task/get`。
 
