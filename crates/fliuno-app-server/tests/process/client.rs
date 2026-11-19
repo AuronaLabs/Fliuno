@@ -7,6 +7,17 @@ use fliuno_protocol::{
     Event, EventKind, Task, TaskIdParams, TaskStatus, TaskSummary, Workspace, WorkspaceOpenParams,
 };
 
+struct Server(Child);
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[path = "client/feed.rs"]
+mod feed;
+
 #[test]
 fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
     let root = std::env::temp_dir()
@@ -22,13 +33,6 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    struct Server(Child);
-    impl Drop for Server {
-        fn drop(&mut self) {
-            let _ = self.0.kill();
-            let _ = self.0.wait();
-        }
-    }
     let mut server = Server(child);
     let writer = server.0.stdin.take().unwrap();
     let reader = BufReader::new(server.0.stdout.take().unwrap());

@@ -1,10 +1,12 @@
 //! Blocking stdio client for Fliuno's local application protocol.
 pub mod ag_ui;
 mod download;
+mod feed;
 mod history;
 mod replay;
 mod wire;
 
+pub use feed::EventFeed;
 pub use history::SessionHistory;
 pub use replay::{EventReplay, ReplayScope};
 

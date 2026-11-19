@@ -233,3 +233,63 @@ fn history_checkpoint_retries_invalid_pages_without_skipping_entries() {
     assert_eq!(sent[2]["params"], sent[3]["params"]);
     assert_eq!(sent[3]["params"], sent[4]["params"]);
 }
+
+#[test]
+fn event_feed_coalesces_notices_and_recovers_from_the_delivered_cursor() {
+    let mut client = fake_client(concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"throughSequence\":8}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"events\":[{\"sequence\":6,\"taskId\":\"task\",\"data\":{\"type\":\"task_started\"}}],\"nextAfter\":6,\"hasMore\":false}}\n",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/event\",\"params\":{\"event\":{\"sequence\":14}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/eventGap\",\"params\":{\"afterSequence\":14}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"events\":[{\"sequence\":12,\"taskId\":\"task\",\"data\":{\"type\":\"task_interrupted\"}}],\"nextAfter\":12,\"hasMore\":false}}\n",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/eventGap\",\"params\":{\"afterSequence\":14}}\n",
+        "{\"jsonrpc\":\"2.0\",\"method\":\"other\",\"params\":{}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"result\":{\"throughSequence\":18}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"result\":{\"events\":[{\"sequence\":17,\"taskId\":\"task\",\"data\":{\"type\":\"task_resumed\"}}],\"nextAfter\":17,\"hasMore\":false}}\n",
+    ).as_bytes());
+    let mut feed =
+        EventFeed::subscribe(&mut client, ReplayScope::Task("task".into()), 5, |_| {}).unwrap();
+    let first = feed
+        .next_page(&mut client, 10, None, |_| {})
+        .unwrap()
+        .unwrap();
+    assert_eq!(first[0].sequence, 6);
+    assert_eq!(feed.cursor(), 8);
+    for sequence in [9, 12, 12, 11] {
+        assert!(
+            feed.observe(Notification {
+                method: "notifications/event".into(),
+                params: json!({"event":{"sequence":sequence}}),
+            })
+            .is_none()
+        );
+    }
+    let live = feed
+        .next_page(&mut client, 10, None, |_| {})
+        .unwrap()
+        .unwrap();
+    assert_eq!(live[0].sequence, 12);
+    let mut other = Vec::new();
+    let repaired = feed
+        .next_page(&mut client, 10, None, |note| other.push(note.method))
+        .unwrap()
+        .unwrap();
+    assert_eq!(repaired[0].sequence, 17);
+    assert_eq!(feed.cursor(), 18);
+    assert_eq!(other, vec!["other"]);
+    assert!(
+        feed.next_page(&mut client, 10, None, |_| {})
+            .unwrap()
+            .is_none()
+    );
+    let (_, written) = client.into_parts();
+    let sent: Vec<Value> = written
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect();
+    assert_eq!(sent.len(), 6);
+    assert_eq!(sent[3]["params"]["through"], 12);
+    assert_eq!(sent[4]["method"], "events/setScope");
+    assert_eq!(sent[5]["params"]["after"], 12);
+}

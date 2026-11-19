@@ -472,3 +472,7 @@ Rust 客户端的续页测试先保存下一页参数，再模拟水位变化和
 Node EventSource 通过本机 HTTP 测试重连，自行带回最后一条完整消息的 `Last-Event-ID`。接收的五条 Rust 输出全部通过 `@ag-ui/core@1.0.5` 的运行时 Schema，并保留多字节和换行文本。日志为 `target/0.0.3-ag-ui-sse-sdk-contract.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成。454 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 一致性通过。日志为 `target/0.0.3-ag-ui-sse-windows.log`。
+
+## 0.0.3 Rust 客户端事件补读（2026-11-19）
+
+真实 stdio 进程测试在同一连接批量提交任务，使服务端的通知队列实际溢出。`EventFeed` 保留会话范围并自动重订阅，补读结果逐项等于同水位的持久回放。测试确认同一工作区内的另一会话未混入结果。单元测试覆盖通知合并、乱序水位、补读期间出现缺口和旧订阅通知的交接。两 crate 的严格 Clippy、28 项库测试和真实进程测试通过。
