@@ -1,12 +1,12 @@
 //! JSON-RPC 2.0 dispatch. Transport and domain errors never enter model messages.
 mod agent_catalog;
+mod approvals;
 mod scheduler;
 mod terminal_subscriptions;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use fliuno_core::{
-    ApprovalOutcome, Error, EventReceiver, EventScope, EventWatermarkReceiver, Kernel,
-    ProgressReceiver,
+    Error, EventReceiver, EventScope, EventWatermarkReceiver, Kernel, ProgressReceiver,
 };
 use fliuno_protocol::*;
 use scheduler::TaskScheduler;
@@ -409,6 +409,7 @@ impl RpcServer {
                 json!(fliuno_core::MAX_APPROVAL_LIST_TARGET_BYTES);
             capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["approvalDecisionLookup"] = json!(true);
+            capabilities["approvalRespondDecision"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
             capabilities["sessionArchiveBatch"] = json!(true);
             capabilities["maxSessionArchiveBatch"] =
@@ -748,24 +749,8 @@ impl RpcServer {
                         .get_approval_decision(&p.task_id, &p.approval_id)?
                 )
             }
-            "approval/respond" => {
-                let p: ApprovalRespondParams = decode(params)?;
-                match self.kernel()?.prepare_approval_response(
-                    &p.task_id,
-                    &p.approval_id,
-                    p.decision,
-                )? {
-                    ApprovalOutcome::Finished(task) => json!(task),
-                    ApprovalOutcome::Prepared { task, execution } => {
-                        match self.scheduler.schedule_tool(execution) {
-                            Ok(()) => json!(task),
-                            Err(message) => {
-                                json!(self.kernel()?.fail_task(&task.id, message.into())?)
-                            }
-                        }
-                    }
-                }
-            }
+            "approval/respond" => json!(self.respond_approval(decode(params)?)?),
+            "approval/respondDecision" => json!(self.respond_approval_decision(decode(params)?)?),
             "events/get" => {
                 let p: EventGetParams = decode(params)?;
                 json!(self.kernel()?.get_event(p.sequence)?)

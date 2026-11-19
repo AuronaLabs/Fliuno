@@ -1646,6 +1646,37 @@
         }
       }
     },
+    "approval/respondDecision": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalRespondParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecision"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "approvalId",
+        "decision"
+      ],
+      "$defs": {
+        "ApprovalDecision": {
+          "type": "string",
+          "enum": [
+            "allow_once",
+            "deny"
+          ]
+        }
+      }
+    },
     "events/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventGetParams",

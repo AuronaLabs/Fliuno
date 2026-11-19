@@ -77,6 +77,7 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 | `approval/get` | `{taskId,approvalId}` | `{kind,approval}`，包含指定待审批项的完整请求 |
 | `approval/getDecision` | `{taskId,approvalId}` | 已提交决定对应的 `Event`，用于重连核对 |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
+| `approval/respondDecision` | 与 `approval/respond` 相同 | 提交决定并返回已持久化的 `Event`。 |
 | `events/list` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | `{events, nextAfter, hasMore}` |
 | `events/listModelUsage` | `{taskId, after?:0, through?, limit?:100, targetBytes?}` | 仅返回该任务的模型用量事件，沿用全局序号 |
 | `events/getWatermark` | `{}` | 当前已提交的全局 `throughSequence`，供多个回放读取方共用 |
@@ -152,6 +153,8 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 `initialize.capabilities.approvalDecisionLookup` 表示支持 `approval/getDecision`。SQLite v34 从历史事件回填任务 ID、审批 ID 和事件序号。模型工具审批返回 `approval_resolved`，ACP 权限和宿主工具审批返回 `agent_approval_resolved`。事件中的 `decision` 记录已提交的用户决定。实际执行、投递和结果仍查各自的任务与事件。尚无已提交决定的审批、仅关闭的审批或任务与审批 ID 不匹配时返回 `-32004`。
 
 审批不提供“允许全部”模式。未来可新增策略接口，但不得把模型或 MCP 声明的工具注解当作授权来源。
+
+`initialize.capabilities.approvalRespondDecision` 表示支持 `approval/respondDecision`。第一次调用沿用原审批和调度路径。对同一任务与审批 ID 重试相同决定时，直接返回原事件。若已有相反决定，则返回 `-32009`。该重试规则也适用于通过 `approval/respond` 提交过的决定。
 
 ### 主机注册的命令执行
 

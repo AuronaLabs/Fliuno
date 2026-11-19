@@ -3,6 +3,7 @@
 ## 0.0.3 开发中
 
 - **会话历史**。`session/listHistory` 按完成顺序倒序读取用户、助手消息和产物引用。客户端能保存固定水位和续页游标，重启后继续读取。单条记录超出页预算时保留任务 ID 和完成序号。[会话历史分页](docs/context.md#会话历史分页)
+- **审批决定**。`approval/respondDecision` 在一次 RPC 中提交并返回持久决定。同一决定可以跨重启重试。[应用协议](docs/protocol.md#方法)
 - **任务摘要**。`task/startSummary` 创建任务并返回精简摘要。`task/getSummaryByRequest` 可按会话和幂等键找回已有任务。[应用协议](docs/protocol.md#方法)
 - **模型用量**。`events/listModelUsage` 直接按任务分页读取已提交的用量事件，沿用全局事件序号。SQLite v37 为已有用量事件回填索引。[应用协议](docs/protocol.md#方法)
 - **共享事件回放**。宿主可读取一次已提交水位，在同一条 stdio 连接交错读取不同任务的 SSE 页。每个读取方有独立游标，可在释放连接后向消费者写入。[AG-UI 接入](docs/ag-ui.md#在一条连接上交错回放多个任务)

@@ -526,3 +526,9 @@ Debian Linux 6.12.107 来宾的 5 项 AG-UI 进程测试通过，覆盖 HTTP 授
 回环测试在两个 SSE 响应保持打开时分别读取并批准工具请求。提交者身份无法审批，其他会话的审批者和同会话其他任务的审批 ID 均无法处理。两次相同决定返回同一份已提交事件，相反决定返回 HTTP 409。
 
 Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。Debian Linux 6.12.107 来宾通过同一 HTTP 进程测试。日志为 `target/0.0.3-ag-ui-http-approvals-windows.log` 和 `D:/Fliuno-Native-Test/guest-ag-ui-http-approvals.log`。
+
+## 0.0.3 审批提交与决定事件（2026-11-19）
+
+真实 app-server 进程测试验证 `approval/respondDecision` 与事件查询返回相同的决定。重复提交相同决定或尝试提交相反决定都不会推进事件水位。重启并从 v33 回填索引后，旧审批仍可按原决定重试。HTTP 审批继续通过会话和任务绑定检查。
+
+Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。Debian Linux 6.12.107 来宾通过审批决定和 HTTP 路由两项进程测试。日志为 `target/0.0.3-approval-respond-decision-windows.log` 和 `D:/Fliuno-Native-Test/guest-approval-respond-decision.log`。

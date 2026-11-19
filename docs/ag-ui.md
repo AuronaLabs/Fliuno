@@ -119,6 +119,6 @@ while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &
 | `GET /runs/{run_id}/approvals/{approval_id}` | 读取绑定到该任务的待审批工具及参数。 |
 | `POST /runs/{run_id}/approvals/{approval_id}` | 提交 `{"decision":"allow_once"}` 或 `{"decision":"deny"}`，返回持久决定事件。 |
 
-审批 ID 来自 SSE 的 `fliuno.approval_requested` 事件。重复提交同一决定返回原事件，提交相反决定返回 `409`。属于其他任务或会话的审批返回 `404`。宿主可以在响应保持打开时处理审批，审批入口有独立的并发名额。
+审批 ID 来自 SSE 的 `fliuno.approval_requested` 事件。重复提交同一决定返回原事件，提交相反决定返回 `409`。属于其他任务或会话的审批返回 `404`。宿主可以在响应保持打开时处理审批，审批入口有独立的并发名额，并通过 `approval/respondDecision` 提交决定。
 
 事件字段对照了 AG-UI 官方规范和官方 TypeScript Schema，固定在提交 `3416b86da4b3288e87f827c7f2759a7fa18b5231`。[事件规范](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/docs/concepts/events.mdx) · [SDK Schema](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/sdks/typescript/packages/core/src/generated/schemas.ts)

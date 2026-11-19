@@ -5,11 +5,11 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use fliuno_client::{Client, Error};
+use fliuno_client::Client;
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalGetParams, ApprovalRespondParams, Event, EventKind,
 };
-use serde::{Deserialize, Serialize, de::IgnoredAny};
+use serde::{Deserialize, Serialize};
 use std::{
     io::{BufRead, Write},
     sync::Arc,
@@ -51,37 +51,23 @@ pub(super) async fn respond<R: BufRead + Send + 'static, W: Write + Send + 'stat
     let event = gateway
         .rpc(move |client| {
             let params = approval_params(client, &session, &run_id, approval_id)?;
-            let event: Event = match client.call("approval/getDecision", &params, |_| {}) {
-                Ok(committed) => committed,
-                Err(Error::Rpc { code: -32004, .. }) => {
-                    // Resolve only an approval that currently belongs to this task.
-                    let _: IgnoredAny = client
-                        .call("approval/get", &params, |_| {})
-                        .map_err(rpc_status)?;
-                    let request = ApprovalRespondParams {
-                        task_id: params.task_id.clone(),
-                        approval_id: params.approval_id.clone(),
-                        decision,
-                    };
-                    let _: IgnoredAny = client
-                        .call("approval/respond", &request, |_| {})
-                        .map_err(rpc_status)?;
-                    client
-                        .call("approval/getDecision", &params, |_| {})
-                        .map_err(rpc_status)?
-                }
-                Err(error) => return Err(rpc_status(error)),
+            let request = ApprovalRespondParams {
+                task_id: params.task_id,
+                approval_id: params.approval_id,
+                decision,
             };
+            let event: Event = client
+                .call("approval/respondDecision", &request, |_| {})
+                .map_err(rpc_status)?;
             match &event.data {
                 EventKind::ApprovalResolved {
                     approval_id,
                     decision: committed,
-                } if event.task_id == params.task_id && approval_id == &params.approval_id => {
-                    if *committed == decision {
-                        Ok(event)
-                    } else {
-                        Err(StatusCode::CONFLICT)
-                    }
+                } if event.task_id == request.task_id
+                    && approval_id == &request.approval_id
+                    && *committed == decision =>
+                {
+                    Ok(event)
                 }
                 _ => Err(StatusCode::BAD_GATEWAY),
             }

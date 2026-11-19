@@ -58,6 +58,7 @@ pub fn schema_bundle() -> Value {
         "approval/get" => schema::<ApprovalGetParams>(),
         "approval/getDecision" => schema::<ApprovalGetParams>(),
         "approval/respond" => schema::<ApprovalRespondParams>(),
+        "approval/respondDecision" => schema::<ApprovalRespondParams>(),
         "events/get" => schema::<EventGetParams>(),
         "events/list" => schema::<EventsListParams>(),
         "events/listModelUsage" => schema::<EventsListParams>(),

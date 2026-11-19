@@ -201,9 +201,33 @@ fn approval_decisions_can_be_reconciled_after_reconnect_and_v33_backfill() {
         );
         let mut params = lookup.clone();
         params["decision"] = json!(decision);
-        peer.call("approval/respond", params);
+        let direct = if decision == "allow_once" {
+            Some(peer.call("approval/respondDecision", params.clone()))
+        } else {
+            peer.call("approval/respond", params.clone());
+            None
+        };
         peer.wait_for_status(id, status);
         let receipt = peer.call("approval/getDecision", lookup.clone());
+        if let Some(direct) = direct {
+            assert_eq!(direct, receipt);
+        }
+        let before_retry = peer.call("events/getWatermark", json!({}));
+        assert_eq!(
+            peer.call("approval/respondDecision", params.clone()),
+            receipt
+        );
+        let mut conflicting = params;
+        conflicting["decision"] = json!(if decision == "allow_once" {
+            "deny"
+        } else {
+            "allow_once"
+        });
+        assert_eq!(
+            peer.request("approval/respondDecision", conflicting)["error"]["code"],
+            -32009
+        );
+        assert_eq!(peer.call("events/getWatermark", json!({})), before_retry);
         assert_eq!(receipt["taskId"], id);
         assert_eq!(
             receipt["data"],
@@ -241,7 +265,10 @@ fn approval_decisions_can_be_reconciled_after_reconnect_and_v33_backfill() {
     }
     let mut peer = Peer::start(&db);
     for (lookup, receipt) in receipts {
-        assert_eq!(peer.call("approval/getDecision", lookup), receipt);
+        assert_eq!(peer.call("approval/getDecision", lookup.clone()), receipt);
+        let mut params = lookup;
+        params["decision"] = receipt["data"]["decision"].clone();
+        assert_eq!(peer.call("approval/respondDecision", params), receipt);
     }
     drop(peer);
     fs::remove_dir_all(root).unwrap();
