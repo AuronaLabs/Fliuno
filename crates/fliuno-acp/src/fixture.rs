@@ -19,9 +19,11 @@ mod persistent;
 pub fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
     // Process fixtures run concurrently inside bounded Jobs/cgroups. Their
     // scheduler size must not multiply by every CPU exposed by the runner.
+    // Stdio and timers do not need the signal/IO reactor, which creates a
+    // Unix socket pair that the Linux scratch sandbox does not permit.
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
-        .enable_all()
+        .enable_time()
         .build()?;
     if std::env::args().nth(1).as_deref() == Some("--persistent-fixture") {
         runtime.block_on(persistent::agent().connect_to(acp::Stdio::new()))?;

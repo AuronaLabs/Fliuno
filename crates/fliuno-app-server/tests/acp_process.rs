@@ -1,5 +1,5 @@
 //! End-to-end application RPC -> durable core -> ACP -> real isolated process.
-#![cfg(all(windows, feature = "test-fixtures"))]
+#![cfg(all(any(windows, target_os = "linux"), feature = "test-fixtures"))]
 
 use serde_json::{Value, json};
 use std::{
@@ -16,6 +16,7 @@ use std::{
 mod authority;
 #[path = "acp_process/context.rs"]
 mod context;
+#[cfg(windows)]
 #[path = "acp_process/persistence.rs"]
 mod persistence;
 
