@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const MAX_SESSION_TITLE_CHARS: usize = 120;
+pub const MAX_SESSION_ARCHIVE_BATCH: usize = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -47,4 +48,19 @@ pub struct SessionRenameParams {
 pub struct SessionSetArchivedParams {
     pub session_id: String,
     pub archived: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionArchiveBatchParams {
+    #[schemars(length(min = 1, max = MAX_SESSION_ARCHIVE_BATCH))]
+    pub session_ids: Vec<String>,
+    pub archived: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionArchiveBatch {
+    /// Sessions follow request order; the batch is committed atomically.
+    pub sessions: Vec<Session>,
 }

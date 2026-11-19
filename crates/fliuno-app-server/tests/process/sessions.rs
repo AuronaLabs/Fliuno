@@ -347,3 +347,102 @@ fn session_archive_filter_survives_migration_and_keeps_row_cursors() {
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn session_archive_batch_is_atomic_ordered_idempotent_and_persistent() {
+    let root = std::env::temp_dir().join(format!("fliuno-session-batch-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let create = json!({"workspaceId":workspace["id"]});
+    let first = peer.call("session/create", create.clone());
+    let middle = peer.call("session/create", create.clone());
+    let last = peer.call("session/create", create);
+    let ids = json!([last["id"], first["id"]]);
+
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER reject_second_archive BEFORE UPDATE OF data ON sessions
+         WHEN json_extract(NEW.data,'$.archived')=1
+           AND OLD.rowid=(SELECT max(rowid) FROM sessions)
+         BEGIN SELECT RAISE(ABORT,'fixture'); END;",
+        )
+        .unwrap();
+    assert_eq!(
+        peer.request(
+            "session/setArchivedBatch",
+            json!({"sessionIds":ids,"archived":true}),
+        )["error"]["code"],
+        -32603
+    );
+    assert_eq!(
+        peer.call("session/get", json!({"sessionId":first["id"]}))["archived"],
+        Value::Null
+    );
+    assert_eq!(
+        peer.call("session/get", json!({"sessionId":last["id"]}))["archived"],
+        Value::Null
+    );
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute_batch("DROP TRIGGER reject_second_archive")
+        .unwrap();
+
+    let request = json!({"sessionIds":ids,"archived":true});
+    let archived = peer.call("session/setArchivedBatch", request.clone());
+    assert_eq!(archived["sessions"][0]["id"], last["id"]);
+    assert_eq!(archived["sessions"][1]["id"], first["id"]);
+    assert_eq!(archived["sessions"][0]["archived"], true);
+    assert_eq!(peer.call("session/setArchivedBatch", request), archived);
+
+    for invalid in [
+        json!({"sessionIds":[],"archived":true}),
+        json!({"sessionIds":[first["id"],first["id"]],"archived":true}),
+        json!({"sessionIds":[middle["id"],"missing"],"archived":true}),
+    ] {
+        let result = peer.request("session/setArchivedBatch", invalid);
+        assert!(matches!(
+            result["error"]["code"].as_i64(),
+            Some(-32602 | -32004)
+        ));
+    }
+    assert_eq!(
+        peer.call("session/get", json!({"sessionId":middle["id"]}))["archived"],
+        Value::Null
+    );
+    let too_many = vec![first["id"].clone(); 33];
+    assert_eq!(
+        peer.request(
+            "session/setArchivedBatch",
+            json!({"sessionIds":too_many,"archived":true}),
+        )["error"]["code"],
+        -32602
+    );
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    assert!(
+        peer.call(
+            "session/setArchivedBatch",
+            json!({"sessionIds":ids,"archived":false})
+        )["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|session| session["archived"] != true)
+    );
+    assert_eq!(
+        peer.call(
+            "session/list",
+            json!({"workspaceId":workspace["id"],"archived":false})
+        )["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

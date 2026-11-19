@@ -152,6 +152,29 @@
         "archived"
       ]
     },
+    "session/setArchivedBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionArchiveBatchParams",
+      "type": "object",
+      "properties": {
+        "sessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionIds",
+        "archived"
+      ]
+    },
     "session/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "SessionListParams",
@@ -4265,6 +4288,53 @@
             "tool_call",
             "agent_permission",
             "host_tool"
+          ]
+        }
+      }
+    },
+    "SessionArchiveBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionArchiveBatch",
+      "type": "object",
+      "properties": {
+        "sessions": {
+          "description": "Sessions follow request order; the batch is committed atomically.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessions"
+      ],
+      "$defs": {
+        "Session": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "archived": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "workspaceId"
           ]
         }
       }

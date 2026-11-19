@@ -136,6 +136,52 @@ impl Kernel {
         Ok(session)
     }
 
+    pub fn set_sessions_archived(
+        &mut self,
+        ids: &[String],
+        archived: bool,
+    ) -> Result<Vec<Session>> {
+        if ids.is_empty() || ids.len() > fliuno_protocol::MAX_SESSION_ARCHIVE_BATCH {
+            return Err(Error::Invalid(
+                "session archive batch requires 1..32 IDs".into(),
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        if ids.iter().any(|id| {
+            id.is_empty()
+                || id.len() > 128
+                || !id.bytes().all(|byte| byte.is_ascii_graphic())
+                || !seen.insert(id)
+        }) {
+            return Err(Error::Invalid(
+                "session archive batch IDs must be unique printable ASCII".into(),
+            ));
+        }
+
+        let tx = self.db.transaction()?;
+        let mut sessions = Vec::with_capacity(ids.len());
+        for id in ids {
+            let data: Option<String> = tx
+                .query_row("SELECT data FROM sessions WHERE id=?1", [id], |row| {
+                    row.get(0)
+                })
+                .optional()?;
+            let data = data.ok_or_else(|| Error::NotFound("session".into()))?;
+            sessions.push(serde_json::from_str::<Session>(&data)?);
+        }
+        for session in &mut sessions {
+            if session.archived != archived {
+                session.archived = archived;
+                tx.execute(
+                    "UPDATE sessions SET data=?2 WHERE id=?1",
+                    params![session.id, serde_json::to_string(session)?],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(sessions)
+    }
+
     fn save_session(&self, session: &Session) -> Result<()> {
         self.db.execute(
             "UPDATE sessions SET data=?2 WHERE id=?1",

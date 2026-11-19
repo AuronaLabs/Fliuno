@@ -362,6 +362,9 @@ impl RpcServer {
                 json!(fliuno_core::MAX_APPROVAL_LIST_TARGET_BYTES);
             capabilities["pendingApprovalDetails"] = json!(true);
             capabilities["sessionArchiving"] = json!(true);
+            capabilities["sessionArchiveBatch"] = json!(true);
+            capabilities["maxSessionArchiveBatch"] =
+                json!(fliuno_protocol::MAX_SESSION_ARCHIVE_BATCH);
             capabilities["artifactByteReads"] = json!(true);
             capabilities["artifactSummaryById"] = json!(true);
             capabilities["scopedArtifactSummaries"] = json!(true);
@@ -533,6 +536,14 @@ impl RpcServer {
                     self.kernel()?
                         .set_session_archived(&p.session_id, p.archived)?
                 )
+            }
+            "session/setArchivedBatch" => {
+                let p: SessionArchiveBatchParams = decode(params)?;
+                json!(SessionArchiveBatch {
+                    sessions: self
+                        .kernel()?
+                        .set_sessions_archived(&p.session_ids, p.archived)?,
+                })
             }
             "session/searchHistory" => {
                 let p: SessionHistorySearchParams = decode(params)?;

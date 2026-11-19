@@ -26,6 +26,7 @@
 | `session/get` | `{sessionId}` | 单个 Session |
 | `session/rename` | `{sessionId,title}` | 持久化标题并返回 Session |
 | `session/setArchived` | `{sessionId,archived}` | 设置持久归档标记并返回 Session |
+| `session/setArchivedBatch` | `{sessionIds,archived}` | 原子更新 1..32 个会话，并按请求顺序返回 Session |
 | `session/context` | `{sessionId,throughSequence?,options?:{mode?,maxTurns?,maxBytes?,selection?,detail?,taskIds?}}` | TaskContext，预览指定序号的历史 |
 | `session/searchHistory` | `{sessionId,query,role?,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
@@ -71,7 +72,7 @@
 
 `initialize.capabilities.sessionCreateIdempotency` 表示 `session/create` 接受 `clientRequestId`。键由 1 到 128 个可打印且不含空格的 ASCII 字符组成，在工作区内唯一。连接中断后用原键和原始标题重试会返回同一个会话的当前信息。复用键并更改原始标题会返回 `-32009`。创建记录和键同事务保存，重启后仍可重试。
 
-`initialize.capabilities.sessionArchiving` 表示支持会话归档。`session/list` 省略 `archived` 时列出全部会话，传 `true` 或 `false` 可按状态筛选。会话对象省略 `archived` 字段时视为 `false`。`session/setArchived` 可以重试；它只更新显示状态，任务、历史和会话 ID 都可照常使用。翻页期间应沿用相同筛选条件。归档状态变动后，从 `after:0` 重拉列表即可反映当前状态。
+`initialize.capabilities.sessionArchiving` 表示支持会话归档。`session/list` 省略 `archived` 时列出全部会话，传 `true` 或 `false` 可按状态筛选。会话对象省略 `archived` 字段时视为 `false`。`session/setArchived` 可以重试；它只更新显示状态，任务、历史和会话 ID 都可照常使用。`sessionArchiveBatch` 和 `maxSessionArchiveBatch` 表示支持最多 32 个 ID 的原子批量更新；无效 ID、重复 ID 或事务失败不会提交任何更新。翻页期间应沿用相同筛选条件。归档状态变动后，从 `after:0` 重拉列表即可反映当前状态。
 
 `taskSummaryStatusFilter` 表示 `task/listSummaries` 可以按一个 `status` 筛选。筛选沿用原清单的任务创建顺序和游标。翻页应保持相同条件。任务状态改变后，从 `after:0` 重拉列表即可看到当前结果。SQLite v23 从已保存的任务摘要回填状态索引。
 
