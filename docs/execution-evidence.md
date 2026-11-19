@@ -506,3 +506,9 @@ Windows `scripts/check.ps1` 通过 461 项测试、26 个离线演示、rustfmt�
 真实 stdio 进程测试在同一连接上交错回放两个任务，并保留第一个任务的实时订阅。推进共享水位后，独立回放得到的字节与该任务的实时输出一致。第二个读取方只收到自己任务的帧。
 
 Windows `scripts/check.ps1` 通过 461 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-shared-replay-windows.log`。
+
+## 0.0.3 AG-UI HTTP 路由（2026-11-19）
+
+回环 HTTP 进程测试在真实 stdio 服务上并发提交两个文本任务，由宿主使用共享连接处理审批。测试确认不同授权会话无法读取运行或提交到其他会话，两个响应使用各自的运行 ID。`Last-Event-ID` 指向完成文本帧时，重连只收到剩余的两条消息。不存在的帧位置返回 HTTP 400。
+
+Windows `scripts/check.ps1` 通过 462 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和应用协议 Schema 一致性检查。日志为 `target/0.0.3-ag-ui-http-windows.log`。

@@ -43,6 +43,9 @@ test = false
 workspace = true
 
 [dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+reqwest.workspace = true
+fliuno-ag-ui-http = { path = "../fliuno-ag-ui-http" }
 rusqlite.workspace = true
 fliuno-client = { path = "../fliuno-client" }
 fliuno-sandbox = { path = "../fliuno-sandbox" }

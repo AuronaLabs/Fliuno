@@ -2,9 +2,9 @@
 
 [文档首页](README.md) · [应用协议](protocol.md#rust-调用方)
 
-宿主可以通过 Rust 客户端提交文本任务，并把已提交的任务事件转换成 AG-UI 消息。宿主管理 HTTP 路由和会话授权，审批通过 Fliuno 应用协议处理。
+宿主可以通过 Rust 客户端提交文本任务，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批通过 Fliuno 应用协议处理。
 
-[提交文本任务](#提交文本任务) · [投影内核事件](#投影内核事件) · [SSE 输出与续传](#sse-输出与续传)
+[提交文本任务](#提交文本任务) · [投影内核事件](#投影内核事件) · [SSE 输出与续传](#sse-输出与续传) · [HTTP 接入](#http-接入)
 
 ## 提交文本任务
 
@@ -98,5 +98,16 @@ while let Some(frames) = feed.write_next_page(&mut client, &mut response_body, &
 重连时，读取客户端发送的 `Last-Event-ID`。通过 AG-UI 提交的任务用 `run.sse(last_event_id)` 创建输出流。直接投影内核任务时，使用 `AgUiSseStream::new(&summary, last_event_id)`。将上文回放循环中的 `projection.project(event)` 换成 `stream.write_event(event, &mut response_body)`。和首次连接一样从 `TaskStarted` 回放，以重建执行段状态。输出从指定消息之后开始，即使它位于一个任务事件产生的多条消息中间。
 
 历史补读完成后，调用 `stream.finish_replay()` 确认找到了续传位置，再把暂存的实时事件按序写入同一个流。找不到 ID、任务不匹配或写入中断会返回错误。写入中断后，消费端用最后一条完整收到的 SSE ID 建立新流。SSE 流输出已提交事件。
+
+## HTTP 接入
+
+`fliuno_ag_ui_http::router` 返回可挂载到 Axum 的路由。传入 `Arc<tokio::sync::Mutex<Client<_, _>>>` 及授权回调。回调根据请求头返回授权的本机会话 ID，返回 `None` 时请求在调用内核前被拒绝。宿主可以在两次 SSE 页读取之间通过同一个客户端处理任务审批。
+
+| 请求 | 行为 |
+| --- | --- |
+| `POST /run` | 接收 `application/json` 的文本任务请求，要求 `threadId` 与授权会话一致。返回 `text/event-stream`。 |
+| `GET /runs/{run_id}` | 在授权会话中找回运行。可发送 `Last-Event-ID`，从指定帧之后续传。不存在或不属于该会话的运行返回 `404`。 |
+
+路由每次读取一页持久事件，释放客户端后再把编码好的页交给响应体。当前限制同时 16 条响应或待解析请求，POST 正文最多 1 MiB，读取超时 10 秒。没有新事件时约每 150 毫秒检查提交水位，连接空闲时发送 SSE 保活注释。执行段结束后关闭响应。
 
 事件字段对照了 AG-UI 官方规范和官方 TypeScript Schema，固定在提交 `3416b86da4b3288e87f827c7f2759a7fa18b5231`。[事件规范](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/docs/concepts/events.mdx) · [SDK Schema](https://github.com/ag-ui-protocol/ag-ui/blob/3416b86da4b3288e87f827c7f2759a7fa18b5231/sdks/typescript/packages/core/src/generated/schemas.ts)

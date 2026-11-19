@@ -5,7 +5,9 @@ use fliuno_client::ag_ui::{
 use fliuno_protocol::Session;
 use std::process::ChildStdout;
 
-fn connect(db: &std::path::Path) -> (Server, Client<BufReader<ChildStdout>, ChildStdin>) {
+pub(super) fn connect(
+    db: &std::path::Path,
+) -> (Server, Client<BufReader<ChildStdout>, ChildStdin>) {
     let mut server = Server(
         Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
             .arg("--db")

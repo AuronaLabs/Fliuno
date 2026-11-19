@@ -797,6 +797,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fliuno-ag-ui-http"
+version = "0.0.3"
+dependencies = [
+ "axum",
+ "fliuno-client",
+ "fliuno-protocol",
+ "futures-util",
+ "tokio",
+]
+
+[[package]]
 name = "fliuno-agents"
 version = "0.0.3"
 dependencies = [
@@ -815,9 +826,11 @@ dependencies = [
 name = "fliuno-app-server"
 version = "0.0.3"
 dependencies = [
+ "axum",
  "base64 0.22.1",
  "crossbeam-channel",
  "fliuno-acp",
+ "fliuno-ag-ui-http",
  "fliuno-agents",
  "fliuno-client",
  "fliuno-core",
@@ -829,6 +842,7 @@ dependencies = [
  "fliuno-skills",
  "fliuno-terminal",
  "fliuno-tools",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",
