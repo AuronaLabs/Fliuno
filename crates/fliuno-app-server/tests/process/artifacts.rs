@@ -299,6 +299,76 @@ fn scoped_artifact_catalog_backfills_and_paginates_across_tasks() {
     fs::remove_dir_all(root).unwrap();
 }
 
+#[test]
+fn artifact_snapshot_can_finish_after_new_writes_and_restart() {
+    let temp = std::env::temp_dir().canonicalize().unwrap();
+    let root = temp.join(format!("fliuno-artifact-snapshot-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let other = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let scope = json!({"kind":"workspace","workspaceId":workspace["id"]});
+    let method = "artifacts/listSnapshot";
+    assert_eq!(
+        peer.call(method, json!({"scope":scope})),
+        json!({"items":[],"throughSequence":0,"nextAfter":0,"hasMore":false})
+    );
+    let first = create_artifact(&mut peer, &session["id"], "Before snapshot 1");
+    let second = create_artifact(&mut peer, &other["id"], "Before snapshot 2");
+    let filter = first["mediaType"].clone();
+    let head = peer.call(method, json!({"scope":scope,"mediaType":filter,"limit":1}));
+    assert_eq!(head["items"], json!([first]));
+    assert_eq!(head["hasMore"], true);
+    let through = head["throughSequence"].as_u64().unwrap();
+    let late = create_artifact(&mut peer, &session["id"], "After snapshot");
+    drop(peer);
+
+    let mut peer = Peer::start(&db);
+    let next = peer.call(method, json!({"scope":scope,"mediaType":filter,"after":head["nextAfter"],"throughSequence":through,"limit":1}));
+    assert_eq!(
+        next,
+        json!({"items":[second],"throughSequence":through,"nextAfter":through,"hasMore":false})
+    );
+    assert_eq!(
+        peer.call(
+            method,
+            json!({"scope":scope,"throughSequence":through,"after":through})
+        )["items"],
+        json!([])
+    );
+    let refreshed = peer.call(method, json!({"scope":scope,"after":through}));
+    assert_eq!(refreshed["items"], json!([late]));
+    assert!(refreshed["throughSequence"].as_u64().unwrap() > through);
+    let session_scope = json!({"kind":"session","sessionId":session["id"]});
+    assert_eq!(
+        peer.call(
+            method,
+            json!({"scope":session_scope,"throughSequence":through})
+        )["items"],
+        json!([first])
+    );
+    for invalid in [
+        json!({"scope":scope,"throughSequence":through,"after":through+1}),
+        json!({"scope":scope,"throughSequence":u64::MAX}),
+        json!({"scope":scope,"limit":0}),
+    ] {
+        assert_eq!(peer.request(method, invalid)["error"]["code"], -32602);
+    }
+    assert_eq!(
+        peer.request(
+            method,
+            json!({"scope":{"kind":"session","sessionId":"missing"}})
+        )["error"]["code"],
+        -32004
+    );
+    drop(peer);
+    let root = root.canonicalize().unwrap();
+    assert_eq!(root.parent(), Some(temp.as_path()));
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn create_artifact(peer: &mut Peer, session_id: &Value, input: &str) -> Value {
     let started = peer.call("task/start", json!({"sessionId":session_id,"input":input}));
     let task_id = started["id"].as_str().unwrap();

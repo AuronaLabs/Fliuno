@@ -1629,6 +1629,92 @@
         }
       }
     },
+    "artifacts/listSnapshot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactCatalogSnapshotParams",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/ArtifactCatalogScope"
+        },
+        "mediaType": {
+          "description": "Match the stored media type exactly, including any parameters.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "after": {
+          "description": "Exclusive cursor from the previous page, or zero for the first page.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "throughSequence": {
+          "description": "Inclusive catalog watermark. Omit it on the first page, then reuse it.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "$defs": {
+        "ArtifactCatalogScope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "session"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "workspace"
+                },
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "workspaceId"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "artifacts/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ArtifactGetParams",
@@ -5058,6 +5144,74 @@
       "additionalProperties": false,
       "required": [
         "items",
+        "nextAfter",
+        "hasMore"
+      ],
+      "$defs": {
+        "ArtifactSummary": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "binary": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "title",
+            "mediaType",
+            "contentBytes"
+          ]
+        }
+      }
+    },
+    "ArtifactCatalogSnapshotPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactCatalogSnapshotPage",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactSummary"
+          }
+        },
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "throughSequence",
         "nextAfter",
         "hasMore"
       ],

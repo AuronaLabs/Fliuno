@@ -189,6 +189,49 @@ impl Kernel {
         limit: u32,
         media_type: Option<&str>,
     ) -> Result<ObjectPage<ArtifactSummary>> {
+        self.scoped_artifact_page(scope, after, i64::MAX, limit, media_type)
+    }
+
+    pub fn list_artifact_snapshot(
+        &self,
+        params: ArtifactCatalogSnapshotParams,
+    ) -> Result<ArtifactCatalogSnapshotPage> {
+        // The primary key stores append-only catalog order; capture the upper
+        // bound using the same scope-independent sequence space as nextAfter.
+        let latest: i64 = self
+            .db
+            .prepare_cached("SELECT COALESCE(MAX(sequence),0) FROM artifact_catalog")?
+            .query_row([], |row| row.get(0))?;
+        let through_sequence = params.through_sequence.unwrap_or(latest as u64);
+        if through_sequence > latest as u64 || params.after > through_sequence {
+            return Err(Error::Invalid(
+                "artifact snapshot requires after <= throughSequence <= current catalog sequence"
+                    .into(),
+            ));
+        }
+        let page = self.scoped_artifact_page(
+            &params.scope,
+            params.after,
+            through_sequence as i64,
+            params.limit,
+            params.media_type.as_deref(),
+        )?;
+        Ok(ArtifactCatalogSnapshotPage {
+            items: page.items,
+            through_sequence,
+            next_after: page.next_after,
+            has_more: page.has_more,
+        })
+    }
+
+    fn scoped_artifact_page(
+        &self,
+        scope: &ArtifactCatalogScope,
+        after: u64,
+        through: i64,
+        limit: u32,
+        media_type: Option<&str>,
+    ) -> Result<ObjectPage<ArtifactSummary>> {
         let cursor = catalog_cursor(after, limit)?;
         if media_type.is_some_and(|value| {
             value.trim().is_empty() || value.len() > 256 || value.chars().any(char::is_control)
@@ -197,38 +240,47 @@ impl Kernel {
                 "mediaType must be 1 to 256 UTF-8 bytes without control characters".into(),
             ));
         }
-        let (column, id) = match scope {
+        let (column, typed_index, id) = match scope {
             ArtifactCatalogScope::Session { session_id } => {
                 self.require_session(session_id)?;
-                ("session_id", session_id)
+                ("session_id", "artifact_catalog_session_type", session_id)
             }
             ArtifactCatalogScope::Workspace { workspace_id } => {
                 self.require_workspace(workspace_id)?;
-                ("workspace_id", workspace_id)
+                (
+                    "workspace_id",
+                    "artifact_catalog_workspace_type",
+                    workspace_id,
+                )
             }
         };
-        // Use separate prepared queries so each scope/filter can seek into its index.
-        let media_predicate = if media_type.is_some() {
-            "AND c.media_type=?4"
+        // SQLite may otherwise scan the scope index and filter each row when
+        // there are no planner statistics and the requested type is rare.
+        let (catalog, media_predicate) = if media_type.is_some() {
+            (
+                format!("artifact_catalog AS c INDEXED BY {typed_index}"),
+                "AND c.media_type=?5",
+            )
         } else {
-            ""
+            ("artifact_catalog AS c".into(), "")
         };
         let sql = format!(
             "SELECT a.id,json_extract(a.data,'$.title'),c.media_type,
              json_extract(a.data,'$.contentBytes'),c.sequence,a.task_id,
              COALESCE(json_extract(a.data,'$.binary'),0)
-             FROM artifact_catalog c JOIN artifacts a ON a.id=c.artifact_id
-             WHERE c.{column}=?1 AND c.sequence>?2 {media_predicate} ORDER BY c.sequence LIMIT ?3"
+             FROM {catalog} JOIN artifacts a ON a.id=c.artifact_id
+             WHERE c.{column}=?1 AND c.sequence>?2 AND c.sequence<=?3 {media_predicate}
+             ORDER BY c.sequence LIMIT ?4"
         );
         if let Some(media_type) = media_type {
             self.query_catalog_page(
                 &sql,
-                params![id, cursor, limit + 1, media_type],
+                params![id, cursor, through, limit + 1, media_type],
                 cursor,
                 limit,
             )
         } else {
-            self.query_catalog_page(&sql, params![id, cursor, limit + 1], cursor, limit)
+            self.query_catalog_page(&sql, params![id, cursor, through, limit + 1], cursor, limit)
         }
     }
 

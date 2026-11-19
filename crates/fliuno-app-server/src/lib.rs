@@ -381,6 +381,7 @@ impl RpcServer {
             capabilities["artifactByteReads"] = json!(true);
             capabilities["binaryArtifacts"] = json!(true);
             capabilities["maxBinaryArtifactBytes"] = json!(MAX_BINARY_ARTIFACT_BYTES);
+            capabilities["artifactCatalogSnapshots"] = json!(true);
             capabilities["artifactSummaryById"] = json!(true);
             capabilities["scopedArtifactSummaries"] = json!(true);
             capabilities["maxArtifactReadBytes"] = json!(MAX_ARTIFACT_READ_BYTES);
@@ -794,6 +795,10 @@ impl RpcServer {
                     p.limit,
                     p.media_type.as_deref()
                 )?)
+            }
+            "artifacts/listSnapshot" => {
+                let p: ArtifactCatalogSnapshotParams = decode(params)?;
+                json!(self.kernel()?.list_artifact_snapshot(p)?)
             }
             "artifacts/read" => {
                 let p: ArtifactReadParams = decode(params)?;

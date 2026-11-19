@@ -52,6 +52,7 @@
 | `artifacts/list` | `{taskId}` | Artifact 数组 |
 | `artifacts/listSummaries` | `{taskId,after?,limit?}` | 按保存顺序分页，返回 `{items,nextAfter,hasMore}` |
 | `artifacts/listScopedSummaries` | `{scope:{kind:"session",sessionId} 或 {kind:"workspace",workspaceId},after?,limit?,mediaType?}` | 按保存顺序查询指定会话或工作区的产物元数据 |
+| `artifacts/listSnapshot` | `{scope,after?,limit?,mediaType?,throughSequence?}` | 返回目录水位和该水位以内的元数据页 |
 | `artifacts/getSummary` | `{taskId,artifactId}` | 单份 ArtifactSummary |
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
 | `artifacts/digest` | `{taskId,artifactId}` | 正文的 `contentBytes` 与小写十六进制 `sha256` |
@@ -92,6 +93,8 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 `scopedArtifactSummaries` 表示支持 `artifacts/listScopedSummaries`。每页最多 100 项，包含归档会话中的产物。从 `after:0` 开始，使用同一查询范围的 `nextAfter` 翻页。SQLite v26 为此清单新增索引并回填已有产物。任务级清单的游标独立于此接口。
 
 `artifactMediaTypeFilter` 表示 `artifacts/listScopedSummaries` 支持 `mediaType`。筛选条件和已有产物的值完全匹配，包含大小写和参数。筛选词最多 256 个 UTF-8 字节，须包含可见内容。翻页时沿用相同筛选条件和作用域。SQLite v28 为会话和工作区分别建立类型索引，并保留原有游标。
+
+`artifactCatalogSnapshots` 表示支持 `artifacts/listSnapshot`。接口使用相同的作用域、类型筛选及目录游标，额外返回全局目录水位 `throughSequence`。首次可省略该字段；后续页沿用返回的水位和作用域、筛选条件，把前一页的 `nextAfter` 传为 `after`。序号大于 `after` 且小于等于水位的产物才参与查询，包括归档会话中的产物。该水位重启后仍可使用，新的产物不会混入。`after` 大于水位，或水位超出当前目录，返回 `-32602`。如需读取快照之后新增的产物，可从旧水位续查并省略 `throughSequence`。目录水位独立于事件序号和任务产物游标。
 
 客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节。若产物是文本，再按 UTF-8 解码，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。SQLite v21 将已有正文移到独立 BLOB 表，保留产物 ID、清单游标和字节偏移。升级在一个事务内完成，迁移中数据库需要空间写入新正文。
 

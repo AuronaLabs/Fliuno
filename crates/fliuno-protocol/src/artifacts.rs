@@ -1,4 +1,5 @@
 //! Byte ranges in the persistent artifact body.
+use crate::ArtifactSummary;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +27,33 @@ pub struct ArtifactCatalogParams {
     #[serde(default = "super::default_limit")]
     #[schemars(range(min = 1, max = 100))]
     pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactCatalogSnapshotParams {
+    pub scope: ArtifactCatalogScope,
+    /// Match the stored media type exactly, including any parameters.
+    #[serde(default)]
+    pub media_type: Option<String>,
+    /// Exclusive cursor from the previous page, or zero for the first page.
+    #[serde(default)]
+    pub after: u64,
+    /// Inclusive catalog watermark. Omit it on the first page, then reuse it.
+    #[serde(default)]
+    pub through_sequence: Option<u64>,
+    #[serde(default = "super::default_limit")]
+    #[schemars(range(min = 1, max = 100))]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactCatalogSnapshotPage {
+    pub items: Vec<ArtifactSummary>,
+    pub through_sequence: u64,
+    pub next_after: u64,
+    pub has_more: bool,
 }
 
 pub const MAX_ARTIFACT_READ_BYTES: u32 = 64 * 1024;

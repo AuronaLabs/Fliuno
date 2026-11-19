@@ -339,3 +339,11 @@ HTTP 契约测试覆盖无效 Base64、无效返回 URI、数量限制、256 KiB
 Gemini 以 `store:false` 提交无状态交互。回环测试覆盖函数调用进入 Fliuno 审批、原始模型步骤和工具结果续轮、SSE 文本增量、缺少结束帧时撤销预览，以及输出上限。app-server 进程测试验证环境配置和所用 API 修订，并确认不支持的供应商计数选项在联网与建库前拒绝。MCP 回归覆盖远端 JSON-RPC 只读拒绝脱敏、原连接复用，以及传输错误仍关闭连接。
 
 Windows `scripts/check.ps1` 通过 415 项测试、26 个离线演示、Schema 一致性、Clippy 和 rustfmt。日志为 `target/0.0.2-gemini-mcp-windows.log`。本轮未使用真实 Gemini 凭据，也未在 Debian Linux 来宾复验。
+
+## 产物目录快照（2026-11-19）
+
+app-server 进程测试覆盖空目录、翻页间新增、重启后的旧水位续读、精确媒体类型筛选及无效水位拒绝。`artifacts/listSnapshot` 复用现有目录索引，无 SQLite 迁移。
+
+Windows 内存 SQLite 3.49.1 微基准使用 100,000 条目录记录，在序号 70,000 以内取同样的 14 条匹配项。无查询规划统计时，61 轮交替采样中，SQLite 自选工作区索引的查询与取行中位数为 10.2127 ms，显式使用既有工作区与媒体类型复合索引后为 0.1511 ms。该测量只覆盖 SQLite 查询及取行。日志为 `target/0.0.2-artifact-snapshot-query-plan.log`。
+
+Windows `scripts/check.ps1` 退出码为 0。431 项测试、26 个离线演示、rustfmt、两组严格 Clippy 和 RPC Schema 均通过。日志为 `target/0.0.2-artifact-catalog-snapshot-windows.log`。本轮未在 Debian Linux 来宾复验。
