@@ -142,6 +142,7 @@ impl Peer {
             "initialize",
             json!({"protocolVersion":"0.1","clientName":"process-test"}),
         );
+        assert_eq!(init["capabilities"]["maxTaskModelSteps"], 8);
         assert_eq!(init["capabilities"]["sessionContext"], true);
         assert_eq!(init["capabilities"]["sessionHistoryList"], true);
         assert_eq!(init["capabilities"]["maxSessionHistoryBytes"], 262_144);

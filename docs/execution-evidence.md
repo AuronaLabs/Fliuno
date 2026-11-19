@@ -851,3 +851,13 @@ Windows 本机调试服务使用 257 条实际完成的任务，把唯一命中�
 Debian Linux 6.12.107 来宾通过 11 项相关进程测试，覆盖历史搜索、分页和直接读取、上下文冻结以及工作台快照与订阅。日志：`D:/Fliuno-Native-Test/guest-history-scan-limit.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：504 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-history-scan-limit-check.log`。
+
+## 0.0.3 每任务模型尝试上限（2026-11-20）
+
+模型任务可设置 `maxModelSteps`，只降低现有的 8 次默认上限。默认任务和旧两项式重试回执形状不变；SQLite v46 只更新版本水位，无需扫描历史。Windows 上用实际 v45 服务创建任务，再用 v46 服务按同一请求 ID 找回旧任务，另建限额任务；v45 服务在启动时明确拒绝再次打开升级后的数据库。见 [模型尝试次数](protocol.md#模型尝试次数)。
+
+真实进程测试跨重启核对两种提交入口、默认等价性和非法值。最后一次响应提议的工具获批后仅生成一份产物；下一次模型调用被阻止。环回供应商收到一次请求并返回不可用响应时，续跑拒绝且原任务、结果不明事件和事件水位保持不变。
+
+Debian Linux 6.12.107 来宾通过 15 项进程测试，涵盖模型预算、启动回执和审批。日志：`D:/Fliuno-Native-Test/guest-model-step-limit.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：507 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-model-step-limit-check.log`。

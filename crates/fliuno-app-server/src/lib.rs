@@ -433,6 +433,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["taskStartSummary"] = json!(true);
+            capabilities["maxTaskModelSteps"] = json!(MAX_TASK_MODEL_STEPS);
             capabilities["taskCancelSummary"] = json!(true);
             capabilities["taskCancelBatch"] = json!(true);
             capabilities["maxTaskCancelBatch"] = json!(MAX_TASK_CANCEL_BATCH);
@@ -766,13 +767,7 @@ impl RpcServer {
             }
             "task/start" => {
                 let p: TaskStartParams = decode(params)?;
-                let (task, created) = self.kernel()?.create_task_with_context(
-                    &p.session_id,
-                    &p.input,
-                    p.client_request_id.as_deref(),
-                    p.backend,
-                    p.context,
-                )?;
+                let (task, created) = self.kernel()?.create_task_from_params(p)?;
                 let task = if created {
                     self.schedule_or_fail(task)?
                 } else {

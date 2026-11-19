@@ -612,17 +612,17 @@ fn tool_loops_stop_at_persisted_model_budget() {
     let (mut kernel, session) = setup();
     kernel.set_model_provider(Box::new(LoopingProvider));
     let mut task = kernel.start_task(&session.id, "loop").unwrap();
-    for _ in 0..MAX_MODEL_STEPS {
+    for _ in 0..DEFAULT_TASK_MODEL_STEPS {
         let id = task.pending_approval.as_ref().unwrap().id.clone();
         task = kernel
             .respond_approval(&task.id, &id, ApprovalDecision::AllowOnce)
             .unwrap();
     }
     assert_eq!(task.status, TaskStatus::Failed);
-    assert_eq!(task.model_steps, MAX_MODEL_STEPS);
+    assert_eq!(task.model_steps, DEFAULT_TASK_MODEL_STEPS);
     assert_eq!(
         kernel.list_artifacts(&task.id).unwrap().len(),
-        MAX_MODEL_STEPS as usize
+        DEFAULT_TASK_MODEL_STEPS as usize
     );
 }
 

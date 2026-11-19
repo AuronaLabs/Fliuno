@@ -2,6 +2,7 @@
 //! external continuations still use their original identity checks.
 use super::*;
 use crate::task::start::{StartLookup, StartRequest, request_conflict};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
@@ -21,6 +22,15 @@ pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+// Keep the two-element receipt for default starts. The optional trailing
+// budget lets existing receipts decode without rewriting any of them.
+#[derive(Serialize, Deserialize)]
+struct StartOptions<B, C>(
+    B,
+    C,
+    #[serde(default, skip_serializing_if = "Option::is_none")] Option<u32>,
+);
+
 pub(super) struct Receipt {
     digest: [u8; 32],
     options: String,
@@ -34,7 +44,11 @@ impl Receipt {
             .ok_or_else(|| Error::Invalid("task start requires frozen context".into()))?;
         Ok(Self {
             digest: Sha256::digest(input.as_bytes()).into(),
-            options: serde_json::to_string(&(&task.backend, &context.options))?,
+            options: serde_json::to_string(&StartOptions(
+                &task.backend,
+                &context.options,
+                task.max_model_steps,
+            ))?,
         })
     }
 
@@ -71,9 +85,13 @@ impl Kernel {
             return Ok(StartLookup::Legacy);
         }
         let options_json = row.get_ref(1)?.as_str().map_err(rusqlite::Error::from)?;
-        let (backend, options): (TaskBackend, ContextOptions) = serde_json::from_str(options_json)?;
+        let StartOptions(backend, options, max_model_steps): StartOptions<
+            TaskBackend,
+            ContextOptions,
+        > = serde_json::from_str(options_json)?;
         if backend != request.backend
             || options != request.options
+            || max_model_steps != request.max_model_steps
             || digest.as_blob().map_err(rusqlite::Error::from)?
                 != Sha256::digest(request.input.as_bytes()).as_slice()
         {

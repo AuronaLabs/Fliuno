@@ -22,7 +22,7 @@ fn summary_retry_receipts_survive_restart_and_commit_with_the_task_and_first_eve
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |row| row.get(0))
             .unwrap(),
-        45
+        46
     );
     assert_eq!(
         db.query_row::<i64, _, _>("SELECT COUNT(*) FROM task_start_receipts", [], |row| row

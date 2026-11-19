@@ -418,6 +418,10 @@ pub struct Task {
     pub model_outcome_unknown: bool,
     pub output: Option<String>,
     pub model_steps: u32,
+    /// A lower attempt limit supplied at task creation. Absent model tasks use 8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = MAX_TASK_MODEL_STEPS))]
+    pub max_model_steps: Option<u32>,
     #[serde(default)]
     pub backend: TaskBackend,
     /// Host registration captured at creation for a queued external-agent task.
@@ -677,6 +681,10 @@ pub struct WorkspaceIdParams {
     pub workspace_id: String,
 }
 
+/// Existing model tasks without an override keep this attempt limit.
+pub const DEFAULT_TASK_MODEL_STEPS: u32 = 8;
+pub const MAX_TASK_MODEL_STEPS: u32 = DEFAULT_TASK_MODEL_STEPS;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskStartParams {
@@ -688,6 +696,10 @@ pub struct TaskStartParams {
     pub backend: TaskBackend,
     #[serde(default)]
     pub context: Option<ContextOptions>,
+    /// Model tasks only. Limits attempts, including uncertain requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = MAX_TASK_MODEL_STEPS))]
+    pub max_model_steps: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

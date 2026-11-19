@@ -24,7 +24,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const SCHEMA_VERSION: u32 = 45;
+pub(crate) const SCHEMA_VERSION: u32 = 46;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -406,6 +406,11 @@ impl Kernel {
         }
         if version < 45 {
             task_revisions::migrate(&mut db)?;
+        }
+        if version < 46 {
+            // A limited task can contain a new snapshot field and receipt slot.
+            // Reject downgrades before an older binary reads either shape.
+            db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

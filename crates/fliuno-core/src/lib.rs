@@ -51,7 +51,6 @@ use std::{collections::BTreeMap, fs::File, sync::Arc};
 use tool::CreateArtifact;
 use uuid::Uuid;
 
-const MAX_MODEL_STEPS: u32 = 8;
 pub type ModelProviderHandle = Arc<dyn ModelProvider>;
 
 fn new_id(prefix: &str) -> String {

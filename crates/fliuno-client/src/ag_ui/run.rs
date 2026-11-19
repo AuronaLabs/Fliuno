@@ -167,6 +167,7 @@ impl AgUiRunInput {
                 client_request_id: Some(request_key(&self.run_id, interrupt_profile)),
                 backend: Default::default(),
                 context: None,
+                max_model_steps: None,
             },
             self.run_id,
         ))

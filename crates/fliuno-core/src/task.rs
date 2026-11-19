@@ -53,7 +53,7 @@ impl Kernel {
                 "task already has an in-flight operation".into(),
             ));
         }
-        if task.model_steps >= MAX_MODEL_STEPS {
+        if model_step_budget_spent(&task) {
             return Ok(PreparedModelStep::Finished(
                 self.fail(task, "model step budget exceeded".into())?,
             ));
@@ -276,6 +276,13 @@ impl Kernel {
                 "model request outcome is uncertain; explicit retry consent is required".into(),
             ));
         }
+        if task.backend == TaskBackend::Model && model_step_budget_spent(&task) {
+            // Do not clear evidence of a possibly billed last attempt if no
+            // attempt remains. Inspect or cancel the interrupted task instead.
+            return Err(Error::Conflict(
+                "model step budget exhausted; task cannot resume".into(),
+            ));
+        }
         task.model_outcome_unknown = false;
         task.status = TaskStatus::Running;
         task.output = None;
@@ -296,6 +303,10 @@ impl Kernel {
         )?;
         Ok(task)
     }
+}
+
+fn model_step_budget_spent(task: &Task) -> bool {
+    task.model_steps >= task.max_model_steps.unwrap_or(DEFAULT_TASK_MODEL_STEPS)
 }
 
 /// Prepare the same cancellation transition for single and batch callers.

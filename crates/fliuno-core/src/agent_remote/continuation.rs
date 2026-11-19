@@ -72,6 +72,7 @@ impl Kernel {
             model_outcome_unknown: false,
             output: None,
             model_steps: 0,
+            max_model_steps: None,
             backend: source.backend,
             backend_authority: Some(authority),
             agent_run: None,

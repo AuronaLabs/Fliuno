@@ -1,4 +1,4 @@
-//! Real startup, handshake and inference using the configured metadata peer.
+//! Real startup, inference budgets, and durable limits on model attempts.
 use super::*;
 use http_wire::{Fixture, Response};
 
@@ -252,4 +252,182 @@ fn gemini_provider_count_mode_fails_before_database_creation() {
             .contains("preflight provider token counting")
     );
     assert!(wire.requests().is_empty());
+}
+
+#[test]
+fn model_step_limit_is_durable_across_receipt_retry_and_final_approval() {
+    let directory = TestDirectory::new();
+    let db_path = directory.db();
+    let mut peer = Peer::start(&db_path);
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let request = json!({"sessionId":session["id"],"input":"approval at the limit",
+        "clientRequestId":"one-step","maxModelSteps":1});
+    let started = peer.call("task/startSummary", request.clone());
+    let id = started["id"].as_str().unwrap();
+    let waiting = peer.wait_for_status(id, "waiting_approval");
+    assert_eq!(waiting["maxModelSteps"], 1);
+    assert_eq!(waiting["modelSteps"], 1);
+    drop(peer);
+
+    let mut peer = Peer::start(&db_path);
+    assert_eq!(peer.call("task/start", request.clone()), waiting);
+    assert_eq!(peer.call("task/startSummary", request.clone())["id"], id);
+    let events = |peer: &mut Peer| peer.call("events/list", json!({"taskId":id}));
+    let before = events(&mut peer);
+    let mut changed = request;
+    changed["maxModelSteps"] = json!(2);
+    for method in ["task/startSummary", "task/start"] {
+        assert_eq!(
+            peer.request(method, changed.clone())["error"]["code"],
+            -32009
+        );
+    }
+    assert_eq!(events(&mut peer), before);
+
+    peer.call(
+        "approval/respond",
+        json!({"taskId":id,
+        "approvalId":waiting["pendingApproval"]["id"],"decision":"allow_once"}),
+    );
+    let done = peer.wait_for_status(id, "failed");
+    assert_eq!(done["output"], "model step budget exceeded");
+    assert_eq!(done["modelSteps"], 1);
+    assert_eq!(done["modelOutcomeUnknown"], false);
+    assert_eq!(
+        peer.call("artifacts/list", json!({"taskId":id}))
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let page = events(&mut peer);
+    let kinds: Vec<_> = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| event["data"]["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds
+            .iter()
+            .filter(|kind| **kind == "model_started")
+            .count(),
+        1
+    );
+    assert!(
+        kinds.ends_with(&["artifact_created", "tool_completed", "task_failed"]),
+        "{kinds:?}"
+    );
+}
+
+#[test]
+fn model_step_limit_preserves_default_receipts_and_rejects_invalid_settings() {
+    let directory = TestDirectory::new();
+    let db_path = directory.db();
+    let mut peer = Peer::start(&db_path);
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let request =
+        json!({"sessionId":session["id"],"input":"default steps","clientRequestId":"old"});
+    let started = peer.call("task/start", request.clone());
+    let id = started["id"].as_str().unwrap();
+    let waiting = peer.wait_for_status(id, "waiting_approval");
+    assert!(waiting.get("maxModelSteps").is_none());
+    drop(peer);
+
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    db.pragma_update(None, "user_version", 45).unwrap();
+    let old_options = || {
+        db.query_row::<String, _, _>(
+            "SELECT options FROM task_start_receipts WHERE request_key='old'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    let v45 = old_options();
+    let options: Value = serde_json::from_str(&v45).unwrap();
+    assert_eq!(options.as_array().unwrap().len(), 2);
+    let mut peer = Peer::start(&db_path);
+    assert_eq!(
+        db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
+            .unwrap(),
+        46
+    );
+    let mut default = request.clone();
+    default["maxModelSteps"] = json!(8);
+    assert_eq!(peer.call("task/startSummary", default.clone())["id"], id);
+    assert_eq!(peer.call("task/start", default), waiting);
+    assert_eq!(old_options(), v45);
+
+    for invalid in [
+        json!({"maxModelSteps":0}),
+        json!({"maxModelSteps":9}),
+        json!({"maxModelSteps":1,"backend":{"type":"external_agent","agentId":"missing"}}),
+    ] {
+        let mut params = request.clone();
+        params["clientRequestId"] = json!("invalid");
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(invalid.as_object().unwrap().clone());
+        assert_eq!(
+            peer.request("task/startSummary", params)["error"]["code"],
+            -32602
+        );
+    }
+    assert_eq!(
+        db.query_row::<u32, _, _>("SELECT count(*) FROM tasks", [], |row| row.get(0))
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn model_step_limit_keeps_uncertain_outcome_when_last_attempt_cannot_resume() {
+    let directory = TestDirectory::new();
+    // The request reached the loopback service, but it did not return a usable
+    // model response. This is intentionally classified as outcome unknown.
+    let endpoint = Fixture::start(|_| Response::json(200, json!({"output":[]})));
+    let db = directory.db();
+    let url = endpoint.url("/v1/");
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&url));
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let task = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"one attempt","maxModelSteps":1}),
+    );
+    let id = task["id"].as_str().unwrap();
+    let interrupted = peer.wait_for_status(id, "interrupted");
+    assert_eq!(interrupted["modelOutcomeUnknown"], true);
+    assert_eq!(interrupted["modelSteps"], 1);
+    drop(peer);
+
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&url));
+    let lookup = json!({"taskId":id});
+    let page = peer.call("events/list", lookup.clone());
+    assert!(
+        page["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["data"]["type"] == "model_outcome_unknown"
+                && event["data"]["step"] == 1)
+    );
+    let response = peer.request(
+        "task/resume",
+        json!({"taskId":id,"retryUncertainModelStep":true}),
+    );
+    assert_eq!(response["error"]["code"], -32009);
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("budget exhausted")
+    );
+    assert_eq!(peer.call("task/get", lookup.clone()), interrupted);
+    assert_eq!(peer.call("events/list", lookup), page);
+    assert_eq!(endpoint.requests().len(), 1);
 }

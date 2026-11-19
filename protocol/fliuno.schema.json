@@ -1009,6 +1009,16 @@
             }
           ],
           "default": null
+        },
+        "maxModelSteps": {
+          "description": "Model tasks only. Limits attempts, including uncertain requests.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 8
         }
       },
       "additionalProperties": false,
@@ -1206,6 +1216,16 @@
             }
           ],
           "default": null
+        },
+        "maxModelSteps": {
+          "description": "Model tasks only. Limits attempts, including uncertain requests.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 8
         }
       },
       "additionalProperties": false,
@@ -3612,6 +3632,16 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "maxModelSteps": {
+          "description": "A lower attempt limit supplied at task creation. Absent model tasks use 8.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 8
         },
         "backend": {
           "$ref": "#/$defs/TaskBackend",

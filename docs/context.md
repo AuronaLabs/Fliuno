@@ -145,6 +145,8 @@ SQLite 在读取候选时先检查记录字节数，最多检查 `maxTurns` 条�
 
 ## 模型请求预算
 
+这里的预算限制**单次请求**的输入与输出。要限制一个任务可以推进多少轮，提交时设置 [`maxModelSteps`](protocol.md#模型尝试次数)。
+
 OpenAI、Anthropic 和 Gemini 可通过两个宿主环境变量启用请求预算预检：
 
 ```powershell

@@ -19,12 +19,14 @@ pub(crate) struct StartRequest<'a> {
     pub key: Option<&'a str>,
     pub backend: TaskBackend,
     pub options: ContextOptions,
+    pub max_model_steps: Option<u32>,
     explicit_context: bool,
 }
 
 pub(crate) fn request_conflict() -> Error {
     Error::Conflict(
-        "clientRequestId was used for different input, backend or context options".into(),
+        "clientRequestId was used for different input, backend, context or model step budget"
+            .into(),
     )
 }
 
@@ -73,7 +75,25 @@ impl Kernel {
         backend: TaskBackend,
         context_options: Option<ContextOptions>,
     ) -> Result<(Task, bool)> {
-        let request = self.prepare_task_start(session_id, input, key, backend, context_options)?;
+        let request =
+            self.prepare_task_start(session_id, input, key, backend, context_options, None)?;
+        self.create_prepared_task(request)
+    }
+
+    /// Starts the same durable state machine as the summary variant.
+    pub fn create_task_from_params(&mut self, p: TaskStartParams) -> Result<(Task, bool)> {
+        let request = self.prepare_task_start(
+            &p.session_id,
+            &p.input,
+            p.client_request_id.as_deref(),
+            p.backend,
+            p.context,
+            p.max_model_steps,
+        )?;
+        self.create_prepared_task(request)
+    }
+
+    fn create_prepared_task(&mut self, request: StartRequest<'_>) -> Result<(Task, bool)> {
         if let Some(task) = self.find_matching_task_start(&request)? {
             return Ok((task, false));
         }
@@ -90,6 +110,7 @@ impl Kernel {
             p.client_request_id.as_deref(),
             p.backend,
             p.context,
+            p.max_model_steps,
         )?;
         if let Some(key) = request.key {
             match self.lookup_task_start(&request, key)? {
@@ -116,9 +137,25 @@ impl Kernel {
         key: Option<&'a str>,
         backend: TaskBackend,
         options: Option<ContextOptions>,
+        max_model_steps: Option<u32>,
     ) -> Result<StartRequest<'a>> {
         validate_input(input)?;
         self.require_session(session)?;
+        if let Some(limit) = max_model_steps {
+            if backend != TaskBackend::Model {
+                return Err(Error::Invalid(
+                    "maxModelSteps applies only to model tasks".into(),
+                ));
+            }
+            if !(1..=MAX_TASK_MODEL_STEPS).contains(&limit) {
+                return Err(Error::Invalid(format!(
+                    "maxModelSteps must be 1 to {MAX_TASK_MODEL_STEPS}"
+                )));
+            }
+        }
+        // An explicit default is the same request as an omitted limit, even
+        // for legacy task snapshots and compact start receipts.
+        let max_model_steps = max_model_steps.filter(|limit| *limit != DEFAULT_TASK_MODEL_STEPS);
         let explicit_context = options.is_some();
         let options = context::normalize_options(options.unwrap_or_default())?;
         if let Some(key) = key {
@@ -130,6 +167,7 @@ impl Kernel {
             key,
             backend,
             options,
+            max_model_steps,
             explicit_context,
         })
     }
@@ -157,6 +195,7 @@ impl Kernel {
         if same_input
             && task.backend == request.backend
             && same_context
+            && task.max_model_steps == request.max_model_steps
             && task.remote_continuation.is_none()
             && task.agent_session_continuation.is_none()
         {
@@ -173,6 +212,7 @@ impl Kernel {
             key,
             backend,
             options,
+            max_model_steps,
             ..
         } = request;
         let backend_authority = match &backend {
@@ -196,6 +236,7 @@ impl Kernel {
             model_outcome_unknown: false,
             output: None,
             model_steps: 0,
+            max_model_steps,
             backend,
             backend_authority,
             agent_run: None,
