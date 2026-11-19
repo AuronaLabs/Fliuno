@@ -54,6 +54,7 @@ fn restores_both_search_scopes_and_opens_a_hit_after_restart() {
         through_sequence: None,
         before_sequence: None,
         limit: Some(1),
+        scan_limit: None,
     });
     let workspace_request = HistorySearchRequest::Workspace(WorkspaceHistorySearchParams {
         workspace_id: workspace["id"].as_str().unwrap().to_owned(),
@@ -62,10 +63,12 @@ fn restores_both_search_scopes_and_opens_a_hit_after_restart() {
         through_sequence: None,
         before_sequence: None,
         limit: Some(1),
+        scan_limit: None,
     });
-    let (through, session_checkpoint, workspace_checkpoint) = {
+    let (through, session_checkpoint, workspace_checkpoint, sparse_checkpoint) = {
         let (_server, mut client) = connect(&db);
         assert_eq!(client.info().capabilities["sessionHistoryGet"], true);
+        assert_eq!(client.info().capabilities["maxHistorySearchScanLimit"], 512);
         let fetch = |client: &mut _, request: HistorySearchRequest, scope| {
             let mut search = HistorySearch::new(request);
             let page = search.next_page(client, |_| {}).unwrap().unwrap();
@@ -79,11 +82,36 @@ fn restores_both_search_scopes_and_opens_a_hit_after_restart() {
         let (workspace_through, workspace_checkpoint) =
             fetch(&mut client, workspace_request.clone(), Some(session_id));
         assert_eq!(session_through, workspace_through);
-        (session_through, session_checkpoint, workspace_checkpoint)
+        let HistorySearchRequest::Workspace(mut sparse) = workspace_request.clone() else {
+            unreachable!()
+        };
+        sparse.query = "needle one".into();
+        sparse.limit = None;
+        sparse.scan_limit = Some(2);
+        let mut search = HistorySearch::new(HistorySearchRequest::Workspace(sparse.clone()));
+        let page = search.next_page(&mut client, |_| {}).unwrap().unwrap();
+        assert!(page.matches.is_empty());
+        assert_eq!(page.scanned_turns, 2);
+        assert_eq!(page.through_sequence, session_through);
+        let sparse_checkpoint = serde_json::to_vec(search.next_request().unwrap()).unwrap();
+        sparse.scan_limit = Some(512);
+        let wide = HistorySearch::new(HistorySearchRequest::Workspace(sparse))
+            .next_page(&mut client, |_| {})
+            .unwrap()
+            .unwrap();
+        assert_eq!(wide.scanned_turns, 3);
+        assert_eq!(wide.matches[0].task_id, oldest["id"]);
+        assert_eq!(wide.next_before_sequence, None);
+        (
+            session_through,
+            session_checkpoint,
+            workspace_checkpoint,
+            sparse_checkpoint,
+        )
     };
 
     let mut peer = Peer::start(&db);
-    let later = approve_report(&mut peer, &first, "History needle four", "later");
+    let later = approve_report(&mut peer, &first, "History needle one later", "later");
     drop(peer);
     let (_server, mut client) = connect(&db);
     let mut session = HistorySearch::new(serde_json::from_slice(&session_checkpoint).unwrap());
@@ -121,6 +149,14 @@ fn restores_both_search_scopes_and_opens_a_hit_after_restart() {
     assert_eq!(page.matches.len(), 1);
     assert_eq!(page.matches[0].task_id, oldest["id"]);
     assert!(workspace.next_page(&mut client, |_| {}).unwrap().is_none());
+
+    let mut sparse = HistorySearch::new(serde_json::from_slice(&sparse_checkpoint).unwrap());
+    let page = sparse.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert_eq!(page.through_sequence, through);
+    assert_eq!(page.scanned_turns, 1);
+    assert_eq!(page.matches[0].task_id, oldest["id"]);
+    assert_eq!(page.matches[0].session_id.as_deref(), Some(session_id));
+    assert!(sparse.next_page(&mut client, |_| {}).unwrap().is_none());
 
     let current = HistorySearch::new(workspace_request)
         .next_page(&mut client, |_| {})

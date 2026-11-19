@@ -1,6 +1,6 @@
 //! Walk a bounded completion window and borrow each eligible JSON projection.
 use super::*;
-use crate::context::search::{HistoryScope, MAX_SEARCH_TURN_BYTES, MAX_SEARCH_TURNS};
+use crate::context::search::{HistoryScope, MAX_SEARCH_TURN_BYTES};
 
 pub(crate) struct ConversationRow<'a> {
     pub(crate) sequence: u64,
@@ -16,6 +16,7 @@ impl Kernel {
         &self,
         scope: HistoryScope<'_>,
         upper: u64,
+        scan_limit: u32,
         mut visit: impl FnMut(ConversationRow<'_>) -> Result<bool>,
     ) -> Result<Option<u64>> {
         let (owner, source, predicate, cursor, session_column) = match scope {
@@ -42,9 +43,9 @@ impl Kernel {
             owner,
             validate_event_cursor(upper)?,
             MAX_SEARCH_TURN_BYTES,
-            MAX_SEARCH_TURNS + 1
+            scan_limit + 1
         ])?;
-        for index in 0..MAX_SEARCH_TURNS {
+        for index in 0..scan_limit {
             let Some(row) = rows.next()? else {
                 break;
             };
@@ -62,7 +63,7 @@ impl Kernel {
                     .map_err(rusqlite::Error::from)?,
                 task_id: row.get_ref(4)?.as_str().map_err(rusqlite::Error::from)?,
             };
-            if !visit(record)? || index + 1 == MAX_SEARCH_TURNS {
+            if !visit(record)? || index + 1 == scan_limit {
                 // Peek without decoding another turn to distinguish a full page from exhaustion.
                 return Ok(rows.next()?.is_some().then_some(sequence));
             }

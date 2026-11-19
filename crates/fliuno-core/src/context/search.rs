@@ -1,15 +1,15 @@
 //! Read-only search within a snapshot of completed history.
 use super::{Error, Kernel, Result};
 use fliuno_protocol::{
-    SessionHistoryMatch, SessionHistoryRole, SessionHistorySearchPage, SessionHistorySearchParams,
-    WorkspaceHistorySearchParams,
+    MAX_HISTORY_SEARCH_SCAN_LIMIT, SessionHistoryMatch, SessionHistoryRole,
+    SessionHistorySearchPage, SessionHistorySearchParams, WorkspaceHistorySearchParams,
 };
 
 use serde::Deserialize;
 use std::borrow::Cow;
 
 const MAX_QUERY_BYTES: usize = 256;
-pub(crate) use fliuno_protocol::MAX_HISTORY_SEARCH_TURNS as MAX_SEARCH_TURNS;
+pub(crate) use fliuno_protocol::MAX_HISTORY_SEARCH_TURNS as DEFAULT_SEARCH_TURNS;
 pub(crate) const MAX_SEARCH_TURN_BYTES: u32 = 128 * 1024;
 
 #[derive(Clone, Copy)]
@@ -84,6 +84,13 @@ impl<'a> HistoryMatcher<'a> {
     }
 }
 
+struct SearchWindow {
+    through: Option<u64>,
+    before: Option<u64>,
+    limit: Option<u32>,
+    scan_limit: Option<u32>,
+}
+
 impl Kernel {
     pub fn search_session_history(
         &self,
@@ -93,9 +100,12 @@ impl Kernel {
             HistoryScope::Session(&params.session_id),
             &params.query,
             params.role,
-            params.through_sequence,
-            params.before_sequence,
-            params.limit,
+            SearchWindow {
+                through: params.through_sequence,
+                before: params.before_sequence,
+                limit: params.limit,
+                scan_limit: params.scan_limit,
+            },
         )
     }
 
@@ -107,9 +117,12 @@ impl Kernel {
             HistoryScope::Workspace(&params.workspace_id),
             &params.query,
             params.role,
-            params.through_sequence,
-            params.before_sequence,
-            params.limit,
+            SearchWindow {
+                through: params.through_sequence,
+                before: params.before_sequence,
+                limit: params.limit,
+                scan_limit: params.scan_limit,
+            },
         )
     }
 
@@ -118,27 +131,31 @@ impl Kernel {
         scope: HistoryScope<'_>,
         query: &str,
         role: Option<SessionHistoryRole>,
-        through_sequence: Option<u64>,
-        before_sequence: Option<u64>,
-        limit: Option<u32>,
+        window: SearchWindow,
     ) -> Result<SessionHistorySearchPage> {
         let query = validate_query(query)?;
-        let limit = limit.unwrap_or(16);
+        let limit = window.limit.unwrap_or(16);
         if !(1..=32).contains(&limit) {
             return Err(Error::Invalid("history limit must be 1 to 32".into()));
+        }
+        let scan_limit = window.scan_limit.unwrap_or(DEFAULT_SEARCH_TURNS);
+        if !(1..=MAX_HISTORY_SEARCH_SCAN_LIMIT).contains(&scan_limit) {
+            return Err(Error::Invalid(format!(
+                "history scanLimit must be 1 to {MAX_HISTORY_SEARCH_SCAN_LIMIT}"
+            )));
         }
         match scope {
             HistoryScope::Session(id) => self.require_session(id)?,
             HistoryScope::Workspace(id) => self.require_workspace(id)?,
         }
         let watermark = self.event_watermark()?;
-        let through_sequence = through_sequence.unwrap_or(watermark);
+        let through_sequence = window.through.unwrap_or(watermark);
         if through_sequence > watermark {
             return Err(Error::Invalid(
                 "throughSequence exceeds the current event sequence".into(),
             ));
         }
-        let upper = match before_sequence {
+        let upper = match window.before {
             Some(before) if before > 0 && before <= through_sequence => before - 1,
             Some(_) => {
                 return Err(Error::Invalid(
@@ -156,7 +173,7 @@ impl Kernel {
             next_before_sequence: None,
         };
         let matcher = HistoryMatcher::new(&query, role);
-        page.next_before_sequence = self.scan_conversation(scope, upper, |row| {
+        page.next_before_sequence = self.scan_conversation(scope, upper, scan_limit, |row| {
             page.scanned_turns += 1;
             if let Some(data) = row.data {
                 if matcher.matches(data)? {

@@ -81,7 +81,7 @@ staged.sync_all()?;
 | `workspace/getProfile` | `{workspaceId}` | 当前 WorkspaceProfile，包含原工作区和可选的显示名称 |
 | `workspace/listProfiles` | `{after?:0,limit?:100}` | WorkspaceProfile ObjectPage，与 `workspace/list` 的游标相同 |
 | `workspace/setTitle` | `{workspaceId,title}` | 持久化显示名称并返回 WorkspaceProfile，`title:""` 清除名称 |
-| `workspace/searchHistory` | `{workspaceId,query,role?,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，跨会话查找已完成任务，命中包含 `sessionId` |
+| `workspace/searchHistory` | `{workspaceId,query,role?,throughSequence?,beforeSequence?,limit?,scanLimit?}` | SessionHistorySearchPage，跨会话查找已完成任务，命中包含 `sessionId` |
 | `session/create` | `{workspaceId,title?,clientRequestId?}` | Session |
 | `session/get` | `{sessionId}` | 单个 Session |
 | `session/rename` | `{sessionId,title}` | 持久化标题并返回 Session |
@@ -90,7 +90,7 @@ staged.sync_all()?;
 | `session/context` | `{sessionId,throughSequence?,options?:{mode?,maxTurns?,maxBytes?,selection?,detail?,taskIds?}}` | TaskContext，预览指定序号的历史 |
 | `session/listHistory` | `{sessionId,throughSequence?,beforeSequence?,limit?,maxBytes?}` | SessionHistoryListPage，按完成序号倒序分页读取精简对话。见[会话历史分页](context.md#会话历史分页)。 |
 | `session/getHistoryTurn` | `{sessionId,taskId,throughSequence?,maxBytes?}` | `SessionHistoryEntry`，直接读一条对话或返回超限引用。见[打开搜索命中](context.md#打开一条历史记录)。 |
-| `session/searchHistory` | `{sessionId,query,role?,throughSequence?,beforeSequence?,limit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
+| `session/searchHistory` | `{sessionId,query,role?,throughSequence?,beforeSequence?,limit?,scanLimit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/startSummary` | 与 `task/start` 相同 | 使用同一任务创建和调度流程，返回 `TaskSummary` |
 | `task/getSummaryByRequest` | `{sessionId,clientRequestId}` | 通过会话和请求键读取当前 `TaskSummary` |
@@ -687,12 +687,14 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `session/searchHistory` 只检查指定会话里已完成且有历史投影的用户与助手消息。查询去除首尾空白后须为 1～256 个 UTF-8 字节，按 Unicode 小写转换后的字面子串匹配，无词法或正则语法。`role` 可设为 `user` 或 `assistant`，省略就查两种消息。`limit` 默认为 16，接受 1～32。结果按完成序号从新到旧，包含 `taskId` 与 `completionSequence`。
 
-每页最多检查 128 条历史。超过 128 KiB 的精简对话投影会跳过并计入 `skippedOversizedTurns`。`scannedTurns` 包含这些记录。只要 `nextBeforeSequence` 有值就还能翻页，即使 `matches` 为空。翻页时沿用 `query` 和 `role`，同时传入首次返回的 `throughSequence` 和上一页的 `nextBeforeSequence` 作为 `beforeSequence`。调用方可用查到的 `taskId` 配合 `session/context` 的 `options.taskIds` 预览和选择历史，搜索本身只读取本机数据库。
+每页默认最多检查 128 条历史。服务声明 `maxHistorySearchScanLimit` 时，可显式传 `scanLimit`（1～512，不超过声明的上限）。小窗口适合限制一次调用的工作量，大窗口适合少翻几次稀疏结果。`limit` 仍是最多返回的命中数，先达到任一上限就结束本页。超过 128 KiB 的精简对话投影会跳过并计入 `skippedOversizedTurns`；`scannedTurns` 包含这些记录。
+
+只要 `nextBeforeSequence` 有值就还能翻页，即使 `matches` 为空。继续时沿用同一范围、`query` 和 `role`，传入首次返回的 `throughSequence` 和上一页的 `nextBeforeSequence` 作为 `beforeSequence`。可以调整 `scanLimit`，游标仍从已检查的最后一条继续。Rust `HistorySearch` 会保存扫描预算，校验能力和回包后才更新游标。连接旧服务时省略 `scanLimit`，仍按默认窗口读取。调用方可用查到的 `taskId` 配合 `session/context` 的 `options.taskIds` 预览和选择历史。
 
 `initialize.capabilities.workspaceHistorySearch` 为真时，可用 `workspace/searchHistory` 搜索同一工作区的所有会话，包括已归档会话。每个命中同时返回 `sessionId`，可用它打开对应会话。查询规则、扫描上限和分页水位与 `session/searchHistory` 相同。SQLite v33 回填按工作区和完成序号排序的索引，现有会话搜索响应保持原样。搜索不会把其他会话内容自动加入模型上下文。
 
 要查看某一条命中，检查 `sessionHistoryGet`，将命中的 `taskId`、所属 `sessionId` 及搜索页的 `throughSequence` 传给 `session/getHistoryTurn`。会话搜索沿用原请求的 `sessionId`，工作区搜索则使用该命中的 `sessionId`。[请求示例与错误边界](context.md#打开一条历史记录)。
 
-`initialize.capabilities.contextMatchRecent` 表示上下文选项也支持 `selection: "match_recent"` 和 `historyQuery: {query,role?}`，将近期匹配记录直接冻结到新任务。匹配方式和扫描上限与历史搜索相同；具体预算和快照语义见[上下文](context.md)。
+`initialize.capabilities.contextMatchRecent` 表示上下文选项也支持 `selection: "match_recent"` 和 `historyQuery: {query,role?}`，将近期匹配记录直接冻结到新任务。匹配方式与历史搜索相同，固定检查最近最多 128 条，独立于搜索接口的 `scanLimit`；具体预算和快照语义见[上下文](context.md)。
 
-搜索从既有的精简历史投影读取匹配字段，命中时返回索引中的任务 ID。构建上下文时才完整解码命中项，并继续应用原有的字节预算。数据库版本和分页结果不变。
+搜索从既有的精简历史投影读取匹配字段，命中时返回索引中的任务 ID。构建上下文时才完整解码命中项，并继续应用原有的字节预算。数据库版本不变，省略 `scanLimit` 时分页结果保持原样。

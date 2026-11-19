@@ -178,6 +178,16 @@
           "format": "uint32",
           "minimum": 0,
           "default": null
+        },
+        "scanLimit": {
+          "description": "Maximum completed turns examined per page. Defaults to 128.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 512
         }
       },
       "additionalProperties": false,
@@ -740,6 +750,16 @@
           "format": "uint32",
           "minimum": 0,
           "default": null
+        },
+        "scanLimit": {
+          "description": "Maximum completed turns examined per page. Defaults to 128.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 512
         }
       },
       "additionalProperties": false,

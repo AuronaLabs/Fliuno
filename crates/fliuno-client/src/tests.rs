@@ -414,6 +414,7 @@ fn history_search_resumes_an_empty_window_and_retries_the_same_cursor() {
             through_sequence: None,
             before_sequence: None,
             limit: None,
+            scan_limit: None,
         },
     ));
     let empty = search.next_page(&mut client, |_| {}).unwrap().unwrap();
@@ -763,4 +764,86 @@ fn decision_batch_rejects_unbound_and_inconsistent_receipts() {
     }
     let actual = client.get_approval_decisions(&request, |_| {}).unwrap();
     assert_eq!(serde_json::to_value(actual).unwrap(), good_reply);
+}
+
+#[test]
+fn history_search_uses_negotiated_scan_limit_without_losing_its_checkpoint() {
+    use fliuno_protocol::SessionHistorySearchParams;
+
+    let request = HistorySearchRequest::Session(SessionHistorySearchParams {
+        session_id: "session".into(),
+        query: "needle".into(),
+        role: None,
+        through_sequence: None,
+        before_sequence: None,
+        limit: None,
+        scan_limit: Some(2),
+    });
+    let mut search = HistorySearch::new(request);
+    let initial = serde_json::to_value(search.next_request()).unwrap();
+    let mut legacy = fake_client(&[]);
+    assert!(matches!(
+        search.next_page(&mut legacy, |_| {}),
+        Err(Error::UnsupportedHistorySearchScanLimit)
+    ));
+    assert_eq!(
+        serde_json::to_value(search.next_request()).unwrap(),
+        initial
+    );
+    assert_eq!(
+        legacy
+            .into_parts()
+            .1
+            .iter()
+            .filter(|byte| **byte == b'\n')
+            .count(),
+        1
+    );
+
+    let mut info: Value = serde_json::from_str(HANDSHAKE).unwrap();
+    info["result"]["capabilities"]["maxHistorySearchScanLimit"] = json!(512);
+    let too_many = json!({"throughSequence":100,"scannedTurns":3,"skippedOversizedTurns":0,"matches":[],"nextBeforeSequence":40});
+    let empty = json!({"throughSequence":100,"scannedTurns":2,"skippedOversizedTurns":0,"matches":[],"nextBeforeSequence":40});
+    let hit = json!({"throughSequence":100,"scannedTurns":1,"skippedOversizedTurns":0,"matches":[{"taskId":"needle","completionSequence":20}],"nextBeforeSequence":null});
+    let mut input = serde_json::to_string(&info).unwrap() + "\n";
+    for (i, result) in [too_many, empty, hit].into_iter().enumerate() {
+        input += &format!("{}\n", json!({"jsonrpc":"2.0","id":i+2,"result":result}));
+    }
+    let mut client = Client::connect(
+        Cursor::new(input.into_bytes()),
+        Vec::new(),
+        "scan-limit",
+        |_| {},
+    )
+    .unwrap();
+    assert!(matches!(
+        search.next_page(&mut client, |_| {}),
+        Err(Error::InvalidHistoryPage)
+    ));
+    assert_eq!(
+        serde_json::to_value(search.next_request()).unwrap(),
+        initial
+    );
+    assert!(
+        search
+            .next_page(&mut client, |_| {})
+            .unwrap()
+            .unwrap()
+            .matches
+            .is_empty()
+    );
+    let checkpoint = serde_json::to_value(search.next_request().unwrap()).unwrap();
+    assert_eq!(checkpoint["params"]["scanLimit"], 2);
+    assert_eq!(checkpoint["params"]["throughSequence"], 100);
+    assert_eq!(checkpoint["params"]["beforeSequence"], 40);
+    assert_eq!(
+        search
+            .next_page(&mut client, |_| {})
+            .unwrap()
+            .unwrap()
+            .matches[0]
+            .task_id,
+        "needle"
+    );
+    assert!(search.next_request().is_none());
 }

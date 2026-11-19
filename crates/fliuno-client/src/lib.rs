@@ -56,6 +56,13 @@ pub enum Error {
     InvalidReplayPage,
     #[error("invalid conversation history page")]
     InvalidHistoryPage,
+    #[error(
+        "history scanLimit must be 1 to {0}",
+        fliuno_protocol::MAX_HISTORY_SEARCH_SCAN_LIMIT
+    )]
+    InvalidHistorySearchScanLimit,
+    #[error("server does not support the requested history scanLimit")]
+    UnsupportedHistorySearchScanLimit,
     #[error("session catalog page violates its requested scope, filter or cursor order")]
     InvalidSessionCatalogPage,
     #[error("task summary page violates its requested scope, status or cursor order")]

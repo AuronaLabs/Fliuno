@@ -146,6 +146,7 @@ impl Kernel {
             self.scan_conversation(
                 search::HistoryScope::Session(session),
                 through_sequence,
+                search::DEFAULT_SEARCH_TURNS,
                 |row| {
                     let Some(data) = row.data else {
                         return Ok(true);

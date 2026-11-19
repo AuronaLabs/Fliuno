@@ -443,6 +443,7 @@ impl RpcServer {
             capabilities["maxSessionHistoryEntries"] = json!(MAX_SESSION_HISTORY_ENTRIES);
             capabilities["sessionHistorySearch"] = json!(true);
             capabilities["workspaceHistorySearch"] = json!(true);
+            capabilities["maxHistorySearchScanLimit"] = json!(MAX_HISTORY_SEARCH_SCAN_LIMIT);
             capabilities["contextMatchRecent"] = json!(true);
             capabilities["artifactMediaTypeFilter"] = json!(true);
             capabilities["remoteTaskWatch"] = json!(self.kernel()?.remote_task_watch_supported());

@@ -447,6 +447,23 @@ fn workspace_history_search_backfills_and_pages_across_sessions_without_crossing
     ).unwrap();
     let mut peer = Peer::start(&db);
     let request = json!({"workspaceId":workspace["id"],"query":" CASE ","role":"user","limit":1});
+    for (method, scope) in [
+        (
+            "session/searchHistory",
+            json!({"sessionId":first_session["id"]}),
+        ),
+        (
+            "workspace/searchHistory",
+            json!({"workspaceId":workspace["id"]}),
+        ),
+    ] {
+        for invalid in [0, 513] {
+            let mut params = scope.clone();
+            params["query"] = json!("case");
+            params["scanLimit"] = json!(invalid);
+            assert_eq!(peer.request(method, params)["error"]["code"], -32602);
+        }
+    }
     let page = peer.call(method, request.clone());
     assert_eq!(page["scannedTurns"], 1);
     assert_eq!(page["matches"][0]["taskId"], second["id"]);

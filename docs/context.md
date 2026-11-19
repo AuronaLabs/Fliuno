@@ -101,7 +101,7 @@ Rust 客户端可将 `SessionHistoryListParams` 交给 `fliuno_client::SessionHi
 
 ## 打开一条历史记录
 
-按关键词查找时，先用 [`session/searchHistory` 或 `workspace/searchHistory`](protocol.md#查找历史任务) 获得任务 ID 和完成序号。服务声明 `sessionHistoryGet` 后，客户端可以按命中直接读取对话，无需翻过前面的历史页。
+按关键词查找时，先用 [`session/searchHistory` 或 `workspace/searchHistory`](protocol.md#查找历史任务) 获得任务 ID 和完成序号。服务声明 `sessionHistoryGet` 后，客户端可以按命中直接读取对话，无需翻过前面的历史页。 稀疏搜索可按服务能力调大 `scanLimit`，减少翻过空页的往返；小窗口也可限制单次扫描，原游标仍能续用。
 
 ```json
 {"jsonrpc":"2.0","id":4,"method":"session/getHistoryTurn","params":{"sessionId":"<session-id>","taskId":"<task-id>","throughSequence":320,"maxBytes":65536}}

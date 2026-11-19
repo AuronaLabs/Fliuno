@@ -1,11 +1,11 @@
 use super::*;
-use crate::context::search::{MAX_SEARCH_TURN_BYTES, MAX_SEARCH_TURNS};
+use crate::context::search::{DEFAULT_SEARCH_TURNS, MAX_SEARCH_TURN_BYTES};
 
 #[test]
 fn search_can_page_past_empty_windows_and_reports_skipped_large_turns() {
     let (mut kernel, session) = setup();
     let matching = complete(&mut kernel, &session.id, "old", "FOUND");
-    for _ in 0..MAX_SEARCH_TURNS - 1 {
+    for _ in 0..DEFAULT_SEARCH_TURNS - 1 {
         complete(&mut kernel, &session.id, "unrelated", "other answer");
     }
     complete(
@@ -21,11 +21,33 @@ fn search_can_page_past_empty_windows_and_reports_skipped_large_turns() {
         through_sequence: None,
         before_sequence: None,
         limit: None,
+        scan_limit: None,
     };
     let first = kernel.search_session_history(params.clone()).unwrap();
     assert!(first.matches.is_empty());
-    assert_eq!(first.scanned_turns, MAX_SEARCH_TURNS);
+    assert_eq!(first.scanned_turns, DEFAULT_SEARCH_TURNS);
     assert_eq!(first.skipped_oversized_turns, 1);
+    let wide = kernel
+        .search_session_history(SessionHistorySearchParams {
+            through_sequence: Some(first.through_sequence),
+            scan_limit: Some(MAX_HISTORY_SEARCH_SCAN_LIMIT),
+            ..params.clone()
+        })
+        .unwrap();
+    assert_eq!(wide.matches[0].task_id, matching.id);
+    assert_eq!(wide.scanned_turns, DEFAULT_SEARCH_TURNS + 1);
+    assert_eq!(wide.skipped_oversized_turns, 1);
+    assert_eq!(wide.next_before_sequence, None);
+    let narrow = kernel
+        .search_session_history(SessionHistorySearchParams {
+            scan_limit: Some(1),
+            ..params.clone()
+        })
+        .unwrap();
+    assert!(narrow.matches.is_empty());
+    assert_eq!(narrow.scanned_turns, 1);
+    assert_eq!(narrow.skipped_oversized_turns, 1);
+    assert!(narrow.next_before_sequence.unwrap() > first.next_before_sequence.unwrap());
     let capture = kernel
         .session_context(
             &params.session_id,
@@ -43,7 +65,7 @@ fn search_can_page_past_empty_windows_and_reports_skipped_large_turns() {
         capture.turns.is_empty(),
         "capture must not scan past the first window"
     );
-    assert_eq!(capture.omitted_turns, u64::from(MAX_SEARCH_TURNS) + 1);
+    assert_eq!(capture.omitted_turns, u64::from(DEFAULT_SEARCH_TURNS) + 1);
     params.through_sequence = Some(first.through_sequence);
     params.before_sequence = Some(first.next_before_sequence.unwrap());
     let second = kernel.search_session_history(params).unwrap();

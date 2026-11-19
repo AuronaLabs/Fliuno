@@ -154,7 +154,9 @@ pub struct SessionContextParams {
 
 pub const MAX_SESSION_HISTORY_BYTES: u32 = 256 * 1024;
 pub const MAX_SESSION_HISTORY_ENTRIES: u32 = 32;
+/// Default budget and the fixed cap on servers without scanLimit support.
 pub const MAX_HISTORY_SEARCH_TURNS: u32 = 128;
+pub const MAX_HISTORY_SEARCH_SCAN_LIMIT: u32 = 512;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -238,6 +240,10 @@ pub struct SessionHistorySearchParams {
     /// Match count per page. Defaults to 16 and accepts 1 to 32.
     #[serde(default)]
     pub limit: Option<u32>,
+    /// Maximum completed turns examined per page. Defaults to 128.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = MAX_HISTORY_SEARCH_SCAN_LIMIT))]
+    pub scan_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -254,6 +260,10 @@ pub struct WorkspaceHistorySearchParams {
     pub before_sequence: Option<u64>,
     #[serde(default)]
     pub limit: Option<u32>,
+    /// Maximum completed turns examined per page. Defaults to 128.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = MAX_HISTORY_SEARCH_SCAN_LIMIT))]
+    pub scan_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
