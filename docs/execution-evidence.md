@@ -769,3 +769,13 @@ SQLite v44 只新增回执表，不扫描旧任务。普通带键提交把输入
 Windows `scripts/check.ps1` 以退出码 0 完成：493 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`target/0.0.3-task-start-receipt-windows.log`。
 
 Windows 本机 stdio 调试服务基准使用同一项已完成任务。提交输入较短，冻结历史使任务快照达到 126,969 B；回执的 SHA-256 与选项净载荷合计 101 B。用两个指向同一任务的键分别走回执和旧路径，逐次比对相同摘要。预热 40 对后交替测量 400 对，中位往返为 301.05 µs 对 1,060.45 µs；不计模型执行或首次写入的成本。日志：`target/0.0.3-task-start-receipt-benchmark.log`。
+
+## 0.0.3 工作台最近任务（2026-11-20）
+
+`work/getSnapshot` 与 `work/subscribe` 可请求 1 至 50 个最近创建的 `TaskSummary`。读取事务固定状态计数、待审批首页、摘要和全局事件水位；订阅在内核提交锁内接上该水位。应用协议仍为 `0.1`，用 `workRecentTasks` 发现功能。未请求时不查询摘要；Rust 客户端连接旧服务时省略该参数。见 [工作台快照](protocol.md#工作台快照)。
+
+真实进程用例覆盖全局、工作区和会话范围、归档会话、空范围及无效上限。批请求先订阅再取消任务，验证返回的快照仍显示取消前的任务与待审批记录，订阅随后从下一水位收到取消；刷新快照后任务与计数一同更新。SDK 用例验证旧服务兼容，以及拒绝缺项、重复 ID、越界条数和错误会话。Debian Linux 6.12.107 来宾的 6 项相关进程测试通过。日志：`D:/Fliuno-Native-Test/guest-work-preview.log`。
+
+在应用服务创建的 SQLite v44 库上，`EXPLAIN QUERY PLAN` 确认会话使用 `tasks_session`，工作区使用 `task_summary_workspace_cursor`，全局逆向访问任务行；三种查询都按主键取紧凑摘要，无临时排序和数据库迁移。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：495 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-work-preview-check.log`。

@@ -74,7 +74,7 @@ flowchart LR
 
 | 要做的事 | 从这里接入 |
 | --- | --- |
-| **搭建工作台** | [任务状态与待审批](docs/protocol.md#工作台实时订阅)、[会话历史](docs/context.md#会话历史分页)、[历史搜索](docs/protocol.md#查找历史任务)、[任务摘要刷新](docs/protocol.md#任务变动摘要) |
+| **搭建工作台** | [最近任务、状态计数与待审批](docs/protocol.md#工作台实时订阅)、[会话历史](docs/context.md#会话历史分页)、[历史搜索](docs/protocol.md#查找历史任务)、[任务摘要刷新](docs/protocol.md#任务变动摘要) |
 | **连接模型、工具或 Agent** | [OpenAI、Anthropic、Gemini](docs/setup.md#真实模型)，以及 [MCP、ACP、A2A](docs/README.md#模型工具与-agent) |
 | **执行本机操作** | [宿主注册的命令与 PTY](docs/README.md#本机执行与隔离)，支持按平台配置隔离和资源预算 |
 | **收取交付物** | [订阅目录](docs/protocol.md#交付物目录订阅) · [分段下载和 SHA-256 校验](docs/protocol.md#审批事件与产物) |

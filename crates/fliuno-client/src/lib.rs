@@ -57,6 +57,13 @@ pub enum Error {
     InvalidSessionCatalogPage,
     #[error("invalid approval inbox snapshot page")]
     InvalidApprovalInboxPage,
+    #[error(
+        "recent task limit must be 1 to {0}",
+        fliuno_protocol::MAX_WORK_RECENT_TASKS
+    )]
+    InvalidRecentTaskLimit,
+    #[error("work snapshot preview violates its requested scope or limit")]
+    InvalidWorkPreview,
     #[error("invalid artifact catalog page")]
     InvalidArtifactCatalogPage,
     #[error("invalid expected artifact SHA-256")]

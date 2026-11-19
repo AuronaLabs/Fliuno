@@ -474,6 +474,7 @@ impl RpcServer {
             capabilities["maxTaskSummaryBatch"] = json!(MAX_TASK_SUMMARY_BATCH);
             capabilities["workSnapshot"] = json!(true);
             capabilities["workSubscription"] = json!(true);
+            capabilities["workRecentTasks"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
             capabilities["workspaceTaskSummaries"] = json!(true);
             capabilities["workspaceTaskSummaryOrdering"] = json!(true);

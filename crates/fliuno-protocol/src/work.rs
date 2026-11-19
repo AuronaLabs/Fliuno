@@ -1,7 +1,10 @@
 //! A coherent starting point for a host's task and approval views.
-use super::{ApprovalInboxPage, ApprovalListParams};
+use super::{ApprovalInboxPage, ApprovalListParams, TaskSummary};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// Bound the number of compact summaries loaded for one work snapshot.
+pub const MAX_WORK_RECENT_TASKS: u32 = 50;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -15,6 +18,10 @@ pub struct WorkSnapshotParams {
     pub approval_limit: u32,
     #[serde(default)]
     pub approval_target_bytes: Option<u32>,
+    /// Request a preview in reverse creation order within the snapshot scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = MAX_WORK_RECENT_TASKS))]
+    pub recent_task_limit: Option<u32>,
 }
 
 impl WorkSnapshotParams {
@@ -48,4 +55,8 @@ pub struct WorkSnapshot {
     /// Its stamp applies to the entire response. The inbox only includes
     /// approvals that had not expired when the snapshot was captured.
     pub approvals: ApprovalInboxPage,
+    /// Compact tasks from the same read view. Omitted unless requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(max = MAX_WORK_RECENT_TASKS))]
+    pub recent_tasks: Option<Vec<TaskSummary>>,
 }

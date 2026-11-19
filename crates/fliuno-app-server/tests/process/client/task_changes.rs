@@ -157,6 +157,7 @@ fn task_change_replay_keeps_scope_pages_and_watermarks_across_restart() {
                 session_id: Some(first.clone()),
                 approval_limit: 20,
                 approval_target_bytes: None,
+                recent_task_limit: None,
             },
             |_| {},
         )
@@ -347,6 +348,7 @@ fn task_summary_changes_catch_up_from_a_pinned_window_and_then_follow_live() {
                 session_id: None,
                 approval_limit: 20,
                 approval_target_bytes: None,
+                recent_task_limit: None,
             },
             |_| {},
         )

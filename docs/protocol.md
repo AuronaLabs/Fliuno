@@ -74,7 +74,7 @@ staged.sync_all()?;
 | `task/list` | `{sessionId,after?:0,limit?:100,targetBytes?}` | Task ObjectPage |
 | `task/listSummaries` | `{sessionId,status?,after?:0,limit?:100}` | TaskSummary ObjectPage。与完整列表共用创建顺序和游标 |
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,order?,after?,limit?,targetBytes?}` | 跨会话分页读取同一工作区的任务摘要，可按创建顺序正序或倒序返回 |
-| `work/getSnapshot` | `{workspaceId?,sessionId?,approvalLimit?,approvalTargetBytes?}` | 同一水位的任务状态计数与待审批首页 |
+| `work/getSnapshot` | `{workspaceId?,sessionId?,approvalLimit?,approvalTargetBytes?,recentTaskLimit?}` | 同一水位的任务状态计数、待审批首页和可选的最近任务 |
 | `work/subscribe` | 同 `work/getSnapshot` | 同一快照，并将本连接切换为该范围的事件水位订阅 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
 | `workspace/get` | `{workspaceId}` | 按 ID 读取已保存的 Workspace。查看 `initialize.capabilities.workspaceById` |
@@ -279,12 +279,14 @@ Rust 的 `Client::get_task_summaries` 返回类型化结果，校验项数、ID 
 服务声明 `workSnapshot` 后，可以用 `work/getSnapshot` 在一次读取中得到指定范围的状态计数和待审批首页。传 `workspaceId` 或 `sessionId` 限定范围，两个都省略时查询整个数据库；工作区包含已归档会话。不存在的范围返回 `-32004`，同时传两个 ID 返回 `-32602`。
 
 ```json
-{"jsonrpc":"2.0","id":8,"method":"work/getSnapshot","params":{"workspaceId":"<workspace-id>","approvalLimit":20}}
+{"jsonrpc":"2.0","id":8,"method":"work/getSnapshot","params":{"workspaceId":"<workspace-id>","approvalLimit":20,"recentTaskLimit":10}}
 ```
 
 结果的 `taskCounts` 始终包含 `running`、`waitingApproval`、`interrupted`、`completed`、`cancelled` 和 `failed`。`waitingApproval` 是任务数：一个任务可能同时有多项审批，审批首页也会排除已到期项。`approvals` 是[待审批快照](#待审批快照)，其 `snapshot.throughSequence` 也是计数的事件水位。审批首页的条数和字节限制与原接口相同。
 
-Rust 的 `Client::work_snapshot` 返回 `(WorkSnapshot, ApprovalInbox)`。首页已经在 `WorkSnapshot.approvals` 中，`ApprovalInbox` 从下一页开始；也可以从 `throughSequence` 接上同范围的事件。需要刷新当前计数时重新调用 `work/getSnapshot`，旧审批游标仍可继续读取原来的列表。
+当 `initialize.capabilities.workRecentTasks` 为 `true` 时，两种快照请求都可传 `recentTaskLimit`（`1` 到 `50`）。`recentTasks` 按任务创建顺序从新到旧返回 `TaskSummary`，和计数、审批首页使用相同范围及事件水位。请求了预览但没有任务时返回 `[]`；省略参数时，服务不查询摘要，响应也省略 `recentTasks`。预览用于首屏；浏览更多任务可使用 [`task/listWorkspaceSummaries`](#工作区会话与任务)。
+
+Rust 的 `Client::work_snapshot` 返回 `(WorkSnapshot, ApprovalInbox)`。首页已经在 `WorkSnapshot.approvals` 中，`ApprovalInbox` 从下一页开始；也可以从 `throughSequence` 接上同范围的事件。需要刷新首屏时重新调用 `work/getSnapshot`，旧审批游标仍可继续读取原来的列表。Rust 客户端会向不声明 `workRecentTasks` 的服务省略该参数，此时 `recent_tasks` 为 `None`。
 
 SQLite v42 从已有状态索引回填计数。平时只有创建任务或状态变化才改动对应范围的计数，读取时不扫描任务列表。
 

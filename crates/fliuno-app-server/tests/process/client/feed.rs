@@ -103,6 +103,7 @@ fn work_feed_coalesces_a_burst_and_replays_every_matching_commit() {
                 session_id: Some(session_id.into()),
                 approval_limit: 10,
                 approval_target_bytes: None,
+                recent_task_limit: None,
             },
             |_| {},
         )

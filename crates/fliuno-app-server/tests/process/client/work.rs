@@ -1,6 +1,7 @@
 use super::*;
 use fliuno_protocol::{
-    ApprovalInboxListParams, TaskStatusCounts, WorkSnapshot, WorkSnapshotParams,
+    ApprovalInboxListParams, MAX_WORK_RECENT_TASKS, TaskStatus, TaskStatusCounts, WorkSnapshot,
+    WorkSnapshotParams,
 };
 
 #[test]
@@ -32,7 +33,7 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     peer.call("task/cancel", json!({"taskId":cancelled["id"]}));
     let waiting = start(&mut peer, &first);
     let later = start(&mut peer, &sibling);
-    start(&mut peer, &other);
+    let foreign_task = start(&mut peer, &other);
     peer.call(
         "session/setArchived",
         json!({"sessionId":sibling["id"],"archived":true}),
@@ -62,6 +63,11 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     .unwrap();
     assert_eq!(empty.task_counts, TaskStatusCounts::default());
     assert!(empty.approvals.page.items.is_empty());
+    let requested_empty = peer.call(
+        "work/getSnapshot",
+        json!({"sessionId":empty_session["id"],"recentTaskLimit":1}),
+    );
+    assert_eq!(requested_empty["recentTasks"], json!([]));
     let active = peer.call(
         "task/start",
         json!({"sessionId":first_id,"input":"hold this model request"}),
@@ -90,7 +96,10 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
         live["approvals"]["page"]["items"][0]["taskId"],
         waiting["id"]
     );
+    assert!(live.get("recentTasks").is_none());
     for invalid in [
+        json!({"recentTaskLimit":0}),
+        json!({"recentTaskLimit":MAX_WORK_RECENT_TASKS+1}),
         json!({"workspaceId":ws,"sessionId":first_id}),
         json!({"approvalLimit":101}),
         json!({"approvalTargetBytes":1023}),
@@ -114,8 +123,10 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
         session_id: None,
         approval_limit: 1,
         approval_target_bytes: Some(1024),
+        recent_task_limit: Some(3),
     };
     assert_eq!(client.info().capabilities["workSubscription"], true);
+    assert_eq!(client.info().capabilities["workRecentTasks"], true);
     let fliuno_client::WorkSubscription {
         snapshot,
         inbox,
@@ -133,6 +144,13 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
         }
     );
     assert_eq!(snapshot.approvals.page.items[0].task_id, waiting["id"]);
+    let preview = snapshot.recent_tasks.as_ref().unwrap();
+    assert_eq!(preview.len(), 3);
+    assert_eq!(preview[0].id, active["id"]);
+    assert_eq!(preview[0].status, TaskStatus::Interrupted);
+    assert_eq!(preview[1].id, later["id"]); // archived sibling
+    assert_eq!(preview[1].status, TaskStatus::WaitingApproval);
+    assert_eq!(preview[2].id, waiting["id"]);
     let through = snapshot.approvals.snapshot.through_sequence;
     assert_eq!(events.cursor(), through);
     assert!(
@@ -185,6 +203,7 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     let (current, _) = client.work_snapshot(&request, |_| {}).unwrap();
     assert_eq!(current.task_counts.waiting_approval, 1);
     assert_eq!(current.task_counts.failed, 2);
+    assert_eq!(current.recent_tasks.unwrap()[1].status, TaskStatus::Failed);
     let by_session = WorkSnapshotParams {
         workspace_id: None,
         session_id: Some(first_id.into()),
@@ -192,6 +211,11 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     };
     let (narrow, _) = client.work_snapshot(&by_session, |_| {}).unwrap();
     assert_eq!(narrow.task_counts.failed, 1);
+    let preview = narrow.recent_tasks.unwrap();
+    assert_eq!(preview.len(), 3);
+    assert_eq!(preview[0].id, active["id"]);
+    assert_eq!(preview[1].id, waiting["id"]);
+    assert_eq!(preview[2].id, cancelled["id"]);
     let all = WorkSnapshotParams {
         workspace_id: None,
         ..request
@@ -199,6 +223,11 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     let (global, _) = client.work_snapshot(&all, |_| {}).unwrap();
     assert_eq!(global.task_counts.waiting_approval, 2);
     assert_eq!(global.task_counts.failed, 2);
+    let preview = global.recent_tasks.unwrap();
+    assert_eq!(preview.len(), 3);
+    assert_eq!(preview[0].id, active["id"]);
+    assert_eq!(preview[1].id, foreign_task["id"]);
+    assert_eq!(preview[2].id, later["id"]);
     let replay: fliuno_protocol::EventsPage = client
         .call(
             "events/listWorkspace",
@@ -243,12 +272,13 @@ fn work_subscription_delivers_only_post_snapshot_events_in_scope() {
     let foreign_task = start(&mut peer, &foreign);
     let old_watermark = peer.call("events/getWatermark", json!({}))["throughSequence"].clone();
     let first_id = peer.id + 1;
-    peer.id += 4;
+    peer.id += 5;
     writeln!(peer.input, "{}", json!([
-        {"jsonrpc":"2.0","id":first_id,"method":"work/subscribe","params":{"sessionId":selected["id"]}},
+        {"jsonrpc":"2.0","id":first_id,"method":"work/subscribe","params":{"sessionId":selected["id"],"recentTaskLimit":2}},
         {"jsonrpc":"2.0","id":first_id+1,"method":"work/subscribe","params":{"sessionId":selected["id"],"workspaceId":workspace["id"]}},
         {"jsonrpc":"2.0","id":first_id+2,"method":"work/subscribe","params":{"workspaceId":"missing"}},
         {"jsonrpc":"2.0","id":first_id+3,"method":"work/subscribe","params":{"approvalTargetBytes":1023}},
+        {"jsonrpc":"2.0","id":first_id+4,"method":"work/subscribe","params":{"recentTaskLimit":0}},
         {"jsonrpc":"2.0","method":"task/cancel","params":{"taskId":foreign_task["id"]}},
         {"jsonrpc":"2.0","method":"task/cancel","params":{"taskId":selected_task["id"]}}
     ])).unwrap();
@@ -265,7 +295,7 @@ fn work_subscription_delivers_only_post_snapshot_events_in_scope() {
         // Any queued event before the batch response still belongs to the old stream.
         assert_ne!(frame["method"], "notifications/eventWatermark");
     };
-    assert_eq!(reply.as_array().unwrap().len(), 4);
+    assert_eq!(reply.as_array().unwrap().len(), 5);
     assert_eq!(reply[0]["id"], first_id);
     let snapshot: WorkSnapshot = serde_json::from_value(reply[0]["result"].clone()).unwrap();
     let through = snapshot.approvals.snapshot.through_sequence;
@@ -276,7 +306,11 @@ fn work_subscription_delivers_only_post_snapshot_events_in_scope() {
         snapshot.approvals.page.items[0].task_id,
         selected_task["id"]
     );
-    for (i, code) in [-32602, -32004, -32602].into_iter().enumerate() {
+    let preview = snapshot.recent_tasks.unwrap();
+    assert_eq!(preview.len(), 1);
+    assert_eq!(preview[0].id, selected_task["id"]);
+    assert_eq!(preview[0].status, TaskStatus::WaitingApproval);
+    for (i, code) in [-32602, -32004, -32602, -32602].into_iter().enumerate() {
         assert_eq!(reply[i + 1]["error"]["code"], code);
     }
     let sequence = loop {
@@ -296,7 +330,15 @@ fn work_subscription_delivers_only_post_snapshot_events_in_scope() {
     let cancel_event = peer.call("events/get", json!({"sequence":sequence}));
     assert_eq!(cancel_event["taskId"], selected_task["id"]);
     assert_eq!(cancel_event["data"]["type"], "task_cancelled");
-    let current = peer.call("work/getSnapshot", json!({"sessionId":selected["id"]}));
+    let current = peer.call(
+        "work/getSnapshot",
+        json!({"sessionId":selected["id"],"recentTaskLimit":2}),
+    );
+    assert_eq!(
+        current["approvals"]["snapshot"]["throughSequence"],
+        sequence
+    );
+    assert_eq!(current["recentTasks"][0]["status"], "cancelled");
     assert_eq!(current["taskCounts"]["waitingApproval"], 0);
     assert_eq!(current["taskCounts"]["cancelled"], 1);
     assert_eq!(current["approvals"]["page"]["items"], json!([]));

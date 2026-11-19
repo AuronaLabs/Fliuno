@@ -87,8 +87,17 @@ pub(super) fn migrate(db: &mut Connection) -> Result<()> {
 
 impl Kernel {
     pub fn work_snapshot(&self, request: &WorkSnapshotParams) -> Result<WorkSnapshot> {
-        // Capture under the kernel lock used for task commits. The inbox
-        // validates scope and budgets before either result is returned.
+        if let Some(limit) = request.recent_task_limit
+            && !(1..=MAX_WORK_RECENT_TASKS).contains(&limit)
+        {
+            return Err(Error::Invalid(format!(
+                "recentTaskLimit must be 1 to {MAX_WORK_RECENT_TASKS}"
+            )));
+        }
+        // The kernel lock orders the subscription handoff with local commits.
+        // A read transaction also pins the inbox, counters and preview to one
+        // SQLite view. The inbox validates scope and its own page budgets.
+        let tx = self.db.unchecked_transaction()?;
         let approvals = self.list_pending_approval_snapshot(&ApprovalInboxListParams {
             page: request.approval_page(),
             snapshot: None,
@@ -98,8 +107,7 @@ impl Kernel {
             (None, Some(id)) => (2, id.as_str()),
             _ => (0, ""),
         };
-        let task_counts = self
-            .db
+        let task_counts = tx
             .prepare_cached(
                 "SELECT running,waiting_approval,interrupted,completed,cancelled,failed
              FROM work_status_counts WHERE scope=?1 AND owner=?2",
@@ -116,9 +124,52 @@ impl Kernel {
             })
             .optional()?
             .unwrap_or_default();
+        let recent_tasks = request
+            .recent_task_limit
+            .map(|limit| recent_tasks(&tx, request, limit))
+            .transpose()?;
+        tx.commit()?;
         Ok(WorkSnapshot {
             task_counts,
             approvals,
+            recent_tasks,
         })
     }
+}
+
+fn recent_tasks(
+    db: &Connection,
+    request: &WorkSnapshotParams,
+    limit: u32,
+) -> Result<Vec<TaskSummary>> {
+    // Drive each join from a reverse creation-order scan and look up only
+    // the requested summaries. Session and workspace membership is immutable.
+    let (sql, owner) = match (&request.session_id, &request.workspace_id) {
+        (Some(id), _) => (
+            "SELECT s.data FROM tasks t CROSS JOIN task_summaries s ON s.task_id=t.id
+             WHERE t.session_id=?1 ORDER BY t.rowid DESC LIMIT ?2",
+            Some(id),
+        ),
+        (None, Some(id)) => (
+            "SELECT s.data FROM task_summary_status t CROSS JOIN task_summaries s ON s.task_id=t.task_id
+             WHERE t.workspace_id=?1 ORDER BY t.task_row DESC LIMIT ?2",
+            Some(id),
+        ),
+        _ => (
+            "SELECT s.data FROM tasks t CROSS JOIN task_summaries s ON s.task_id=t.id
+             ORDER BY t.rowid DESC LIMIT ?1",
+            None,
+        ),
+    };
+    let mut stmt = db.prepare_cached(sql)?;
+    let mut rows = match owner {
+        Some(id) => stmt.query(params![id, limit])?,
+        None => stmt.query([limit])?,
+    };
+    let mut summaries = Vec::new();
+    while let Some(row) = rows.next()? {
+        let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+        summaries.push(serde_json::from_str(data)?);
+    }
+    Ok(summaries)
 }
