@@ -59,7 +59,7 @@
 
 ### 按字节预算选择近期记录
 
-客户端可以用 `contextFitRecent` 和 `maxContextCandidates` 发现该能力。在 `session/context.options` 或 `task/start.context` 中传入 `"selection":"fit_recent"` 后，内核从最新记录向前检查最多 128 条已完成记录。每条记录要能完整放入剩余字节预算才会入选。入选数达到 `maxTurns` 时停止，最终按完成顺序返回；`omittedTurns` 统计所有未入选的记录。
+`contextFitRecent:true` 表示支持 `"selection":"fit_recent"`。内核从最新记录向前检查已完成记录，默认最多检查 128 条（`maxContextCandidates`）。每条记录要能完整放入剩余字节预算才会入选。入选数达到 `maxTurns` 时停止，最终按完成顺序返回；`omittedTurns` 统计所有未入选的记录。
 
 该策略仅用于 `mode=session` 且未指定 `taskIds` 的任务。默认策略 `recent` 保留完整的近期连续后缀。任务创建时冻结所用策略及结果。SQLite v13 支持读取带新策略的快照，升级仅更新数据库版本号。
 
@@ -71,9 +71,15 @@
 {"selection":"match_recent","historyQuery":{"query":"项目代号","role":"user"},"detail":"conversation","maxTurns":8,"maxBytes":32768}
 ```
 
-查询去掉首尾空白后须为 1 至 256 个 UTF-8 字节。匹配使用与 `session/searchHistory` 相同的 Unicode 小写字面子串规则；省略 `role` 时同时查用户和助手文本。每次最多从新到旧检查 128 条，只扫描不超过 128 KiB 的精简投影。命中的完整记录能放入剩余预算才会入选，最终按完成顺序返回。工具和产物内容不能触发命中，`detail` 仍决定入选记录包含哪些字段。
+查询去掉首尾空白后须为 1 至 256 个 UTF-8 字节。匹配使用与 `session/searchHistory` 相同的 Unicode 小写字面子串规则；省略 `role` 时同时查用户和助手文本。默认最多从新到旧检查 128 条，只匹配单条不超过 128 KiB 的精简投影。命中的记录能放入剩余预算才会入选，最终按完成顺序返回。工具和产物内容不能触发命中，`detail` 决定入选记录包含哪些字段。
 
 仅限 `mode=session`，不能与 `taskIds` 并用。`omittedTurns` 包含未命中、超预算或扫描范围之外的已完成记录。预览和任务创建采用相同规则，快照冻结时保存去掉首尾空白的查询；相同请求键重试沿用原快照。SQLite v30 为新快照格式标记版本，不改写原有记录。
+
+### 调整上下文扫描范围
+
+握手返回 `maxContextScanLimit` 时，可在 `session/context.options`、`task/start.context` 或 `task/startSummary.context` 为 `fit_recent` 和 `match_recent` 传入 `scanLimit`，范围为 1 至 512。较小的范围可以少检查历史记录，较大的范围可以找回更早符合条件的记录。超预算或未命中的记录同样占用扫描额度。`maxTurns`、`maxBytes` 与单条搜索投影上限继续生效。
+
+省略 `scanLimit` 与显式设为 128 等价，快照里都不保存该字段。非默认值保存在冻结选项中，与请求键绑定；变更它并复用同一请求键会返回 `-32009`。`recent`、`mode=isolated` 和显式 `taskIds` 不接受该参数。SQLite v47 标记新快照和回执格式，升级只更新版本号。
 
 ### 精简对话记录
 
@@ -149,7 +155,7 @@ SQLite v14 从已完成记录回填每个会话的计数和最后完成序号。
 
 未传 `taskIds` 时，按完成事件顺序选择最近的连续完整任务后缀，并按时间正序发送。任务数量上限与整个序列化 `TaskContext` 的 UTF-8 字节预算同时生效；不会切断工具调用和结果，也不会把一条超大记录截成不完整 JSON。显式选择也使用同一完整快照预算，包含 `options.taskIds` 等元数据。`omittedTurns` 精确统计该会话已完成但未选入的记录数。
 
-默认选择中，最新任务单条超预算时，结果为空并报告省略数量；不跳过它改选更早记录。客户端可显式指定更早的记录。即使全部历史被省略，后端仍接收含 `omittedTurns` 的数据块。当前没有模型摘要、语义压缩或检索式选择。
+默认选择中，最新任务单条超预算时，结果为空并报告省略数量。客户端可显式指定更早的记录，也可使用 `fit_recent` 或 `match_recent`。即使全部历史被省略，后端仍接收含 `omittedTurns` 的数据块。
 
 SQLite 在读取候选时先检查记录字节数，最多检查 `maxTurns` 条、每条不超过 `maxBytes`。默认选择从新到旧逐条读取，第一次超额即停止，并用单次 JSON 计量精确计算完整快照长度。显式选择另外检查累计原始记录字节数和最终快照大小。Task 快照、事件、数据库页与 SDK 缓冲都可能重复占用空间，因此快照预算不等于进程总内存上限。
 

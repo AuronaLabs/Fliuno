@@ -541,6 +541,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "scanLimit": {
+              "description": "Maximum completed records examined by fit_recent or match_recent.\nOmit to examine at most 128 records, including any skipped records.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 512
             }
           },
           "additionalProperties": false
@@ -1176,6 +1186,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "scanLimit": {
+              "description": "Maximum completed records examined by fit_recent or match_recent.\nOmit to examine at most 128 records, including any skipped records.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 512
             }
           },
           "additionalProperties": false
@@ -1383,6 +1403,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "scanLimit": {
+              "description": "Maximum completed records examined by fit_recent or match_recent.\nOmit to examine at most 128 records, including any skipped records.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 512
             }
           },
           "additionalProperties": false
@@ -4012,6 +4042,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "scanLimit": {
+              "description": "Maximum completed records examined by fit_recent or match_recent.\nOmit to examine at most 128 records, including any skipped records.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 512
             }
           },
           "additionalProperties": false
@@ -5664,6 +5704,16 @@
                   "type": "null"
                 }
               ]
+            },
+            "scanLimit": {
+              "description": "Maximum completed records examined by fit_recent or match_recent.\nOmit to examine at most 128 records, including any skipped records.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 512
             }
           },
           "additionalProperties": false

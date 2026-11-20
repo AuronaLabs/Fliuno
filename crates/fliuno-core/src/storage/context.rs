@@ -242,7 +242,9 @@ impl Kernel {
         let through = validate_event_cursor(through)?;
         let candidates = match options.selection {
             ContextSelection::Recent => options.max_turns,
-            ContextSelection::FitRecent => crate::MAX_CONTEXT_CANDIDATES,
+            ContextSelection::FitRecent => {
+                options.scan_limit.unwrap_or(crate::MAX_CONTEXT_CANDIDATES)
+            }
             ContextSelection::MatchRecent => {
                 return Err(Error::Invalid(
                     "history matching requires the conversation scan".into(),

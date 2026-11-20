@@ -471,6 +471,7 @@ impl RpcServer {
             capabilities["historySearchAfterSequence"] = json!(true);
             capabilities["maxHistorySearchScanLimit"] = json!(MAX_HISTORY_SEARCH_SCAN_LIMIT);
             capabilities["contextMatchRecent"] = json!(true);
+            capabilities["maxContextScanLimit"] = json!(MAX_CONTEXT_SCAN_LIMIT);
             capabilities["artifactMediaTypeFilter"] = json!(true);
             capabilities["remoteTaskWatch"] = json!(self.kernel()?.remote_task_watch_supported());
             capabilities["remoteTaskCheckLookup"] = json!(true);

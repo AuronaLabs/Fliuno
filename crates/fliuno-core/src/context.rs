@@ -6,6 +6,7 @@ use super::*;
 
 pub const MAX_CONTEXT_TURNS: u32 = 32;
 pub const MAX_CONTEXT_BYTES: u32 = 256 * 1024;
+/// Default candidate window retained for clients using the original options.
 pub const MAX_CONTEXT_CANDIDATES: u32 = 128;
 
 pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
@@ -41,6 +42,18 @@ pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
             "context fit_recent requires session mode without taskIds".into(),
         ));
     }
+    if let Some(limit) = options.scan_limit {
+        if options.selection == ContextSelection::Recent {
+            return Err(Error::Invalid(
+                "context scanLimit requires fit_recent or match_recent".into(),
+            ));
+        }
+        if !(1..=MAX_CONTEXT_SCAN_LIMIT).contains(&limit) {
+            return Err(Error::Invalid(format!(
+                "context scanLimit must be 1 to {MAX_CONTEXT_SCAN_LIMIT}"
+            )));
+        }
+    }
     match (&options.history_query, options.selection) {
         (Some(history), ContextSelection::MatchRecent)
             if options.mode == ContextMode::Session && options.task_ids.is_none() =>
@@ -59,6 +72,8 @@ pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
 
 pub(crate) fn normalize_options(mut options: ContextOptions) -> Result<ContextOptions> {
     validate_options(&options)?;
+    // Preserve the snapshot wire shape and keyed identity of legacy defaults.
+    options.scan_limit = options.scan_limit.filter(|&n| n != MAX_CONTEXT_CANDIDATES);
     if let Some(ids) = &mut options.task_ids {
         ids.sort_unstable();
     }
@@ -147,7 +162,10 @@ impl Kernel {
                 search::HistoryScope::Session(session),
                 0,
                 through_sequence,
-                search::DEFAULT_SEARCH_TURNS,
+                snapshot
+                    .options
+                    .scan_limit
+                    .unwrap_or(MAX_CONTEXT_CANDIDATES),
                 |row| {
                     let Some(data) = row.data else {
                         return Ok(true);

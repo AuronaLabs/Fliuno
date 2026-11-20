@@ -946,3 +946,13 @@ Windows 调试构建使用相同数据库的副本，经本机 stdio 预热 25 �
 Debian Linux 6.12.107 来宾通过 14 项相关进程测试。日志：`D:/Fliuno-Native-Test/guest-history-byte-budget.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：522 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。22 页 Markdown 的 496 处本地引用校验通过。日志：`D:/Fliuno-Native-Test/windows-history-byte-budget-check.log`。
+
+## 0.0.3 可调上下文扫描范围（2026-11-20）
+
+`fit_recent` 和 `match_recent` 可在 1 至 512 条之间设置扫描范围，默认 128 条。核心测试验证超预算及未命中的记录也占用额度，并检查扩大窗口后仍按完成顺序返回。进程测试检查参数边界、v46 数据库升级、显式默认值与旧回执的等价性，以及重启后复用同一键时保留原快照、变更范围时返回冲突。详见[上下文扫描范围](context.md#调整上下文扫描范围)。
+
+Windows 调试构建通过 stdio 创建 129 份已完成记录，每份用户输入约 8 KiB。唯一匹配位于第 129 条，扩大窗口才选中它。另用同一水位比较默认窗口和 `scanLimit=1`，两者结果均为空并报告相同的省略数。预热后交替测量 100 对调用，中位数分别为 18.812 ms 和 0.764 ms。较小窗口的耗时收益来自减少扫描，与原窗口有不同的历史覆盖范围。原始日志见 `D:/Fliuno-Native-Test/context-scan-limit-benchmark.log`。
+
+Debian Linux 6.12.107 来宾完成 14 项相关进程测试，退出码为 0。原始日志见 `D:/Fliuno-Native-Test/guest-context-scan-limit.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成。522 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。22 页 Markdown 的 501 处本地引用校验通过。原始日志见 `target/context-scan-limit-windows-final.log`。

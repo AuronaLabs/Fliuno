@@ -152,16 +152,53 @@ fn fit_recent_skips_large_turns_and_keeps_the_selection_across_restart() {
     );
     assert_eq!(preview["turns"][0]["taskId"], small["id"]);
     assert_eq!(preview["omittedTurns"], 1);
+    let narrow = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"options":{"selection":"fit_recent","maxBytes":2048,"scanLimit":1}}),
+    );
+    assert_eq!(narrow["turns"], json!([]));
+    assert_eq!(narrow["omittedTurns"], 2);
+    for invalid in [
+        json!({"selection":"fit_recent","scanLimit":0}),
+        json!({"selection":"fit_recent","scanLimit":513}),
+        json!({"selection":"fit_recent","mode":"isolated","scanLimit":128}),
+        json!({"scanLimit":128}),
+        json!({"taskIds":[small["id"]],"scanLimit":128}),
+    ] {
+        assert_eq!(
+            peer.request(
+                "session/context",
+                json!({"sessionId":session["id"],"options":invalid})
+            )["error"]["code"],
+            -32602,
+        );
+    }
     let request = json!({"sessionId":session["id"],"input":"follow up","clientRequestId":"fit","context":opts});
     let follow = peer.call("task/start", request.clone());
     assert_eq!(follow["context"], preview);
     peer.wait_for_status(follow["id"].as_str().unwrap(), "waiting_approval");
     approve_report(&mut peer, &session, "latest small report", "latest");
     drop(peer);
+    // Reopen a v46 database with only legacy-shaped context options.
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .pragma_update(None, "user_version", 46)
+        .unwrap();
     let mut peer = Peer::start(&db);
-    let retry = peer.call("task/start", request.clone());
+    let mut explicit_default = request.clone();
+    explicit_default["context"]["scanLimit"] = json!(128);
+    let retry = peer.call("task/start", explicit_default.clone());
     assert_eq!(retry["id"], follow["id"]);
     assert_eq!(retry["context"], preview);
+    let receipt = peer.call("task/startSummary", explicit_default);
+    assert_eq!(receipt["id"], follow["id"]);
+    assert_eq!(
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .unwrap(),
+        47
+    );
     let mut different = request;
     different["context"]["selection"] = json!("recent");
     assert_eq!(
@@ -194,12 +231,13 @@ fn match_recent_freezes_only_matching_history_with_a_role_and_byte_budget() {
     let other = peer.call("session/create", json!({"workspaceId":ws["id"]}));
     approve_report(&mut peer, &other, "Orion other session", "outside");
 
-    let options = json!({"selection":"match_recent","historyQuery":{"query":"  ORION ","role":"user"},"maxBytes":2048});
+    let options = json!({"selection":"match_recent","historyQuery":{"query":"  ORION ","role":"user"},"maxBytes":2048,"scanLimit":3});
     let preview = peer.call(
         "session/context",
         json!({"sessionId":session["id"],"options":options}),
     );
     assert_eq!(preview["options"]["historyQuery"]["query"], "ORION");
+    assert_eq!(preview["options"]["scanLimit"], 3);
     assert_eq!(preview["turns"].as_array().unwrap().len(), 1);
     assert_eq!(preview["turns"][0]["taskId"], small["id"]);
     assert!(
@@ -211,6 +249,15 @@ fn match_recent_freezes_only_matching_history_with_a_role_and_byte_budget() {
     );
     assert_eq!(preview["omittedTurns"], 2);
     assert!(serde_json::to_vec(&preview).unwrap().len() <= 2048);
+    let mut narrow = options.clone();
+    narrow["scanLimit"] = json!(2);
+    assert_eq!(
+        peer.call(
+            "session/context",
+            json!({"sessionId":session["id"],"options":narrow})
+        )["turns"],
+        json!([])
+    );
 
     let mut assistant = options.clone();
     assistant["historyQuery"]["role"] = json!("assistant");
@@ -259,6 +306,14 @@ fn match_recent_freezes_only_matching_history_with_a_role_and_byte_budget() {
     let retry = peer.call("task/start", request.clone());
     assert_eq!(retry["id"], follow["id"]);
     assert_eq!(retry["context"], preview);
+    let mut changed_limit = request.clone();
+    changed_limit["context"]["scanLimit"] = json!(2);
+    for method in ["task/start", "task/startSummary"] {
+        assert_eq!(
+            peer.request(method, changed_limit.clone())["error"]["code"],
+            -32009
+        );
+    }
     request["context"]["historyQuery"]["query"] = json!("other topic");
     assert_eq!(peer.request("task/start", request)["error"]["code"], -32009);
     drop(peer);

@@ -164,6 +164,7 @@ impl Peer {
         assert_eq!(init["capabilities"]["contextConversationDetail"], true);
         assert_eq!(init["capabilities"]["contextAtSequence"], true);
         assert_eq!(init["capabilities"]["maxContextCandidates"], 128);
+        assert_eq!(init["capabilities"]["maxContextScanLimit"], 512);
         assert_eq!(init["capabilities"]["registrationAuthority"], true);
         assert_eq!(init["capabilities"]["pendingApprovalInbox"], true);
         assert_eq!(

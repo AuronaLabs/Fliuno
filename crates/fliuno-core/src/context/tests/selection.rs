@@ -22,6 +22,19 @@ fn fit_recent_only_searches_a_bounded_window_of_complete_records() {
     assert_eq!(snapshot.turns[0].task_id, chosen.id);
     assert_eq!(snapshot.omitted_turns, u64::from(MAX_CONTEXT_CANDIDATES));
     assert!(serde_json::to_vec(&snapshot).unwrap().len() <= 1024);
+    let wide = kernel
+        .session_context(
+            &session.id,
+            ContextOptions {
+                scan_limit: Some(MAX_CONTEXT_SCAN_LIMIT),
+                ..opts.clone()
+            },
+        )
+        .unwrap();
+    assert_eq!(wide.turns.len(), 2);
+    assert_eq!(wide.turns[0].task_id, oldest.id);
+    assert_eq!(wide.turns[1].task_id, chosen.id);
+    assert_eq!(wide.omitted_turns, snapshot.omitted_turns - 1);
     assert!(
         kernel
             .session_context(

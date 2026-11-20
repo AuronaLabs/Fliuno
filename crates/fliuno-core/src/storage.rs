@@ -26,7 +26,7 @@ use std::{
 };
 pub(crate) use task_resume::ResumeFacts;
 
-pub(crate) const SCHEMA_VERSION: u32 = 46;
+pub(crate) const SCHEMA_VERSION: u32 = 47;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -412,6 +412,10 @@ impl Kernel {
         if version < 46 {
             // A limited task can contain a new snapshot field and receipt slot.
             // Reject downgrades before an older binary reads either shape.
+            db.pragma_update(None, "user_version", 46)?;
+        }
+        if version < 47 {
+            // Frozen context options and keyed receipts can now contain scanLimit.
             db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();

@@ -45,6 +45,8 @@ impl ContextDetail {
     }
 }
 
+pub const MAX_CONTEXT_SCAN_LIMIT: u32 = 512;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextOptions {
@@ -67,6 +69,11 @@ pub struct ContextOptions {
     /// Required in match_recent mode; searches only user and assistant text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history_query: Option<ContextHistoryQuery>,
+    /// Maximum completed records examined by fit_recent or match_recent.
+    /// Omit to examine at most 128 records, including any skipped records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = MAX_CONTEXT_SCAN_LIMIT))]
+    pub scan_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -94,6 +101,7 @@ impl Default for ContextOptions {
             detail: ContextDetail::Full,
             task_ids: None,
             history_query: None,
+            scan_limit: None,
         }
     }
 }

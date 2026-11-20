@@ -67,6 +67,19 @@ fn search_can_page_past_empty_windows_and_reports_skipped_large_turns() {
         "capture must not scan past the first window"
     );
     assert_eq!(capture.omitted_turns, u64::from(DEFAULT_SEARCH_TURNS) + 1);
+    let wider_capture = kernel
+        .session_context_through(
+            &params.session_id,
+            ContextOptions {
+                scan_limit: Some(DEFAULT_SEARCH_TURNS + 1),
+                ..capture.options
+            },
+            Some(first.through_sequence),
+        )
+        .unwrap();
+    assert_eq!(wider_capture.turns.len(), 1);
+    assert_eq!(wider_capture.turns[0].task_id, matching.id);
+    assert_eq!(wider_capture.omitted_turns, u64::from(DEFAULT_SEARCH_TURNS));
     params.through_sequence = Some(first.through_sequence);
     params.before_sequence = Some(first.next_before_sequence.unwrap());
     let second = kernel.search_session_history(params).unwrap();
