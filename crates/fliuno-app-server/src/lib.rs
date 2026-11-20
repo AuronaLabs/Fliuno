@@ -455,6 +455,7 @@ impl RpcServer {
             });
             capabilities["taskStartSummary"] = json!(true);
             capabilities["taskImageInput"] = json!(true);
+            capabilities["taskPdfInput"] = json!(true);
             capabilities["maxTaskModelSteps"] = json!(MAX_TASK_MODEL_STEPS);
             capabilities["taskResumeStatus"] = json!(true);
             capabilities["taskCancelSummary"] = json!(true);

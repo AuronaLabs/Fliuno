@@ -6,8 +6,8 @@ use fliuno_core::{
     CancellationToken, ModelDecision, ModelError, ModelProvider, ModelStreamEvent, ModelTurn,
     ProviderReplay, ToolSpec,
 };
-use fliuno_protocol::UserContentPart;
 use fliuno_protocol::{Message, ModelUsage, Task, ToolCall};
+use fliuno_protocol::{PDF_MIME_TYPE, UserContentPart};
 use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -99,6 +99,7 @@ fn request(model: &str, task: &Task, tools: &[ToolSpec], streaming: bool) -> Res
             Message::UserParts { parts } => input.push(json!({"type":"user_input", "content":parts.iter().map(|part| match part {
                 UserContentPart::Text { text } => json!({"type":"text", "text":text}),
                 UserContentPart::Image { mime_type, data } => json!({"type":"image", "mime_type":mime_type.as_str(), "data":data}),
+                UserContentPart::Pdf { data } => json!({"type":"document", "mime_type":PDF_MIME_TYPE, "data":data}),
             }).collect::<Vec<_>>()})),
             Message::ProviderReplay { provider, data } if provider == "gemini" => {
                 input.extend(

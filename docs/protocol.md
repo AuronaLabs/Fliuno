@@ -218,9 +218,13 @@ SQLite v44 将普通有键提交的输入 SHA-256、后端和规范化后的上�
 
 ### 内嵌图片输入
 
-`initialize.capabilities.taskImageInput` 表示本机 `task/start` 和 `task/startSummary` 的 `input` 可以使用有序数组。普通文本仍可直接传字符串。数组仅用于模型任务，由 `{ "type": "text", "text": "…" }` 和 `{ "type": "image", "mimeType": "image/png", "data": "…" }` 组成。图片数据使用标准 Base64，支持 PNG、JPEG 和 WebP。至少传一张图片，最多四张图片、32 个片段，文本和 Base64 分别最多 256 KiB 和 512 KiB。
+`initialize.capabilities.taskImageInput` 表示本机 `task/start` 和 `task/startSummary` 的 `input` 可以使用有序数组。普通文本仍可直接传字符串。数组仅用于模型任务，由 `{ "type": "text", "text": "…" }` 和 `{ "type": "image", "mimeType": "image/png", "data": "…" }` 组成。图片数据使用标准 Base64，支持 PNG、JPEG 和 WebP。至少传一个图片或 PDF，共最多 4 个媒体、32 个片段，文本和 Base64 分别最多 256 KiB 和 512 KiB。
 
 同一个请求键按片段顺序、文本、图片格式和数据判定是否重复。图片保留在任务的 `user_parts` 消息，普通任务摘要和新任务的历史上下文只使用文字及 `[image]` 占位符。使用配套的 OpenAI、Anthropic 或 Gemini 适配器时，宿主选择可接收图片的模型。按 JSON 字节数估算输入的本地请求预算也包含图片数据。AG-UI 客户端的输入封装见[提交内嵌图片](ag-ui.md#提交内嵌图片)。
+
+### 内嵌 PDF 输入
+
+声明 `initialize.capabilities.taskPdfInput` 的服务在同一个 `input` 数组中接受 `{ "type": "pdf", "data": "…" }`。`data` 是 PDF 文件的标准 Base64 编码。图片和 PDF 合计最多 4 个，编码总长最多 512 KiB，文字和片段上限沿用图片输入约定。重试保留片段种类和顺序。任务摘要和新任务的历史上下文用 `[document]` 表示 PDF。 [查看 AG-UI 接入](ag-ui.md#提交内嵌-pdf)
 
 ### 模型尝试次数
 

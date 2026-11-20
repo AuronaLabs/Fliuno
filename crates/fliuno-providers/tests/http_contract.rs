@@ -805,9 +805,10 @@ fn remote_error_bodies_never_enter_task_history() {
 }
 
 #[test]
-fn inline_png_is_dispatched_in_order_to_each_model_api() {
+fn inline_media_is_dispatched_in_order_to_each_model_api() {
     use fliuno_protocol::{ImageMimeType, UserContentPart};
     const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
+    const PDF: &str = "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAxMCAxMF0gPj4KZW5kb2JqCnhyZWYKMCA0CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA0IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxODQKJSVFT0YK";
     let (mut task, tools) = prepared_model_step();
     task.messages = vec![Message::UserParts {
         parts: vec![
@@ -818,6 +819,7 @@ fn inline_png_is_dispatched_in_order_to_each_model_api() {
                 mime_type: ImageMimeType::Png,
                 data: PNG.into(),
             },
+            UserContentPart::Pdf { data: PDF.into() },
             UserContentPart::Text {
                 text: "After".into(),
             },
@@ -835,7 +837,8 @@ fn inline_png_is_dispatched_in_order_to_each_model_api() {
         json!([
             {"type":"input_text","text":"Before"},
             {"type":"input_image","image_url":format!("data:image/png;base64,{PNG}"),"detail":"auto"},
-            {"type":"input_text","text":"After"},
+            {"type":"input_file","filename":"document.pdf","file_data":format!("data:application/pdf;base64,{PDF}")},
+        {"type":"input_text","text":"After"},
         ])
     );
 
@@ -850,7 +853,8 @@ fn inline_png_is_dispatched_in_order_to_each_model_api() {
         json!([
             {"type":"text","text":"Before"},
             {"type":"image","source":{"type":"base64","media_type":"image/png","data":PNG}},
-            {"type":"text","text":"After"},
+            {"type":"document","source":{"type":"base64","media_type":"application/pdf","data":PDF}},
+        {"type":"text","text":"After"},
         ])
     );
 
@@ -866,7 +870,8 @@ fn inline_png_is_dispatched_in_order_to_each_model_api() {
             "type":"user_input","content":[
                 {"type":"text","text":"Before"},
                 {"type":"image","mime_type":"image/png","data":PNG},
-                {"type":"text","text":"After"},
+                {"type":"document","mime_type":"application/pdf","data":PDF},
+            {"type":"text","text":"After"},
             ]
         })
     );

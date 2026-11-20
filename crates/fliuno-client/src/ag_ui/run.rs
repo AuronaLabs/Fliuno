@@ -8,7 +8,7 @@ use fliuno_protocol::{
     ApprovalDetails, ApprovalRun, ApprovalRunPendingParams, ApprovalRunReplay, ApprovalRunWindow,
     ImageMimeType, MAX_APP_REQUEST_BYTES, MAX_TASK_MODEL_STEPS, MAX_TASK_TEXT_BYTES, TaskIdParams,
     TaskInput, TaskRequestLookupParams, TaskStartParams, TaskStatus, TaskSummary, UserContentPart,
-    validate_image_input,
+    validate_multipart_input,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -31,10 +31,12 @@ pub enum AgUiRunError {
     UnsupportedInput,
     #[error("the last AG-UI message must be nonempty user text within 256 KiB")]
     UserText,
-    #[error("invalid AG-UI inline image input: {0}")]
-    ImageInput(&'static str),
+    #[error("invalid AG-UI inline media input: {0}")]
+    MediaInput(&'static str),
     #[error("the server does not support inline image input")]
     ImageInputUnavailable,
+    #[error("the server does not support inline PDF input")]
+    PdfInputUnavailable,
     #[error("the server returned a task outside the selected session or backend")]
     InvalidResult,
     #[error("AG-UI model step limit must be 1 to {MAX_TASK_MODEL_STEPS}")]
@@ -115,7 +117,8 @@ enum UserContent {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ContentPart {
     Text { text: String },
-    Image { source: ImageSource },
+    Image { source: InlineSource<ImageMimeType> },
+    Document { source: InlineSource<PdfMimeType> },
 }
 
 #[derive(Deserialize)]
@@ -124,11 +127,14 @@ enum ContentPart {
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
-enum ImageSource {
-    Data {
-        value: String,
-        mime_type: ImageMimeType,
-    },
+enum InlineSource<M> {
+    Data { value: String, mime_type: M },
+}
+
+#[derive(Deserialize)]
+enum PdfMimeType {
+    #[serde(rename = "application/pdf")]
+    Pdf,
 }
 
 impl UserContent {
@@ -138,28 +144,35 @@ impl UserContent {
             Self::Parts(parts)
                 if parts
                     .iter()
-                    .any(|part| matches!(part, ContentPart::Image { .. })) =>
+                    .any(|part| !matches!(part, ContentPart::Text { .. })) =>
             {
                 let parts: Vec<_> = parts
                     .into_iter()
                     .map(|part| match part {
                         ContentPart::Text { text } => UserContentPart::Text { text },
                         ContentPart::Image {
-                            source: ImageSource::Data { value, mime_type },
+                            source: InlineSource::Data { value, mime_type },
                         } => UserContentPart::Image {
                             data: value,
                             mime_type,
                         },
+                        ContentPart::Document {
+                            source:
+                                InlineSource::Data {
+                                    value,
+                                    mime_type: PdfMimeType::Pdf,
+                                },
+                        } => UserContentPart::Pdf { data: value },
                     })
                     .collect();
-                validate_image_input(&parts).map_err(AgUiRunError::ImageInput)?;
+                validate_multipart_input(&parts).map_err(AgUiRunError::MediaInput)?;
                 return Ok(TaskInput::Parts(parts));
             }
             Self::Parts(parts) => parts
                 .into_iter()
                 .filter_map(|part| match part {
                     ContentPart::Text { text } => Some(text),
-                    ContentPart::Image { .. } => None,
+                    ContentPart::Image { .. } | ContentPart::Document { .. } => None,
                 })
                 .collect(),
         };
@@ -475,10 +488,22 @@ impl<R: BufRead, W: Write> Client<R, W> {
         options: AgUiRunOptions,
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
-        if matches!(request.input, TaskInput::Parts(_))
-            && self.info().capabilities.get("taskImageInput") != Some(&Value::Bool(true))
-        {
-            return Err(AgUiRunError::ImageInputUnavailable);
+        if let TaskInput::Parts(parts) = &request.input {
+            let capabilities = &self.info().capabilities;
+            if capabilities.get("taskImageInput") != Some(&Value::Bool(true))
+                && parts
+                    .iter()
+                    .any(|part| matches!(part, UserContentPart::Image { .. }))
+            {
+                return Err(AgUiRunError::ImageInputUnavailable);
+            }
+            if capabilities.get("taskPdfInput") != Some(&Value::Bool(true))
+                && parts
+                    .iter()
+                    .any(|part| matches!(part, UserContentPart::Pdf { .. }))
+            {
+                return Err(AgUiRunError::PdfInputUnavailable);
+            }
         }
         if let Some(steps) = request.max_model_steps
             && !self

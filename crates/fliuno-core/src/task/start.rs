@@ -51,6 +51,7 @@ impl StartInput<'_> {
                     let (kind, data) = match part {
                         UserContentPart::Text { text } => ("text", text),
                         UserContentPart::Image { mime_type, data } => (mime_type.as_str(), data),
+                        UserContentPart::Pdf { data } => (PDF_MIME_TYPE, data),
                     };
                     for field in [kind, data.as_str()] {
                         digest.update((field.len() as u64).to_be_bytes());
@@ -64,7 +65,7 @@ impl StartInput<'_> {
 
     fn validate_media(self) -> Result<()> {
         if let Self::Parts(parts) = self {
-            validate_image_input(parts).map_err(|message| Error::Invalid(message.into()))?;
+            validate_multipart_input(parts).map_err(|message| Error::Invalid(message.into()))?;
         }
         Ok(())
     }
@@ -216,7 +217,7 @@ impl Kernel {
         match input {
             StartInput::Text(text) => validate_input(text)?,
             StartInput::Parts(parts) if backend == TaskBackend::Model => {
-                validate_image_input_limits(parts)
+                validate_multipart_input_limits(parts)
                     .map_err(|message| Error::Invalid(message.into()))?;
             }
             StartInput::Parts(_) => {

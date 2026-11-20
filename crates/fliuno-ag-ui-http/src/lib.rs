@@ -418,7 +418,8 @@ fn run_status(error: AgUiRunError) -> StatusCode {
         AgUiRunError::Replay(error) => replay_status(error),
         AgUiRunError::InvalidResult
         | AgUiRunError::ModelStepLimitUnavailable
-        | AgUiRunError::ImageInputUnavailable => StatusCode::BAD_GATEWAY,
+        | AgUiRunError::ImageInputUnavailable
+        | AgUiRunError::PdfInputUnavailable => StatusCode::BAD_GATEWAY,
         _ => StatusCode::BAD_REQUEST,
     }
 }

@@ -466,8 +466,9 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
 }
 
 #[tokio::test]
-async fn ag_ui_http_image_input_is_authorized_and_durable() {
+async fn ag_ui_http_inline_media_is_authorized_and_durable() {
     const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
+    const PDF: &str = "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAxMCAxMF0gPj4KZW5kb2JqCnhyZWYKMCA0CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA0IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxODQKJSVFT0YK";
     let root = std::env::temp_dir().join(format!("fliuno-ag-ui-image-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
     let db = root.join("kernel.db");
@@ -503,7 +504,8 @@ async fn ag_ui_http_image_input_is_authorized_and_durable() {
         {"id":"u","role":"user","content":[
             {"type":"text","text":"Before "},
             {"type":"image","source":{"type":"data","mimeType":"image/png","value":PNG}},
-            {"type":"text","text":" after"}
+            {"type":"text","text":" after "},
+            {"type":"document","source":{"type":"data","mimeType":"application/pdf","value":PDF}}
         ]}
     ]});
     assert_eq!(
@@ -532,6 +534,21 @@ async fn ag_ui_http_image_input_is_authorized_and_durable() {
             .unwrap();
         assert_eq!(response.status(), 400);
     }
+    for source in [
+        json!({"type":"data","mimeType":"image/png","value":PDF}),
+        json!({"type":"data","mimeType":"application/pdf","value":PNG}),
+    ] {
+        let mut rejected = run.clone();
+        rejected["messages"][0]["content"][3]["source"] = source;
+        let response = http
+            .post(&endpoint)
+            .bearer_auth("image-test")
+            .json(&rejected)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400);
+    }
     let response = http
         .post(&endpoint)
         .bearer_auth("image-test")
@@ -543,6 +560,7 @@ async fn ag_ui_http_image_input_is_authorized_and_durable() {
     let sse = response.text().await.unwrap();
     assert!(sse.contains("RUN_FINISHED"), "{sse}");
     assert!(!sse.contains(PNG));
+    assert!(!sse.contains(PDF));
     let task_id = shared
         .lock()
         .await
@@ -563,7 +581,10 @@ async fn ag_ui_http_image_input_is_authorized_and_durable() {
         .start_ag_ui_interrupt_run(&session.id, parsed, |_| {})
         .unwrap();
     assert_eq!(repeated.task().id, task_id);
-    assert_eq!(repeated.task().input_preview, "Before [image] after");
+    assert_eq!(
+        repeated.task().input_preview,
+        "Before [image] after [document]"
+    );
     let task: Task = client
         .call("task/get", &json!({"taskId":task_id}), |_| {})
         .unwrap();
@@ -573,6 +594,7 @@ async fn ag_ui_http_image_input_is_authorized_and_durable() {
     assert!(
         matches!(&parts[1], fliuno_protocol::UserContentPart::Image { data, .. } if data == PNG)
     );
+    assert!(matches!(&parts[3], fliuno_protocol::UserContentPart::Pdf { data } if data == PDF));
     let mut changed = run;
     changed["messages"][0]["content"][1]["source"]["value"] = json!("iVBORw0KGgo=");
     let parsed =
@@ -604,7 +626,10 @@ async fn ag_ui_http_image_input_is_authorized_and_durable() {
                 |_| {},
             )
             .unwrap();
-        if history.to_string().contains("Before [image] after") {
+        if history
+            .to_string()
+            .contains("Before [image] after [document]")
+        {
             break history;
         }
         assert!(
@@ -614,6 +639,7 @@ async fn ag_ui_http_image_input_is_authorized_and_durable() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     };
     assert!(!history.to_string().contains(PNG));
+    assert!(!history.to_string().contains(PDF));
     drop(client);
     drop(server);
     fs::remove_dir_all(root).unwrap();

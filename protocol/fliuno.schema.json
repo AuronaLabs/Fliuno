@@ -1157,6 +1157,23 @@
                 "mimeType",
                 "data"
               ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "pdf"
+                },
+                "data": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "data"
+              ]
             }
           ]
         },
@@ -1435,6 +1452,23 @@
               "required": [
                 "type",
                 "mimeType",
+                "data"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "pdf"
+                },
+                "data": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
                 "data"
               ]
             }
@@ -4128,6 +4162,23 @@
               "required": [
                 "type",
                 "mimeType",
+                "data"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "pdf"
+                },
+                "data": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
                 "data"
               ]
             }
