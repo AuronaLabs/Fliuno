@@ -349,6 +349,14 @@ fn byte_budget_defers_a_turn_instead_of_dropping_or_truncating_it() {
         entries[0]["completionSequence"]
     );
     assert!(serde_json::to_vec(&read).unwrap().len() <= 4096);
+    let entry_bytes = serde_json::to_vec(&read).unwrap().len();
+    lookup["maxBytes"] = json!(entry_bytes);
+    assert_eq!(peer.call("session/getHistoryTurn", lookup.clone()), read);
+    lookup["maxBytes"] = json!(entry_bytes - 1);
+    assert_eq!(
+        peer.call("session/getHistoryTurn", lookup.clone()),
+        entries[0]
+    );
     lookup["maxBytes"] = json!(1023);
     assert_eq!(
         peer.request("session/getHistoryTurn", lookup)["error"]["code"],
@@ -372,6 +380,23 @@ fn byte_budget_defers_a_turn_instead_of_dropping_or_truncating_it() {
     let expanded = peer.call(method, retried);
     assert_eq!(expanded["entries"][0]["kind"], "turn");
     assert_eq!(expanded["entries"][0]["turn"]["taskId"], largest["id"]);
+    let expanded_entries = expanded["entries"].as_array().unwrap();
+    let exact_budget = serde_json::to_vec(&expanded_entries[..2]).unwrap().len();
+    let mut boundary = request.clone();
+    boundary["maxBytes"] = json!(exact_budget);
+    let exact = peer.call(method, boundary.clone());
+    assert_eq!(exact["entries"], json!(&expanded_entries[..2]));
+    assert_eq!(
+        exact["nextBeforeSequence"],
+        expanded_entries[1]["turn"]["completionSequence"]
+    );
+    boundary["maxBytes"] = json!(exact_budget - 1);
+    let short = peer.call(method, boundary);
+    assert_eq!(short["entries"], json!(&expanded_entries[..1]));
+    assert_eq!(
+        short["nextBeforeSequence"],
+        expanded_entries[0]["turn"]["completionSequence"]
+    );
     request["beforeSequence"] = first["nextBeforeSequence"].clone();
     let next = peer.call(method, request.clone());
     assert_eq!(next["entries"].as_array().unwrap().len(), 1);

@@ -2,6 +2,11 @@
 use super::*;
 use crate::json_size;
 
+// Both history tables store ContextTurn using serde_json::to_string. The
+// wire entry wraps that same compact object with a fixed tag and field name.
+const TURN_ENTRY_OVERHEAD: usize = r#"{"kind":"turn","turn":}"#.len();
+const ARRAY_BRACKETS: usize = 2;
+
 impl Kernel {
     /// Fetch a single completed conversation without opening the full task snapshot.
     pub fn get_session_history_turn(
@@ -24,12 +29,13 @@ impl Kernel {
             request.session_id,
             request.task_id,
             validate_event_cursor(through)?,
-            max_bytes
+            i64::from(max_bytes) - TURN_ENTRY_OVERHEAD as i64,
         ])?;
         let row = rows
             .next()?
             .ok_or_else(|| Error::NotFound("completed conversation turn".into()))?;
-        let (entry, _) = decode_entry(row, max_bytes as usize)?;
+        let (entry, _) = decode_entry(row, max_bytes as usize)?
+            .ok_or_else(|| Error::Invalid("history entry exceeds maxBytes".into()))?;
         Ok(entry)
     }
 
@@ -81,7 +87,7 @@ impl Kernel {
         let mut rows = statement.query(params![
             request.session_id,
             validate_event_cursor(upper)?,
-            max_bytes,
+            i64::from(max_bytes) - (ARRAY_BRACKETS + TURN_ENTRY_OVERHEAD) as i64,
             limit + 1,
             validate_event_cursor(after)?,
         ])?;
@@ -91,21 +97,21 @@ impl Kernel {
             next_before_sequence: None,
         };
         let mut last_sequence = None;
-        let mut bytes = 2; // JSON array brackets.
+        let mut remaining = max_bytes as usize - ARRAY_BRACKETS;
         while let Some(row) = rows.next()? {
             if page.entries.len() == limit as usize {
                 page.next_before_sequence = last_sequence;
                 break;
             }
             let sequence = row.get::<_, i64>(2)? as u64;
-            let (entry, entry_bytes) = decode_entry(row, max_bytes as usize - 2)?;
-            let next_bytes = bytes + usize::from(last_sequence.is_some()) + entry_bytes;
-            if next_bytes > max_bytes as usize {
+            let comma = usize::from(last_sequence.is_some());
+            let Some((entry, entry_bytes)) = decode_entry(row, remaining.saturating_sub(comma))?
+            else {
                 page.next_before_sequence = last_sequence;
                 break;
-            }
+            };
             page.entries.push(entry);
-            bytes = next_bytes;
+            remaining -= comma + entry_bytes;
             last_sequence = Some(sequence);
         }
         Ok(page)
@@ -122,23 +128,30 @@ fn history_budget(max_bytes: Option<u32>) -> Result<u32> {
     Ok(max_bytes)
 }
 
-fn decode_entry(row: &rusqlite::Row<'_>, budget: usize) -> Result<(SessionHistoryEntry, usize)> {
+fn decode_entry(
+    row: &rusqlite::Row<'_>,
+    remaining: usize,
+) -> Result<Option<(SessionHistoryEntry, usize)>> {
     let value = row.get_ref(0)?;
     let data = value.as_str_or_null().map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, value.data_type(), Box::new(error))
     })?;
     if let Some(data) = data {
-        let turn = SessionHistoryEntry::Turn {
-            turn: serde_json::from_str(data)?,
-        };
-        let bytes = json_size(&turn)?;
-        if bytes <= budget {
-            return Ok((turn, bytes));
+        let bytes = data.len() + TURN_ENTRY_OVERHEAD;
+        if bytes > remaining {
+            return Ok(None);
         }
+        return Ok(Some((
+            SessionHistoryEntry::Turn {
+                turn: serde_json::from_str(data)?,
+            },
+            bytes,
+        )));
     }
+    // The SQL projection omits bodies that cannot fit even on an empty page.
     let entry = oversized(row, row.get::<_, i64>(2)? as u64)?;
     let bytes = json_size(&entry)?;
-    Ok((entry, bytes))
+    Ok((bytes <= remaining).then_some((entry, bytes)))
 }
 
 fn oversized(row: &rusqlite::Row<'_>, completion_sequence: u64) -> Result<SessionHistoryEntry> {
