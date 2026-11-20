@@ -345,3 +345,79 @@ fn work_subscription_delivers_only_post_snapshot_events_in_scope() {
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn session_count_batch_tracks_transitions_and_workspace_ownership_across_restart() {
+    let root = std::env::temp_dir().join(format!("fliuno-work-counts-{}", uuid::Uuid::new_v4()));
+    let foreign = root.join("foreign");
+    fs::create_dir_all(&foreign).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let other = peer.call("workspace/open", json!({"root":foreign}));
+    let main = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let empty = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let excluded = peer.call("session/create", json!({"workspaceId":other["id"]}));
+    let request = json!({"workspaceId":workspace["id"],"sessionIds":[empty["id"],main["id"],excluded["id"],main["id"],"missing"]});
+    let zero = serde_json::to_value(TaskStatusCounts::default()).unwrap();
+    let initial = peer.call("work/getSessionCounts", request.clone());
+    assert_eq!(initial["throughSequence"], 0);
+    assert_eq!(
+        initial["items"],
+        json!([
+            {"sessionId":empty["id"],"taskCounts":zero},
+            {"sessionId":main["id"],"taskCounts":zero}, null,
+            {"sessionId":main["id"],"taskCounts":zero}, null,
+        ])
+    );
+    let task = peer.call(
+        "task/startSummary",
+        json!({"sessionId":main["id"],"input":"prepare one report"}),
+    );
+    let task_id = task["id"].as_str().unwrap();
+    let waiting = peer.wait_for_status(task_id, "waiting_approval");
+    let blocked = peer.call("work/getSessionCounts", request.clone());
+    assert!(blocked["throughSequence"].as_u64().unwrap() > 0);
+    assert_eq!(blocked["items"][1]["taskCounts"]["waitingApproval"], 1);
+    assert_eq!(blocked["items"][1], blocked["items"][3]);
+    peer.call("approval/respond", json!({"taskId":task_id,"approvalId":waiting["pendingApproval"]["id"],"decision":"allow_once"}));
+    peer.wait_for_status(task_id, "completed");
+    peer.call(
+        "session/setArchived",
+        json!({"sessionId":main["id"],"archived":true}),
+    );
+    let finished = peer.call("work/getSessionCounts", request.clone());
+    let snapshot = peer.call("work/getSnapshot", json!({"sessionId":main["id"]}));
+    assert_eq!(finished["items"][1]["taskCounts"], snapshot["taskCounts"]);
+    assert_eq!(finished["items"][1]["taskCounts"]["completed"], 1);
+    assert_eq!(finished["items"][1]["taskCounts"]["waitingApproval"], 0);
+    assert_eq!(
+        finished["throughSequence"],
+        snapshot["approvals"]["snapshot"]["throughSequence"]
+    );
+    assert_eq!(
+        peer.request(
+            "work/getSessionCounts",
+            json!({"workspaceId":"missing","sessionIds":[main["id"]]})
+        )["error"]["code"],
+        -32004
+    );
+    for invalid in [
+        json!([]),
+        json!(vec![main["id"].clone(); 65]),
+        json!(["bad key"]),
+    ] {
+        assert_eq!(
+            peer.request(
+                "work/getSessionCounts",
+                json!({"workspaceId":workspace["id"],"sessionIds":invalid})
+            )["error"]["code"],
+            -32602
+        );
+    }
+    drop(peer);
+    let mut reopened = Peer::start(&db);
+    assert_eq!(reopened.call("work/getSessionCounts", request), finished);
+    drop(reopened);
+    fs::remove_dir_all(root).unwrap();
+}

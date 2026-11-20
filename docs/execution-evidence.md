@@ -1206,3 +1206,19 @@ Windows 本机调试构建比较同一个 SQLite 夹具上的两套服务。预�
 测量脚本和日志见 `D:/Fliuno-Native-Test/summary-revision-lookup-benchmark.py` 和 `D:/Fliuno-Native-Test/summary-revision-lookup-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，544 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 4 项任务回放与 2 项工作台进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-summary-revision-lookup-windows.log` 和 `D:/Fliuno-Native-Test/guest-summary-revision-lookup.log`。
+
+## 0.0.3 批量读取会话任务计数（2026-11-20）
+
+真实 stdio 测试覆盖空会话、缺失和其他工作区的会话、重复位置、任务从待审批到完成、归档会话及重启后一致性。测试核对计数与 `work/getSnapshot` 相同，也检查批量上限和无效 ID。[应用协议](protocol.md#批量读取会话任务计数)
+
+Windows 调试构建查询同一工作区的 32 个会话，其中 24 个会话各有一项待审批任务，另外 8 个会话为空。预热 20 轮后交替测量 100 轮，每轮核对所有会话计数和水位。下表记录 stdio 中位耗时和响应字节数。
+
+| 请求方式 | 耗时 | 响应 |
+| --- | ---: | ---: |
+| 逐项读取工作台快照 | 16.636 ms | 14,335 字节 |
+| JSON-RPC 批量调用工作台快照 | 11.837 ms | 14,337 字节 |
+| `work/getSessionCounts` | 2.248 ms | 5,286 字节 |
+
+测量脚本和日志见 `D:/Fliuno-Native-Test/work-session-counts-benchmark.py` 和 `D:/Fliuno-Native-Test/work-session-counts-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，545 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 3 项工作台进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-work-session-counts-windows.log` 和 `D:/Fliuno-Native-Test/guest-work-session-counts.log`。

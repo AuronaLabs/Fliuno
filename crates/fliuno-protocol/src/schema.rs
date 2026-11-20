@@ -16,6 +16,7 @@ pub fn schema_bundle() -> Value {
     let methods = schemas! {
         "initialize" => schema::<InitializeParams>(),
         "work/getSnapshot" => schema::<WorkSnapshotParams>(),
+        "work/getSessionCounts" => schema::<WorkSessionCountsParams>(),
         "work/subscribe" => schema::<WorkSnapshotParams>(),
         "workspace/open" => schema::<WorkspaceOpenParams>(),
         "workspace/searchHistory" => schema::<WorkspaceHistorySearchParams>(),
@@ -131,6 +132,7 @@ pub fn schema_bundle() -> Value {
         "TaskSummaryChangesPage" => schema::<TaskSummaryChangesPage>(),
         "TaskSummariesPage" => schema::<ObjectPage<TaskSummary>>(),
         "WorkSnapshot" => schema::<WorkSnapshot>(),
+        "WorkSessionCounts" => schema::<WorkSessionCounts>(),
         "TaskContext" => schema::<TaskContext>(),
         "SessionHistoryListPage" => schema::<SessionHistoryListPage>(),
         "SessionHistoryEntry" => schema::<SessionHistoryEntry>(),

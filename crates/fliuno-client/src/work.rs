@@ -1,8 +1,11 @@
 //! Bootstrap a work view from a snapshot and follow its durable events.
 use super::{ApprovalInbox, Client, Error, EventFeed, EventReplay, Notification, ReplayScope};
-use fliuno_protocol::{MAX_WORK_RECENT_TASKS, WorkSnapshot, WorkSnapshotParams};
+use fliuno_protocol::{
+    MAX_WORK_RECENT_TASKS, WorkSessionCounts, WorkSessionCountsParams, WorkSnapshot,
+    WorkSnapshotParams,
+};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     io::{BufRead, Write},
 };
 
@@ -17,6 +20,31 @@ pub struct WorkSubscription {
 }
 
 impl<R: BufRead, W: Write> Client<R, W> {
+    /// Read task counts for visible sessions at one event watermark. Check
+    /// the `workSessionCounts` capability before calling.
+    pub fn work_session_counts(
+        &mut self,
+        request: &WorkSessionCountsParams,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<WorkSessionCounts, Error> {
+        let result: WorkSessionCounts =
+            self.call("work/getSessionCounts", request, on_notification)?;
+        if result.items.len() != request.session_ids.len()
+            || result.through_sequence > i64::MAX as u64
+        {
+            return Err(Error::InvalidResult);
+        }
+        let mut seen = HashMap::with_capacity(result.items.len());
+        for (id, item) in request.session_ids.iter().zip(&result.items) {
+            if item.as_ref().is_some_and(|item| &item.session_id != id)
+                || seen.insert(id, item).is_some_and(|prior| prior != item)
+            {
+                return Err(Error::InvalidResult);
+            }
+        }
+        Ok(result)
+    }
+
     /// Read a work overview and an inbox pager already positioned after its
     /// first page. Use the snapshot's global event sequence to resume delivery.
     /// Servers without `workRecentTasks` return no task preview.

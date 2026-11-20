@@ -54,7 +54,7 @@
 <details>
 <summary>更多查询与批量操作</summary>
 
-- **快照与目录**：[独立读取工作台快照](protocol.md#工作台快照) · [会话目录](protocol.md#会话目录) · [任务目录](protocol.md#任务目录)
+- **快照与目录**：[独立读取工作台快照](protocol.md#工作台快照) · [批量读取会话计数](protocol.md#批量读取会话任务计数) · [会话目录](protocol.md#会话目录) · [任务目录](protocol.md#任务目录)
 - **分开同步变动和详情**：[回放变动的任务 ID](protocol.md#任务变动回放) · [批量读取摘要](protocol.md#批量读取任务摘要)
 - **批量操作**：[取消任务](protocol.md#批量取消任务) · [核对审批结果](protocol.md#批量读取审批决定) · [校验交付物摘要](protocol.md#批量读取交付物摘要)
 - **历史**：[分页读取](context.md#会话历史分页) · [订阅历史](context.md#订阅会话历史) · [查找任务](protocol.md#查找历史任务) · [只搜新完成的任务](protocol.md#只搜索新完成的任务)

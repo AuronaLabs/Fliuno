@@ -1,6 +1,8 @@
 //! Maintain small status counters from the narrow task status projection.
 use super::*;
 
+mod session_counts;
+
 const STATUSES: [TaskStatus; 6] = [
     TaskStatus::Running,
     TaskStatus::WaitingApproval,
@@ -112,16 +114,7 @@ impl Kernel {
                 "SELECT running,waiting_approval,interrupted,completed,cancelled,failed
              FROM work_status_counts WHERE scope=?1 AND owner=?2",
             )?
-            .query_row(params![scope, owner], |row| {
-                Ok(TaskStatusCounts {
-                    running: row.get::<_, i64>(0)? as u64,
-                    waiting_approval: row.get::<_, i64>(1)? as u64,
-                    interrupted: row.get::<_, i64>(2)? as u64,
-                    completed: row.get::<_, i64>(3)? as u64,
-                    cancelled: row.get::<_, i64>(4)? as u64,
-                    failed: row.get::<_, i64>(5)? as u64,
-                })
-            })
+            .query_row(params![scope, owner], |row| read_counts(row, 0))
             .optional()?
             .unwrap_or_default();
         let recent_tasks = request
@@ -135,6 +128,17 @@ impl Kernel {
             recent_tasks,
         })
     }
+}
+
+fn read_counts(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<TaskStatusCounts> {
+    Ok(TaskStatusCounts {
+        running: row.get::<_, i64>(offset)? as u64,
+        waiting_approval: row.get::<_, i64>(offset + 1)? as u64,
+        interrupted: row.get::<_, i64>(offset + 2)? as u64,
+        completed: row.get::<_, i64>(offset + 3)? as u64,
+        cancelled: row.get::<_, i64>(offset + 4)? as u64,
+        failed: row.get::<_, i64>(offset + 5)? as u64,
+    })
 }
 
 fn recent_tasks(

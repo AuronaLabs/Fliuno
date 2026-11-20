@@ -82,6 +82,7 @@ staged.sync_all()?;
 | `task/list` | `{sessionId,after?:0,limit?:100,targetBytes?}` | Task ObjectPage |
 | `task/listSummaries` | `{sessionId,status?,order?,after?:0,limit?:100,targetBytes?}` | 会话内的 TaskSummary ObjectPage；游标来自完整任务列表使用的创建行位置 |
 | `task/listWorkspaceSummaries` | `{workspaceId,status?,order?,after?,limit?,targetBytes?}` | 跨会话分页读取同一工作区的任务摘要，可按创建顺序正序或倒序返回 |
+| `work/getSessionCounts` | `{workspaceId,sessionIds:[...]}` | [批量读取会话任务计数](#批量读取会话任务计数) |
 | `work/getSnapshot` | `{workspaceId?,sessionId?,approvalLimit?,approvalTargetBytes?,recentTaskLimit?}` | 同一水位的任务状态计数、待审批首页和可选的最近任务 |
 | `work/subscribe` | 同 `work/getSnapshot` | 同一快照，并将本连接切换为该范围的事件水位订阅 |
 | `workspace/open` | `{root}` | Workspace；根目录必须存在 |
@@ -410,7 +411,19 @@ Rust 的 `Client::work_snapshot` 返回 `(WorkSnapshot, ApprovalInbox)`。首页
 
 SQLite v42 从已有状态索引回填计数。平时只有创建任务或状态变化才改动对应范围的计数，读取时不扫描任务列表。
 
-#### 工作台实时订阅
+#### 批量读取会话任务计数
+
+服务声明 `workSessionCounts:true` 后，可用 `work/getSessionCounts` 为工作台会话列表读取状态计数。一次传入同一 `workspaceId` 下的 1～64 个会话 ID。`maxWorkSessionCountBatch` 公布最大项数，所有 ID 须为 1～128 个可见 ASCII 字符。
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"work/getSessionCounts","params":{"workspaceId":"<workspace-id>","sessionIds":["<session-id>"]}}
+```
+
+`items` 与请求一一对应，保留顺序和重复位置。匹配的项返回 `{sessionId,taskCounts}`，其中 `taskCounts` 与工作台快照一致。空会话返回全零计数，已归档会话仍可读取。不存在或归属其他工作区的会话返回 `null`，不存在的工作区返回 `-32004`。
+
+`throughSequence` 是计数读事务的全局事件水位，可用于判断这些计数的新旧。需要补读事件时，继续使用已处理的事件游标。Rust 调用方可用 `Client::work_session_counts`。
+
+### 工作台实时订阅
 
 当 `initialize.capabilities.workSubscription` 为 `true` 时，`work/subscribe` 使用相同参数，返回相同的 `WorkSnapshot`，并一次建立同范围的事件订阅。内核在同一提交锁下读取快照、挂接订阅。快照水位以内的状态已经计入首屏；后续只发出序号大于该水位的 `notifications/eventWatermark`，由客户端按相同范围补读正文。多次提交可能合并为一次水位通知。参数或范围无效时，当前订阅保持不变。
 

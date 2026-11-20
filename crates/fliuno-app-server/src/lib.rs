@@ -514,6 +514,8 @@ impl RpcServer {
             capabilities["maxTaskSummaryChangeEvents"] = json!(MAX_TASK_SUMMARY_CHANGE_EVENTS);
             capabilities["maxTaskSummaryBatch"] = json!(MAX_TASK_SUMMARY_BATCH);
             capabilities["workSnapshot"] = json!(true);
+            capabilities["workSessionCounts"] = json!(true);
+            capabilities["maxWorkSessionCountBatch"] = json!(MAX_WORK_SESSION_COUNT_BATCH);
             capabilities["workSubscription"] = json!(true);
             capabilities["workRecentTasks"] = json!(true);
             capabilities["taskSummaryStatusFilter"] = json!(true);
@@ -673,6 +675,10 @@ impl RpcServer {
             "work/getSnapshot" => {
                 let p: WorkSnapshotParams = decode(params)?;
                 json!(self.kernel()?.work_snapshot(&p)?)
+            }
+            "work/getSessionCounts" => {
+                let p: WorkSessionCountsParams = decode(params)?;
+                json!(self.kernel()?.work_session_counts(&p)?)
             }
             "work/subscribe" => {
                 let p: WorkSnapshotParams = decode(params)?;

@@ -67,6 +67,35 @@
       },
       "additionalProperties": false
     },
+    "work/getSessionCounts": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkSessionCountsParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-~]+$"
+        },
+        "sessionIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!-~]+$"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "sessionIds"
+      ]
+    },
     "work/subscribe": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "WorkSnapshotParams",
@@ -6371,6 +6400,102 @@
                 "agentId"
               ]
             }
+          ]
+        }
+      }
+    },
+    "WorkSessionCounts": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkSessionCounts",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "One position per input. A missing or foreign session is null.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/WorkSessionCount"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "throughSequence": {
+          "description": "The global event watermark in the same read view as the counts.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "throughSequence"
+      ],
+      "$defs": {
+        "WorkSessionCount": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "taskCounts": {
+              "$ref": "#/$defs/TaskStatusCounts"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sessionId",
+            "taskCounts"
+          ]
+        },
+        "TaskStatusCounts": {
+          "type": "object",
+          "properties": {
+            "running": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "waitingApproval": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "interrupted": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "completed": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "cancelled": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "failed": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "running",
+            "waitingApproval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
           ]
         }
       }
