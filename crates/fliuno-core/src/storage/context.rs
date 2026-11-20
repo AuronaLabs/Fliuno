@@ -192,33 +192,23 @@ impl Kernel {
         );
         let mut statement = self.db.prepare_cached(&sql)?;
         let mut turns: Vec<ContextTurn> = Vec::new();
-        let mut bytes = 0;
+        // Apply the aggregate body budget before SQLite loads each record.
+        // The caller measures the completed response, including its envelope.
+        let mut remaining = options.max_bytes as usize;
         for id in ids {
-            let record: Option<Option<String>> = statement
-                .query_row(params![session, id, through, options.max_bytes], |row| {
-                    row.get(0)
-                })
-                .optional()?;
-            let data = match record {
-                None => {
-                    return Err(Error::Invalid(
-                        "selected context task is not a completed record in this session".into(),
-                    ));
-                }
-                Some(None) => {
-                    return Err(Error::Invalid(
-                        "selected context tasks exceed maxBytes".into(),
-                    ));
-                }
-                Some(Some(data)) => data,
-            };
-            bytes += data.len();
-            if bytes > options.max_bytes as usize {
-                return Err(Error::Invalid(
-                    "selected context tasks exceed maxBytes".into(),
-                ));
-            }
-            turns.push(serde_json::from_str(&data)?);
+            let mut rows = statement.query(params![session, id, through, remaining as i64])?;
+            let row = rows.next()?.ok_or_else(|| {
+                Error::Invalid(
+                    "selected context task is not a completed record in this session".into(),
+                )
+            })?;
+            let data = row
+                .get_ref(0)?
+                .as_str_or_null()
+                .map_err(rusqlite::Error::from)?
+                .ok_or_else(|| Error::Invalid("selected context tasks exceed maxBytes".into()))?;
+            remaining -= data.len();
+            turns.push(serde_json::from_str(data)?);
         }
         turns.sort_unstable_by_key(|turn| turn.completion_sequence);
         Ok((total, turns))

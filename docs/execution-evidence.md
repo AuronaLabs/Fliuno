@@ -1079,3 +1079,11 @@ Windows 调试构建使用同一数据库，按随机平衡顺序回放 100 对�
 脚本和日志见 `D:/Fliuno-Native-Test/latest-summary-revisions-benchmark.py` 与 `D:/Fliuno-Native-Test/latest-summary-revisions-benchmark.log`。Debian Linux 6.12.107 来宾通过 8 项回放和工作台进程测试，QEMU 与 `FLIUNO_RESULT` 均为 0。日志见 `D:/Fliuno-Native-Test/guest-latest-summary-revisions.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，包含 532 项测试、29 个离线演示、格式、Clippy 和 Schema 检查。
+
+## 0.0.3 显式选取历史按剩余预算读取（2026-11-20）
+
+显式选取多条历史时，把剩余字节预算传给 SQLite。内核直接解码数据库返回的正文，下一条放不下时拒绝整项请求。真实 stdio 测试验证单条分别可用、合计超预算时不产生事件，提高预算后可用相同请求键创建任务并重试。[显式任务选择](context.md#显式任务选择)
+
+Windows 本机调试构建对同一数据库的两个副本发出 `session/context` 请求。夹具包含 24,920 和 246,105 字节的精简对话正文，预算为 262,144 字节。预热后按随机平衡顺序测量各 200 对请求，校验错误或结果一致。选择两条时的拒绝请求中位耗时从 1.080 降至 0.868 ms。只选第一条的对照请求中位数为 2.074 → 2.107 ms。脚本和日志位于 `D:/Fliuno-Native-Test/selected-context-budget-benchmark.py` 与 `D:/Fliuno-Native-Test/selected-context-budget-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0。533 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志为 `%TEMP%/fliuno-selected-context-budget-windows.log`。

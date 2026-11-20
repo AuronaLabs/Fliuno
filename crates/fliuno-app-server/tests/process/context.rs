@@ -17,6 +17,51 @@ fn approve_report(peer: &mut Peer, session: &Value, input: &str, key: &str) -> V
 }
 
 #[test]
+fn explicit_history_rejects_aggregate_overflow_without_consuming_the_request_key() {
+    let root = std::env::temp_dir().join(format!("fliuno-context-budget-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let mut peer = Peer::start(&root.join("kernel.db"));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let first = approve_report(&mut peer, &session, &"a".repeat(2048), "first");
+    let second = approve_report(&mut peer, &session, &"b".repeat(2048), "second");
+    for task in [&first, &second] {
+        let preview = peer.call(
+            "session/context",
+            json!({"sessionId":session["id"],"options":{
+                "taskIds":[task["id"]],"detail":"conversation","maxBytes":3072
+            }}),
+        );
+        assert_eq!(preview["turns"][0]["taskId"], task["id"]);
+    }
+    let mut request = json!({
+        "sessionId":session["id"],"input":"follow up","clientRequestId":"follow",
+        "context":{"taskIds":[second["id"],first["id"]],"detail":"conversation","maxBytes":3072}
+    });
+    let before = peer.call("events/getWatermark", json!({}));
+    assert_eq!(
+        peer.request("task/start", request.clone())["error"]["code"],
+        -32602
+    );
+    assert_eq!(peer.call("events/getWatermark", json!({})), before);
+
+    request["context"]["maxBytes"] = json!(8192);
+    let task = peer.call("task/start", request.clone());
+    let turns = &task["context"]["turns"];
+    assert_eq!(turns.as_array().unwrap().len(), 2);
+    assert_eq!(turns[0]["taskId"], first["id"]);
+    assert_eq!(turns[1]["taskId"], second["id"]);
+    assert_eq!(peer.call("task/start", request)["id"], task["id"]);
+    drop(peer);
+    let root = root.canonicalize().unwrap();
+    assert_eq!(
+        root.parent(),
+        Some(std::env::temp_dir().canonicalize().unwrap().as_path())
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn context_preview_snapshot_and_idempotency_survive_restart() {
     let root = std::env::temp_dir().join(format!(
         "fliuno-context-{}-{}",
