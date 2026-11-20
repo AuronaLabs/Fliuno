@@ -111,6 +111,12 @@ pub(super) fn summarize(task: &Task) -> TaskSummary {
             .take(160)
             .take_while(|ch| *ch != '\0')
             .collect(),
+        Some(Message::UserParts { parts }) => parts
+            .iter()
+            .flat_map(|part| part.text_projection().chars())
+            .take(160)
+            .take_while(|ch| *ch != '\0')
+            .collect(),
         _ => String::new(),
     };
     let run = task.agent_run.as_ref();

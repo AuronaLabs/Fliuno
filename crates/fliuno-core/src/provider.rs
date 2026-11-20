@@ -151,7 +151,13 @@ impl ModelProvider for DemoProvider {
             .messages
             .iter()
             .find_map(|m| match m {
-                Message::User { text } => Some(text.as_str()),
+                Message::User { text } => Some(std::borrow::Cow::Borrowed(text.as_str())),
+                Message::UserParts { parts } => Some(std::borrow::Cow::Owned(
+                    parts
+                        .iter()
+                        .map(fliuno_protocol::UserContentPart::text_projection)
+                        .collect(),
+                )),
                 _ => None,
             })
             .ok_or("task has no user message")?;

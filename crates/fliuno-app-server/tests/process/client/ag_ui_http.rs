@@ -464,3 +464,157 @@ async fn ag_ui_http_authorizes_starts_concurrent_runs_and_resumes_sse() {
     drop(server);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn ag_ui_http_image_input_is_authorized_and_durable() {
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
+    let root = std::env::temp_dir().join(format!("fliuno-ag-ui-image-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let (server, mut client) = super::ag_ui_run::connect(&db);
+    let workspace: Workspace = client
+        .call("workspace/open", &json!({"root":root}), |_| {})
+        .unwrap();
+    let session: Session = client
+        .call(
+            "session/create",
+            &json!({"workspaceId":workspace.id}),
+            |_| {},
+        )
+        .unwrap();
+    let session_id = session.id.clone();
+    let shared = Arc::new(Mutex::new(client));
+    let router = fliuno_ag_ui_http::router_with_interrupts(
+        shared.clone(),
+        move |headers| {
+            (headers.get("authorization")?.to_str().ok()? == "Bearer image-test")
+                .then(|| session_id.clone())
+        },
+        |_| None,
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/run", listener.local_addr().unwrap());
+    let listener = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .unwrap();
+    let run = json!({"threadId":session.id,"runId":"image-run","messages":[
+        {"id":"u","role":"user","content":[
+            {"type":"text","text":"Before "},
+            {"type":"image","source":{"type":"data","mimeType":"image/png","value":PNG}},
+            {"type":"text","text":" after"}
+        ]}
+    ]});
+    assert_eq!(
+        http.post(&endpoint)
+            .json(&run)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    for rejected_source in [
+        json!({"type":"url","value":"http://127.0.0.1/image.png"}),
+        json!({"type":"file","value":"file-1","provider":"openai"}),
+        json!({"type":"data","mimeType":"image/png","value":"not base64"}),
+        json!({"type":"data","mimeType":"image/jpeg","value":PNG}),
+    ] {
+        let mut rejected = run.clone();
+        rejected["messages"][0]["content"][1]["source"] = rejected_source;
+        let response = http
+            .post(&endpoint)
+            .bearer_auth("image-test")
+            .json(&rejected)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400);
+    }
+    let response = http
+        .post(&endpoint)
+        .bearer_auth("image-test")
+        .json(&run)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let sse = response.text().await.unwrap();
+    assert!(sse.contains("RUN_FINISHED"), "{sse}");
+    assert!(!sse.contains(PNG));
+    let task_id = shared
+        .lock()
+        .await
+        .attach_ag_ui_interrupt_run(&session.id, "image-run", |_| {})
+        .unwrap()
+        .task()
+        .id
+        .clone();
+    listener.abort();
+    assert!(listener.await.unwrap_err().is_cancelled());
+    drop(shared);
+    drop(server);
+
+    let (server, mut client) = super::ag_ui_run::connect(&db);
+    let parsed =
+        fliuno_client::ag_ui::AgUiRunInput::parse(&serde_json::to_vec(&run).unwrap()).unwrap();
+    let repeated = client
+        .start_ag_ui_interrupt_run(&session.id, parsed, |_| {})
+        .unwrap();
+    assert_eq!(repeated.task().id, task_id);
+    assert_eq!(repeated.task().input_preview, "Before [image] after");
+    let task: Task = client
+        .call("task/get", &json!({"taskId":task_id}), |_| {})
+        .unwrap();
+    let fliuno_protocol::Message::UserParts { parts } = &task.messages[0] else {
+        panic!("stored input is not multipart");
+    };
+    assert!(
+        matches!(&parts[1], fliuno_protocol::UserContentPart::Image { data, .. } if data == PNG)
+    );
+    let mut changed = run;
+    changed["messages"][0]["content"][1]["source"]["value"] = json!("iVBORw0KGgo=");
+    let parsed =
+        fliuno_client::ag_ui::AgUiRunInput::parse(&serde_json::to_vec(&changed).unwrap()).unwrap();
+    assert!(matches!(
+        client.start_ag_ui_interrupt_run(&session.id, parsed, |_| {}),
+        Err(fliuno_client::ag_ui::AgUiRunError::Rpc(Error::Rpc {
+            code: -32009,
+            ..
+        }))
+    ));
+    let _: Task = client
+        .call(
+            "approval/respond",
+            &ApprovalRespondParams {
+                task_id: task_id.clone(),
+                approval_id: task.pending_approval.unwrap().id,
+                decision: ApprovalDecision::AllowOnce,
+            },
+            |_| {},
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let history = loop {
+        let history: Value = client
+            .call(
+                "session/listHistory",
+                &json!({"sessionId":session.id}),
+                |_| {},
+            )
+            .unwrap();
+        if history.to_string().contains("Before [image] after") {
+            break history;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "completed task missing from history"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert!(!history.to_string().contains(PNG));
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}

@@ -3,7 +3,6 @@
 use super::*;
 use crate::task::start::{StartLookup, StartRequest, request_conflict};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
@@ -37,13 +36,13 @@ pub(super) struct Receipt {
 }
 
 impl Receipt {
-    pub(super) fn new(task: &Task, input: &str) -> Result<Self> {
+    pub(super) fn new(task: &Task, digest: [u8; 32]) -> Result<Self> {
         let context = task
             .context
             .as_ref()
             .ok_or_else(|| Error::Invalid("task start requires frozen context".into()))?;
         Ok(Self {
-            digest: Sha256::digest(input.as_bytes()).into(),
+            digest,
             options: serde_json::to_string(&StartOptions(
                 &task.backend,
                 &context.options,
@@ -92,8 +91,7 @@ impl Kernel {
         if backend != request.backend
             || options != request.options
             || max_model_steps != request.max_model_steps
-            || digest.as_blob().map_err(rusqlite::Error::from)?
-                != Sha256::digest(request.input.as_bytes()).as_slice()
+            || digest.as_blob().map_err(rusqlite::Error::from)? != request.input.digest().as_slice()
         {
             return Err(request_conflict());
         }

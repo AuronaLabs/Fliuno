@@ -12,7 +12,9 @@ pub use schema::schema_bundle;
 mod session;
 pub use session::*;
 mod task_cancel;
+mod task_input;
 pub use task_cancel::*;
+pub use task_input::*;
 mod task_changes;
 mod task_summary;
 mod task_watermarks;
@@ -383,6 +385,9 @@ pub enum Message {
     User {
         text: String,
     },
+    UserParts {
+        parts: Vec<UserContentPart>,
+    },
     ToolCall {
         call: ToolCall,
     },
@@ -689,7 +694,7 @@ pub const MAX_TASK_MODEL_STEPS: u32 = DEFAULT_TASK_MODEL_STEPS;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskStartParams {
     pub session_id: String,
-    pub input: String,
+    pub input: TaskInput,
     #[serde(default)]
     pub client_request_id: Option<String>,
     #[serde(default)]

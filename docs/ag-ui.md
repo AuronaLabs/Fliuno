@@ -2,12 +2,12 @@
 
 [文档中心](README.md) › [接入客户端](README.md#接入客户端) · [应用协议](protocol.md#rust-调用方)
 
-宿主可以通过 Rust 客户端提交文本任务，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批可以由宿主通过应用协议处理，也可以挂载独立授权的审批入口。
+宿主可以通过 Rust 客户端提交文本或内嵌图片，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批可以由宿主通过应用协议处理，也可以挂载独立授权的审批入口。
 
 | 要做什么 | 对应步骤 |
 | --- | --- |
 | **挂载 HTTP 接口** | [路由与宿主授权](#http-接入) · [宿主模型尝试上限](#宿主模型尝试上限) · [离线示例](../examples/ag_ui_http_demo.py) |
-| **运行任务并展示进度** | [提交文本任务](#提交文本任务) → [投影内核事件](#投影内核事件) |
+| **运行任务并展示进度** | [提交文本任务](#提交文本任务) · [提交内嵌图片](#提交内嵌图片) · [投影内核事件](#投影内核事件) |
 | **恢复运行** | [SSE 输出与续传](#sse-输出与续传) · [审批中断与续跑](#审批中断与续跑) |
 
 ## 提交文本任务
@@ -30,11 +30,26 @@
 | 字段 | 当前支持范围 |
 | --- | --- |
 | `runId` | 非空且不含控制字符，最多 512 个 UTF-8 字节。同一会话用同一 `runId` 重试相同输入只创建一个任务。 |
-| `messages` | 纯文本的 `user` 或 `assistant` 消息。最后一条必须是 `user`，正文可以是字符串或文本片段数组，合计最多 256 KiB。内核使用最后一条消息和本地会话历史。 |
+| `messages` | 接受 `user` 或 `assistant` 消息，最后一条必须是 `user`。内核使用最后一条消息和本地会话历史。正文支持最多 256 KiB 的文本，也支持[内嵌图片](#提交内嵌图片)。 |
 | `protocolVersion` | 可省略。提供时使用 `1.0`。 |
-| 其余输入 | JSON 正文最多 1 MiB。`state` 和 `forwardedProps` 可省略、设为 `null` 或空对象。`tools`、`context` 和 `resume` 可省略或使用空数组。当前不支持 `parentRunId`、工具调用、加密消息或非文本内容。 |
+| 其余输入 | JSON 正文最多 1 MiB。`state` 和 `forwardedProps` 可省略、设为 `null` 或空对象。`tools`、`context` 和 `resume` 可省略或使用空数组。当前不支持 `parentRunId`、工具调用、加密消息或其他媒体。 |
 
 用返回值的 `task()` 取得已创建的任务摘要。连接中断后，可以调用 `Client::attach_ag_ui_run(session_id, run_id, on_notification)`，从数据库找回同一个任务。用 `run.subscribe_sse(...)` 输出事件，即可沿用首次执行的 `runId`。后续显式恢复的执行段仍使用各自派生的 ID。
+
+### 提交内嵌图片
+
+`Client::start_ag_ui_run`、`Client::start_ag_ui_input_run` 和 `POST /run` 接受 AG-UI 图片片段。最后一条用户消息的 `content` 可以混排文字和图片，也可以只含图片。使用 `source.type: "data"`，将 PNG、JPEG 或 WebP 通过标准 Base64 放进 `value`，并在 `mimeType` 声明格式。
+
+```json
+[
+  {"type":"text","text":"请描述这张图片"},
+  {"type":"image","source":{"type":"data","mimeType":"image/png","value":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII="}}
+]
+```
+
+单条混合消息最多 32 个片段、4 张图片，图片的 Base64 总长最多 512 KiB。服务会拒绝 URL 和文件句柄。图片随任务保存在本机数据库，由配置的模型服务接收。任务摘要和会话历史使用 `[image]` 占位符。重试时沿用原运行 ID 和原来的有序片段。
+
+标准的会话授权也适用于图片提交。审批续跑仍要求独立的审批授权和空的 `messages`。Rust 客户端会先检查 `taskImageInput` 能力。
 
 ## 投影内核事件
 
@@ -113,7 +128,7 @@ Rust 宿主演示位于 [`local_host.rs`](../crates/fliuno-ag-ui-http/examples/l
 
 | 请求 | 行为 |
 | --- | --- |
-| `POST /run` | 接收 `application/json` 的文本任务请求，要求 `threadId` 与授权会话一致。返回 `text/event-stream`。 |
+| `POST /run` | 接收 `application/json` 的任务请求，要求 `threadId` 与授权会话一致。返回 `text/event-stream`。 |
 | `GET /runs/{run_id}` | 在授权会话中找回运行。可发送 `Last-Event-ID`，从指定帧之后续传。不存在或不属于该会话的运行返回 `404`。 |
 | `DELETE /runs/{run_id}` | 取消授权会话中的运行，成功返回 `204`。重复取消仍返回 `204`。已经完成或失败的任务返回 `409`。 |
 
@@ -152,7 +167,7 @@ let router = RouterBuilder::new(client, authorize)
 
 新宿主可选择 `router_with_interrupts(client, authorize, reviewer)`。需要 app-server 声明 `approvalResumeRun` 和 `approvalRunPending`。现有 `router_with_approvals` 继续使用上一节的行为；两个模式的运行 ID 各自查找。
 
-1. 提交者向 `POST /run` 发送文本任务。需要审批时，父流在已提交的审批请求处输出 `RUN_FINISHED`，随后关闭。`outcome` 中含有一项 `interrupts`；详情（包括工具参数）仍通过审批者专用的 `GET /runs/{run_id}/approvals/{approval_id}` 读取。运行 ID 必须是发出该审批的执行段；已处理的审批和其他执行段的 ID 都返回 `404`。
+1. 提交者向 `POST /run` 提交任务。需要审批时，父流在已提交的审批请求处输出 `RUN_FINISHED`，随后关闭。`outcome` 中含有一项 `interrupts`；详情（包括工具参数）仍通过审批者专用的 `GET /runs/{run_id}/approvals/{approval_id}` 读取。运行 ID 必须是发出该审批的执行段；已处理的审批和其他执行段的 ID 都返回 `404`。
 2. 审批者向 `POST /run` 发送下方 JSON。`threadId` 必须匹配其授权的会话，`parentRunId` 引用刚结束的执行段，`runId` 是新的 ID。每次续跑只接受一个中断答复，`messages` 为空。
 3. 响应从子运行的 `RUN_STARTED` 开始，继续同一内核任务。子运行若再次需要审批，可以用它作为下一次续跑的父运行。每条 SSE 响应最多包含自己的执行段，重连时使用对应的 `runId` 与 `Last-Event-ID`。
 
@@ -170,7 +185,7 @@ let router = RouterBuilder::new(client, authorize)
 }
 ```
 
-拒绝可使用 `decision: "deny"`，或使用 `status: "cancelled"` 并省略 `payload`。拒绝会留下审批决定，子运行以 `RUN_ERROR` 结束。`POST` 审批详情路由在这个模式下不开放。审批者可以读取本会话的 SSE，但只持有审批权限不能创建文本任务或取消运行。
+拒绝可使用 `decision: "deny"`，或使用 `status: "cancelled"` 并省略 `payload`。拒绝会留下审批决定，子运行以 `RUN_ERROR` 结束。`POST` 审批详情路由在这个模式下不开放。审批者可以读取本会话的 SSE，但只持有审批权限不能创建任务或取消运行。
 
 同一个子 `runId` 重试相同答复时返回同一执行段，重启后也不会重新执行工具。重复 ID 换成不同父运行、审批或决定时返回 `409`。把一个执行段的 `Last-Event-ID` 传给另一个执行段返回 `400`。子运行接管后，通过父 ID 取消任务返回 `409`。
 

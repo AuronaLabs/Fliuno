@@ -803,3 +803,71 @@ fn remote_error_bodies_never_enter_task_history() {
     assert!(task.output.unwrap().contains("401"));
     handle.join().unwrap();
 }
+
+#[test]
+fn inline_png_is_dispatched_in_order_to_each_model_api() {
+    use fliuno_protocol::{ImageMimeType, UserContentPart};
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
+    let (mut task, tools) = prepared_model_step();
+    task.messages = vec![Message::UserParts {
+        parts: vec![
+            UserContentPart::Text {
+                text: "Before".into(),
+            },
+            UserContentPart::Image {
+                mime_type: ImageMimeType::Png,
+                data: PNG.into(),
+            },
+            UserContentPart::Text {
+                text: "After".into(),
+            },
+        ],
+    }];
+    let cancellation = CancellationToken::new();
+    let (base, wire) = fixture(vec![(
+        200,
+        json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}]}),
+    )]);
+    let provider = OpenAiProvider::new(&base, "fixture-key", "fixture-model").unwrap();
+    provider.next(&task, &tools, &cancellation).unwrap();
+    assert_eq!(
+        wire.join().unwrap()[0].1["input"][0]["content"],
+        json!([
+            {"type":"input_text","text":"Before"},
+            {"type":"input_image","image_url":format!("data:image/png;base64,{PNG}"),"detail":"auto"},
+            {"type":"input_text","text":"After"},
+        ])
+    );
+
+    let (base, wire) = fixture(vec![(
+        200,
+        json!({"stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}),
+    )]);
+    let provider = AnthropicProvider::new(&base, "fixture-key", "fixture-model").unwrap();
+    provider.next(&task, &tools, &cancellation).unwrap();
+    assert_eq!(
+        wire.join().unwrap()[0].1["messages"][0]["content"],
+        json!([
+            {"type":"text","text":"Before"},
+            {"type":"image","source":{"type":"base64","media_type":"image/png","data":PNG}},
+            {"type":"text","text":"After"},
+        ])
+    );
+
+    let (base, wire) = fixture(vec![(
+        200,
+        json!({"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Done"}]}]}),
+    )]);
+    let provider = GeminiProvider::new(&base, "fixture-key", "fixture-model").unwrap();
+    provider.next(&task, &tools, &cancellation).unwrap();
+    assert_eq!(
+        wire.join().unwrap()[0].1["input"][0],
+        json!({
+            "type":"user_input","content":[
+                {"type":"text","text":"Before"},
+                {"type":"image","mime_type":"image/png","data":PNG},
+                {"type":"text","text":"After"},
+            ]
+        })
+    );
+}

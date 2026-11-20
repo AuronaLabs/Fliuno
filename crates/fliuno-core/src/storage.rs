@@ -510,11 +510,11 @@ impl Kernel {
     pub(crate) fn commit_task_start(
         &mut self,
         task: &Task,
-        request: Option<(&str, &str)>,
+        request: Option<(&str, [u8; 32])>,
     ) -> Result<()> {
         let events = &[EventKind::TaskStarted];
-        if let Some((key, input)) = request {
-            let receipt = task_starts::Receipt::new(task, input)?;
+        if let Some((key, digest)) = request {
+            let receipt = task_starts::Receipt::new(task, digest)?;
             self.commit_transition(
                 task,
                 events,

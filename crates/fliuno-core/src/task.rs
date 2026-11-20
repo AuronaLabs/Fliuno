@@ -264,7 +264,7 @@ pub(crate) fn transition_to_cancelled(task: &mut Task) -> Vec<EventKind> {
 }
 
 pub(crate) fn validate_input(input: &str) -> Result<()> {
-    if input.trim().is_empty() || input.len() > 262_144 {
+    if input.trim().is_empty() || input.len() > fliuno_protocol::MAX_TASK_TEXT_BYTES {
         return Err(Error::Invalid(
             "input must contain 1..262144 UTF-8 bytes".into(),
         ));

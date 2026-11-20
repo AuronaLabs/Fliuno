@@ -216,6 +216,12 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 
 SQLite v44 将普通有键提交的输入 SHA-256、后端和规范化后的上下文选项随任务与首个事件提交。新任务的摘要重试只核对这个回执和当前摘要。旧任务仍通过原快照核对，升级不扫描历史正文。同一键空间中的审批续跑和远端续接继续按各自的规则识别。
 
+### 内嵌图片输入
+
+`initialize.capabilities.taskImageInput` 表示本机 `task/start` 和 `task/startSummary` 的 `input` 可以使用有序数组。普通文本仍可直接传字符串。数组仅用于模型任务，由 `{ "type": "text", "text": "…" }` 和 `{ "type": "image", "mimeType": "image/png", "data": "…" }` 组成。图片数据使用标准 Base64，支持 PNG、JPEG 和 WebP。至少传一张图片，最多四张图片、32 个片段，文本和 Base64 分别最多 256 KiB 和 512 KiB。
+
+同一个请求键按片段顺序、文本、图片格式和数据判定是否重复。图片保留在任务的 `user_parts` 消息，普通任务摘要和新任务的历史上下文只使用文字及 `[image]` 占位符。使用配套的 OpenAI、Anthropic 或 Gemini 适配器时，宿主选择可接收图片的模型。按 JSON 字节数估算输入的本地请求预算也包含图片数据。AG-UI 客户端的输入封装见[提交内嵌图片](ag-ui.md#提交内嵌图片)。
+
 ### 模型尝试次数
 
 `initialize.capabilities.maxTaskModelSteps` 表示 `task/start` 和 `task/startSummary` 接受 `maxModelSteps`，取值为 `1..=8`。省略或显式填 `8` 都使用默认上限，重试时视为同一请求。外部 Agent 任务不接受该字段。低于默认值时，任务快照保留 `maxModelSteps`；已使用的次数见 `modelSteps`。

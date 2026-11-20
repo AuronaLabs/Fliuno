@@ -1,6 +1,7 @@
 //! Ordinary task submission and durable request identity.
 use super::{validate_input, validate_key};
 use crate::*;
+use sha2::{Digest, Sha256};
 
 pub enum TaskSummaryStart {
     Created(Box<Task>),
@@ -15,12 +16,68 @@ pub(crate) enum StartLookup {
 
 pub(crate) struct StartRequest<'a> {
     pub session: &'a str,
-    pub input: &'a str,
+    pub input: StartInput<'a>,
     pub key: Option<&'a str>,
     pub backend: TaskBackend,
     pub options: ContextOptions,
     pub max_model_steps: Option<u32>,
     explicit_context: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum StartInput<'a> {
+    Text(&'a str),
+    Parts(&'a [UserContentPart]),
+}
+
+impl<'a> From<&'a TaskInput> for StartInput<'a> {
+    fn from(input: &'a TaskInput) -> Self {
+        match input {
+            TaskInput::Text(text) => Self::Text(text),
+            TaskInput::Parts(parts) => Self::Parts(parts),
+        }
+    }
+}
+
+impl StartInput<'_> {
+    pub(crate) fn digest(self) -> [u8; 32] {
+        match self {
+            Self::Text(text) => Sha256::digest(text.as_bytes()).into(),
+            Self::Parts(parts) => {
+                let mut digest = Sha256::new();
+                // An invalid UTF-8 prefix separates parts from legacy text receipts.
+                digest.update(b"\xfffliuno-parts-v1");
+                for part in parts {
+                    let (kind, data) = match part {
+                        UserContentPart::Text { text } => ("text", text),
+                        UserContentPart::Image { mime_type, data } => (mime_type.as_str(), data),
+                    };
+                    for field in [kind, data.as_str()] {
+                        digest.update((field.len() as u64).to_be_bytes());
+                        digest.update(field.as_bytes());
+                    }
+                }
+                digest.finalize().into()
+            }
+        }
+    }
+
+    fn matches(self, message: Option<&Message>) -> bool {
+        match (self, message) {
+            (Self::Text(expected), Some(Message::User { text })) => expected == text,
+            (Self::Parts(expected), Some(Message::UserParts { parts })) => expected == parts,
+            _ => false,
+        }
+    }
+
+    fn message(self) -> Message {
+        match self {
+            Self::Text(text) => Message::User { text: text.into() },
+            Self::Parts(parts) => Message::UserParts {
+                parts: parts.to_vec(),
+            },
+        }
+    }
 }
 
 pub(crate) fn request_conflict() -> Error {
@@ -75,8 +132,14 @@ impl Kernel {
         backend: TaskBackend,
         context_options: Option<ContextOptions>,
     ) -> Result<(Task, bool)> {
-        let request =
-            self.prepare_task_start(session_id, input, key, backend, context_options, None)?;
+        let request = self.prepare_task_start(
+            session_id,
+            StartInput::Text(input),
+            key,
+            backend,
+            context_options,
+            None,
+        )?;
         self.create_prepared_task(request)
     }
 
@@ -84,7 +147,7 @@ impl Kernel {
     pub fn create_task_from_params(&mut self, p: TaskStartParams) -> Result<(Task, bool)> {
         let request = self.prepare_task_start(
             &p.session_id,
-            &p.input,
+            (&p.input).into(),
             p.client_request_id.as_deref(),
             p.backend,
             p.context,
@@ -106,7 +169,7 @@ impl Kernel {
         let p = params;
         let request = self.prepare_task_start(
             &p.session_id,
-            &p.input,
+            (&p.input).into(),
             p.client_request_id.as_deref(),
             p.backend,
             p.context,
@@ -133,13 +196,23 @@ impl Kernel {
     fn prepare_task_start<'a>(
         &self,
         session: &'a str,
-        input: &'a str,
+        input: StartInput<'a>,
         key: Option<&'a str>,
         backend: TaskBackend,
         options: Option<ContextOptions>,
         max_model_steps: Option<u32>,
     ) -> Result<StartRequest<'a>> {
-        validate_input(input)?;
+        match input {
+            StartInput::Text(text) => validate_input(text)?,
+            StartInput::Parts(parts) if backend == TaskBackend::Model => {
+                validate_image_input(parts).map_err(|message| Error::Invalid(message.into()))?;
+            }
+            StartInput::Parts(_) => {
+                return Err(Error::Invalid(
+                    "multipart input applies only to model tasks".into(),
+                ));
+            }
+        }
         self.require_session(session)?;
         if let Some(limit) = max_model_steps {
             if backend != TaskBackend::Model {
@@ -184,8 +257,7 @@ impl Kernel {
                 "request ID already belongs to a resumed run".into(),
             ));
         }
-        let same_input =
-            matches!(task.messages.first(), Some(Message::User { text }) if text == request.input);
+        let same_input = request.input.matches(task.messages.first());
         let same_context = task
             .context
             .as_ref()
@@ -229,7 +301,7 @@ impl Kernel {
             id: new_id("task"),
             session_id: session.into(),
             status: TaskStatus::Running,
-            messages: vec![Message::User { text: input.into() }],
+            messages: vec![input.message()],
             context: Some(context),
             pending_approval: None,
             in_flight_tool: None,
@@ -243,7 +315,7 @@ impl Kernel {
             remote_continuation: None,
             agent_session_continuation: None,
         };
-        self.commit_task_start(&task, key.map(|key| (key, input)))?;
+        self.commit_task_start(&task, key.map(|key| (key, input.digest())))?;
         Ok(task)
     }
 }

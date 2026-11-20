@@ -454,6 +454,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["taskStartSummary"] = json!(true);
+            capabilities["taskImageInput"] = json!(true);
             capabilities["maxTaskModelSteps"] = json!(MAX_TASK_MODEL_STEPS);
             capabilities["taskResumeStatus"] = json!(true);
             capabilities["taskCancelSummary"] = json!(true);

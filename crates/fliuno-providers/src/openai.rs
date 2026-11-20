@@ -6,6 +6,7 @@ use fliuno_core::{
     CancellationToken, ModelDecision, ModelError, ModelProvider, ModelStreamEvent, ModelTurn,
     ProviderReplay, ToolSpec,
 };
+use fliuno_protocol::UserContentPart;
 use fliuno_protocol::{Message, Task, ToolCall};
 use reqwest::header::{AUTHORIZATION, HeaderMap};
 use serde_json::{Value, json};
@@ -72,6 +73,10 @@ fn request(model: &str, task: &Task, tools: &[ToolSpec], streaming: bool) -> Res
     for message in &task.messages {
         match message {
             Message::User { text } => input.push(json!({"role":"user","content":text})),
+            Message::UserParts { parts } => input.push(json!({"role":"user", "content":parts.iter().map(|part| match part {
+                UserContentPart::Text { text } => json!({"type":"input_text", "text":text}),
+                UserContentPart::Image { mime_type, data } => json!({"type":"input_image", "image_url":format!("data:{};base64,{data}", mime_type.as_str()), "detail":"auto"}),
+            }).collect::<Vec<_>>()})),
             Message::ProviderReplay { provider, data } if provider == "openai" => {
                 input.extend(
                     data.as_array()

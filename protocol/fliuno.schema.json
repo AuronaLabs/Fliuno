@@ -1062,7 +1062,7 @@
           "type": "string"
         },
         "input": {
-          "type": "string"
+          "$ref": "#/$defs/TaskInput"
         },
         "clientRequestId": {
           "type": [
@@ -1105,6 +1105,69 @@
         "input"
       ],
       "$defs": {
+        "TaskInput": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UserContentPart"
+              }
+            }
+          ]
+        },
+        "UserContentPart": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "text"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "image"
+                },
+                "mimeType": {
+                  "$ref": "#/$defs/ImageMimeType"
+                },
+                "data": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "mimeType",
+                "data"
+              ]
+            }
+          ]
+        },
+        "ImageMimeType": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
         "TaskBackend": {
           "description": "Host-registered execution target. Commands and credentials never enter RPC.",
           "oneOf": [
@@ -1279,7 +1342,7 @@
           "type": "string"
         },
         "input": {
-          "type": "string"
+          "$ref": "#/$defs/TaskInput"
         },
         "clientRequestId": {
           "type": [
@@ -1322,6 +1385,69 @@
         "input"
       ],
       "$defs": {
+        "TaskInput": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UserContentPart"
+              }
+            }
+          ]
+        },
+        "UserContentPart": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "text"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "image"
+                },
+                "mimeType": {
+                  "$ref": "#/$defs/ImageMimeType"
+                },
+                "data": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "mimeType",
+                "data"
+              ]
+            }
+          ]
+        },
+        "ImageMimeType": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
         "TaskBackend": {
           "description": "Host-registered execution target. Commands and credentials never enter RPC.",
           "oneOf": [
@@ -3880,6 +4006,25 @@
               "properties": {
                 "role": {
                   "type": "string",
+                  "const": "user_parts"
+                },
+                "parts": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/UserContentPart"
+                  }
+                }
+              },
+              "required": [
+                "role",
+                "parts"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
                   "const": "tool_call"
                 },
                 "call": {
@@ -3944,6 +4089,56 @@
                 "data"
               ]
             }
+          ]
+        },
+        "UserContentPart": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "text"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "image"
+                },
+                "mimeType": {
+                  "$ref": "#/$defs/ImageMimeType"
+                },
+                "data": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "mimeType",
+                "data"
+              ]
+            }
+          ]
+        },
+        "ImageMimeType": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
           ]
         },
         "ToolCall": {

@@ -1,4 +1,4 @@
-//! Bind the AG-UI text input profile to a durable local task request.
+//! Bind the AG-UI input profile to a durable local task request.
 use super::{
     AgUiProjector, AgUiSseError, AgUiSseFeed, AgUiSseFeedError, AgUiSseReplay, AgUiSseStream,
     interrupt::ResumeEntry,
@@ -6,15 +6,15 @@ use super::{
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
     ApprovalDetails, ApprovalRun, ApprovalRunPendingParams, ApprovalRunReplay, ApprovalRunWindow,
-    MAX_APP_REQUEST_BYTES, MAX_TASK_MODEL_STEPS, TaskIdParams, TaskRequestLookupParams,
-    TaskStartParams, TaskStatus, TaskSummary,
+    ImageMimeType, MAX_APP_REQUEST_BYTES, MAX_TASK_MODEL_STEPS, MAX_TASK_TEXT_BYTES, TaskIdParams,
+    TaskInput, TaskRequestLookupParams, TaskStartParams, TaskStatus, TaskSummary, UserContentPart,
+    validate_image_input,
 };
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::io::{BufRead, Write};
 
-const MAX_TEXT_BYTES: usize = 256 * 1024;
 const MAX_RUN_ID_BYTES: usize = 512;
 
 #[derive(Debug, thiserror::Error)]
@@ -31,6 +31,10 @@ pub enum AgUiRunError {
     UnsupportedInput,
     #[error("the last AG-UI message must be nonempty user text within 256 KiB")]
     UserText,
+    #[error("invalid AG-UI inline image input: {0}")]
+    ImageInput(&'static str),
+    #[error("the server does not support inline image input")]
+    ImageInputUnavailable,
     #[error("the server returned a task outside the selected session or backend")]
     InvalidResult,
     #[error("AG-UI model step limit must be 1 to {MAX_TASK_MODEL_STEPS}")]
@@ -56,7 +60,7 @@ impl AgUiModelStepLimit {
     }
 }
 
-/// Options for a root text run, set by the host before sending it to the kernel.
+/// Options for a root run, set by the host before sending it to the kernel.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AgUiRunOptions {
     pub interrupt_on_approval: bool,
@@ -86,7 +90,7 @@ pub(super) struct Message {
     #[serde(rename = "id")]
     _id: String,
     role: Role,
-    content: TextContent,
+    content: Option<UserContent>,
     #[serde(rename = "encryptedValue")]
     encrypted_value: Option<serde::de::IgnoredAny>,
     #[serde(rename = "toolCalls", default)]
@@ -102,26 +106,67 @@ enum Role {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum TextContent {
+enum UserContent {
     String(String),
-    Parts(Vec<TextPart>),
+    Parts(Vec<ContentPart>),
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum TextPart {
+enum ContentPart {
     Text { text: String },
+    Image { source: ImageSource },
 }
 
-impl TextContent {
-    fn into_text(self) -> String {
-        match self {
+#[derive(Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+enum ImageSource {
+    Data {
+        value: String,
+        mime_type: ImageMimeType,
+    },
+}
+
+impl UserContent {
+    fn into_input(self) -> Result<TaskInput, AgUiRunError> {
+        let text: String = match self {
             Self::String(text) => text,
+            Self::Parts(parts)
+                if parts
+                    .iter()
+                    .any(|part| matches!(part, ContentPart::Image { .. })) =>
+            {
+                let parts: Vec<_> = parts
+                    .into_iter()
+                    .map(|part| match part {
+                        ContentPart::Text { text } => UserContentPart::Text { text },
+                        ContentPart::Image {
+                            source: ImageSource::Data { value, mime_type },
+                        } => UserContentPart::Image {
+                            data: value,
+                            mime_type,
+                        },
+                    })
+                    .collect();
+                validate_image_input(&parts).map_err(AgUiRunError::ImageInput)?;
+                return Ok(TaskInput::Parts(parts));
+            }
             Self::Parts(parts) => parts
                 .into_iter()
-                .map(|TextPart::Text { text }| text)
+                .filter_map(|part| match part {
+                    ContentPart::Text { text } => Some(text),
+                    ContentPart::Image { .. } => None,
+                })
                 .collect(),
+        };
+        if text.len() > MAX_TASK_TEXT_BYTES || text.trim().is_empty() {
+            return Err(AgUiRunError::UserText);
         }
+        Ok(TaskInput::Text(text))
     }
 }
 
@@ -182,14 +227,14 @@ impl AgUiRunInput {
         else {
             return Err(AgUiRunError::UserText);
         };
-        let text = message.content.into_text();
-        if text.len() > MAX_TEXT_BYTES || text.trim().is_empty() {
-            return Err(AgUiRunError::UserText);
-        }
+        let input = message
+            .content
+            .ok_or(AgUiRunError::UserText)?
+            .into_input()?;
         Ok((
             TaskStartParams {
                 session_id: session_id.to_owned(),
-                input: text,
+                input,
                 client_request_id: Some(request_key(&self.run_id, options.interrupt_on_approval)),
                 backend: Default::default(),
                 context: None,
@@ -369,7 +414,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         body: &[u8],
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
-        self.start_ag_ui_text_run(
+        self.start_ag_ui_input_run(
             session_id,
             AgUiRunInput::parse(body)?,
             AgUiRunOptions::default(),
@@ -377,14 +422,14 @@ impl<R: BufRead, W: Write> Client<R, W> {
         )
     }
 
-    /// Start a text run whose SSE stream stops at the first committed interrupt.
+    /// Start a run whose SSE stream stops at the first committed interrupt.
     pub fn start_ag_ui_interrupt_run(
         &mut self,
         session_id: &str,
         input: AgUiRunInput,
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
-        self.start_ag_ui_text_run(
+        self.start_ag_ui_input_run(
             session_id,
             input,
             AgUiRunOptions {
@@ -395,8 +440,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         )
     }
 
-    /// Submit a parsed text run with host policy. Fail before submitting if
-    /// the server does not advertise support for the requested bound.
+    /// Submit a parsed text run with host policy.
     pub fn start_ag_ui_text_run(
         &mut self,
         session_id: &str,
@@ -405,6 +449,37 @@ impl<R: BufRead, W: Write> Client<R, W> {
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
         let (request, run_id) = input.into_task(session_id, options)?;
+        if matches!(request.input, TaskInput::Parts(_)) {
+            return Err(AgUiRunError::UnsupportedInput);
+        }
+        self.submit_ag_ui_run(session_id, request, run_id, options, on_notification)
+    }
+
+    /// Submit a parsed run and check required capabilities before dispatch.
+    pub fn start_ag_ui_input_run(
+        &mut self,
+        session_id: &str,
+        input: AgUiRunInput,
+        options: AgUiRunOptions,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<AgUiRun, AgUiRunError> {
+        let (request, run_id) = input.into_task(session_id, options)?;
+        self.submit_ag_ui_run(session_id, request, run_id, options, on_notification)
+    }
+
+    fn submit_ag_ui_run(
+        &mut self,
+        session_id: &str,
+        request: TaskStartParams,
+        run_id: String,
+        options: AgUiRunOptions,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<AgUiRun, AgUiRunError> {
+        if matches!(request.input, TaskInput::Parts(_))
+            && self.info().capabilities.get("taskImageInput") != Some(&Value::Bool(true))
+        {
+            return Err(AgUiRunError::ImageInputUnavailable);
+        }
         if let Some(steps) = request.max_model_steps
             && !self
                 .info()

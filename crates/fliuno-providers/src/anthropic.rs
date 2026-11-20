@@ -6,6 +6,7 @@ use fliuno_core::{
     CancellationToken, ModelDecision, ModelError, ModelProvider, ModelStreamEvent, ModelTurn,
     ProviderReplay, ToolSpec,
 };
+use fliuno_protocol::UserContentPart;
 use fliuno_protocol::{Message, Task, ToolCall};
 use reqwest::header::HeaderMap;
 use serde_json::{Value, json};
@@ -68,6 +69,10 @@ fn request(model: &str, task: &Task, tools: &[ToolSpec], streaming: bool) -> Res
     for message in &task.messages {
         match message {
             Message::User { text } => messages.push(json!({"role":"user","content":text})),
+            Message::UserParts { parts } => messages.push(json!({"role":"user", "content":parts.iter().map(|part| match part {
+                UserContentPart::Text { text } => json!({"type":"text", "text":text}),
+                UserContentPart::Image { mime_type, data } => json!({"type":"image", "source":{"type":"base64", "media_type":mime_type.as_str(), "data":data}}),
+            }).collect::<Vec<_>>()})),
             Message::ProviderReplay { provider, data } if provider == "anthropic" => {
                 messages.push(json!({"role":"assistant","content":data}));
             }

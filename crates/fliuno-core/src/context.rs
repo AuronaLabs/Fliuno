@@ -258,6 +258,9 @@ pub(crate) fn project_turn(
         .iter()
         .filter_map(|message| match message {
             Message::User { text } => Some(ContextMessage::User { text: text.clone() }),
+            Message::UserParts { parts } => Some(ContextMessage::User {
+                text: parts.iter().map(UserContentPart::text_projection).collect(),
+            }),
             Message::Assistant { text } => Some(ContextMessage::Assistant { text: text.clone() }),
             Message::ToolCall { call } => Some(ContextMessage::ToolCall { call: call.clone() }),
             Message::ToolResult { call_id, output } => Some(ContextMessage::ToolResult {

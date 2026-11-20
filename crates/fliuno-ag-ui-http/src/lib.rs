@@ -131,7 +131,7 @@ where
         .build()
 }
 
-/// Mount the AG-UI interrupt profile. A text request uses `authorize`; a
+/// Mount the AG-UI interrupt profile. A root request uses `authorize`; a
 /// continuation posted to the same `/run` route uses `reviewer` exclusively.
 /// The legacy approval response route is not mounted under this profile.
 pub fn router_with_interrupts<R, W>(
@@ -254,7 +254,7 @@ async fn start<R: BufRead + Send + 'static, W: Write + Send + 'static>(
             let run = if resume {
                 client.resume_ag_ui_run(&session, input, notify)
             } else {
-                client.start_ag_ui_text_run(&session, input, options, notify)
+                client.start_ag_ui_input_run(&session, input, options, notify)
             }
             .map_err(run_status)?;
             let through = client.event_watermark(|_| {}).map_err(rpc_status)?;
@@ -416,9 +416,9 @@ fn run_status(error: AgUiRunError) -> StatusCode {
         AgUiRunError::InputTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
         AgUiRunError::Rpc(error) => rpc_status(error),
         AgUiRunError::Replay(error) => replay_status(error),
-        AgUiRunError::InvalidResult | AgUiRunError::ModelStepLimitUnavailable => {
-            StatusCode::BAD_GATEWAY
-        }
+        AgUiRunError::InvalidResult
+        | AgUiRunError::ModelStepLimitUnavailable
+        | AgUiRunError::ImageInputUnavailable => StatusCode::BAD_GATEWAY,
         _ => StatusCode::BAD_REQUEST,
     }
 }
