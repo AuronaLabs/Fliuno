@@ -1,18 +1,66 @@
 //! Bounded inline media accepted at ordinary model task submission.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{Error, IgnoredAny, SeqAccess, Visitor},
+};
+use std::fmt;
 
 pub const MAX_TASK_TEXT_BYTES: usize = 256 * 1024;
 const MAX_MEDIA_BASE64_BYTES: usize = 512 * 1024;
 const MAX_INPUT_PARTS: usize = 32;
 const MAX_INPUT_MEDIA: usize = 4;
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum TaskInput {
     Text(String),
     Parts(Vec<UserContentPart>),
+}
+
+impl<'de> Deserialize<'de> for TaskInput {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_any(TaskInputVisitor)
+    }
+}
+
+struct TaskInputVisitor;
+
+impl<'de> Visitor<'de> for TaskInputVisitor {
+    type Value = TaskInput;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a text string or an array of at most 32 input parts")
+    }
+
+    fn visit_string<E: Error>(self, text: String) -> Result<Self::Value, E> {
+        Ok(TaskInput::Text(text))
+    }
+
+    fn visit_str<E: Error>(self, text: &str) -> Result<Self::Value, E> {
+        self.visit_string(text.to_owned())
+    }
+
+    fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
+        // Dispatch on the JSON shape so the text path can take ownership of
+        // strings and the media path can stop before converting a large array.
+        let capacity = seq.size_hint().unwrap_or(0);
+        if capacity > MAX_INPUT_PARTS {
+            return Err(S::Error::invalid_length(capacity, &self));
+        }
+        let mut parts = Vec::with_capacity(capacity);
+        while parts.len() < MAX_INPUT_PARTS {
+            let Some(part) = seq.next_element()? else {
+                return Ok(TaskInput::Parts(parts));
+            };
+            parts.push(part);
+        }
+        if seq.next_element::<IgnoredAny>()?.is_some() {
+            return Err(S::Error::invalid_length(MAX_INPUT_PARTS + 1, &self));
+        }
+        Ok(TaskInput::Parts(parts))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -161,6 +161,21 @@ fn image_receipt_reuses_valid_input_but_rejects_malformed_and_changed_parts() {
         peer.request("task/startSummary", request.clone())["error"]["code"],
         -32602
     );
+    let mut oversized = request.clone();
+    oversized["input"] = json!(vec![json!({"type":"text", "text":""}); 33]);
+    oversized["input"][32] = json!({"type":"image", "mimeType":"image/png", "data":PNG});
+    assert_eq!(
+        peer.request("task/startSummary", oversized)["error"]["code"],
+        -32602
+    );
+    let mut limit = request.clone();
+    limit["clientRequestId"] = json!("exact-part-limit");
+    limit["input"] = json!(vec![json!({"type":"text", "text":""}); 32]);
+    limit["input"][31] = json!({"type":"image", "mimeType":"image/png", "data":PNG});
+    assert_eq!(
+        peer.call("task/startSummary", limit)["inputPreview"],
+        "[image]"
+    );
     request["input"][0]["data"] = json!(PNG);
     let started = peer.call("task/startSummary", request.clone());
     let task_id = started["id"].as_str().unwrap();

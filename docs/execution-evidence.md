@@ -993,3 +993,11 @@ Windows `scripts/check.ps1` 以退出码 0 完成，包含 527 项测试、28 �
 HTTP 进程测试提交混合文本、图片和 PDF，检查授权、MIME 不匹配时的拒绝、重启后的原始内容及请求去重，并核对会话历史只包含文字和占位符。三种模型接口的回环测试验证同一消息内的片段顺序和各自的 PDF 字段。[接入文档](ag-ui.md#提交内嵌-pdf)
 
 Windows `scripts/check.ps1` 退出码为 0，包含 527 项测试、28 个离线演示、格式、Clippy 和 Schema 检查。Debian Linux 6.12.107 来宾通过 8 项 AG-UI 和回执进程测试，QEMU 与 `FLIUNO_RESULT` 均为 0。日志见 `D:/Fliuno-Native-Test/guest-ag-ui-pdf-input.log`。
+
+## 0.0.3 任务输入提前校验片段数（2026-11-20）
+
+应用协议解码时按 JSON 形状区分字符串和数组。读取数组片段数后会尽早验证 32 项上限。进程测试提交恰好 32 项并取得原始任务摘要，第 33 项返回 `-32602`。
+
+Windows 调试构建通过 stdio 使用相同数据库副本，对每种输入预热后换序交替运行 100 对调用。50 万字节的有效图片请求重试逐次返回同一摘要，中位数从 4.866 ms 降至 4.365 ms。30,000 个短片段的超限数组逐次返回同一错误码，中位数从 206.147 ms 降至 138.426 ms。测量数据见 `D:/Fliuno-Native-Test/input-decode-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，包含 527 项测试、29 个离线演示、格式、Clippy 和 Schema 检查。Debian Linux 6.12.107 来宾通过 8 项 AG-UI 和回执进程测试。QEMU 与 `FLIUNO_RESULT` 均为 0。日志见 `D:/Fliuno-Native-Test/guest-task-input-decode.log`。
