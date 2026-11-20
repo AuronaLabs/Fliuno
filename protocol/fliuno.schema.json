@@ -472,7 +472,7 @@
           "type": "string"
         },
         "throughSequence": {
-          "description": "Include completions at or before this global event sequence.",
+          "description": "Include completions at or before this global event sequence.\nIf options.throughSequence is also given, the two values must agree.",
           "type": [
             "integer",
             "null"
@@ -554,6 +554,15 @@
             },
             "afterSequence": {
               "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "throughSequence": {
+              "description": "Pin the inclusive completion watermark for preview and task creation.\nOmit to use the current watermark. Zero selects an empty history.",
               "type": [
                 "integer",
                 "null"
@@ -1318,6 +1327,15 @@
               ],
               "format": "uint64",
               "minimum": 0
+            },
+            "throughSequence": {
+              "description": "Pin the inclusive completion watermark for preview and task creation.\nOmit to use the current watermark. Zero selects an empty history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -1642,6 +1660,15 @@
             },
             "afterSequence": {
               "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "throughSequence": {
+              "description": "Pin the inclusive completion watermark for preview and task creation.\nOmit to use the current watermark. Zero selects an empty history.",
               "type": [
                 "integer",
                 "null"
@@ -4495,6 +4522,15 @@
               ],
               "format": "uint64",
               "minimum": 0
+            },
+            "throughSequence": {
+              "description": "Pin the inclusive completion watermark for preview and task creation.\nOmit to use the current watermark. Zero selects an empty history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -6249,6 +6285,15 @@
             },
             "afterSequence": {
               "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "throughSequence": {
+              "description": "Pin the inclusive completion watermark for preview and task creation.\nOmit to use the current watermark. Zero selects an empty history.",
               "type": [
                 "integer",
                 "null"

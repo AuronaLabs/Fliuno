@@ -78,6 +78,10 @@ pub struct ContextOptions {
     /// Omit or set to zero to consider the entire session history.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_sequence: Option<u64>,
+    /// Pin the inclusive completion watermark for preview and task creation.
+    /// Omit to use the current watermark. Zero selects an empty history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub through_sequence: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -107,6 +111,7 @@ impl Default for ContextOptions {
             history_query: None,
             scan_limit: None,
             after_sequence: None,
+            through_sequence: None,
         }
     }
 }
@@ -159,6 +164,7 @@ pub struct TaskContext {
 pub struct SessionContextParams {
     pub session_id: String,
     /// Include completions at or before this global event sequence.
+    /// If options.throughSequence is also given, the two values must agree.
     #[serde(default)]
     pub through_sequence: Option<u64>,
     #[serde(default)]

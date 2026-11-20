@@ -4,7 +4,7 @@
 
 同一 `Session` 的后续任务默认接收此前已完成工作的有界历史。历史由 Fliuno 保存和选择，OpenAI、Anthropic 与 ACP 后端使用同一份中性记录。每个任务仍有自己的执行、审批和供应商续接状态。
 
-[创建任务](#协议与使用) · [读取历史](#会话历史分页) · [打开单条记录](#打开一条历史记录) · [限定历史范围](#从指定事件之后选择历史) · [冻结快照](#冻结与幂等) · [选择与预算](#选择预算与省略) · [持久化](#持久化与迁移)
+[创建任务](#协议与使用) · [读取历史](#会话历史分页) · [打开单条记录](#打开一条历史记录) · [限定历史范围](#从指定事件之后选择历史) · [复用已预览的历史](#提交任务时固定预览范围) · [冻结快照](#冻结与幂等) · [选择与预算](#选择预算与省略) · [持久化](#持久化与迁移)
 
 ## 协议与使用
 
@@ -99,9 +99,22 @@ SQLite v22 从已完成记录回填精简投影。只有包含工具或宿主操
 {"jsonrpc":"2.0","id":4,"method":"task/startSummary","params":{"sessionId":"<session-id>","input":"接着交接后的工作","clientRequestId":"handoff-120","context":{"afterSequence":120,"detail":"conversation"}}}
 ```
 
-内核选择同一会话中完成序号落在 `(afterSequence, throughSequence]` 的记录。预览可固定顶层 `throughSequence`，创建任务时以上一条已提交事件为上界。下界等于上界时返回空历史，大于上界时返回 `-32602`。省略下界与传 `0` 等价。正数下界仅适用于 `mode=session`。
+内核选择同一会话中完成序号落在 `(afterSequence, throughSequence]` 的记录。预览可固定顶层 `throughSequence`。未指定上界时，预览和创建任务都使用当时的事件水位。下界等于上界时返回空历史，大于上界时返回 `-32602`。省略下界与传 `0` 等价。正数下界仅适用于 `mode=session`。
 
 范围先于 `recent`、`fit_recent`、`match_recent` 的候选和字节预算生效。显式 `taskIds` 必须全部在范围内。`omittedTurns` 继续统计该会话在上界以内所有未入选的完成记录，包含下界及之前的记录。正数下界写入冻结选项，并与请求键绑定。SQLite v49 记录新快照格式，旧记录可直接读取。
+
+### 提交任务时固定预览范围
+
+握手声明 `contextThroughSequence` 时，宿主可在 `options` 中传入 `throughSequence` 来预览固定范围。先用 `events/getWatermark` 取得水位，再用该水位和其他选项预览。用户确认后，在 `task/start` 或 `task/startSummary` 的 `context` 中传入同一组选项。等待确认期间完成的新任务会落在该范围之外。
+
+```json
+{"jsonrpc":"2.0","id":5,"method":"session/context","params":{"sessionId":"<session-id>","options":{"afterSequence":120,"throughSequence":160,"detail":"conversation"}}}
+{"jsonrpc":"2.0","id":6,"method":"task/startSummary","params":{"sessionId":"<session-id>","input":"接着已确认的工作","clientRequestId":"handoff-160","context":{"afterSequence":120,"throughSequence":160,"detail":"conversation"}}}
+```
+
+上界包含该序号，`0` 可固定为空历史。上界须处于当前已提交范围内，且不小于 `afterSequence`。该选项适用于 `mode=session`。如果预览同时提供顶层 `throughSequence` 和 `options.throughSequence`，两个值必须一致。
+
+内核把显式上界写进冻结选项并计入快照字节预算。改动或省略上界会改变请求身份，复用原请求键时返回 `-32009`。SQLite v50 标记了新增字段，旧快照和请求回执仍可直接读取。
 
 ## 会话历史分页
 

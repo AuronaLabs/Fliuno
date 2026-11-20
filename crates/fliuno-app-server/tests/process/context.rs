@@ -244,7 +244,7 @@ fn fit_recent_skips_large_turns_and_keeps_the_selection_across_restart() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        49
+        50
     );
     let mut different = request;
     different["context"]["selection"] = json!("recent");

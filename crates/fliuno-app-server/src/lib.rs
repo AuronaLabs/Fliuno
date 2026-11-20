@@ -500,6 +500,7 @@ impl RpcServer {
             capabilities["contextConversationDetail"] = json!(true);
             capabilities["contextAtSequence"] = json!(true);
             capabilities["contextAfterSequence"] = json!(true);
+            capabilities["contextThroughSequence"] = json!(true);
             capabilities["taskListTargetBytes"] = json!(fliuno_core::MAX_TASK_LIST_TARGET_BYTES);
             capabilities["taskSummaryListTargetBytes"] =
                 json!(fliuno_core::MAX_TASK_LIST_TARGET_BYTES);

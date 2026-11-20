@@ -22,6 +22,11 @@ pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
             "context afterSequence requires session mode".into(),
         ));
     }
+    if options.mode == ContextMode::Isolated && options.through_sequence.is_some() {
+        return Err(Error::Invalid(
+            "context throughSequence requires session mode".into(),
+        ));
+    }
     if let Some(ids) = &options.task_ids {
         let unique: std::collections::BTreeSet<_> = ids.iter().collect();
         if options.mode != ContextMode::Session
@@ -107,8 +112,15 @@ impl Kernel {
     ) -> Result<TaskContext> {
         self.require_session(session)?;
         let options = normalize_options(options)?;
+        if let (Some(outer), Some(pinned)) = (through, options.through_sequence)
+            && outer != pinned
+        {
+            return Err(Error::Invalid(
+                "throughSequence and options.throughSequence must match".into(),
+            ));
+        }
         let watermark = self.event_watermark()?;
-        let through_sequence = through.unwrap_or(watermark);
+        let through_sequence = options.through_sequence.or(through).unwrap_or(watermark);
         if through_sequence > watermark {
             return Err(Error::Invalid(
                 "throughSequence exceeds the current event sequence".into(),

@@ -1101,3 +1101,9 @@ Windows `scripts/check.ps1` 退出码为 0，包含 534 项测试、29 个离线
 Windows 本机调试构建在同一进程中交替测试 64 个请求键。预热 10 对后测量 60 对，每次核对摘要顺序、内容和批次水位。串行查询改用批量查询后，请求数为 64 → 1，响应字节数中位数为 20,224 → 17,927，耗时中位数为 18.137 → 3.185 ms。脚本和日志见 `D:/Fliuno-Native-Test/request-summary-batch-benchmark.py` 与 `D:/Fliuno-Native-Test/request-summary-batch-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0。535 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志见 `%TEMP%/fliuno-request-summary-batch-windows.log`。
+
+## 0.0.3 提交时固定上下文预览范围（2026-11-20）
+
+真实 stdio 测试在预览固定范围后完成另一项任务，再提交并逐字段比较冻结快照。测试覆盖 v49 旧回执、两个预览上界一致性、零水位、越界无写入、重启后的摘要与完整任务重试。[协议用法](context.md#提交任务时固定预览范围)
+
+Windows `scripts/check.ps1` 退出码为 0，536 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾的 15 项上下文和历史进程测试全部通过，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-context-pinned-window-windows.log` 和 `D:/Fliuno-Native-Test/guest-context-pinned-window.log`。

@@ -26,7 +26,7 @@ use std::{
 };
 pub(crate) use task_resume::ResumeFacts;
 
-pub(crate) const SCHEMA_VERSION: u32 = 49;
+pub(crate) const SCHEMA_VERSION: u32 = 50;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -425,6 +425,10 @@ impl Kernel {
         if version < 49 {
             // Older versions cannot read afterSequence in frozen context or receipts.
             db.pragma_update(None, "user_version", 49)?;
+        }
+        if version < 50 {
+            // A pinned upper bound can appear in frozen context and start receipts.
+            db.pragma_update(None, "user_version", 50)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
