@@ -5,8 +5,9 @@ use super::{Client, Error, Notification};
 use fliuno_protocol::{
     Event, EventKind, EventSubscription, EventWatermark, EventsListAllParams, EventsListParams,
     EventsListSessionParams, EventsListWorkspaceParams, EventsPage, EventsSetScopeParams,
-    ModelUsageSummary, ModelUsageSummaryBatch, ModelUsageSummaryBatchParams,
-    ModelUsageSummaryParams, ModelUsageSummaryScope, TaskWatermarks, TaskWatermarksParams,
+    ModelUsageRangePage, ModelUsageRangeParams, ModelUsageSummary, ModelUsageSummaryBatch,
+    ModelUsageSummaryBatchParams, ModelUsageSummaryParams, ModelUsageSummaryScope, TaskWatermarks,
+    TaskWatermarksParams,
 };
 use std::{
     collections::HashMap,
@@ -113,6 +114,36 @@ impl<R: BufRead, W: Write> Client<R, W> {
             }
         }
         Ok(batch)
+    }
+
+    /// Read a page of exact totals. If `has_more` is set, use `next_after` and
+    /// `through_sequence` on the next request to keep the same event window.
+    pub fn summarize_model_usage_range(
+        &mut self,
+        request: &ModelUsageRangeParams,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<ModelUsageRangePage, Error> {
+        let page: ModelUsageRangePage =
+            self.call("modelUsage/summarizeRange", request, on_notification)?;
+        let reports = page.totals.report_count.0;
+        if page.through_sequence > i64::MAX as u64
+            || request
+                .through
+                .is_some_and(|through| through != page.through_sequence)
+            || page.next_after < request.after
+            || page.next_after > page.through_sequence
+            || reports > u128::from(request.limit)
+            || if page.has_more {
+                page.next_after == request.after
+                    || page.next_after == page.through_sequence
+                    || reports != u128::from(request.limit)
+            } else {
+                page.next_after != page.through_sequence
+            }
+        {
+            return Err(Error::InvalidResult);
+        }
+        Ok(page)
     }
 
     /// Install a live subscription and open the matching replay window. `after`

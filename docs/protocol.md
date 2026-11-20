@@ -141,6 +141,7 @@ staged.sync_all()?;
 | `events/listWorkspaceModelUsage` | `{workspaceId,after?,through?,limit?,targetBytes?}` | 分页读取工作区各会话的模型用量，包含已归档会话 |
 | `modelUsage/getSummary` | `{scope:{kind:"task",taskId}}`、`{scope:{kind:"session",sessionId}}` 或 `{scope:{kind:"workspace",workspaceId}}` | `{throughSequence,totals}`，读取该范围内已保存报告的累计值 |
 | `modelUsage/getSummaries` | `{scopes:[scope,...]}` | `{throughSequence,items}`，按输入顺序返回同一读视图中的累计值 |
+| `modelUsage/summarizeRange` | `{scope,after?:0,through?,limit?:256}` | [按事件范围汇总](#按事件范围汇总)，返回此页的精确用量和续页游标 |
 | `events/listTaskChanges` | `{taskId?,sessionId?,workspaceId?,after?,through?,limit?}` | 固定水位并回放发生变动的任务 ID，每页去重，不返回事件正文 |
 | `events/listLatestTaskSummaryRevisions` | `{taskId?,sessionId?,workspaceId?,after?,through?,limit?}` | [按窗口合并摘要修订](#按窗口合并摘要修订)，整个窗口内每个任务只返回一次 |
 | `events/getWatermark` | `{}` | 当前已提交的全局 `throughSequence`，供多个回放读取方共用 |
@@ -632,6 +633,22 @@ SQLite v43 从已有用量索引回填汇总；新报告和三个范围的计数
 ```
 
 `items` 和请求一一对应，保留重复位置。范围不存在时返回 `null`，范围存在但暂无报告时返回一组十进制字符串 `"0"`。所有项均对应同一个全局 `throughSequence`。单独比较不同层级的用量时，注意同一份报告可能同时计入任务、会话和工作区，不能将重叠范围的值相加。Rust 客户端可用 `Client::model_usage_summaries`；旧服务仍可逐条调用 `Client::model_usage_summary`，每条有独立水位。
+
+#### 按事件范围汇总
+
+`initialize.capabilities.modelUsageRangeSummary` 为真时，客户端可以读取某个检查点之后的用量。`scope` 与 [累计汇总](#用量汇总) 相同，包含任务、会话和工作区三个层级。工作区汇总包括已归档会话。
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"modelUsage/summarizeRange","params":{"scope":{"kind":"workspace","workspaceId":"<workspace-id>"},"after":220,"through":320,"limit":256}}
+```
+
+服务器读取 `(after, through]` 范围内的报告。`after` 默认是 `0`，省略 `through` 时在同一 SQLite 读事务中取当前全局事件水位。必须满足 `after <= through <= 当前事件水位`，错误范围返回 `-32602`，不存在的范围返回 `-32004`。`limit` 默认是 256，服务通过 `maxModelUsageRangeReports` 公布上限（当前 512）。
+
+- `totals` 只包含本页贡献，七个字段均为十进制字符串。报告中明确给出的 `0` 计入对应的可选字段报告数。
+- `hasMore:true` 时，把 `nextAfter` 和 `throughSequence` 分别作为下一页的 `after` 和 `through`。相加每页各字段可得固定窗口的汇总。
+- `hasMore:false` 时，`nextAfter` 直接到达 `throughSequence`，即使末尾没有报告也是如此。客户端可以保存它，作为下一次增量汇总的起点。
+
+Rust 客户端可调用 `Client::summarize_model_usage_range`。需要查看单次模型调用时，使用[逐条报告回放](#回放用量报告)。
 
 #### 回放用量报告
 

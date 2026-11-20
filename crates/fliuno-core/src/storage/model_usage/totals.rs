@@ -85,17 +85,7 @@ pub(super) fn record(tx: &Transaction<'_>, owners: [&str; 3], usage: &ModelUsage
     }
     drop(rows);
     for total in &mut totals {
-        total.report_count.0 += 1;
-        total.input_tokens.0 += u128::from(usage.input_tokens);
-        total.output_tokens.0 += u128::from(usage.output_tokens);
-        if let Some(count) = usage.cached_input_tokens {
-            total.cached_input_report_count.0 += 1;
-            total.cached_input_tokens.0 += u128::from(count);
-        }
-        if let Some(count) = usage.reasoning_output_tokens {
-            total.reasoning_output_report_count.0 += 1;
-            total.reasoning_output_tokens.0 += u128::from(count);
-        }
+        accumulate(total, usage);
     }
     let [task, session, workspace] = totals.map(|total| serde_json::to_string(&total));
     tx.prepare_cached(
@@ -107,6 +97,20 @@ pub(super) fn record(tx: &Transaction<'_>, owners: [&str; 3], usage: &ModelUsage
         owners[0], owners[1], owners[2], task?, session?, workspace?
     ])?;
     Ok(())
+}
+
+pub(super) fn accumulate(total: &mut ModelUsageTotals, usage: &ModelUsage) {
+    total.report_count.0 += 1;
+    total.input_tokens.0 += u128::from(usage.input_tokens);
+    total.output_tokens.0 += u128::from(usage.output_tokens);
+    if let Some(count) = usage.cached_input_tokens {
+        total.cached_input_report_count.0 += 1;
+        total.cached_input_tokens.0 += u128::from(count);
+    }
+    if let Some(count) = usage.reasoning_output_tokens {
+        total.reasoning_output_report_count.0 += 1;
+        total.reasoning_output_tokens.0 += u128::from(count);
+    }
 }
 
 impl Kernel {

@@ -2918,6 +2918,101 @@
         }
       }
     },
+    "modelUsage/summarizeRange": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelUsageRangeParams",
+      "type": "object",
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/ModelUsageSummaryScope"
+        },
+        "after": {
+          "description": "Exclusive lower event bound.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "through": {
+          "description": "Inclusive upper event bound, defaulting to the current global watermark.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "limit": {
+          "description": "Maximum reports included in this page.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 512,
+          "default": 256
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "$defs": {
+        "ModelUsageSummaryScope": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "task"
+                },
+                "taskId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "taskId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "session"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "workspace"
+                },
+                "workspaceId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "workspaceId"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "events/listModelUsage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "EventsListParams",
@@ -10797,6 +10892,84 @@
       "required": [
         "throughSequence",
         "items"
+      ],
+      "$defs": {
+        "ModelUsageTotals": {
+          "type": "object",
+          "properties": {
+            "reportCount": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "inputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "outputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "cachedInputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "cachedInputReportCount": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "reasoningOutputTokens": {
+              "$ref": "#/$defs/UsageCount"
+            },
+            "reasoningOutputReportCount": {
+              "$ref": "#/$defs/UsageCount"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "reportCount",
+            "inputTokens",
+            "outputTokens",
+            "cachedInputTokens",
+            "cachedInputReportCount",
+            "reasoningOutputTokens",
+            "reasoningOutputReportCount"
+          ]
+        },
+        "UsageCount": {
+          "description": "An exact integer exposed as a decimal string, including on JavaScript clients.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 39,
+          "pattern": "^(0|[1-9][0-9]*)$"
+        }
+      }
+    },
+    "ModelUsageRangePage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelUsageRangePage",
+      "type": "object",
+      "properties": {
+        "throughSequence": {
+          "description": "Fixed upper bound to pass as `through` when requesting the next page.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "nextAfter": {
+          "description": "Last included report sequence, or the upper bound when the window is exhausted.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        },
+        "totals": {
+          "description": "Totals contributed by the reports in this page alone.",
+          "$ref": "#/$defs/ModelUsageTotals"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "throughSequence",
+        "nextAfter",
+        "hasMore",
+        "totals"
       ],
       "$defs": {
         "ModelUsageTotals": {

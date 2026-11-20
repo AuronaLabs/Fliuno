@@ -785,6 +785,48 @@ fn usage_summary_batch_checks_positions_watermark_and_duplicate_totals() {
 }
 
 #[test]
+fn usage_range_checks_the_fixed_bound_and_exact_page_progress() {
+    use fliuno_protocol::{
+        ModelUsageRangeParams, ModelUsageSummaryScope, ModelUsageTotals, UsageCount,
+    };
+    let request = ModelUsageRangeParams {
+        scope: ModelUsageSummaryScope::Session {
+            session_id: "s1".into(),
+        },
+        after: 4,
+        through: Some(9),
+        limit: 2,
+    };
+    let totals = ModelUsageTotals {
+        report_count: UsageCount(2),
+        ..Default::default()
+    };
+    let cases = [
+        (10, 6, true, 2, false), // changed window
+        (9, 4, true, 2, false),  // stuck continuation
+        (9, 6, true, 1, false),  // short nonterminal page
+        (9, 8, false, 2, false), // incomplete terminal cursor
+        (9, 9, false, 3, false), // over budget
+        (9, 6, true, 2, true),
+        (9, 9, false, 0, true),
+    ];
+    for (through, next, more, reports, valid) in cases {
+        let mut totals = totals.clone();
+        totals.report_count = UsageCount(reports);
+        let reply = json!({"jsonrpc":"2.0","id":2,"result":{
+            "throughSequence":through,"nextAfter":next,"hasMore":more,"totals":totals
+        }});
+        let mut client = fake_client(format!("{reply}\n").as_bytes());
+        let result = client.summarize_model_usage_range(&request, |_| {});
+        if valid {
+            assert_eq!(result.unwrap().next_after, next);
+        } else {
+            assert!(matches!(result, Err(Error::InvalidResult)));
+        }
+    }
+}
+
+#[test]
 fn invalid_task_change_page_preserves_the_replay_cursor() {
     let duplicate = json!({"changes":[{"taskId":"task","sequence":5},{"taskId":"task","sequence":6}],
         "nextAfter":9,"throughSequence":9,"hasMore":false});

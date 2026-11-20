@@ -1126,3 +1126,19 @@ Windows 本机调试构建对同一份含 100,000 条完成记录的数据库夹
 脚本和日志位于 `D:/Fliuno-Native-Test/history-count-checkpoints-benchmark.py` 和 `D:/Fliuno-Native-Test/history-count-checkpoints-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，537 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾的 15 项上下文和历史进程测试及 1 项累计计数回滚测试全部通过，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-history-count-checkpoints-windows.log` 和 `D:/Fliuno-Native-Test/guest-history-count-checkpoints.log`。
+
+## 0.0.3 按事件范围汇总模型用量（2026-11-20）
+
+真实 stdio 测试从已有用量事件汇总任务、会话、工作区和已归档会话。测试验证了空范围、超界拒绝、明确的零值与缺失字段、超过 `u64::MAX` 的精确总量，以及新报告写入和服务重启后仍按原水位续页。Rust 客户端测试覆盖错误水位、停滞游标和报告数不符的响应。[应用协议](protocol.md#按事件范围汇总)
+
+Windows 本机调试构建通过 stdio 对同一事件窗口比较两种读取方式。一种回放报告并在 Python 客户端相加，另一种在内核按页汇总。每组预热 20 对，交替测量 100 对，每次核对七项总量一致。
+
+| 报告数 | 请求与汇总的中位耗时 | 响应字节数中位数 |
+| ---: | ---: | ---: |
+| 16 | 1.251 → 0.574 ms | 3,579 → 294 |
+| 256 | 12.579 → 2.962 ms | 56,860 → 304 |
+| 512 | 22.369 → 4.687 ms | 113,856 → 305 |
+
+脚本和日志位于 `D:/Fliuno-Native-Test/model-usage-range-benchmark.py` 和 `D:/Fliuno-Native-Test/model-usage-range-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，538 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 3 项用量进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-model-usage-range-windows.log` 和 `D:/Fliuno-Native-Test/guest-model-usage-range.log`。

@@ -81,6 +81,7 @@ pub fn schema_bundle() -> Value {
         "events/list" => schema::<EventsListParams>(),
         "modelUsage/getSummary" => schema::<ModelUsageSummaryParams>(),
         "modelUsage/getSummaries" => schema::<ModelUsageSummaryBatchParams>(),
+        "modelUsage/summarizeRange" => schema::<ModelUsageRangeParams>(),
         "events/listModelUsage" => schema::<EventsListParams>(),
         "events/listSessionModelUsage" => schema::<EventsListSessionParams>(),
         "events/listWorkspaceModelUsage" => schema::<EventsListWorkspaceParams>(),
@@ -167,6 +168,7 @@ pub fn schema_bundle() -> Value {
         "TaskWatermarks" => schema::<TaskWatermarks>(),
         "ModelUsageSummary" => schema::<ModelUsageSummary>(),
         "ModelUsageSummaryBatch" => schema::<ModelUsageSummaryBatch>(),
+        "ModelUsageRangePage" => schema::<ModelUsageRangePage>(),
         "ModelProgress" => schema::<ModelProgress>(),
         "ModelBudget" => schema::<ModelBudget>(),
         "EventsPage" => schema::<EventsPage>()

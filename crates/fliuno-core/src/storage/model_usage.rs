@@ -1,4 +1,5 @@
 //! Scope indexes for model usage. The committed event log owns the payload.
+mod range;
 mod totals;
 use super::*;
 use rusqlite::Transaction;
@@ -74,6 +75,25 @@ enum UsageScope<'a> {
     Workspace(&'a str),
 }
 
+impl<'a> UsageScope<'a> {
+    fn resolve(self, kernel: &Kernel) -> Result<(&'a str, &'static str)> {
+        match self {
+            Self::Task(id) => {
+                kernel.require_task(id)?;
+                Ok((id, "task_id"))
+            }
+            Self::Session(id) => {
+                kernel.require_session(id)?;
+                Ok((id, "session_id"))
+            }
+            Self::Workspace(id) => {
+                kernel.require_workspace(id)?;
+                Ok((id, "workspace_id"))
+            }
+        }
+    }
+}
+
 impl Kernel {
     pub fn list_model_usage_events(&self, request: &EventsListParams) -> Result<EventsPage> {
         self.list_usage_scope(
@@ -119,20 +139,7 @@ impl Kernel {
         limit: u32,
         target_bytes: Option<u32>,
     ) -> Result<EventsPage> {
-        let (owner, column) = match scope {
-            UsageScope::Task(id) => {
-                self.require_task(id)?;
-                (id, "task_id")
-            }
-            UsageScope::Session(id) => {
-                self.require_session(id)?;
-                (id, "session_id")
-            }
-            UsageScope::Workspace(id) => {
-                self.require_workspace(id)?;
-                (id, "workspace_id")
-            }
-        };
+        let (owner, column) = scope.resolve(self)?;
         // Seek in the scope's covering index and fetch only matching event rows.
         // CROSS JOIN keeps the scope range on the outside of the join.
         self.query_event_page(

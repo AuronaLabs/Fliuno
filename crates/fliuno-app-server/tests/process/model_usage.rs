@@ -389,6 +389,55 @@ fn usage_summary_is_exact_and_scoped_after_v42_migration_and_new_reports() {
     let batch = |peer: &mut Peer| peer.call("modelUsage/getSummaries", batch_params.clone());
     let zero = totals(0, 0, 0, (0, 0), (0, 0));
     let foreign_totals = totals(1, 12, 1, (10, 1), (0, 0));
+    let range = "modelUsage/summarizeRange";
+    let report_events = peer.call(
+        "events/listWorkspaceModelUsage",
+        json!({"workspaceId":workspace["id"],"through":before_cursor}),
+    );
+    let first_report = &report_events["events"][0]["sequence"];
+    let archived_use = totals(1, u64::MAX.into(), 0, (0, 0), (0, 1));
+    let all_in_range = peer.call(range, json!({"scope":scope}));
+    assert_eq!(
+        all_in_range,
+        json!({"throughSequence":before_cursor,"nextAfter":before_cursor,"hasMore":false,"totals":before["totals"]})
+    );
+    let first_page = peer.call(range, json!({"scope":scope,"limit":1}));
+    assert_eq!(
+        first_page,
+        json!({"throughSequence":before_cursor,"nextAfter":first_report,"hasMore":true,"totals":first_use})
+    );
+    for (scoped, expected) in [
+        (&task_scope, &first_use),
+        (&first_scope, &first_use),
+        (&empty_scope, &zero),
+        (&foreign_scope, &foreign_totals),
+        (
+            &json!({"kind":"session","sessionId":archived["id"]}),
+            &archived_use,
+        ),
+    ] {
+        assert_eq!(
+            peer.call(range, json!({"scope":scoped,"through":before_cursor})),
+            json!({"throughSequence":before_cursor,"nextAfter":before_cursor,"hasMore":false,"totals":expected})
+        );
+    }
+    assert_eq!(
+        peer.call(range, json!({"scope":scope,"through":0})),
+        json!({"throughSequence":0,"nextAfter":0,"hasMore":false,"totals":zero})
+    );
+    for params in [
+        json!({"scope":scope,"limit":0}),
+        json!({"scope":scope,"limit":fliuno_protocol::MAX_MODEL_USAGE_RANGE_REPORTS + 1}),
+        json!({"scope":scope,"through":before_cursor + 1}),
+        json!({"scope":scope,"after":before_cursor,"through":before_cursor - 1}),
+        json!({"scope":scope,"after":u64::MAX}),
+    ] {
+        assert_eq!(peer.request(range, params)["error"]["code"], -32602);
+    }
+    assert_eq!(
+        peer.request(range, json!({"scope":missing}))["error"]["code"],
+        -32004
+    );
     let before_batch = batch(&mut peer);
     let bound = fliuno_protocol::MAX_MODEL_USAGE_SUMMARY_BATCH;
     assert_eq!(
@@ -449,6 +498,19 @@ fn usage_summary_is_exact_and_scoped_after_v42_migration_and_new_reports() {
     drop(peer);
     let mut peer = Peer::start(&db);
     assert_eq!(summary(&mut peer, &scope), after);
+    let pinned_request = json!({"scope":scope,"through":first_page["throughSequence"],"after":first_page["nextAfter"],"limit":1});
+    assert_eq!(
+        peer.call(range, pinned_request),
+        json!({"throughSequence":before_cursor,"nextAfter":before_cursor,"hasMore":false,"totals":archived_use})
+    );
+    assert_eq!(
+        peer.call(range, json!({"scope":scope,"through":before_cursor})),
+        all_in_range
+    );
+    assert_eq!(
+        peer.call(range, json!({"scope":scope,"after":before_cursor})),
+        json!({"throughSequence":after["throughSequence"],"nextAfter":after["throughSequence"],"hasMore":false,"totals":totals(1,5,8,(4,1),(3,1))})
+    );
     let after_batch = batch(&mut peer);
     assert_eq!(
         after_batch,

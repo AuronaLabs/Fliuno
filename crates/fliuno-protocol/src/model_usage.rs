@@ -1,4 +1,4 @@
-//! Lifetime totals over committed model-usage reports.
+//! Exact totals over committed model-usage reports.
 use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
@@ -41,6 +41,40 @@ pub struct ModelUsageSummaryBatch {
     /// owners with no reports get zero totals. Duplicate scopes are retained.
     #[schemars(length(min = 1, max = MAX_MODEL_USAGE_SUMMARY_BATCH))]
     pub items: Vec<Option<ModelUsageTotals>>,
+}
+
+pub const MAX_MODEL_USAGE_RANGE_REPORTS: u32 = 512;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelUsageRangeParams {
+    pub scope: ModelUsageSummaryScope,
+    /// Exclusive lower event bound.
+    #[serde(default)]
+    pub after: u64,
+    /// Inclusive upper event bound, defaulting to the current global watermark.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub through: Option<u64>,
+    /// Maximum reports included in this page.
+    #[serde(default = "default_range_limit")]
+    #[schemars(range(min = 1, max = MAX_MODEL_USAGE_RANGE_REPORTS))]
+    pub limit: u32,
+}
+
+const fn default_range_limit() -> u32 {
+    256
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelUsageRangePage {
+    /// Fixed upper bound to pass as `through` when requesting the next page.
+    pub through_sequence: u64,
+    /// Last included report sequence, or the upper bound when the window is exhausted.
+    pub next_after: u64,
+    pub has_more: bool,
+    /// Totals contributed by the reports in this page alone.
+    pub totals: ModelUsageTotals,
 }
 
 /// An exact integer exposed as a decimal string, including on JavaScript clients.
