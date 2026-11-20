@@ -1,4 +1,7 @@
 //! Fingerprint workspace files without placing their content in model context.
+mod batch;
+pub(super) use batch::HashBatch;
+
 use super::*;
 
 pub(super) const BUDGET: file_io::ReadBudget = (64 * 1024 * 1024, "file exceeds 64 MiB");
@@ -43,12 +46,30 @@ impl Tool for Hash {
         let file = directory
             .open_with(&args.path, &file_io::options(false))
             .map_err(|_| "cannot open workspace file")?;
-        file_io::require_regular_file(&file, BUDGET, cancellation)?;
-        let mut digest = Sha256::new();
-        let bytes = file_io::read_chunks(file, BUDGET, cancellation, |chunk| digest.update(chunk))?;
+        let digest = fingerprint(file, BUDGET, cancellation)?;
         Ok(ToolOutput {
-            output: json!({"path":args.path, "bytes":bytes, "sha256":format!("{:x}", digest.finalize())}),
+            output: json!({"path":args.path, "bytes":digest.bytes, "sha256":digest.sha256}),
             artifacts: Vec::new(),
         })
     }
+}
+
+#[derive(serde::Serialize)]
+struct Fingerprint {
+    bytes: u64,
+    sha256: String,
+}
+
+fn fingerprint(
+    file: cap_std::fs::File,
+    budget: file_io::ReadBudget,
+    cancellation: &CancellationToken,
+) -> Result<Fingerprint, ToolError> {
+    file_io::require_regular_file(&file, budget, cancellation)?;
+    let mut digest = Sha256::new();
+    let bytes = file_io::read_chunks(file, budget, cancellation, |chunk| digest.update(chunk))?;
+    Ok(Fingerprint {
+        bytes,
+        sha256: format!("{:x}", digest.finalize()),
+    })
 }

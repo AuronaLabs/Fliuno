@@ -956,3 +956,9 @@ Windows 调试构建通过 stdio 创建 129 份已完成记录，每份用户输
 Debian Linux 6.12.107 来宾完成 14 项相关进程测试，退出码为 0。原始日志见 `D:/Fliuno-Native-Test/guest-context-scan-limit.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成。522 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。22 页 Markdown 的 501 处本地引用校验通过。原始日志见 `target/context-scan-limit-windows-final.log`。
+
+## 0.0.3 工作区批量 SHA-256（2026-11-20）
+
+`workspace_sha256_batch` 通过一次普通工作区读取审批计算一组文件摘要。真实进程测试验证越界路径在审批前被拒绝、拒绝审批时没有工具结果、重启后审批仍对应原路径清单，以及允许后计算的是实际读取的字节。结果按批准的顺序返回，接受空文件和恰好 8 MiB 的文件，超限一字节、缺失、目录各自标记为不可用。进程测试还验证已完成结果在再次重启后保持一致。见[工具契约](protocol.md#内置工具与作用域)。
+
+Windows `scripts/check.ps1` 退出码为 0，包含 523 项测试、28 个离线演示、格式、Clippy 和 Schema 检查。Debian Linux 6.12.107 来宾通过批量摘要和工作区搜索两项进程测试，覆盖真实 FIFO 和末级符号链接。日志见 `target/workspace-hash-batch-windows-check.log` 和 `D:/Fliuno-Native-Test/guest-workspace-hash-batch-final.log`。

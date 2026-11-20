@@ -41,6 +41,8 @@ mod task_status;
 #[cfg(feature = "test-fixtures")]
 #[path = "process/terminal.rs"]
 mod terminal;
+#[path = "process/workspace_hash.rs"]
+mod workspace_hash;
 #[path = "process/workspace_import.rs"]
 mod workspace_import;
 #[path = "process/workspace_profiles.rs"]

@@ -705,6 +705,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 - `workspace_stat({path})`：查询工作区相对路径，根目录用 `.`。返回 `path`、`kind`（`file`、`directory`、`symlink` 或 `other`）、普通文件的 `bytes` 和可用的 `modifiedUnixMs`。不适用的字段为 `null`。不跟随末级符号链接。每次查询按工作区读取工具走审批。
 - `workspace_stat_batch({paths})` 一次审批查询 1 到 16 条不同的工作区相对路径，路径文本合计最多 8 KiB。返回按输入排序的 `entries`。可读取的项包含 `status:"found"` 及 `workspace_stat` 的元数据字段。无法读取的项仅返回 `path` 和 `status:"unavailable"`。整个批次会先验证路径格式。工具不读取文件正文，也不跟随末级符号链接。
 - `workspace_sha256({path})`：审批后对至多 64 MiB 的工作区普通文件逐块计算 SHA-256，返回 `path`、实际读取的 `bytes` 和小写十六进制 `sha256`。结果不含正文。并发修改文件时，摘要只描述实际读到的字节流。
+- `workspace_sha256_batch({paths})` 用一次审批计算 1 至 8 个不同的工作区文件的 SHA-256，路径文本合计最多 8 KiB，每个文件最多 8 MiB。`entries` 按输入顺序返回。`hashed` 项包含 `path`、`bytes` 和 `sha256`，`unavailable` 项仅包含 `path` 和状态。缺失、超限、不可读、非普通文件和末级符号链接都归为 `unavailable`。取消会结束整个批次。工具只返回摘要和字节数，逐个读取文件，因此并发修改可能影响结果。
 - `workspace_read_text({path,line?,limit?})`：读取最多 256 KiB UTF-8 文件；line 从 1 开始，limit 是最大行数，均须为正整数。按行截取保留原换行，SHA-256 始终针对完整文件；超出末行返回空文本。
 - `workspace_read_bytes({path})`：读取最多 256 KiB 原始字节并返回 `{path,encoding:"base64",data,bytes,sha256,grantsPermissions:false}`。长度和摘要针对原始字节；不检测 MIME、不解码格式、不执行，也不自动创建 artifact。该读取和所有其他工具调用一样，每次需要审批；拒绝审批不会返回文件数据。
 - `workspace_search_text({paths,query,maxMatches?:24})`：一次审批搜索 1 到 8 个明确指定的工作区相对文件路径，每份文件最多 256 KiB。`query` 为 1 到 256 字节的单行 UTF-8 字面文本，区分大小写。按输入的文件顺序和行序，每行只返回首个命中的行号和 UTF-8 字节列，均从 1 开始。`maxMatches` 限制整批返回 1 到 64 个命中。每份文件分别报告 `searched`、`nonText` 或 `unreadable`。超过匹配预算时，相应文件的 `hasMore` 为 true。工具结果仅含位置，不含原文。
