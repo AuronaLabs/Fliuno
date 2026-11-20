@@ -353,7 +353,7 @@ fn model_step_limit_preserves_default_receipts_and_rejects_invalid_settings() {
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
             .unwrap(),
-        51
+        52
     );
     let mut default = request.clone();
     default["maxModelSteps"] = json!(8);

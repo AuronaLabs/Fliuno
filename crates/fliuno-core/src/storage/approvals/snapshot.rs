@@ -56,8 +56,34 @@ pub(in crate::storage) fn migrate_snapshots(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+pub(in crate::storage) fn migrate_snapshot_open_indexes(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    tx.execute_batch(
+        "CREATE INDEX IF NOT EXISTS pending_approvals_opened ON pending_approvals(opened_through);
+         CREATE INDEX IF NOT EXISTS closed_approvals_opened ON closed_approvals(opened_through);
+         PRAGMA user_version=52;",
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+// Prefer a short rowid interval to sorting approvals that closed after the
+// snapshot, especially once a scoped inbox has accumulated many newer rows.
+const SHORT_APPROVAL_SEQUENCE_RANGE: i64 = 4096;
+
 impl Kernel {
     pub fn list_pending_approval_snapshot(
+        &self,
+        request: &ApprovalInboxListParams,
+    ) -> Result<ApprovalInboxPage> {
+        let tx = self.db.unchecked_transaction()?;
+        let page = self.read_pending_approval_snapshot(request)?;
+        tx.commit()?;
+        Ok(page)
+    }
+
+    /// The caller pins the watermark and approval indexes to one read view.
+    pub(in crate::storage) fn read_pending_approval_snapshot(
         &self,
         request: &ApprovalInboxListParams,
     ) -> Result<ApprovalInboxPage> {
@@ -103,15 +129,23 @@ impl Kernel {
             let rows = select.query(params![scope, after as i64, time, limit + 1])?;
             read_approval_page(rows, after, limit, target_bytes)?
         } else {
-            // Bound each sorted input to the merge. Only closed rows after the
-            // snapshot can contribute; the scope/close indexes can seek there.
+            let through = snapshot.through_sequence as i64;
+            let upper = self.approval_sequence_through(through)?;
+            let closed_table =
+                if upper.saturating_sub(after as i64) <= SHORT_APPROVAL_SEQUENCE_RANGE {
+                    "closed_approvals NOT INDEXED"
+                } else {
+                    "closed_approvals"
+                };
+            // Bound both inputs to the merge. The upper inbox cursor excludes
+            // approvals opened after the snapshot even if they have since closed.
             let sql = format!(
                 "WITH active AS (
-                     SELECT {COLUMNS} FROM pending_approvals WHERE sequence>?2 {filter}
+                     SELECT {COLUMNS} FROM pending_approvals WHERE sequence>?2 AND sequence<=?6 {filter}
                      AND opened_through<=?5 AND (expires_at IS NULL OR expires_at>?3)
                      ORDER BY sequence LIMIT ?4
                  ), closed AS (
-                     SELECT {COLUMNS} FROM closed_approvals WHERE sequence>?2 {filter}
+                     SELECT {COLUMNS} FROM {closed_table} WHERE sequence>?2 AND sequence<=?6 {filter}
                      AND closed_through>?5 AND opened_through<=?5
                      AND (expires_at IS NULL OR expires_at>?3)
                      ORDER BY sequence LIMIT ?4
@@ -123,10 +157,27 @@ impl Kernel {
                 after as i64,
                 time,
                 limit + 1,
-                snapshot.through_sequence as i64
+                through,
+                upper
             ])?;
             read_approval_page(rows, after, limit, target_bytes)?
         };
         Ok(ApprovalInboxPage { snapshot, page })
+    }
+
+    fn approval_sequence_through(&self, through: i64) -> Result<i64> {
+        // The inbox sequence is assigned at insertion and its open stamp is
+        // the monotone committed event watermark. When rows close, both keys
+        // move together. Each index ends in the rowid, which is `sequence`.
+        Ok(self
+            .db
+            .prepare_cached(
+                "SELECT max(
+               coalesce((SELECT sequence FROM pending_approvals WHERE opened_through<=?1
+                         ORDER BY opened_through DESC,sequence DESC LIMIT 1),0),
+               coalesce((SELECT sequence FROM closed_approvals WHERE opened_through<=?1
+                         ORDER BY opened_through DESC,sequence DESC LIMIT 1),0))",
+            )?
+            .query_row([through], |row| row.get(0))?)
     }
 }

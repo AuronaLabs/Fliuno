@@ -26,7 +26,7 @@ use std::{
 };
 pub(crate) use task_resume::ResumeFacts;
 
-pub(crate) const SCHEMA_VERSION: u32 = 51;
+pub(crate) const SCHEMA_VERSION: u32 = 52;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -432,6 +432,9 @@ impl Kernel {
         }
         if version < 51 {
             context::migrate_turn_count_checkpoints(&mut db)?;
+        }
+        if version < 52 {
+            approvals::migrate_snapshot_open_indexes(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));

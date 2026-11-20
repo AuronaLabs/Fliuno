@@ -1158,3 +1158,20 @@ Windows `scripts/check.ps1` 退出码为 0，538 项测试、29 个离线演示�
 Windows 本机调试构建通过 stdio 打开 16 个各 2 KiB 的交付物。对比逐项调用 `artifacts/openDownload` 与一次 `artifacts/openDownloads`，预热 20 对后交替测量 100 对，每对核对摘要和正文完全一致。请求从 16 次降到 1 次，中位耗时从 6.844 ms 降到 3.418 ms，响应中位数从 47,328 字节降到 47,265 字节。脚本和日志见 `D:/Fliuno-Native-Test/artifact-download-batch-benchmark.py` 与 `D:/Fliuno-Native-Test/artifact-download-batch-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，540 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 4 项 Rust 客户端交付物进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-artifact-download-batch-windows.log` 和 `D:/Fliuno-Native-Test/guest-artifact-download-batch.log`。
+
+## 0.0.3 待审批历史快照续页（2026-11-20）
+
+真实 stdio 测试保留全局、工作区和会话的待审批快照，以不同顺序关闭其中的审批，再打开一条新审批。随后还原 v51 索引布局并重启服务，验证升级到 v52 后三种旧快照的续页、最终游标和新快照仍符合预期。旧库迁移测试也验证了 v40 起保存的审批仍可回放。[应用协议](protocol.md#待审批快照)
+
+Windows 本机调试构建通过 stdio 查询每个快照。夹具在旧快照之后生成 100,000 条已关闭审批。每个场景交替测量 100 对请求，并逐对检查完整响应一致。表中是往返耗时的中位数。
+
+| 查询范围 | 优化前 | 优化后 |
+| --- | ---: | ---: |
+| 全局旧快照 | 32.464 ms | 0.694 ms |
+| 工作区旧快照 | 52.618 ms | 0.722 ms |
+| 会话旧快照 | 54.463 ms | 0.746 ms |
+| 接近当前水位的会话快照 | 0.592 ms | 0.632 ms |
+
+测试脚本与日志见 `D:/Fliuno-Native-Test/approval-window-benchmark.py` 和 `D:/Fliuno-Native-Test/approval-window-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，541 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 8 项审批进程测试与 2 项工作台进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-approval-window-windows-recheck.log` 和 `D:/Fliuno-Native-Test/guest-approval-window.log`。

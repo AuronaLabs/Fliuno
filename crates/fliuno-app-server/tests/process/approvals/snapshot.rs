@@ -48,6 +48,7 @@ fn snapshot_resume_tracks_resolved_cancelled_and_new_approvals_across_upgrade_an
             "BEGIN;
          DROP TRIGGER stamp_pending_approval;
          DROP TRIGGER retain_closed_approval;
+         DROP INDEX pending_approvals_opened;
          ALTER TABLE pending_approvals DROP COLUMN opened_through;
          DROP TABLE closed_approvals;
          DROP TABLE approval_inbox_meta;

@@ -3,7 +3,7 @@ use super::*;
 use rusqlite::Transaction;
 
 mod snapshot;
-pub(super) use snapshot::migrate_snapshots;
+pub(super) use snapshot::{migrate_snapshot_open_indexes, migrate_snapshots};
 
 pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;

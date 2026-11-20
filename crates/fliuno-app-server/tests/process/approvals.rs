@@ -455,3 +455,78 @@ fn approval_decisions_can_be_reconciled_after_reconnect_and_v33_backfill() {
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn historical_pending_approval_pages_keep_pre_upgrade_bounds_across_scopes() {
+    let root =
+        std::env::temp_dir().join(format!("fliuno-approval-window-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(root.join("foreign")).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let foreign = peer.call("workspace/open", json!({"root":root.join("foreign")}));
+    let first = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let sibling = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let outside = peer.call("session/create", json!({"workspaceId":foreign["id"]}));
+    let submit = |peer: &mut Peer, session: &Value| {
+        let task = peer.call(
+            "task/startSummary",
+            json!({"sessionId":session["id"],"input":"review"}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval")
+    };
+    let head = submit(&mut peer, &first);
+    let older = submit(&mut peer, &first);
+    submit(&mut peer, &outside);
+    let sibling_task = submit(&mut peer, &sibling);
+    let newest = submit(&mut peer, &first);
+    let method = "approval/listPendingSnapshot";
+    let scopes = [
+        json!({}),
+        json!({"workspaceId":workspace["id"]}),
+        json!({"sessionId":first["id"]}),
+    ];
+    let mut pages = Vec::new();
+    for scope in &scopes {
+        let mut page = scope.clone();
+        page["limit"] = json!(1);
+        pages.push(peer.call(method, json!({"page":page})));
+    }
+    // Closing approvals out of order changes their storage table but not the
+    // opening fence. The newest saved row opened exactly at the captured waterline.
+    for task in [&newest, &older] {
+        peer.call("approval/respond", json!({"taskId":task["id"],"approvalId":task["pendingApproval"]["id"],"decision":"deny"}));
+        peer.wait_for_status(task["id"].as_str().unwrap(), "failed");
+    }
+    let future = submit(&mut peer, &first);
+    drop(peer);
+    rusqlite::Connection::open(&db).unwrap().execute_batch(
+        "DROP INDEX pending_approvals_opened; DROP INDEX closed_approvals_opened; PRAGMA user_version=51;"
+    ).unwrap();
+    let mut peer = Peer::start(&db);
+    for (index, (scope, snapshot)) in scopes.iter().zip(pages).enumerate() {
+        assert_eq!(snapshot["page"]["items"][0]["taskId"], head["id"]);
+        let mut page = scope.clone();
+        page["after"] = snapshot["page"]["nextAfter"].clone();
+        let after = peer.call(method, json!({"page":page,"snapshot":snapshot["snapshot"]}));
+        assert_eq!(after["snapshot"], snapshot["snapshot"]);
+        let items = after["page"]["items"].as_array().unwrap();
+        assert_eq!(items.first().unwrap()["taskId"], older["id"]);
+        assert_eq!(items.last().unwrap()["taskId"], newest["id"]);
+        assert_eq!(items.len(), 4 - index);
+        assert_eq!(
+            items.iter().any(|row| row["taskId"] == sibling_task["id"]),
+            index < 2
+        );
+        assert!(!items.iter().any(|row| row["taskId"] == future["id"]));
+        assert_eq!(after["page"]["hasMore"], false);
+        page["after"] = after["page"]["nextAfter"].clone();
+        let terminal = peer.call(method, json!({"page":page,"snapshot":snapshot["snapshot"]}));
+        assert_eq!(
+            terminal["page"],
+            json!({"items":[],"nextAfter":page["after"],"hasMore":false})
+        );
+    }
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

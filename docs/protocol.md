@@ -490,7 +490,7 @@ Rust 的 `EventReplay::next_latest_task_summary_revisions` 和 `EventFeed::next_
 
 若要接上实时更新，可在读完快照后用 `events/setScope` 建立相同范围的订阅，从快照的 `throughSequence` 补读至订阅响应中的水位，再处理实时事件。快照只用于展示与对账；`approval/get` 和 `approval/respond` 始终校验当前状态和期限。
 
-SQLite v41 在升级时记录可读取的最早水位，并保留待审批摘要的打开和关闭边界，不复制工具参数。早于该水位、超过当前水位或续页时缺少快照会返回 `-32602`。原 `approval/listPending` 继续返回实时列表。
+SQLite v41 在升级时记录可读取的最早水位，并保留待审批摘要的打开和关闭边界，不复制工具参数。早于该水位、超过当前水位或续页时缺少快照会返回 `-32602`。原 `approval/listPending` 继续返回实时列表。SQLite v52 增加按审批打开水位查找的索引，让历史页跳过快照之后打开的审批。
 
 #### 决定与运行
 

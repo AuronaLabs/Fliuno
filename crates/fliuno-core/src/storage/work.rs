@@ -98,7 +98,7 @@ impl Kernel {
         // A read transaction also pins the inbox, counters and preview to one
         // SQLite view. The inbox validates scope and its own page budgets.
         let tx = self.db.unchecked_transaction()?;
-        let approvals = self.list_pending_approval_snapshot(&ApprovalInboxListParams {
+        let approvals = self.read_pending_approval_snapshot(&ApprovalInboxListParams {
             page: request.approval_page(),
             snapshot: None,
         })?;
