@@ -30,7 +30,8 @@ impl Kernel {
                 "SELECT requested.key, session.id,
                         COALESCE(c.running,0), COALESCE(c.waiting_approval,0),
                         COALESCE(c.interrupted,0), COALESCE(c.completed,0),
-                        COALESCE(c.cancelled,0), COALESCE(c.failed,0)
+                        COALESCE(c.cancelled,0), COALESCE(c.failed,0),
+                        COALESCE(c.waiting_input,0)
                  FROM json_each(?1) AS requested
                  LEFT JOIN sessions AS session
                     ON session.id=requested.value AND session.workspace_id=?2

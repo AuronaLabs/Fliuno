@@ -72,6 +72,8 @@ impl WorkSnapshotParams {
 pub struct TaskStatusCounts {
     pub running: u64,
     pub waiting_approval: u64,
+    #[serde(default)]
+    pub waiting_input: u64,
     pub interrupted: u64,
     pub completed: u64,
     pub cancelled: u64,

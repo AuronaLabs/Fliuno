@@ -14,6 +14,7 @@ mod task_cancel;
 mod task_catalog;
 mod task_resume;
 mod task_summaries;
+mod task_tool_input;
 mod terminal;
 mod wire;
 mod work;

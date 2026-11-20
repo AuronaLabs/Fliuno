@@ -35,6 +35,8 @@ pub const PROTOCOL_VERSION: &str = "0.1";
 /// Includes the line delimiter on the application stdio transport.
 pub const MAX_APP_REQUEST_BYTES: usize = 1024 * 1024;
 pub const MAX_CLIENT_REQUEST_ID_BYTES: usize = 128;
+pub const MAX_TOOL_INPUT_BYTES: usize = 256 * 1024;
+pub const MAX_TOOL_INPUT_ROUNDS: u8 = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -48,6 +50,7 @@ pub struct Workspace {
 pub enum TaskStatus {
     Running,
     WaitingApproval,
+    WaitingInput,
     Interrupted,
     Completed,
     Cancelled,
@@ -59,6 +62,7 @@ impl TaskStatus {
         match self {
             Self::Running => "running",
             Self::WaitingApproval => "waiting_approval",
+            Self::WaitingInput => "waiting_input",
             Self::Interrupted => "interrupted",
             Self::Completed => "completed",
             Self::Cancelled => "cancelled",
@@ -88,6 +92,16 @@ pub struct Approval {
     /// Absent in legacy snapshots, which cannot authorize a new execution.
     #[serde(default)]
     pub authority: Option<String>,
+}
+
+/// Public, resumable input requested by an in-flight approved tool call.
+/// Opaque continuation state is stored by the kernel and is never exposed here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolInputRequest {
+    pub call_id: String,
+    pub requests: Value,
+    pub round: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -419,6 +433,8 @@ pub struct Task {
     pub pending_approval: Option<Approval>,
     #[serde(default)]
     pub in_flight_tool: Option<ToolCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_tool_input: Option<ToolInputRequest>,
     /// A restart/timeout can leave the model request result and billing unknown.
     #[serde(default)]
     pub model_outcome_unknown: bool,
@@ -618,6 +634,15 @@ pub enum EventKind {
     },
     ToolStarted {
         call: ToolCall,
+    },
+    ToolInputRequired {
+        call_id: String,
+        requests: Value,
+        round: u8,
+    },
+    ToolInputResolved {
+        call_id: String,
+        request_id: String,
     },
     ToolOutcomeUnknown {
         call_id: String,
@@ -858,6 +883,16 @@ pub struct ApprovalRespondParams {
     pub task_id: String,
     pub approval_id: String,
     pub decision: ApprovalDecision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ToolInputRespondParams {
+    pub task_id: String,
+    pub call_id: String,
+    /// Idempotency key for retrying this exact user response.
+    pub request_id: String,
+    pub responses: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

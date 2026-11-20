@@ -455,13 +455,14 @@ fn oversized_sse_events_fail_closed_and_tool_errors_remain_known_results() {
 }
 
 #[test]
-fn multi_round_results_never_trigger_an_implicit_sdk_retry() {
+fn multi_round_results_are_returned_without_an_implicit_sdk_retry() {
     for result in [
         json!({"resultType":"input_required","requestState":"opaque-private-state"}),
         json!({"resultType":"input_required","content":[],"requestState":"opaque-private-state"}),
         json!({"resultType":"task","content":[]}),
         json!({"resultType":"extension","content":[]}),
     ] {
+        let input_required = result["resultType"] == "input_required";
         let fixture = Fixture::start(move |r| {
             if r.body["method"] != "tools/call" {
                 return wire::reply(r, Version::Modern);
@@ -472,11 +473,21 @@ fn multi_round_results_never_trigger_an_implicit_sdk_retry() {
             )
         });
         let tools = tools(config(&fixture));
-        let Err(ToolError::OutcomeUnknown(message)) = invoke(&*tools[0], &CancellationToken::new())
-        else {
-            panic!("non-final result was not interrupted");
-        };
-        assert!(message.contains("result unknown") && !message.contains("opaque-private-state"));
+        let response = invoke(&*tools[0], &CancellationToken::new());
+        if input_required {
+            assert!(matches!(
+                response,
+                Err(ToolError::InputRequired { request_state: Some(state), .. })
+                    if state == "opaque-private-state"
+            ));
+        } else {
+            let Err(ToolError::OutcomeUnknown(message)) = response else {
+                panic!("unsupported non-final result was accepted");
+            };
+            assert!(
+                message.contains("result unknown") && !message.contains("opaque-private-state")
+            );
+        }
         assert_eq!(
             fixture
                 .requests()
@@ -485,10 +496,12 @@ fn multi_round_results_never_trigger_an_implicit_sdk_retry() {
                 .count(),
             1
         );
-        assert!(matches!(
-            invoke(&*tools[0], &CancellationToken::new()),
-            Err(ToolError::Failed(_))
-        ));
+        if !input_required {
+            assert!(matches!(
+                invoke(&*tools[0], &CancellationToken::new()),
+                Err(ToolError::Failed(_))
+            ));
+        }
     }
 }
 

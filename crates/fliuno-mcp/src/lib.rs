@@ -16,10 +16,13 @@ pub use config::{
 use fliuno_core::{
     CancellationToken, Kernel, Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec,
 };
-use fliuno_protocol::ToolCall;
+use fliuno_protocol::{MAX_TOOL_INPUT_BYTES, ToolCall, ToolInputRequest};
 use host::Host;
 pub use launch::ProcessIsolation;
-use rmcp::model::{CallToolRequestParams, CallToolResponse};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResponse, ElicitRequestParams, ElicitResult, InputRequest,
+    InputRequests, InputResponses,
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
@@ -248,11 +251,11 @@ impl Tool for McpTool {
         });
         if self.tasks_supported {
             fliuno_core::authority_digest(
-                "mcp.tool.v3",
+                "mcp.tool.v5",
                 &serde_json::json!({"contract":identity,"tasksSupported":true}),
             )
         } else {
-            fliuno_core::authority_digest("mcp.tool.v2", &identity)
+            fliuno_core::authority_digest("mcp.tool.v4", &identity)
         }
     }
     fn spec(&self) -> ToolSpec {
@@ -271,10 +274,91 @@ impl Tool for McpTool {
         Ok(())
     }
 
+    fn validate_input_request(
+        &self,
+        request: &ToolInputRequest,
+        request_state: Option<&str>,
+    ) -> Result<(), String> {
+        let parsed = parse_input_requests(&request.requests)?;
+        if parsed.is_empty() && request_state.is_none() {
+            return Err("MCP input-required result contains no continuation".into());
+        }
+        validate_input_requests(&parsed)
+    }
+
+    fn validate_input(&self, request: &ToolInputRequest, responses: &Value) -> Result<(), String> {
+        let requests = parse_input_requests(&request.requests)?;
+        validate_input_requests(&requests)?;
+        if fliuno_core::json_size(responses).map_err(|_| "invalid MCP responses")?
+            > MAX_TOOL_INPUT_BYTES
+        {
+            return Err("MCP input responses exceed 256 KiB".into());
+        }
+        let response_map = responses
+            .as_object()
+            .ok_or("MCP input responses must be an object")?;
+        if response_map.len() != requests.len()
+            || requests.keys().any(|id| !response_map.contains_key(id))
+        {
+            return Err("MCP input responses must match every request ID exactly".into());
+        }
+        for (id, input) in requests {
+            let InputRequest::Elicitation(elicitation) = input else {
+                return Err("only MCP form elicitation is supported".into());
+            };
+            let ElicitRequestParams::FormElicitationParams {
+                requested_schema, ..
+            } = elicitation.params
+            else {
+                return Err("MCP URL elicitation is not supported".into());
+            };
+            let result: ElicitResult = serde_json::from_value(response_map[&id].clone())
+                .map_err(|_| "invalid MCP elicitation response")?;
+            if result.action == rmcp::model::ElicitationAction::Accept {
+                let schema = serde_json::to_value(requested_schema)
+                    .map_err(|_| "invalid MCP elicitation schema")?;
+                let validator = jsonschema::validator_for(&schema)
+                    .map_err(|_| "invalid MCP elicitation schema")?;
+                let content = result.content.as_ref().unwrap_or(&Value::Null);
+                if !validator.is_valid(content) {
+                    return Err(
+                        "MCP elicitation response does not match its requested schema".into(),
+                    );
+                }
+            } else if result.content.is_some() {
+                return Err("non-accepted MCP elicitation cannot contain response content".into());
+            }
+        }
+        Ok(())
+    }
+
     fn execute(
         &self,
         _context: &ToolContext<'_>,
         call: &ToolCall,
+        cancellation: &CancellationToken,
+    ) -> Result<ToolOutput, ToolError> {
+        self.invoke(call, None, None, cancellation)
+    }
+
+    fn resume(
+        &self,
+        _context: &ToolContext<'_>,
+        call: &ToolCall,
+        request_state: Option<&str>,
+        responses: &Value,
+        cancellation: &CancellationToken,
+    ) -> Result<ToolOutput, ToolError> {
+        self.invoke(call, request_state, Some(responses), cancellation)
+    }
+}
+
+impl McpTool {
+    fn invoke(
+        &self,
+        call: &ToolCall,
+        request_state: Option<&str>,
+        responses: Option<&Value>,
         cancellation: &CancellationToken,
     ) -> Result<ToolOutput, ToolError> {
         self.validate(&call.arguments)?;
@@ -285,32 +369,59 @@ impl Tool for McpTool {
             .clone();
         let name = self.remote_name.clone();
         let tasks_supported = self.tasks_supported;
+        let mut params = CallToolRequestParams::new(name).with_arguments(arguments);
+        if let Some(state) = request_state {
+            params = params.with_request_state(state.to_owned());
+        }
+        if let Some(responses) = responses {
+            let parsed: InputResponses = serde_json::from_value(responses.clone())
+                .map_err(|_| ToolError::Failed("invalid MCP input response map".into()))?;
+            params = params.with_input_responses(parsed);
+        }
         let response = self.host.request(cancellation, move |service| {
             Box::pin(async move {
-                // The high-level SDK helper drives MRTR rounds itself. Keep one
-                // request so continuations require their own durable host state.
-                Ok(
-                    match service
-                        .call_tool_once(CallToolRequestParams::new(name).with_arguments(arguments))
-                        .await?
+                Ok(match service.call_tool_once(params).await? {
+                    CallToolResponse::Complete(result)
+                        if host::is_complete(&result.result_type) =>
                     {
-                        CallToolResponse::Complete(result)
-                            if host::is_complete(&result.result_type) =>
-                        {
-                            Some(CallToolResponse::Complete(result))
-                        }
-                        CallToolResponse::Task(task)
-                            if tasks_supported
-                                && tasks::validate_task_id(&task.task.task_id).is_ok() =>
-                        {
-                            Some(CallToolResponse::Task(task))
-                        }
-                        _ => None,
-                    },
-                )
+                        Some(CallToolResponse::Complete(result))
+                    }
+                    CallToolResponse::Task(task)
+                        if tasks_supported
+                            && tasks::validate_task_id(&task.task.task_id).is_ok() =>
+                    {
+                        Some(CallToolResponse::Task(task))
+                    }
+                    CallToolResponse::InputRequired(result) => {
+                        Some(CallToolResponse::InputRequired(result))
+                    }
+                    _ => None,
+                })
             })
         })?;
         let output = match response {
+            CallToolResponse::InputRequired(result) => {
+                let requests = serde_json::to_value(result.input_requests.unwrap_or_default())
+                    .map_err(|_| {
+                        ToolError::OutcomeUnknown("cannot encode MCP input request".into())
+                    })?;
+                if fliuno_core::json_size(&requests).map_err(|_| {
+                    ToolError::OutcomeUnknown("cannot size MCP input request".into())
+                })? > MAX_TOOL_INPUT_BYTES
+                    || result
+                        .request_state
+                        .as_ref()
+                        .is_some_and(|state| state.len() > MAX_TOOL_INPUT_BYTES)
+                {
+                    return Err(ToolError::OutcomeUnknown(
+                        "MCP input request exceeds 256 KiB".into(),
+                    ));
+                }
+                return Err(ToolError::InputRequired {
+                    requests,
+                    request_state: result.request_state,
+                });
+            }
             CallToolResponse::Complete(result) => {
                 serde_json::to_value(result).map_err(|_| "cannot encode MCP output")?
             }
@@ -338,6 +449,34 @@ impl Tool for McpTool {
             artifacts: vec![],
         })
     }
+}
+
+fn parse_input_requests(value: &Value) -> Result<InputRequests, String> {
+    serde_json::from_value(value.clone()).map_err(|_| "invalid MCP input request map".into())
+}
+
+fn validate_input_requests(requests: &InputRequests) -> Result<(), String> {
+    if requests.len() > 16
+        || requests.keys().any(|id| {
+            id.is_empty() || id.len() > 128 || !id.bytes().all(|byte| byte.is_ascii_graphic())
+        })
+    {
+        return Err("MCP input request IDs exceed their bounds".into());
+    }
+    for request in requests.values() {
+        match request {
+            InputRequest::Elicitation(elicitation) => {
+                if !matches!(
+                    elicitation.params,
+                    ElicitRequestParams::FormElicitationParams { .. }
+                ) {
+                    return Err("MCP URL elicitation is not supported".into());
+                }
+            }
+            _ => return Err("MCP sampling and roots input requests are not supported".into()),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -44,10 +44,12 @@ HTTP `lifecycle` 默认 `auto`：首先使用 `2026-07-28` 的 `server/discover`
 - `timeoutMs` 范围为 100..300000，默认 30000。连接超时最多 10 秒；SDK 控制请求最多 5 秒；初始化、发现和工具调用遵循主机预算。
 - 一条 SSE event 和一条完整 JSON 响应最多 1 MiB；工具输出序列化后也最多 1 MiB。工具发现最多 32 页、256 个工具及 4 MiB 累计序列化页面数据；工具描述最多 4 KiB，单个 Schema 最多 64 KiB。每页及 SDK 已解析对象仍另有短暂分配，因此累计发现预算不是总进程 RSS 上限。
 - 排队期间取消或超时在发送前返回已知失败，不关闭正在处理其他调用的主机。
-- 请求发出后的网络错误、超时、取消、协议失败、HTTP 超限响应及目前不支持的 MRTR 多轮 continuation 都按结果未知处理，并关闭共享主机。内核保留 `inFlightTool`，重启不会重新发送该调用。协议层完整结果在序列化后超过工具输出预算也保留未知标记。
+- 请求发出后的网络错误、超时、取消、协议失败和 HTTP 超限响应都按结果未知处理，并关闭共享主机。内核保留 `inFlightTool`，重启不会重新发送该调用。协议层完整结果在序列化后超过工具输出预算也保留未知标记。
+- MCP `tools/call` 返回 MRTR `input_required` 时，内核只接受受限的表单 elicitation 请求。任务进入 `waiting_input`，宿主展示请求并显式提交 `task/respondToolInput`；内核校验每个响应后，将原工具参数、响应及原 `requestState` 交回同一 MCP 服务。用户取消或拒绝表单由远端工具按协议处理。
+- sampling、roots 和 URL elicitation 请求不会自动执行或显示为受支持的补答表单；不支持或超预算的请求按结果未知处理，不会自动续接。每个工具调用最多续接 10 轮，请求与响应各最多 256 KiB。
 - `isError: true` 是一个完整的 MCP 工具结果，并不代表 HTTP/JSON-RPC 传输失败。
 
-> **MRTR 续接边界**：收到 `input_required` 时，Fliuno 当前将调用记为结果未知并关闭该 host，不会自动补答或再次发送。核心工具执行还没有可持久化的暂停与恢复状态；接入续接前，需要让原获批调用在用户补答后恢复，并保留原审批、请求参数和不透明的 `requestState`。
+> **审批边界**：用户输入只继续同一个已审批工具调用，不创建新的模型工具调用，也不会重复审批或改写原始参数。续接令牌只保存在内核 SQLite 私有表，不进入 Task、Event 或 RPC 响应；响应幂等摘要也只保存在该表中。
 
 ## MCP Tasks
 
@@ -68,13 +70,13 @@ HTTP `lifecycle` 默认 `auto`：首先使用 `2026-07-28` 的 `server/discover`
 
 资源、提示、Skills 元数据和 completion 查询使用相同的只读错误语义。
 
-Fliuno 将任务句柄持久化在正常工具结果中，由模型或调用方显式选择单次读取、短轮询、补答或协作取消；它不会在后台隐式轮询，也不会在重启后自动重发任何 Tasks 请求。读取结果必须匹配请求的任务 ID，且是完整快照。任务状态通知、自动续接、过期清理和 MRTR 续交互仍未实现。
+Fliuno 将任务句柄持久化在正常工具结果中，由模型或调用方显式选择单次读取、短轮询、补答或协作取消；它不会在后台隐式轮询，也不会在重启后自动重发任何 Tasks 请求。读取结果必须匹配请求的任务 ID，且是完整快照。Tasks 状态通知、自动轮询与过期清理仍未实现。MRTR 仅支持工具调用内的表单 elicitation 续接，不覆盖其他 server-to-client 请求类型。
 
 ## 当前范围
 
 隔离 stdio server 可配置 `assets`，在启动前把宿主列举的脚本、DLL 和数据复制到私有根并检查 SHA-256。工具审批另存完整注册摘要，绑定传输、端点、原生程序内容、参数、实际环境/凭据、预算与远端 Schema；即使展示别名不变，重启后的配置变化也不能复用旧审批。环境和凭据在注册时冻结，传输使用同一份值，见[注册身份](authority.md)。Windows 和 Debian Linux 来宾都已通过真实 Node/CPython 多文件 MCP 的允许、拒绝、篡改流程，命令与局限见[解释器清单](runtime-bundles.md)。MCP 不借此获得工作区代理或网络能力。
 
-除 MCP tools/list 和 tools/call 外，内核也按服务声明接入资源、资源模板、提示和 Tasks 控制，详见[内容通道](mcp-content.md)。这些操作均逐次审批，支持逐次审批的短时目录与 URI 监听。MCP server-to-client sampling、elicitation 和长期订阅仍待接入。工具继续使用 SDK 的一次性 `call_tool_once`，内容操作用原始 SDK 请求绕过自动 MRTR 和旧缓存回退；二者共享排队、取消与失败关闭逻辑。Tasks 当前由显式控制工具驱动；MRTR 续交互、任务状态通知、OAuth、旧版独立 HTTP+SSE 传输、热重连和外部真实服务验收都仍在后续计划中。stdio Windows AppContainer/Linux Landlock 隔离不适用于 HTTP 网络服务器；远程服务器访问由宿主网络身份和凭据决定。
+除 MCP tools/list 和 tools/call 外，内核也按服务声明接入资源、资源模板、提示和 Tasks 控制，详见[内容通道](mcp-content.md)。这些操作均逐次审批，支持逐次审批的短时目录与 URI 监听。工具调用内的表单 elicitation 可以通过显式的用户输入响应续接原调用；sampling、roots、独立 elicitation 请求和长期订阅仍未接入。工具继续使用 SDK 的一次性 `call_tool_once`，内容操作用原始 SDK 请求绕过自动 MRTR 和旧缓存回退；二者共享排队、取消与失败关闭逻辑。Tasks 当前由显式控制工具驱动；Tasks 状态通知、OAuth、旧版独立 HTTP+SSE 传输、热重连和外部真实服务验收仍在后续计划中。stdio Windows AppContainer/Linux Landlock 隔离不适用于 HTTP 网络服务器；远程服务器访问由宿主网络身份和凭据决定。
 
 协议版本矩阵、凭据处理、JSON/SSE、取消、不确定结果、审批/拒绝与重启行为由单元测试、官方 SDK HTTP server 互操作测试和本机 app-server 进程测试覆盖。运行本机端到端演示：
 

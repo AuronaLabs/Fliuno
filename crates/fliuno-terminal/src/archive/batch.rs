@@ -36,6 +36,10 @@ impl Service {
                     terminal_id: id.clone(),
                     message,
                 },
+                Err(ToolError::InputRequired { .. }) => TerminalArchiveBatchItem::Failed {
+                    terminal_id: id.clone(),
+                    message: "terminal archive does not support resumable tool input".into(),
+                },
                 Err(ToolError::OutcomeUnknown(message))
                 | Err(ToolError::OutcomeUnknownWithOutput { message, .. }) => {
                     TerminalArchiveBatchItem::OutcomeUnknown {

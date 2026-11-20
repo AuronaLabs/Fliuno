@@ -15,6 +15,7 @@ mod task_resume;
 mod task_revisions;
 mod task_starts;
 mod task_summaries;
+mod tool_inputs;
 mod work;
 mod workspaces;
 use super::*;
@@ -25,8 +26,9 @@ use std::{
     path::Path,
 };
 pub(crate) use task_resume::ResumeFacts;
+pub(crate) use tool_inputs::Mutation as ToolInputMutation;
 
-pub(crate) const SCHEMA_VERSION: u32 = 52;
+pub(crate) const SCHEMA_VERSION: u32 = 54;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -52,6 +54,7 @@ fn write_transition(
     artifacts: &[Artifact],
     binding: Option<RequestBinding<'_>>,
     resume: Option<&ApprovalResumeParams>,
+    tool_input: Option<&ToolInputMutation<'_>>,
 ) -> Result<Vec<u64>> {
     let running = task.status == TaskStatus::Running
         || task.agent_run.as_ref().is_some_and(|run| !run.finished);
@@ -67,6 +70,7 @@ fn write_transition(
     ])?;
     let summary_changed = task_summaries::record(tx, task)?;
     task_resume::record(tx, task)?;
+    tool_inputs::record(tx, task, tool_input)?;
     if let Some(continuation) = &task.remote_continuation
         && continuation.expected.state == AgentTaskState::InputRequired
     {
@@ -436,6 +440,12 @@ impl Kernel {
         if version < 52 {
             approvals::migrate_snapshot_open_indexes(&mut db)?;
         }
+        if version < 53 {
+            tool_inputs::migrate(&mut db)?;
+        }
+        if version < 54 {
+            work::migrate_waiting_input(&mut db)?;
+        }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         tools.insert(
@@ -522,7 +532,7 @@ impl Kernel {
         resume: Option<&ApprovalResumeParams>,
     ) -> Result<()> {
         let binding = key.map(|key| RequestBinding { key, receipt: None });
-        self.commit_transition(task, events, artifacts, binding, resume)
+        self.commit_transition(task, events, artifacts, binding, resume, None)
     }
 
     pub(crate) fn commit_task_start(
@@ -542,9 +552,10 @@ impl Kernel {
                     receipt: Some(&receipt),
                 }),
                 None,
+                None,
             )
         } else {
-            self.commit_transition(task, events, &[], None, None)
+            self.commit_transition(task, events, &[], None, None, None)
         }
     }
 
@@ -555,12 +566,23 @@ impl Kernel {
         artifacts: &[Artifact],
         binding: Option<RequestBinding<'_>>,
         resume: Option<&ApprovalResumeParams>,
+        tool_input: Option<&ToolInputMutation<'_>>,
     ) -> Result<()> {
         let tx = self.db.transaction()?;
-        let sequences = write_transition(&tx, task, events, artifacts, binding, resume)?;
+        let sequences =
+            write_transition(&tx, task, events, artifacts, binding, resume, tool_input)?;
         tx.commit()?;
         self.publish_task_events(&task.id, &task.session_id, &sequences, events);
         Ok(())
+    }
+
+    pub(crate) fn commit_tool_input_transition(
+        &mut self,
+        task: &Task,
+        events: &[EventKind],
+        mutation: ToolInputMutation<'_>,
+    ) -> Result<()> {
+        self.commit_transition(task, events, &[], None, None, Some(&mutation))
     }
 
     fn publish_task_events(

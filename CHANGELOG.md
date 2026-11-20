@@ -1,6 +1,6 @@
 # 更新记录
 
-## 0.0.3 开发中
+## 0.0.3
 
 | 改动 | 从哪里开始 |
 | --- | --- |
@@ -9,8 +9,11 @@
 | **会话历史** 可分页、增量订阅和搜索。新任务能调整历史扫描范围。 | [会话与上下文](docs/context.md) |
 | **交付物与用量** 支持订阅、带摘要的分段下载和批量用量汇总。 | [交付物](docs/protocol.md#审批事件与产物) · [模型用量](docs/protocol.md#模型用量) |
 | **持久状态与性能** 保留任务重试回执和审批执行段，减少分页、恢复和大输入重试时的解码。 | [测试与测量](docs/execution-evidence.md) |
+| **MCP 工具续接** 将表单 elicitation 暂停为持久任务，用户补答后继续同一获批调用，并将不透明令牌留在内核私有存储。 | [MCP 传输与边界](docs/mcp.md#预算和失败语义) |
 
 ### 详细改动
+
+- **MCP 工具输入续接**。远端返回 `input_required` 时进入 `waiting_input`；新 RPC `task/respondToolInput` 校验补答和原工具身份，续接同一参数与调用。支持 10 轮、每轮 256 KiB、SQLite 重启恢复和请求幂等；公开任务与事件不包含续接令牌或响应摘要。当前只接入表单 elicitation。[续接协议与安全边界](docs/protocol.md#工具输入续接) · [MCP 预算与失败语义](docs/mcp.md#预算和失败语义)
 
 - **批量读取会话任务计数**。工作台可一次刷新同一工作区最多 64 个会话的任务状态计数。[应用协议](docs/protocol.md#批量读取会话任务计数)
 
@@ -113,7 +116,7 @@
 - **Rust 终端输出续读**。客户端可类型化读取末尾或指定页、订阅后续字节，并核对会话、终端、游标和保留缺口。服务重启后可以从应用已经消费的位置继续。[Rust 终端客户端](docs/terminal-subscriptions.md#rust-客户端)
 - **项目文档**。README 和文档中心有浅色、深色与窄屏封面。文档按离线体验、客户端接入和内核开发组织，配置页分步说明怎样从演示走到自己的服务。[文档中心](docs/README.md)
 
-应用协议仍为 `0.1`，客户端可通过 `initialize.capabilities` 发现新增 RPC。[验收记录](docs/execution-evidence.md)
+SQLite 数据库升级到 schema v54。旧版本二进制会拒绝打开升级后的数据库；需要降级时请使用升级前的数据库备份。应用协议仍为 `0.1`，客户端可通过 `initialize.capabilities` 发现新增 RPC。[验收记录](docs/execution-evidence.md)
 
 ## 0.0.2
 

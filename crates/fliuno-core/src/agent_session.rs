@@ -74,6 +74,7 @@ impl Kernel {
             context: None,
             pending_approval: None,
             in_flight_tool: None,
+            pending_tool_input: None,
             model_outcome_unknown: false,
             output: None,
             model_steps: 0,

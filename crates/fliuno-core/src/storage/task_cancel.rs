@@ -60,7 +60,7 @@ impl Kernel {
             // data until the whole batch commits.
             let mut task = read_task(&tx, &item.task.id)?;
             let events = transition_to_cancelled(&mut task);
-            let sequences = write_transition(&tx, &task, &events, &[], None, None)?;
+            let sequences = write_transition(&tx, &task, &events, &[], None, None, None)?;
             item.task = task_summaries::summarize(&task);
             item.changed = true;
             committed.push((index, sequences, events));

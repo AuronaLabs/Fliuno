@@ -17,6 +17,7 @@ impl Kernel {
     ) -> Result<Task> {
         task.status = TaskStatus::Failed;
         task.pending_approval = None;
+        task.pending_tool_input = None;
         task.in_flight_tool = None;
         task.output = Some(message.clone());
         events.push(EventKind::TaskFailed { message });
@@ -256,6 +257,7 @@ pub(crate) fn transition_to_cancelled(task: &mut Task) -> Vec<EventKind> {
     debug_assert!(!task.status.is_terminal());
     task.status = TaskStatus::Cancelled;
     task.pending_approval = None;
+    task.pending_tool_input = None;
     let mut events = vec![EventKind::TaskCancelled];
     if let Some(run) = &mut task.agent_run {
         events.extend(agent::close_approvals(run));

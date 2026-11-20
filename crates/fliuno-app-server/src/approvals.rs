@@ -1,12 +1,28 @@
 //! Approval RPCs share one preparation and scheduling path.
 use super::{RpcError, RpcServer};
-use fliuno_core::{ApprovalOutcome, Error};
+use fliuno_core::{ApprovalOutcome, Error, ToolInputOutcome};
 use fliuno_protocol::{
     ApprovalRespondParams, ApprovalResumeParams, ApprovalRun, Event, EventKind, Task,
-    TaskRequestLookupParams, TaskSummary,
+    TaskRequestLookupParams, TaskSummary, ToolInputRespondParams,
 };
 
 impl RpcServer {
+    pub(super) fn respond_tool_input(
+        &self,
+        params: ToolInputRespondParams,
+    ) -> Result<Task, RpcError> {
+        let outcome = self.kernel()?.prepare_tool_input_response(&params)?;
+        match outcome {
+            ToolInputOutcome::Duplicate(task) => Ok(task),
+            ToolInputOutcome::Prepared { task, execution } => {
+                match self.scheduler.schedule_tool(execution) {
+                    Ok(()) => Ok(task),
+                    Err(message) => Ok(self.kernel()?.fail_task(&task.id, message.into())?),
+                }
+            }
+        }
+    }
+
     pub(super) fn cancel_approval_run(
         &self,
         p: TaskRequestLookupParams,

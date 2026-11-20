@@ -126,7 +126,7 @@ MCP stdio 配置必须显式选择 `trusted_host`、`windows_app_container` 或 
 
 `fliuno-sandbox` 的可选 `async-io` 模块负责 exec/MCP/ACP 共享的原生父端管道：Windows IOCP、Linux 非阻塞 pipe，输入完成与 EOF/error 各有证据，stdout/stderr 不借用 Tokio 文件线程池。Windows trusted host 与 AppContainer 共用 launch/process/inheritance/reactor 模块，策略分别准备 cwd/环境、可选 profile 和 Job 预算；共享所有权不会把宿主路径转换为隔离权限。Unix host 保留 Tokio process + 进程组。同步启动和 PTY 服务保持独立。原生执行报告的首次停止原因与最终清理状态分别记录，数据库只持久保存结果，不承担 OS 句柄管理，见 [执行证据](execution-evidence.md)。
 
-`fliuno-mcp` 将 stdio 启动与 Streamable HTTP 连接收敛为同一工具接口；配置解析和 URL/头部校验先于网络或子进程 IO。HTTP 使用官方 `rmcp` 3.11 SDK 承担版本协商与 JSON/SSE 编解码，发现结果进入与本机工具相同的 Schema 校验、审批和持久事件状态机。host 模块统一服务器所有权、请求排队、取消与有界关闭；content 模块按服务能力注册资源/模板/提示工具，独立校验参数和结果预算。内容请求一次取一页，URI 与提示角色保留为普通工具数据。调用超时、取消或传输失败后的副作用保持未知，禁止透明重放。OAuth、订阅、宿主交互与 MRTR 持久继续保留在适配层后续扩展，见[内容通道](mcp-content.md)。
+`fliuno-mcp` 将 stdio 启动与 Streamable HTTP 连接收敛为同一工具接口；配置解析和 URL/头部校验先于网络或子进程 IO。HTTP 使用官方 `rmcp` 3.11 SDK 承担版本协商与 JSON/SSE 编解码，发现结果进入与本机工具相同的 Schema 校验、审批和持久事件状态机。host 模块统一服务器所有权、请求排队、取消与有界关闭；content 模块按服务能力注册资源/模板/提示工具，独立校验参数和结果预算。内容请求一次取一页，URI 与提示角色保留为普通工具数据。工具调用遇到受支持的 MRTR 表单输入时，核心可持久暂停原获批调用，待用户响应后绑定相同工具身份和参数续接；续接令牌不进入公开任务或事件。调用超时、取消或传输失败后的副作用保持未知，禁止透明重放。OAuth、订阅及其他 server-to-client 交互仍待扩展，见[内容通道](mcp-content.md)。
 
 Skills 只在主机明确配置的目录中发现，先返回元数据再按名称读取指令。读取上限 128 KiB；目录名与 frontmatter 名称需匹配。技能文本不改变权限策略，也不自动执行其中的脚本。
 

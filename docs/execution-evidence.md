@@ -24,8 +24,15 @@
 - **终端**：[Rust 终端续读](#003-rust-终端续读2026-11-20)
 - **AG-UI 与审批**：[内嵌图片输入](#003-ag-ui-内嵌图片输入2026-11-20) · [内嵌 PDF](#003-ag-ui-内嵌-pdf2026-11-20) · [图片请求重试](#003-图片请求重试2026-11-20) · [AG-UI SSE 续传](#003-ag-ui-sse-续传2026-11-19) · [HTTP 宿主演示](#003-ag-ui-http-宿主演示2026-11-19) · [审批中断与续跑](#003-ag-ui-审批中断与续跑2026-11-19) · [批量审批回执](#003-批量审批回执2026-11-20)
 - **执行控制**：[每任务模型尝试上限](#003-每任务模型尝试上限2026-11-20) · [AG-UI 宿主模型尝试上限](#003-ag-ui-宿主模型尝试上限2026-11-20) · [审批续跑边界预检](#003-审批续跑边界预检2026-11-20)
+- **MCP**：[工具输入续接验收](#003-mcp-工具输入续接验收2026-11-20)
 
 </details>
+
+## 0.0.3 MCP 工具输入续接验收（2026-11-20）
+
+MCP 表单 elicitation 可将已获批工具调用暂停为 `waiting_input`。宿主提交 `task/respondToolInput` 后，内核校验原工具身份与用户响应，并续接同一调用。覆盖多轮输入、响应幂等、SQLite 重启恢复、取消清理、权限身份变化、大小与轮数上限，以及不支持输入类型的拒绝路径；续接令牌和响应摘要不会进入公开任务或事件。
+
+Windows 本机 `cargo fmt --all -- --check`、`cargo clippy --workspace --all-features --all-targets --locked -- -D warnings`、`cargo test --workspace --all-features --locked` 和 `cargo build --workspace --all-features --release --locked` 均以退出码 0 完成。
 
 ## 0.0.3 性能摘录
 

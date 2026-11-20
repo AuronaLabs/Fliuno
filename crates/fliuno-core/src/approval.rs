@@ -1,6 +1,7 @@
 //! Approval binding and durable preparation for tool execution.
 use super::*;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub enum ApprovalOutcome {
@@ -11,6 +12,20 @@ pub enum ApprovalOutcome {
     },
 }
 
+pub enum ToolInputOutcome {
+    Duplicate(Task),
+    Prepared {
+        task: Task,
+        execution: Box<PreparedToolExecution>,
+    },
+}
+
+struct ToolContinuation {
+    request_state: Option<String>,
+    responses: Value,
+    round: u8,
+}
+
 /// Owns the trusted tool and immutable inputs needed by a background worker.
 pub struct PreparedToolExecution {
     task_id: String,
@@ -18,6 +33,7 @@ pub struct PreparedToolExecution {
     call: ToolCall,
     workspace: Workspace,
     tool: Arc<dyn Tool>,
+    continuation: Option<ToolContinuation>,
 }
 
 impl PreparedToolExecution {
@@ -34,6 +50,7 @@ impl PreparedToolExecution {
             call,
             workspace,
             tool,
+            continuation: None,
         }
     }
     pub fn task_id(&self) -> &str {
@@ -57,8 +74,15 @@ impl PreparedToolExecution {
             workspace: &self.workspace,
         };
         // The tool may have completed an external effect before unwinding.
-        catch_unwind(AssertUnwindSafe(|| {
-            self.tool.execute(&context, &self.call, cancellation)
+        catch_unwind(AssertUnwindSafe(|| match &self.continuation {
+            Some(continuation) => self.tool.resume(
+                &context,
+                &self.call,
+                continuation.request_state.as_deref(),
+                &continuation.responses,
+                cancellation,
+            ),
+            None => self.tool.execute(&context, &self.call, cancellation),
         }))
         .unwrap_or_else(|_| Err(ToolError::OutcomeUnknown("tool execution panicked".into())))
     }
@@ -166,6 +190,7 @@ impl Kernel {
             call: approval.call,
             workspace,
             tool,
+            continuation: None,
         });
         Ok(ApprovalOutcome::Prepared { task, execution })
     }
@@ -197,6 +222,110 @@ impl Kernel {
         )?;
         task.in_flight_tool = Some(execution.call.clone());
         Ok(true)
+    }
+
+    /// Validate a user response and prepare the same approved tool call for continuation.
+    pub fn prepare_tool_input_response(
+        &mut self,
+        request: &ToolInputRespondParams,
+    ) -> Result<ToolInputOutcome> {
+        crate::task::validate_key(&request.request_id)?;
+        validate_identifier(&request.call_id, 256, "call ID")?;
+        let response_bytes = serde_json::to_vec(&request.responses)?;
+        if response_bytes.len() > MAX_TOOL_INPUT_BYTES {
+            return Err(Error::Invalid("tool input responses exceed 256 KiB".into()));
+        }
+        let response_sha256 = format!("{:x}", Sha256::digest(&response_bytes));
+        let task = self.get_task(&request.task_id)?;
+        let saved = self.tool_input_record(&request.task_id)?;
+        if saved.last_request_id.as_deref() == Some(&request.request_id) {
+            if saved.last_response_sha256.as_deref() == Some(&response_sha256)
+                && saved.call_id == request.call_id
+            {
+                return Ok(ToolInputOutcome::Duplicate(task));
+            }
+            return Err(Error::Conflict(
+                "tool input request ID was already used with a different response".into(),
+            ));
+        }
+        if task.status != TaskStatus::WaitingInput
+            || task.pending_tool_input.as_ref().is_none_or(|pending| {
+                pending.call_id != request.call_id || pending.round != saved.round
+            })
+            || saved.call_id != request.call_id
+            || task
+                .in_flight_tool
+                .as_ref()
+                .is_none_or(|call| call.id != request.call_id)
+            || saved.request_state.is_none()
+                && task
+                    .pending_tool_input
+                    .as_ref()
+                    .is_none_or(|pending| pending.requests.is_null())
+        {
+            return Err(Error::Conflict(
+                "task is not waiting for this tool input".into(),
+            ));
+        }
+        let call = task.in_flight_tool.clone().expect("checked in-flight call");
+        let tool = self
+            .tools
+            .get(&call.name)
+            .cloned()
+            .ok_or_else(|| Error::Conflict("approved tool is no longer registered".into()))?;
+        if tool.authority() != saved.authority {
+            return Err(Error::Conflict(
+                "approved tool registration changed while waiting for input".into(),
+            ));
+        }
+        if let Err(message) = tool.validate_input(
+            task.pending_tool_input
+                .as_ref()
+                .expect("checked pending input"),
+            &request.responses,
+        ) {
+            return Err(Error::Invalid(message));
+        }
+        if tool.validate(&call.arguments).is_err()
+            || matches!(
+                self.policy.evaluate(&tool.spec(), &call),
+                PolicyDecision::Deny(_)
+            )
+        {
+            return Err(Error::Conflict(
+                "tool permissions changed while waiting for input".into(),
+            ));
+        }
+        let workspace = self.workspace_for_task(&task.id)?;
+        let mut task = task;
+        task.status = TaskStatus::Running;
+        task.pending_tool_input = None;
+        let mutation = ToolInputMutation::Resume {
+            call_id: &request.call_id,
+            request_id: &request.request_id,
+            response_sha256: &response_sha256,
+        };
+        self.commit_tool_input_transition(
+            &task,
+            &[EventKind::ToolInputResolved {
+                call_id: request.call_id.clone(),
+                request_id: request.request_id.clone(),
+            }],
+            mutation,
+        )?;
+        let execution = Box::new(PreparedToolExecution {
+            task_id: task.id.clone(),
+            session_id: task.session_id.clone(),
+            call,
+            workspace,
+            tool,
+            continuation: Some(ToolContinuation {
+                request_state: saved.request_state,
+                responses: request.responses.clone(),
+                round: saved.round,
+            }),
+        });
+        Ok(ToolInputOutcome::Prepared { task, execution })
     }
 
     /// Apply a worker result only if its durable execution identity is current.
@@ -247,6 +376,12 @@ impl Kernel {
             Err(ToolError::OutcomeUnknownWithOutput { message, output }) => {
                 return self.record_unknown_tool(task, execution, message, Some(output));
             }
+            Err(ToolError::InputRequired {
+                requests,
+                request_state,
+            }) => {
+                return self.pause_tool_for_input(task, execution, requests, request_state);
+            }
             Err(error) => return self.fail(task, error.to_string()),
         };
 
@@ -268,6 +403,60 @@ impl Kernel {
             output: prepared.output,
         });
         self.commit(&task, &events, &prepared.artifacts)?;
+        Ok(task)
+    }
+
+    fn pause_tool_for_input(
+        &mut self,
+        mut task: Task,
+        execution: &PreparedToolExecution,
+        requests: Value,
+        request_state: Option<String>,
+    ) -> Result<Task> {
+        let request_bytes = serde_json::to_vec(&requests)?;
+        let state_bytes = request_state.as_ref().map_or(0, String::len);
+        let round = execution
+            .continuation
+            .as_ref()
+            .map_or(0, |continuation| continuation.round)
+            .saturating_add(1);
+        let pending = ToolInputRequest {
+            call_id: execution.call.id.clone(),
+            requests,
+            round,
+        };
+        let valid = round <= MAX_TOOL_INPUT_ROUNDS
+            && request_bytes.len() <= MAX_TOOL_INPUT_BYTES
+            && state_bytes <= MAX_TOOL_INPUT_BYTES
+            && (request_state.is_some() || !pending.requests.is_null())
+            && execution
+                .tool
+                .validate_input_request(&pending, request_state.as_deref())
+                .is_ok();
+        if !valid {
+            return self.record_unknown_tool(
+                task,
+                execution,
+                "tool requested unsupported, oversized or excessive additional input".into(),
+                None,
+            );
+        }
+        task.status = TaskStatus::WaitingInput;
+        task.pending_tool_input = Some(pending.clone());
+        self.commit_tool_input_transition(
+            &task,
+            &[EventKind::ToolInputRequired {
+                call_id: pending.call_id.clone(),
+                requests: pending.requests.clone(),
+                round,
+            }],
+            ToolInputMutation::Suspend {
+                call_id: &execution.call.id,
+                authority: &execution.tool.authority(),
+                request_state: request_state.as_deref(),
+                round,
+            },
+        )?;
         Ok(task)
     }
 
@@ -321,6 +510,16 @@ impl Kernel {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tool_input_tests;
+
+fn validate_identifier(value: &str, max_bytes: usize, label: &str) -> Result<()> {
+    if value.is_empty() || value.len() > max_bytes || !value.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(Error::Invalid(format!("invalid {label}")));
+    }
+    Ok(())
 }
 
 fn same_call(left: &ToolCall, right: &ToolCall) -> bool {

@@ -106,6 +106,7 @@ staged.sync_all()?;
 | `task/getSummaryByRequest` | `{sessionId,clientRequestId}` | 通过会话和请求键读取当前 `TaskSummary` |
 | `task/getSummariesByRequest` | `{sessionId,clientRequestIds}` | [按请求键批查任务](#按请求键批查任务)，返回同一水位的 `TaskSummaryBatch` |
 | `task/get` | `{taskId}` | Task |
+| `task/respondToolInput` | `{taskId,callId,requestId,responses}` | Task；提交补答并继续同一获批工具调用，能力标记为 `taskRespondToolInput` |
 | `task/getSummary` | `{taskId}` | 单条 `TaskSummary`，可以轻量轮询任务状态 |
 | `task/getSummaries` | `{taskIds,workspaceId?,sessionId?}` | 从同一查询快照按请求顺序返回摘要或 `null`，附上事件水位 |
 | `task/checkRemote` | `{taskId,waitMs?}` | `{checkId}`；后台只读核对，结果经事件返回，见 [A2A](a2a.md#显式核对远端状态) |
@@ -490,6 +491,14 @@ Rust 的 `EventReplay::next_latest_task_summary_revisions` 和 `EventFeed::next_
 
 每项包含 `id`、`taskId`、`sessionId`、`kind`、`allowOnceAvailable` 和 `expiresAtUnixMs`。`kind` 为 `tool_call`、`agent_permission` 或 `host_tool`。工具审批没有到期时间。若 `initialize.capabilities.pendingApprovalDetails` 为 `true`，客户端可通过 `approval/get` 查看单项原请求，再用 `approval/respond` 提交决定。已解决、过期或属于其他任务的项返回 `-32004`。提交时仍以当时的任务状态、审批期限、工具注册和策略为准。已撤销、解决或过期的审批会从列表移除。服务重启后保留模型工具审批，已丢失的 Agent 运行结束时清除相应审批。
 
+#### 工具输入续接
+
+`initialize.capabilities.taskRespondToolInput` 表示支持 `task/respondToolInput`。任务因工具返回可补答请求而进入 `waiting_input`；宿主展示 `Task.pendingToolInput` 后，使用原 `taskId`、`callId`、新的幂等 `requestId` 和响应对象提交。内核重新核对已批准工具的注册身份、参数和当前策略，只将原参数与响应交回同一工具的续接入口，不再调用模型，也不重复审批。请求状态和响应摘要保存在内核私有 SQLite 表，不出现在 Task、Event 或 RPC 响应中。每轮请求和响应最多 256 KiB，最多 10 轮；任务可取消，重启后待输入状态可继续处理。
+
+```json
+{"jsonrpc":"2.0","id":10,"method":"task/respondToolInput","params":{"taskId":"<task-id>","callId":"<tool-call-id>","requestId":"<response-id>","responses":{"<request-id>":{"action":"accept","content":{"code":"1234"}}}}}
+```
+
 `initialize.capabilities.pendingApprovalListTargetBytes` 给出审批列表的最大字节目标。`targetBytes` 接受 1024～8388608，按紧凑 JSON 数组 UTF-8 字节分页；首次遇到的单个大条目仍完整返回，`nextAfter` 可在同一 workspace 或 session 范围内续读。
 
 #### 待审批快照
@@ -795,7 +804,7 @@ HTTP 服务器不启动子进程，使用显式 `transport` 和环境变量名�
 
 握手声明 `resources` / `prompts` 的 MCP 服务还会注册按服务 ID 命名的资源、模板与提示工具。它们使用普通工具审批和持久结果，不增加另一套应用 RPC；分页、URI、角色数据、容量和恢复边界见[内容通道](mcp-content.md)。只有资源或提示的服务不接收 `tools/list`。
 
-`timeoutMs` 可选，默认 30000，取值范围 100..300000 毫秒，分别限制初始化、发现与每次调用；调用预算包含等待同一主机前序调用的时间。排队时的取消或等待超时返回已知失败，不向服务器发送请求，也不关闭正被其他任务使用的主机。请求发送后超时、取消或协议失败会关闭该 MCP 主机并将外部结果标记为未知；重启 Fliuno 后才会重新连接，内核不会自动重放该调用。子进程在 Unix 上放入独立进程组，在 Windows 上放入 Job Object，关闭时回收其进程树。工具别名稳定且限定为模型 API 可接受的 ASCII 名称，原始名称由适配器保存。stdio 生命周期、版本协商与消息格式由官方 `rmcp` 实现；HTTP 配置、生命周期、预算和支持边界见 [MCP 传输文档](mcp.md)。当前不向服务器提供模型采样或用户交互能力。
+`timeoutMs` 可选，默认 30000，取值范围 100..300000 毫秒，分别限制初始化、发现与每次调用；调用预算包含等待同一主机前序调用的时间。排队时的取消或等待超时返回已知失败，不向服务器发送请求，也不关闭正被其他任务使用的主机。请求发送后超时、取消或协议失败会关闭该 MCP 主机并将外部结果标记为未知；重启 Fliuno 后才会重新连接，内核不会自动重放该调用。工具内 MRTR 仅支持表单 elicitation 的显式用户补答续接；不支持自动 sampling、roots 或 URL elicitation。子进程在 Unix 上放入独立进程组，在 Windows 上放入 Job Object，关闭时回收其进程树。工具别名稳定且限定为模型 API 可接受的 ASCII 名称，原始名称由适配器保存。stdio 生命周期、版本协商与消息格式由官方 `rmcp` 实现；HTTP 配置、生命周期、预算和支持边界见 [MCP 传输文档](mcp.md)。
 
 stdio 的 `isolation` 必填。`trusted_host` 使用宿主用户权限，必须指定 `cwd`。Windows 可选择 `windows_app_container`，Linux 可选择 `linux_landlock`；隔离模式必须省略 `cwd`。两者都在新建私有目录中启动单个程序，不授予 workspace 路径，并在隔离设置失败时拒绝启动。Linux 要求 Landlock ABI 6，系统运行目录只读开放，seccomp 禁止 socket 操作；当前 cgroup v2 有可写委派时，sandbox 将进程放入私有 cgroup，并用 `cgroup.kill` 回收含 `setsid` 后代的整树。资源预算依赖已委派的 domain cgroup 和 `cpu`/`memory`/`pids` 控制器；通过 `linuxCgroupParent` 指定时，Fliuno 在该目录下创建私有子 cgroup 并设置所请求的 `memory.max`、`pids.max`、`cpu.max`，任何一项不可用都会拒绝启动。Windows 默认 Job 上限为 16 个活动进程和 512 MiB commit，可由 `resources` 覆盖；CPU quota 仅支持 Linux。Linux sandbox 的独立 guardian 通过 pidfd 监控宿主进程整体，宿主退出或 cgroup 所有者 Drop 后回收；创建它的线程退出不会终止任务。子进程在 exec 前完成 cgroup 加入和 pidfd 交接确认，guardian 不可用时拒绝执行。Windows 系统共享资源仍受既有 ACL 控制。解释器伴随文件通过宿主固定摘要的 `assets` 清单提供；MCP workspace 代理尚未实现，见[伴随文件](runtime-bundles.md)。其他平台请求不支持的隔离模式会明确失败，绝不退回宿主权限。
 

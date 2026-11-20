@@ -90,7 +90,7 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
     );
     assert_eq!(
         live["taskCounts"],
-        json!({"running":1,"waitingApproval":2,"interrupted":0,"completed":1,"cancelled":1,"failed":1})
+        json!({"running":1,"waitingApproval":2,"waitingInput":0,"interrupted":0,"completed":1,"cancelled":1,"failed":1})
     );
     assert_eq!(
         live["approvals"]["page"]["items"][0]["taskId"],
@@ -137,6 +137,7 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
         TaskStatusCounts {
             running: 0,
             waiting_approval: 2,
+            waiting_input: 0,
             interrupted: 1,
             completed: 1,
             cancelled: 1,

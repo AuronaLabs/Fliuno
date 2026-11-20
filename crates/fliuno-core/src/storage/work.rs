@@ -87,6 +87,93 @@ pub(super) fn migrate(db: &mut Connection) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn migrate_waiting_input(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    let has_column: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('work_status_counts')
+         WHERE name='waiting_input')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_column {
+        tx.execute_batch(
+            "ALTER TABLE work_status_counts ADD COLUMN waiting_input INTEGER NOT NULL DEFAULT 0 CHECK(waiting_input>=0);",
+        )?;
+    }
+    tx.execute_batch(
+        "UPDATE work_status_counts SET waiting_input=CASE scope
+             WHEN 0 THEN (SELECT COUNT(*) FROM task_summary_status WHERE status='waiting_input')
+             WHEN 1 THEN (SELECT COUNT(*) FROM task_summary_status WHERE status='waiting_input' AND session_id=owner)
+             ELSE (SELECT COUNT(*) FROM task_summary_status WHERE status='waiting_input' AND workspace_id=owner)
+         END;
+         DROP TRIGGER IF EXISTS work_status_insert;
+         DROP TRIGGER IF EXISTS work_status_update;
+         DROP TRIGGER IF EXISTS work_status_delete;",
+    )?;
+    let mut statuses = STATUSES.to_vec();
+    statuses.push(TaskStatus::WaitingInput);
+    install_triggers(&tx, &statuses)?;
+    tx.pragma_update(None, "user_version", 54)?;
+    tx.commit()?;
+    Ok(())
+}
+
+fn install_triggers(tx: &rusqlite::Transaction<'_>, statuses: &[TaskStatus]) -> Result<()> {
+    let cols = statuses
+        .iter()
+        .map(|state| state.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let new_values = statuses
+        .iter()
+        .map(|state| format!("NEW.status='{}'", state.as_str()))
+        .collect::<Vec<_>>()
+        .join(",");
+    let add = statuses
+        .iter()
+        .map(|state| {
+            let name = state.as_str();
+            format!("{name}={name}+excluded.{name}")
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let transition = statuses
+        .iter()
+        .map(|state| {
+            let name = state.as_str();
+            format!("{name}={name}+(NEW.status='{name}')-(OLD.status='{name}')")
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let remove = statuses
+        .iter()
+        .map(|state| {
+            let name = state.as_str();
+            format!("{name}={name}-(OLD.status='{name}')")
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    const OWNERS: &str = "(scope=0 AND owner='')
+        OR (scope=1 AND owner=OLD.session_id)
+        OR (scope=2 AND owner=COALESCE(OLD.workspace_id,''))";
+    tx.execute_batch(&format!(
+        "CREATE TRIGGER work_status_insert AFTER INSERT ON task_summary_status BEGIN
+             INSERT INTO work_status_counts(scope,owner,{cols})
+             VALUES (0,'',{new_values}), (1,NEW.session_id,{new_values}),
+                    (2,COALESCE(NEW.workspace_id,''),{new_values})
+             ON CONFLICT(scope,owner) DO UPDATE SET {add};
+         END;
+         CREATE TRIGGER work_status_update AFTER UPDATE OF status ON task_summary_status
+         WHEN NEW.status<>OLD.status BEGIN
+             UPDATE work_status_counts SET {transition} WHERE {OWNERS};
+         END;
+         CREATE TRIGGER work_status_delete AFTER DELETE ON task_summary_status BEGIN
+             UPDATE work_status_counts SET {remove} WHERE {OWNERS};
+         END;"
+    ))?;
+    Ok(())
+}
+
 impl Kernel {
     pub fn work_snapshot(&self, request: &WorkSnapshotParams) -> Result<WorkSnapshot> {
         if let Some(limit) = request.recent_task_limit
@@ -111,7 +198,7 @@ impl Kernel {
         };
         let task_counts = tx
             .prepare_cached(
-                "SELECT running,waiting_approval,interrupted,completed,cancelled,failed
+                "SELECT running,waiting_approval,interrupted,completed,cancelled,failed,waiting_input
              FROM work_status_counts WHERE scope=?1 AND owner=?2",
             )?
             .query_row(params![scope, owner], |row| read_counts(row, 0))
@@ -138,6 +225,7 @@ fn read_counts(row: &rusqlite::Row<'_>, offset: usize) -> rusqlite::Result<TaskS
         completed: row.get::<_, i64>(offset + 3)? as u64,
         cancelled: row.get::<_, i64>(offset + 4)? as u64,
         failed: row.get::<_, i64>(offset + 5)? as u64,
+        waiting_input: row.get::<_, i64>(offset + 6)? as u64,
     })
 }
 

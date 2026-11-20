@@ -17,6 +17,7 @@ pub use query::MAX_TASK_LIST_TARGET_BYTES;
 pub const MAX_APPROVAL_LIST_TARGET_BYTES: u32 = MAX_TASK_LIST_TARGET_BYTES;
 mod registry;
 mod storage;
+pub(crate) use storage::ToolInputMutation;
 mod task;
 mod tool;
 
@@ -29,7 +30,7 @@ pub use agent_remote::{
     PreparedRemoteTaskCheck,
 };
 pub use agent_tools::AgentToolObservation;
-pub use approval::{ApprovalOutcome, PreparedToolExecution};
+pub use approval::{ApprovalOutcome, PreparedToolExecution, ToolInputOutcome};
 pub use context::{MAX_CONTEXT_BYTES, MAX_CONTEXT_CANDIDATES, MAX_CONTEXT_TURNS, context_prompt};
 pub use error::{Error, Result};
 pub use events::{

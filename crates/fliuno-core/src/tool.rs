@@ -1,5 +1,5 @@
 use crate::{CancellationToken, new_id};
-use fliuno_protocol::{Artifact, ArtifactBody, ToolCall, Workspace};
+use fliuno_protocol::{Artifact, ArtifactBody, ToolCall, ToolInputRequest, Workspace};
 
 mod binary_artifact;
 pub(crate) use binary_artifact::CreateBinaryArtifact;
@@ -48,6 +48,11 @@ pub struct ToolOutput {
 pub enum ToolError {
     #[error("{0}")]
     Failed(String),
+    #[error("tool requires user input")]
+    InputRequired {
+        requests: Value,
+        request_state: Option<String>,
+    },
     #[error("{0}")]
     OutcomeUnknown(String),
     /// Bounded observed evidence is auditable without implying completion.
@@ -92,6 +97,38 @@ pub trait Tool: Send + Sync {
         call: &ToolCall,
         cancellation: &CancellationToken,
     ) -> std::result::Result<ToolOutput, ToolError>;
+
+    /// Validate user responses against a request previously returned by this tool.
+    fn validate_input(
+        &self,
+        _request: &ToolInputRequest,
+        _responses: &Value,
+    ) -> std::result::Result<(), String> {
+        Err("tool does not accept resumable user input".into())
+    }
+
+    /// Reject unsupported or malformed input requests before exposing them.
+    fn validate_input_request(
+        &self,
+        _request: &ToolInputRequest,
+        _request_state: Option<&str>,
+    ) -> std::result::Result<(), String> {
+        Err("tool does not accept resumable user input".into())
+    }
+
+    /// Continue the same approved tool call using its opaque persisted state.
+    fn resume(
+        &self,
+        _context: &ToolContext<'_>,
+        _call: &ToolCall,
+        _request_state: Option<&str>,
+        _responses: &Value,
+        _cancellation: &CancellationToken,
+    ) -> std::result::Result<ToolOutput, ToolError> {
+        Err(ToolError::Failed(
+            "tool does not support resumable user input".into(),
+        ))
+    }
 }
 
 #[derive(serde::Deserialize)]

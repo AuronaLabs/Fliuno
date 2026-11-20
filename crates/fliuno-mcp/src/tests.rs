@@ -47,6 +47,7 @@ impl ServerHandler for Fixture {
 
 struct MrtrFixture {
     calls: Arc<AtomicUsize>,
+    continuations: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
 }
 
 impl ServerHandler for MrtrFixture {
@@ -73,10 +74,16 @@ impl ServerHandler for MrtrFixture {
 
     async fn call_tool(
         &self,
-        _request: CallToolRequestParams,
+        request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.calls.fetch_add(1, Ordering::SeqCst) > 0 {
+            self.continuations
+                .lock()
+                .unwrap()
+                .push(serde_json::to_value(&request).unwrap());
+            return Ok(CallToolResult::success(vec![ContentBlock::text("continued")]).into());
+        }
         let required = serde_json::from_value::<rmcp::model::InputRequiredResult>(json!({
             "resultType":"input_required",
             "inputRequests":{
@@ -101,8 +108,9 @@ impl ServerHandler for MrtrFixture {
 }
 
 #[test]
-fn mrtr_input_required_is_unknown_and_never_replayed() {
+fn mrtr_form_input_resumes_the_same_tool_call_with_private_state() {
     let calls = Arc::new(AtomicUsize::new(0));
+    let continuations = Arc::new(std::sync::Mutex::new(Vec::new()));
     let runtime = Runtime::new().unwrap();
     let (service, tools) = runtime.block_on(async {
         let (client_io, server_io) = tokio::io::duplex(16384);
@@ -110,13 +118,18 @@ fn mrtr_input_required_is_unknown_and_never_replayed() {
         let client_peer_info = client.clone();
         let server_peer_info = MrtrFixture {
             calls: Arc::clone(&calls),
+            continuations: Arc::clone(&continuations),
         }
         .get_info();
         tokio::spawn({
             let calls = Arc::clone(&calls);
+            let continuations = Arc::clone(&continuations);
             async move {
                 rmcp::service::serve_directly::<RoleServer, _, _, _, _>(
-                    MrtrFixture { calls },
+                    MrtrFixture {
+                        calls,
+                        continuations,
+                    },
                     server_io,
                     Some(client_peer_info),
                 )
@@ -155,20 +168,39 @@ fn mrtr_input_required_is_unknown_and_never_replayed() {
         arguments: json!({"text":"needs input"}),
     };
 
-    let first = tool.execute(&context, &call, &CancellationToken::new());
-    let observed = first
-        .as_ref()
-        .err()
-        .map_or_else(|| "unexpected success".to_owned(), ToString::to_string);
-    assert!(
-        matches!(&first, Err(ToolError::OutcomeUnknown(message)) if message.contains("continuation")),
-        "unexpected first result: {observed}"
-    );
-    assert!(matches!(
-        tool.execute(&context, &call, &CancellationToken::new()),
-        Err(ToolError::Failed(message)) if message.contains("host is closed")
-    ));
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let (requests, request_state) = match tool.execute(&context, &call, &CancellationToken::new()) {
+        Err(ToolError::InputRequired {
+            requests,
+            request_state,
+        }) => (requests, request_state),
+        _ => panic!("expected MCP input request"),
+    };
+    let pending = ToolInputRequest {
+        call_id: call.id.clone(),
+        requests,
+        round: 1,
+    };
+    tool.validate_input_request(&pending, request_state.as_deref())
+        .unwrap();
+    let responses = json!({"user-input":{"action":"accept","content":{"code":"1234"}}});
+    tool.validate_input(&pending, &responses).unwrap();
+    let result = tool
+        .resume(
+            &context,
+            &call,
+            request_state.as_deref(),
+            &responses,
+            &CancellationToken::new(),
+        )
+        .unwrap();
+    assert_eq!(result.output["content"][0]["text"], "continued");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let continuation = continuations.lock().unwrap();
+    assert_eq!(continuation.len(), 1);
+    assert_eq!(continuation[0]["name"], "echo");
+    assert_eq!(continuation[0]["arguments"], json!({"text":"needs input"}));
+    assert_eq!(continuation[0]["requestState"], "opaque-state");
+    assert_eq!(continuation[0]["inputResponses"], responses);
 }
 
 #[test]

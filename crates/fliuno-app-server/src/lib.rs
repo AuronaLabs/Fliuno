@@ -454,6 +454,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["taskStartSummary"] = json!(true);
+            capabilities["taskRespondToolInput"] = json!(true);
             capabilities["taskImageInput"] = json!(true);
             capabilities["taskPdfInput"] = json!(true);
             capabilities["taskArtifactInput"] = json!(true);
@@ -729,6 +730,10 @@ impl RpcServer {
                     p.limit,
                     p.target_bytes,
                 )?)
+            }
+            "task/respondToolInput" => {
+                let p: ToolInputRespondParams = decode(params)?;
+                json!(self.respond_tool_input(p)?)
             }
             "task/listSummaries" => {
                 let p: TaskSummaryListParams = decode(params)?;
@@ -1826,6 +1831,179 @@ mod tests {
             .unwrap();
         assert!(response.get("error").is_none(), "{response}");
         response["result"].clone()
+    }
+
+    struct InputProvider;
+
+    impl fliuno_core::ModelProvider for InputProvider {
+        fn next(
+            &self,
+            task: &Task,
+            _: &[fliuno_core::ToolSpec],
+            _: &fliuno_core::CancellationToken,
+        ) -> std::result::Result<fliuno_core::ModelTurn, String> {
+            if task
+                .messages
+                .iter()
+                .any(|message| matches!(message, Message::ToolResult { .. }))
+            {
+                Ok(fliuno_core::ModelDecision::Complete("accepted".into()).into())
+            } else {
+                Ok(fliuno_core::ModelDecision::Call(fliuno_protocol::ToolCall {
+                    id: "input-call".into(),
+                    name: "input_tool".into(),
+                    arguments: json!({"target":"service"}),
+                })
+                .into())
+            }
+        }
+    }
+
+    struct InputTool(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl fliuno_core::Tool for InputTool {
+        fn spec(&self) -> fliuno_core::ToolSpec {
+            fliuno_core::ToolSpec {
+                name: "input_tool".into(),
+                description: "Test tool input".into(),
+                effect: fliuno_core::ToolEffect::External,
+                input_schema: json!({"type":"object","required":["target"],"properties":{"target":{"type":"string"}},"additionalProperties":false}),
+            }
+        }
+
+        fn validate(&self, arguments: &Value) -> std::result::Result<(), String> {
+            (arguments == &json!({"target":"service"}))
+                .then_some(())
+                .ok_or_else(|| "invalid fixture arguments".into())
+        }
+
+        fn execute(
+            &self,
+            _: &fliuno_core::ToolContext<'_>,
+            _: &fliuno_protocol::ToolCall,
+            _: &fliuno_core::CancellationToken,
+        ) -> std::result::Result<fliuno_core::ToolOutput, fliuno_core::ToolError> {
+            Err(fliuno_core::ToolError::InputRequired {
+                requests: json!({"confirmation":{"message":"Confirm"}}),
+                request_state: Some("private-state".into()),
+            })
+        }
+
+        fn validate_input_request(
+            &self,
+            request: &fliuno_protocol::ToolInputRequest,
+            state: Option<&str>,
+        ) -> std::result::Result<(), String> {
+            (request.requests == json!({"confirmation":{"message":"Confirm"}})
+                && state == Some("private-state"))
+            .then_some(())
+            .ok_or_else(|| "invalid fixture request".into())
+        }
+
+        fn validate_input(
+            &self,
+            _: &fliuno_protocol::ToolInputRequest,
+            responses: &Value,
+        ) -> std::result::Result<(), String> {
+            (responses == &json!({"confirmation":{"accepted":true}}))
+                .then_some(())
+                .ok_or_else(|| "invalid fixture response".into())
+        }
+
+        fn resume(
+            &self,
+            _: &fliuno_core::ToolContext<'_>,
+            _: &fliuno_protocol::ToolCall,
+            state: Option<&str>,
+            _: &Value,
+            _: &fliuno_core::CancellationToken,
+        ) -> std::result::Result<fliuno_core::ToolOutput, fliuno_core::ToolError> {
+            if state != Some("private-state") {
+                return Err(fliuno_core::ToolError::Failed(
+                    "continuation state changed".into(),
+                ));
+            }
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(fliuno_core::ToolOutput {
+                output: json!({"accepted":true}),
+                artifacts: vec![],
+            })
+        }
+    }
+
+    #[test]
+    fn tool_input_rpc_schedules_one_resumable_approved_call() {
+        let resumed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut kernel = Kernel::in_memory(Box::new(InputProvider)).unwrap();
+        kernel
+            .register_tool(Box::new(InputTool(Arc::clone(&resumed))))
+            .unwrap();
+        let workspace = kernel
+            .open_workspace(std::env::current_dir().unwrap().to_str().unwrap())
+            .unwrap();
+        let session = kernel.create_session(&workspace.id).unwrap();
+        let mut server = RpcServer::new(kernel);
+        let init = rpc(
+            &mut server,
+            "initialize",
+            json!({"protocolVersion":"0.1","clientName":"tool-input-test"}),
+        );
+        assert_eq!(init["capabilities"]["taskRespondToolInput"], true);
+        let started = rpc(
+            &mut server,
+            "task/start",
+            json!({"sessionId":session.id,"input":"continue"}),
+        );
+        let task_id = started["id"].as_str().unwrap().to_owned();
+        let wait = |server: &mut RpcServer, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                let task = rpc(server, "task/get", json!({"taskId":task_id}));
+                if task["status"] == expected {
+                    return task;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "task never entered {expected}: {task}"
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let waiting_approval = wait(&mut server, "waiting_approval");
+        rpc(
+            &mut server,
+            "approval/respond",
+            json!({"taskId":task_id,"approvalId":waiting_approval["pendingApproval"]["id"],"decision":"allow_once"}),
+        );
+        let waiting_input = wait(&mut server, "waiting_input");
+        assert_eq!(waiting_input["pendingToolInput"]["callId"], "input-call");
+        assert_eq!(
+            waiting_input["inFlightTool"]["arguments"],
+            json!({"target":"service"})
+        );
+        assert!(!waiting_input.to_string().contains("private-state"));
+
+        let response = json!({
+            "taskId":task_id,"callId":"input-call","requestId":"input-response-1",
+            "responses":{"confirmation":{"accepted":true}}
+        });
+        rpc(&mut server, "task/respondToolInput", response.clone());
+        let completed = wait(&mut server, "completed");
+        assert_eq!(completed["output"], "accepted");
+        assert_eq!(resumed.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let duplicate = rpc(&mut server, "task/respondToolInput", response);
+        assert_eq!(duplicate["status"], "completed");
+        assert_eq!(resumed.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let events = server
+            .kernel()
+            .unwrap()
+            .list_events(&task_id, 0, 100)
+            .unwrap();
+        assert!(!events.events.iter().any(|event| {
+            serde_json::to_string(&event.data)
+                .unwrap()
+                .contains("private-state")
+        }));
     }
 
     #[test]
