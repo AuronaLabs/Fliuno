@@ -1980,6 +1980,7 @@
     "task/getSummaries": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskSummaryBatchParams",
+      "description": "Request order and optional scope for bounded task point reads.",
       "type": "object",
       "properties": {
         "taskIds": {
@@ -2160,6 +2161,41 @@
       "additionalProperties": false,
       "required": [
         "taskId"
+      ]
+    },
+    "task/getResumeStatuses": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskSummaryBatchParams",
+      "description": "Request order and optional scope for bounded task point reads.",
+      "type": "object",
+      "properties": {
+        "taskIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!-~]+$"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        },
+        "workspaceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskIds"
       ]
     },
     "task/resume": {
@@ -5038,6 +5074,95 @@
         "disposition"
       ],
       "$defs": {
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "TaskResumeDisposition": {
+          "description": "Current policy decision for an explicit resume. It reserves no work.",
+          "type": "string",
+          "enum": [
+            "ready",
+            "retry_uncertain_model_step",
+            "not_interrupted",
+            "remote_continuation",
+            "agent_already_started",
+            "agent_unavailable",
+            "agent_registration_changed",
+            "tool_outcome_unknown",
+            "model_step_budget_exhausted"
+          ]
+        }
+      }
+    },
+    "TaskResumeStatusBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskResumeStatusBatch",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "One entry per task ID. Missing and out-of-scope rows retain their position.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TaskResumeStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "throughSequence": {
+          "description": "Global event watermark from the same read as the task state.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "throughSequence"
+      ],
+      "$defs": {
+        "TaskResumeStatus": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskStatus"
+            },
+            "disposition": {
+              "$ref": "#/$defs/TaskResumeDisposition"
+            },
+            "remainingModelSteps": {
+              "description": "None for external agents; zero when a model task cannot make another attempt.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "status",
+            "disposition"
+          ]
+        },
         "TaskStatus": {
           "type": "string",
           "enum": [

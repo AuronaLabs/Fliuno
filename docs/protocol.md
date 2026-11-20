@@ -113,6 +113,7 @@ staged.sync_all()?;
 | `task/cancelSummary` | `{taskId}` | 复用取消流程，返回 `TaskSummary`。能力标记为 `taskCancelSummary`。 |
 | `task/cancelBatch` | `{scope,taskIds}` | 原子提交选中任务的取消，返回 `{items:[{task,changed}],throughSequence}` |
 | `task/getResumeStatus` | `{taskId}` | [`TaskResumeStatus`](#任务恢复判断)，查询当前能否恢复及原因 |
+| `task/getResumeStatuses` | `{taskIds,workspaceId?,sessionId?}` | [`TaskResumeStatusBatch`](#批量查询恢复状态)，按入参顺序返回同一读取时点的恢复状态 |
 | `task/resume` | `{taskId,retryUncertainModelStep?:false}` | Task；恢复后排队；外部未知结果不能重试；模型结果不确定时须显式传 true |
 
 ### 审批、事件与产物
@@ -267,6 +268,12 @@ SQLite v46 保存自定义上限，也能读取已有任务和两项式回执；
 | `agent_already_started` / `remote_continuation` | 任务不允许通过 `task/resume` 重放；先核对已保存的 Agent 或远端执行证据。 |
 
 查询由 SQLite 从同一任务快照提取恢复所需字段，正文和操作参数不会交给 Rust 解码，不需要迁移数据库。结果只反映读取当时的任务和注册。`task/resume` 会加载完整任务并重新判断；期间的取消、状态变化或调度容量仍可能影响恢复。审批仍走 `approval/respond` 等审批入口。
+
+### 批量查询恢复状态
+
+服务通过 `initialize.capabilities.taskResumeStatusBatch` 声明支持，并在 `maxTaskResumeStatusBatch` 公布单次上限，当前为 64。Rust 宿主可调用 `get_task_resume_statuses`。请求接受 `taskIds`，以及可选的 `sessionId` 或 `workspaceId`，两种范围只能选一种。
+
+响应包含 `items` 和 `throughSequence`。每项使用与单条查询相同的恢复状态。重复 ID 保留原位置，缺失或超出范围的任务填 `null`。事件游标和任务状态来自同一次 SQLite 读取，宿主可从该游标补读后续变动。实际恢复时，`task/resume` 会再次检查任务状态及重试同意。
 
 ### 会话目录
 

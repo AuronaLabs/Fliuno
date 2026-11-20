@@ -31,12 +31,32 @@ impl Kernel {
     /// Inspect current recovery policy without queuing work or changing evidence.
     pub fn get_task_resume_status(&self, task_id: &str) -> Result<TaskResumeStatus> {
         let task = self.read_resume_facts(task_id)?;
-        Ok(TaskResumeStatus {
-            disposition: self.resume_disposition(&task),
+        Ok(self.resume_status(task_id, &task))
+    }
+
+    /// Read all requested recovery decisions at one event watermark.
+    pub fn get_task_resume_statuses(
+        &self,
+        request: &TaskSummaryBatchParams,
+    ) -> Result<TaskResumeStatusBatch> {
+        let (items, through_sequence) = self.read_resume_facts_batch(request)?;
+        Ok(TaskResumeStatusBatch {
+            items: items
+                .into_iter()
+                .zip(&request.task_ids)
+                .map(|(task, id)| task.map(|facts| self.resume_status(id, &facts)))
+                .collect(),
+            through_sequence,
+        })
+    }
+
+    fn resume_status(&self, id: &str, task: &ResumeFacts<'_>) -> TaskResumeStatus {
+        TaskResumeStatus {
+            disposition: self.resume_disposition(task),
             remaining_model_steps: task.remaining_model_steps(),
             status: task.status,
-            task_id: task_id.into(),
-        })
+            task_id: id.into(),
+        }
     }
 
     fn resume_disposition(&self, task: &ResumeFacts<'_>) -> Disposition {

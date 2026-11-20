@@ -1,5 +1,5 @@
 //! Bounded point reads for updating a host's task list.
-use crate::TaskSummary;
+use crate::{TaskResumeStatus, TaskSummary};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +8,7 @@ pub const MAX_TASK_SUMMARY_ID_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+/// Request order and optional scope for bounded task point reads.
 pub struct TaskSummaryBatchParams {
     #[schemars(length(min = 1, max = MAX_TASK_SUMMARY_BATCH))]
     #[schemars(inner(length(min = 1, max = MAX_TASK_SUMMARY_ID_BYTES), regex(pattern = "^[!-~]+$")))]
@@ -24,5 +25,14 @@ pub struct TaskSummaryBatch {
     /// One entry per requested ID, including duplicates. Missing and out-of-scope rows are null.
     pub items: Vec<Option<TaskSummary>>,
     /// Global event watermark read from the same database snapshot as the summaries.
+    pub through_sequence: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskResumeStatusBatch {
+    /// One entry per task ID. Missing and out-of-scope rows retain their position.
+    pub items: Vec<Option<TaskResumeStatus>>,
+    /// Global event watermark from the same read as the task state.
     pub through_sequence: u64,
 }

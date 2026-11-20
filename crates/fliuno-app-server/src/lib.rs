@@ -459,6 +459,8 @@ impl RpcServer {
             capabilities["taskArtifactInput"] = json!(true);
             capabilities["maxTaskModelSteps"] = json!(MAX_TASK_MODEL_STEPS);
             capabilities["taskResumeStatus"] = json!(true);
+            capabilities["taskResumeStatusBatch"] = json!(true);
+            capabilities["maxTaskResumeStatusBatch"] = json!(MAX_TASK_SUMMARY_BATCH);
             capabilities["taskCancelSummary"] = json!(true);
             capabilities["taskCancelBatch"] = json!(true);
             capabilities["maxTaskCancelBatch"] = json!(MAX_TASK_CANCEL_BATCH);
@@ -902,6 +904,10 @@ impl RpcServer {
             "task/getResumeStatus" => {
                 let p: TaskIdParams = decode(params)?;
                 json!(self.kernel()?.get_task_resume_status(&p.task_id)?)
+            }
+            "task/getResumeStatuses" => {
+                let p: TaskSummaryBatchParams = decode(params)?;
+                json!(self.kernel()?.get_task_resume_statuses(&p)?)
             }
             "task/resume" => {
                 let p: TaskResumeParams = decode(params)?;

@@ -187,3 +187,149 @@ fn task_summary_batch_reads_current_scoped_rows_in_input_order() {
     drop(server);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn task_resume_status_batch_preserves_scope_and_read_only_recovery_policy() {
+    use fliuno_protocol::{TaskResumeDisposition, TaskResumeStatus};
+    use http_wire::{Fixture, Response};
+
+    let root = std::env::temp_dir().join(format!("fliuno-resume-batch-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(root.join("outside")).unwrap();
+    let db = root.join("kernel.db");
+    let wire = Fixture::start(|request| {
+        let body = if request.body["input"].as_array().unwrap().last().unwrap()["content"]
+            == "complete"
+        {
+            json!({"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"done"}]}]})
+        } else {
+            json!({"output":[]})
+        };
+        Response::json(200, body)
+    });
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&wire.url("/v1/")));
+    assert_eq!(
+        peer.call("task/getResumeStatuses", json!({"taskIds":["missing"]})),
+        json!({"items":[null],"throughSequence":0})
+    );
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let outside = peer.call("workspace/open", json!({"root":root.join("outside")}));
+    let focus = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let sibling = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let foreign = peer.call("session/create", json!({"workspaceId":outside["id"]}));
+    let mut start = |session: &Value, input: &str, limit, status| {
+        let task = peer.call(
+            "task/startSummary",
+            json!({
+                "sessionId":session["id"],"input":input,"maxModelSteps":limit
+            }),
+        );
+        let id = task["id"].as_str().unwrap();
+        peer.wait_for_status(id, status);
+        id.to_owned()
+    };
+    let uncertain = start(&focus, &"inspect\n".repeat(25_000), 2, "interrupted");
+    let exhausted = start(&sibling, "exhaust budget", 1, "interrupted");
+    let finished = start(&focus, "complete", 2, "completed");
+    let excluded = start(&foreign, "complete", 2, "completed");
+    drop(peer);
+
+    let (server, mut client) = super::ag_ui_run::connect(&db);
+    assert_eq!(client.info().capabilities["taskResumeStatusBatch"], true);
+    assert_eq!(
+        client.info().capabilities["maxTaskResumeStatusBatch"],
+        MAX_TASK_SUMMARY_BATCH
+    );
+    let before = client.event_watermark(|_| {}).unwrap();
+    let request = TaskSummaryBatchParams {
+        workspace_id: Some(ws["id"].as_str().unwrap().to_owned()),
+        session_id: None,
+        task_ids: vec![
+            exhausted.clone(),
+            excluded,
+            uncertain.clone(),
+            "missing".into(),
+            finished.clone(),
+            uncertain.clone(),
+        ],
+    };
+    let single = |client: &mut Client<_, _>, id| client.get_task_resume_status(id, |_| {}).unwrap();
+    let exhausted_status = single(&mut client, &exhausted);
+    let uncertain_status = single(&mut client, &uncertain);
+    let finished_status = single(&mut client, &finished);
+    assert_eq!(
+        exhausted_status.disposition,
+        TaskResumeDisposition::ModelStepBudgetExhausted
+    );
+    assert_eq!(
+        uncertain_status.disposition,
+        TaskResumeDisposition::RetryUncertainModelStep
+    );
+    assert_eq!(uncertain_status.remaining_model_steps, Some(1));
+    assert_eq!(
+        finished_status.disposition,
+        TaskResumeDisposition::NotInterrupted
+    );
+    let batch = client.get_task_resume_statuses(&request, |_| {}).unwrap();
+    assert_eq!(batch.through_sequence, before);
+    assert_eq!(
+        batch.items,
+        vec![
+            Some(exhausted_status),
+            None,
+            Some(uncertain_status.clone()),
+            None,
+            Some(finished_status.clone()),
+            Some(uncertain_status.clone())
+        ]
+    );
+    let session_id = focus["id"].as_str().unwrap().to_owned();
+    let narrow = client
+        .get_task_resume_statuses(
+            &TaskSummaryBatchParams {
+                workspace_id: None,
+                session_id: Some(session_id.clone()),
+                ..request.clone()
+            },
+            |_| {},
+        )
+        .unwrap();
+    assert_eq!(
+        narrow.items,
+        vec![
+            None,
+            None,
+            Some(uncertain_status.clone()),
+            None,
+            Some(finished_status),
+            Some(uncertain_status)
+        ]
+    );
+    for invalid in [
+        json!({"taskIds":[]}),
+        json!({"taskIds":vec![&uncertain; MAX_TASK_SUMMARY_BATCH + 1]}),
+        json!({"taskIds":["bad id"]}),
+        json!({"taskIds":[uncertain],"workspaceId":ws["id"],"sessionId":session_id}),
+    ] {
+        assert!(matches!(
+            client.call::<_, Value>("task/getResumeStatuses", &invalid, |_| {}),
+            Err(Error::Rpc { code: -32602, .. })
+        ));
+    }
+    assert!(matches!(
+        client.call::<_, Value>(
+            "task/getResumeStatuses",
+            &json!({"taskIds":[uncertain],"sessionId":"missing"}),
+            |_| {}
+        ),
+        Err(Error::Rpc { code: -32004, .. })
+    ));
+    assert!(matches!(
+        client.call::<_, TaskResumeStatus>("task/resume", &json!({"taskId":uncertain}), |_| {}),
+        Err(Error::Rpc { code: -32009, .. })
+    ));
+    assert_eq!(client.event_watermark(|_| {}).unwrap(), before);
+    assert_eq!(wire.requests().len(), 4);
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}

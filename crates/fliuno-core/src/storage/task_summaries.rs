@@ -147,8 +147,10 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<bool> {
 }
 
 impl Kernel {
-    /// Read only the compact summary projection, in one SQLite read view.
-    pub fn get_task_summaries(&self, request: &TaskSummaryBatchParams) -> Result<TaskSummaryBatch> {
+    pub(super) fn validate_task_lookup_batch(
+        &self,
+        request: &TaskSummaryBatchParams,
+    ) -> Result<()> {
         if request.task_ids.is_empty() || request.task_ids.len() > MAX_TASK_SUMMARY_BATCH {
             return Err(Error::Invalid(format!(
                 "taskIds must contain 1 to {MAX_TASK_SUMMARY_BATCH} entries"
@@ -165,12 +167,18 @@ impl Kernel {
         }
         match (&request.workspace_id, &request.session_id) {
             (Some(_), Some(_)) => {
-                return Err(Error::Invalid("select one task summary scope".into()));
+                return Err(Error::Invalid("select one task scope".into()));
             }
             (Some(id), None) => self.require_workspace(id)?,
             (None, Some(id)) => self.require_session(id)?,
             (None, None) => {}
         }
+        Ok(())
+    }
+
+    /// Read only the compact summary projection, in one SQLite read view.
+    pub fn get_task_summaries(&self, request: &TaskSummaryBatchParams) -> Result<TaskSummaryBatch> {
+        self.validate_task_lookup_batch(request)?;
         // Drive indexed lookups from the bounded input array. Scope is checked
         // before joining the summary, so an excluded row's body is never read.
         // The array index restores request order without a SQL sort.
