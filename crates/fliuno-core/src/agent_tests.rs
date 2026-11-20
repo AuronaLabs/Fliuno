@@ -199,6 +199,42 @@ fn concurrent_permissions_are_bound_once_and_deny_does_not_fail_agent() {
 }
 
 #[test]
+fn maximum_pending_permissions_keep_the_inbox_index_complete_and_ordered() {
+    let (mut kernel, session) = setup();
+    let (task, run) = start(&mut kernel, &session);
+    let approvals: Vec<_> = (0..agent::MAX_PENDING)
+        .map(|index| {
+            permission(
+                &mut kernel,
+                &task,
+                &run,
+                &format!("permission-{index}"),
+                true,
+            )
+        })
+        .collect();
+
+    let indexed = kernel
+        .list_pending_approvals(ApprovalListParams {
+            workspace_id: None,
+            session_id: Some(session.id),
+            after: 0,
+            limit: agent::MAX_PENDING as u32,
+            target_bytes: None,
+        })
+        .unwrap();
+    assert_eq!(
+        indexed
+            .items
+            .iter()
+            .map(|item| &item.id)
+            .collect::<Vec<_>>(),
+        approvals.iter().map(|item| &item.id).collect::<Vec<_>>(),
+    );
+    assert!(!indexed.has_more);
+}
+
+#[test]
 fn cross_protocol_terminal_outcomes_share_one_durable_event_projection() {
     let cases = [
         (Some(AgentStopReason::EndTurn), false, TaskStatus::Completed),

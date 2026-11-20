@@ -1,6 +1,7 @@
 //! Compact inbox rows survive model approval recovery and are updated with each task snapshot.
 use super::*;
 use rusqlite::Transaction;
+use std::collections::HashSet;
 
 mod details;
 mod snapshot;
@@ -69,15 +70,17 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
                 Some(a.expires_at_unix_ms),
             )
         });
-    let pending = model.chain(agent);
+    let pending: Vec<_> = model.chain(agent).collect();
+    let pending_ids: HashSet<_> = pending.iter().map(|(id, _, _, _)| *id).collect();
     let mut select =
         tx.prepare_cached("SELECT approval_id FROM pending_approvals WHERE task_id=?1")?;
     let existing: Vec<String> = select
         .query_map([&task.id], |row| row.get(0))?
         .collect::<std::result::Result<_, _>>()?;
+    let existing_ids: HashSet<_> = existing.iter().map(String::as_str).collect();
     let mut delete = tx.prepare_cached("DELETE FROM pending_approvals WHERE approval_id=?1")?;
     for id in &existing {
-        if !pending.clone().any(|(active, _, _, _)| active == id) {
+        if !pending_ids.contains(id.as_str()) {
             delete.execute([id])?;
         }
     }
@@ -86,7 +89,7 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
          SELECT ?1,?2,id,workspace_id,?4,?5,?6 FROM sessions WHERE id=?3",
     )?;
     for (id, kind, allow_once, expires_at) in pending {
-        if !existing.iter().any(|current| current == id) {
+        if !existing_ids.contains(id) {
             insert.execute(params![
                 id,
                 task.id,

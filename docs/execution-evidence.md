@@ -1232,6 +1232,12 @@ Windows 开发构建用 v0.0.3 优化前的旧服务二进制和当前服务交�
 
 Windows `scripts/check.ps1` 以退出码 0 完成：**545 项测试、0 失败、0 忽略**，格式、两组严格 Clippy、协议 Schema 校验及 29 个离线演示通过。Debian Linux 6.12.107 来宾的真实 app-server 进程测试也通过（1 项批量归档进程测试，`FLIUNO_RESULT=0`）。日志见 `%TEMP%/fliuno-session-archive-windows.log`、`D:/Fliuno-Native-Test/session-archive-linux-build.log` 和 `D:/Fliuno-Native-Test/session-archive-linux-serial.log`。
 
+## 0.0.3 审批收件箱集合差分（2026-11-20）
+
+每次任务快照更新时，内核会比较持久收件箱中已有的审批身份与任务的当前待批列表。此前两个方向都逐项扫描对方列表；现在先构建身份集合，再按差集删除旧项、插入新项，避免平方级比较。已存在的审批行不会删除重建，因此其序号和分页位置保持不变。
+
+新增核心测试连续登记允许的最大 **16** 项 Agent 权限，并核对 SQLite 收件箱完整保留它们的提交顺序。Windows `cargo test -p fliuno-core --all-features` 通过 **85 项测试**，核心 Clippy 与 rustfmt 检查通过。该上限很小，本次没有报告单独的耗时测量。
+
 ## 从 v0.0.2 升级数据库
 
 2026-11-20 用从 `v0.0.2` 标签提交 `caa2e259634141c7a603793265df22b52c9dc641` 构建的旧服务创建数据库，再由 0.0.3 开发版打开。旧服务先完成一项任务并写入 UTF-8 交付物，再让另一项任务停在待审批状态，最后归档会话。两次启动均通过应用协议 `0.1` 握手。
