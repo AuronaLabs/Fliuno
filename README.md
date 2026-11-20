@@ -55,7 +55,7 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 | 能力 | 说明 |
 | --- | --- |
 | **持久任务** | 任务、审批、事件和交付物写入 SQLite；支持历史补读与断线恢复。 |
-| **模型与 Agent** | 接入 OpenAI、Anthropic、Gemini，以及 ACP、A2A 和 MCP。 |
+| **模型、工具与 Agent** | 接入 OpenAI、Anthropic、Gemini，以及 MCP、ACP 和 A2A。 |
 | **本机执行** | 由宿主注册工作区文件、命令和终端能力；支持的平台可启用进程隔离。 |
 | **客户端协议** | 提供 stdio JSON-RPC、Rust 客户端及可嵌入的 AG-UI HTTP / SSE 路由。 |
 

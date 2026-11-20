@@ -27,7 +27,7 @@
 
 ## 一次任务的生命周期
 
-任务状态和事件持久化在 SQLite；工作台可以持续订阅，也可以在重连后按游标补读。
+任务状态和事件持久化在 SQLite；工作台可以持续订阅，也可以在重连后按游标补读。下图展示任务触发受控操作并完成审批的典型路径。
 
 ```mermaid
 sequenceDiagram
@@ -39,10 +39,8 @@ sequenceDiagram
   K->>D: 保存任务与事件
   K->>X: 执行模型步骤
   X-->>K: 提议受控操作
-  opt 需要用户审批
-    K-->>W: waiting_approval
-    W->>K: approval/respond
-  end
+  K-->>W: waiting_approval
+  W->>K: approval/respond
   K->>X: 执行获批操作
   K->>D: 提交结果与事件
   W->>K: 按游标读取或订阅
