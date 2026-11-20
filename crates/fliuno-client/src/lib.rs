@@ -57,6 +57,8 @@ pub enum Error {
     InvalidReplayPage,
     #[error("invalid conversation history page")]
     InvalidHistoryPage,
+    #[error("server does not support a lower bound for history search")]
+    UnsupportedHistorySearchAfterSequence,
     #[error(
         "history scanLimit must be 1 to {0}",
         fliuno_protocol::MAX_HISTORY_SEARCH_SCAN_LIMIT

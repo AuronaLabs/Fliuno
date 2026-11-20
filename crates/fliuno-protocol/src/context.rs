@@ -234,6 +234,9 @@ pub struct SessionHistorySearchParams {
     /// Reuse the first page's completion watermark when fetching more results.
     #[serde(default)]
     pub through_sequence: Option<u64>,
+    /// Exclusive lower bound. Use a previously consumed watermark to search new turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_sequence: Option<u64>,
     /// Exclusive completion cursor returned by the previous page.
     #[serde(default)]
     pub before_sequence: Option<u64>,
@@ -256,6 +259,9 @@ pub struct WorkspaceHistorySearchParams {
     pub role: Option<SessionHistoryRole>,
     #[serde(default)]
     pub through_sequence: Option<u64>,
+    /// Exclusive lower bound, preserved on every continuation page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_sequence: Option<u64>,
     #[serde(default)]
     pub before_sequence: Option<u64>,
     #[serde(default)]

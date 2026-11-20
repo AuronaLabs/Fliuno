@@ -15,6 +15,7 @@ impl Kernel {
     pub(crate) fn scan_conversation(
         &self,
         scope: HistoryScope<'_>,
+        after: u64,
         upper: u64,
         scan_limit: u32,
         mut visit: impl FnMut(ConversationRow<'_>) -> Result<bool>,
@@ -36,14 +37,15 @@ impl Kernel {
         let columns = format!(", s.sequence, c.task_id IS NOT NULL, {session_column}, s.task_id");
         let projection = conversation_projection("?3", &columns, source);
         let sql = format!(
-            "{projection} WHERE {predicate}=?1 AND {cursor}<=?2 ORDER BY {cursor} DESC LIMIT ?4"
+            "{projection} WHERE {predicate}=?1 AND {cursor}<=?2 AND {cursor}>?5 ORDER BY {cursor} DESC LIMIT ?4"
         );
         let mut statement = self.db.prepare_cached(&sql)?;
         let mut rows = statement.query(params![
             owner,
             validate_event_cursor(upper)?,
             MAX_SEARCH_TURN_BYTES,
-            scan_limit + 1
+            scan_limit + 1,
+            validate_event_cursor(after)?
         ])?;
         for index in 0..scan_limit {
             let Some(row) = rows.next()? else {

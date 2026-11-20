@@ -52,6 +52,7 @@ fn restores_both_search_scopes_and_opens_a_hit_after_restart() {
         query: "needle".into(),
         role: Some(SessionHistoryRole::User),
         through_sequence: None,
+        after_sequence: None,
         before_sequence: None,
         limit: Some(1),
         scan_limit: None,
@@ -61,6 +62,7 @@ fn restores_both_search_scopes_and_opens_a_hit_after_restart() {
         query: "needle".into(),
         role: Some(SessionHistoryRole::User),
         through_sequence: None,
+        after_sequence: None,
         before_sequence: None,
         limit: Some(1),
         scan_limit: None,
@@ -166,5 +168,91 @@ fn restores_both_search_scopes_and_opens_a_hit_after_restart() {
     assert_eq!(current.matches[0].task_id, later["id"]);
     drop(client);
     drop(_server);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn incremental_search_keeps_both_bounds_across_restart() {
+    let root = std::env::temp_dir().join(format!("fliuno-history-window-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let session_params = json!({"sessionId":session["id"], "query":"needle", "role":"user"});
+    approve_report(&mut peer, &session, "old needle", "old");
+    let after = peer.call("session/searchHistory", session_params.clone())["throughSequence"]
+        .as_u64()
+        .unwrap();
+    let hit = approve_report(&mut peer, &session, "new needle", "hit");
+    approve_report(&mut peer, &session, "unrelated", "miss");
+    drop(peer);
+
+    let (through, checkpoint) = {
+        let (_server, mut client) = connect(&db);
+        assert_eq!(
+            client.info().capabilities["historySearchAfterSequence"],
+            true
+        );
+        let mut search = HistorySearch::new(HistorySearchRequest::Workspace(
+            WorkspaceHistorySearchParams {
+                workspace_id: workspace["id"].as_str().unwrap().into(),
+                query: "needle".into(),
+                role: Some(SessionHistoryRole::User),
+                through_sequence: None,
+                after_sequence: Some(after),
+                before_sequence: None,
+                limit: None,
+                scan_limit: Some(1),
+            },
+        ));
+        let empty = search.next_page(&mut client, |_| {}).unwrap().unwrap();
+        assert!(empty.matches.is_empty());
+        assert_eq!(empty.scanned_turns, 1);
+        let checkpoint = serde_json::to_value(search.next_request().unwrap()).unwrap();
+        assert_eq!(checkpoint["params"]["afterSequence"], after);
+        (empty.through_sequence, checkpoint)
+    };
+
+    let mut peer = Peer::start(&db);
+    approve_report(&mut peer, &session, "later needle", "later");
+    let mut bounded = session_params;
+    bounded["throughSequence"] = json!(through);
+    bounded["afterSequence"] = json!(after);
+    let page = peer.call("session/searchHistory", bounded.clone());
+    assert_eq!(page["scannedTurns"], 2);
+    assert_eq!(page["matches"].as_array().unwrap().len(), 1);
+    assert_eq!(page["matches"][0]["taskId"], hit["id"]);
+    assert!(page["nextBeforeSequence"].is_null());
+
+    bounded["beforeSequence"] = json!(after);
+    assert_eq!(
+        peer.request("session/searchHistory", bounded.clone())["error"]["code"],
+        -32602
+    );
+    bounded.as_object_mut().unwrap().remove("beforeSequence");
+    bounded["afterSequence"] = json!(through + 1);
+    assert_eq!(
+        peer.request("session/searchHistory", bounded.clone())["error"]["code"],
+        -32602
+    );
+    bounded["afterSequence"] = json!(through);
+    let empty = peer.call("session/searchHistory", bounded);
+    assert_eq!(
+        empty,
+        json!({"throughSequence":through,"matches":[],"scannedTurns":0,"skippedOversizedTurns":0,"nextBeforeSequence":null})
+    );
+    drop(peer);
+
+    let (server, mut client) = connect(&db);
+    let mut search = HistorySearch::new(serde_json::from_value(checkpoint).unwrap());
+    let page = search.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert_eq!(page.through_sequence, through);
+    assert_eq!(page.scanned_turns, 1);
+    assert_eq!(page.matches.len(), 1);
+    assert_eq!(page.matches[0].task_id, hit["id"]);
+    assert!(search.next_page(&mut client, |_| {}).unwrap().is_none());
+    drop(client);
+    drop(server);
     fs::remove_dir_all(root).unwrap();
 }

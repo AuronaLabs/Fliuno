@@ -161,6 +161,15 @@
           "minimum": 0,
           "default": null
         },
+        "afterSequence": {
+          "description": "Exclusive lower bound, preserved on every continuation page.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "beforeSequence": {
           "type": [
             "integer",
@@ -730,6 +739,15 @@
           "format": "uint64",
           "minimum": 0,
           "default": null
+        },
+        "afterSequence": {
+          "description": "Exclusive lower bound. Use a previously consumed watermark to search new turns.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
         },
         "beforeSequence": {
           "description": "Exclusive completion cursor returned by the previous page.",

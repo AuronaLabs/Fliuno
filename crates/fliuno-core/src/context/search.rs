@@ -86,6 +86,7 @@ impl<'a> HistoryMatcher<'a> {
 
 struct SearchWindow {
     through: Option<u64>,
+    after: Option<u64>,
     before: Option<u64>,
     limit: Option<u32>,
     scan_limit: Option<u32>,
@@ -102,6 +103,7 @@ impl Kernel {
             params.role,
             SearchWindow {
                 through: params.through_sequence,
+                after: params.after_sequence,
                 before: params.before_sequence,
                 limit: params.limit,
                 scan_limit: params.scan_limit,
@@ -119,6 +121,7 @@ impl Kernel {
             params.role,
             SearchWindow {
                 through: params.through_sequence,
+                after: params.after_sequence,
                 before: params.before_sequence,
                 limit: params.limit,
                 scan_limit: params.scan_limit,
@@ -155,11 +158,17 @@ impl Kernel {
                 "throughSequence exceeds the current event sequence".into(),
             ));
         }
+        let after = window.after.unwrap_or(0);
+        if after > through_sequence {
+            return Err(Error::Invalid(
+                "afterSequence exceeds throughSequence".into(),
+            ));
+        }
         let upper = match window.before {
-            Some(before) if before > 0 && before <= through_sequence => before - 1,
+            Some(before) if before > after && before <= through_sequence => before - 1,
             Some(_) => {
                 return Err(Error::Invalid(
-                    "beforeSequence must be within throughSequence".into(),
+                    "beforeSequence must be above afterSequence and within throughSequence".into(),
                 ));
             }
             None => through_sequence,
@@ -173,21 +182,22 @@ impl Kernel {
             next_before_sequence: None,
         };
         let matcher = HistoryMatcher::new(&query, role);
-        page.next_before_sequence = self.scan_conversation(scope, upper, scan_limit, |row| {
-            page.scanned_turns += 1;
-            if let Some(data) = row.data {
-                if matcher.matches(data)? {
-                    page.matches.push(SessionHistoryMatch {
-                        task_id: row.task_id.to_owned(),
-                        completion_sequence: row.sequence,
-                        session_id: row.session_id.map(str::to_owned),
-                    });
+        page.next_before_sequence =
+            self.scan_conversation(scope, after, upper, scan_limit, |row| {
+                page.scanned_turns += 1;
+                if let Some(data) = row.data {
+                    if matcher.matches(data)? {
+                        page.matches.push(SessionHistoryMatch {
+                            task_id: row.task_id.to_owned(),
+                            completion_sequence: row.sequence,
+                            session_id: row.session_id.map(str::to_owned),
+                        });
+                    }
+                } else {
+                    page.skipped_oversized_turns += 1;
                 }
-            } else {
-                page.skipped_oversized_turns += 1;
-            }
-            Ok(page.matches.len() < limit as usize)
-        })?;
+                Ok(page.matches.len() < limit as usize)
+            })?;
         Ok(page)
     }
 }

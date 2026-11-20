@@ -729,8 +729,20 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `initialize.capabilities.workspaceHistorySearch` 为真时，可用 `workspace/searchHistory` 搜索同一工作区的所有会话，包括已归档会话。每个命中同时返回 `sessionId`，可用它打开对应会话。查询规则、扫描上限和分页水位与 `session/searchHistory` 相同。SQLite v33 回填按工作区和完成序号排序的索引，现有会话搜索响应保持原样。搜索不会把其他会话内容自动加入模型上下文。
 
+#### 只搜索新完成的任务
+
+服务声明 `historySearchAfterSequence: true` 时，两种搜索都接受 `afterSequence` 作为不含式下界。省略时从历史起点搜索。`throughSequence` 是含式上界，首请求省略即使用当前水位；`beforeSequence` 若提供，必须大于 `afterSequence` 且不超过 `throughSequence`。下界大于上界返回 `-32602`；相等返回空页。
+
+```json
+{"jsonrpc":"2.0","id":12,"method":"workspace/searchHistory","params":{"workspaceId":"<workspace-id>","query":"交付报告","afterSequence":120,"scanLimit":32}}
+```
+
+续页时保留 `afterSequence` 和首响应的 `throughSequence`，并传入 `nextBeforeSequence`。范围外的完成记录不计入 `scannedTurns`。同一查询的所有分页处理完毕后，可把 `throughSequence` 用作下一轮搜索的 `afterSequence`。Rust `HistorySearch` 保存下界，收到越界命中或无法继续的游标时保留原请求；旧服务上带下界的搜索在发送前返回不支持。数据库无需迁移。
+
+#### 打开命中或用于模型上下文
+
 要查看某一条命中，检查 `sessionHistoryGet`，将命中的 `taskId`、所属 `sessionId` 及搜索页的 `throughSequence` 传给 `session/getHistoryTurn`。会话搜索沿用原请求的 `sessionId`，工作区搜索则使用该命中的 `sessionId`。[请求示例与错误边界](context.md#打开一条历史记录)。
 
 `initialize.capabilities.contextMatchRecent` 表示上下文选项也支持 `selection: "match_recent"` 和 `historyQuery: {query,role?}`，将近期匹配记录直接冻结到新任务。匹配方式与历史搜索相同，固定检查最近最多 128 条，独立于搜索接口的 `scanLimit`；具体预算和快照语义见[上下文](context.md)。
 
-搜索从既有的精简历史投影读取匹配字段，命中时返回索引中的任务 ID。构建上下文时才完整解码命中项，并继续应用原有的字节预算。数据库版本不变，省略 `scanLimit` 时分页结果保持原样。
+搜索从既有的精简历史投影读取匹配字段，命中时返回索引中的任务 ID。构建上下文时才完整解码命中项，并继续应用原有的字节预算。

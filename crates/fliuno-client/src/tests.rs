@@ -472,6 +472,7 @@ fn history_search_resumes_an_empty_window_and_retries_the_same_cursor() {
             query: "needle".into(),
             role: None,
             through_sequence: None,
+            after_sequence: None,
             before_sequence: None,
             limit: None,
             scan_limit: None,
@@ -835,6 +836,7 @@ fn history_search_uses_negotiated_scan_limit_without_losing_its_checkpoint() {
         query: "needle".into(),
         role: None,
         through_sequence: None,
+        after_sequence: None,
         before_sequence: None,
         limit: None,
         scan_limit: Some(2),
@@ -905,6 +907,58 @@ fn history_search_uses_negotiated_scan_limit_without_losing_its_checkpoint() {
             .task_id,
         "needle"
     );
+    assert!(search.next_request().is_none());
+}
+
+#[test]
+fn incremental_history_rejects_legacy_servers_and_out_of_window_pages() {
+    use fliuno_protocol::SessionHistorySearchParams;
+
+    let request = HistorySearchRequest::Session(SessionHistorySearchParams {
+        session_id: "session".into(),
+        query: "needle".into(),
+        role: None,
+        through_sequence: Some(100),
+        after_sequence: Some(20),
+        before_sequence: Some(40),
+        limit: Some(1),
+        scan_limit: None,
+    });
+    let mut search = HistorySearch::new(request);
+    let checkpoint = serde_json::to_value(search.next_request()).unwrap();
+    let mut legacy = fake_client(&[]);
+    assert!(matches!(
+        search.next_page(&mut legacy, |_| {}),
+        Err(Error::UnsupportedHistorySearchAfterSequence)
+    ));
+    assert_eq!(legacy.into_parts().1.split(|&b| b == b'\n').count(), 2);
+
+    let mut info: Value = serde_json::from_str(HANDSHAKE).unwrap();
+    info["result"]["capabilities"]["historySearchAfterSequence"] = json!(true);
+    let mut input = format!("{info}\n");
+    for (id, sequence, next) in [(2, 20, None), (3, 21, Some(21)), (4, 21, None)] {
+        let result = json!({"throughSequence":100,"matches":[{"taskId":"hit","completionSequence":sequence}],"scannedTurns":1,"skippedOversizedTurns":0,"nextBeforeSequence":next});
+        input += &format!("{}\n", json!({"jsonrpc":"2.0","id":id,"result":result}));
+    }
+    let mut client = Client::connect(
+        Cursor::new(input.into_bytes()),
+        Vec::new(),
+        "history-window",
+        |_| {},
+    )
+    .unwrap();
+    for _ in 0..2 {
+        assert!(matches!(
+            search.next_page(&mut client, |_| {}),
+            Err(Error::InvalidHistoryPage)
+        ));
+        assert_eq!(
+            serde_json::to_value(search.next_request()).unwrap(),
+            checkpoint
+        );
+    }
+    let page = search.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert_eq!(page.matches[0].completion_sequence, 21);
     assert!(search.next_request().is_none());
 }
 

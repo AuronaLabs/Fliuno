@@ -145,6 +145,7 @@ impl Kernel {
             let matcher = search::HistoryMatcher::new(&query, history.role);
             self.scan_conversation(
                 search::HistoryScope::Session(session),
+                0,
                 through_sequence,
                 search::DEFAULT_SEARCH_TURNS,
                 |row| {

@@ -41,10 +41,20 @@ impl HistorySearch {
         let Some(request) = &mut self.next else {
             return Ok(None);
         };
-        let scan_limit = match request {
-            HistorySearchRequest::Session(params) => params.scan_limit,
-            HistorySearchRequest::Workspace(params) => params.scan_limit,
+        let (scan_limit, after) = match request {
+            HistorySearchRequest::Session(params) => (params.scan_limit, params.after_sequence),
+            HistorySearchRequest::Workspace(params) => (params.scan_limit, params.after_sequence),
         };
+        if after.is_some()
+            && client
+                .info()
+                .capabilities
+                .get("historySearchAfterSequence")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+        {
+            return Err(Error::UnsupportedHistorySearchAfterSequence);
+        }
         // Preserve the requested work budget. Silently sending it to a legacy
         // server, or dropping it, would change either validation or the work.
         if let Some(limit) = scan_limit {
@@ -86,6 +96,7 @@ impl HistorySearch {
             &page,
             *through,
             *before,
+            after.unwrap_or(0),
             limit.unwrap_or(16),
             scan_limit.unwrap_or(MAX_HISTORY_SEARCH_TURNS),
             workspace,
@@ -104,12 +115,17 @@ fn validate_page(
     page: &SessionHistorySearchPage,
     through: Option<u64>,
     before: Option<u64>,
+    after: u64,
     limit: u32,
     scan_limit: u32,
     workspace: bool,
 ) -> Result<(), Error> {
+    let upper = before.map_or(page.through_sequence, |seq| seq.saturating_sub(1));
     if page.through_sequence > i64::MAX as u64
         || through.is_some_and(|stamp| stamp != page.through_sequence)
+        || after > page.through_sequence
+        || before.is_some_and(|seq| seq <= after || seq > page.through_sequence)
+        || u64::from(page.scanned_turns) > upper.saturating_sub(after)
         || page.scanned_turns > scan_limit
         || page.skipped_oversized_turns > page.scanned_turns
         || page.matches.len() > limit as usize
@@ -120,7 +136,7 @@ fn validate_page(
     let mut previous = before;
     for hit in &page.matches {
         let sequence = hit.completion_sequence;
-        if sequence == 0
+        if sequence <= after
             || sequence > page.through_sequence
             || previous.is_some_and(|prev| sequence >= prev)
             || hit.task_id.is_empty()
@@ -135,7 +151,7 @@ fn validate_page(
         previous = Some(sequence);
     }
     if page.next_before_sequence.is_some_and(|next| {
-        next <= 1
+        next <= after + 1
             || next > page.through_sequence
             || before.is_some_and(|prev| next >= prev)
             || previous.is_some_and(|seq| next > seq)

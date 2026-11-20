@@ -19,6 +19,7 @@ fn search_can_page_past_empty_windows_and_reports_skipped_large_turns() {
         query: " found ".into(),
         role: None,
         through_sequence: None,
+        after_sequence: None,
         before_sequence: None,
         limit: None,
         scan_limit: None,
