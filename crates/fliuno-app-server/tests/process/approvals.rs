@@ -123,6 +123,66 @@ fn approval_run_binding_migrates_and_replays_one_decision_after_restart() {
 }
 
 #[test]
+fn approval_resume_rejects_a_live_approval_outside_the_parent_boundary() {
+    use http_wire::{Fixture, Response};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let step = AtomicUsize::new(0);
+    let model = Fixture::start(move |_| {
+        let step = step.fetch_add(1, Ordering::Relaxed);
+        let arguments = json!({"title":format!("artifact {step}"),"content":"content"});
+        Response::json(
+            200,
+            json!({"status":"completed","output":[{
+                "type":"function_call","call_id":format!("call-{step}"),
+                "name":"artifact_create","arguments":arguments.to_string()
+            }]}),
+        )
+    });
+    let root = std::env::temp_dir().join(format!("fliuno-run-boundary-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let path = root.join("kernel.db");
+    let url = model.url("/v1/");
+    let mut peer = Peer::start_with_model_fixture(&path, Some(&url));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let task = peer.call(
+        "task/startSummary",
+        json!({"sessionId":session["id"],"input":"two pauses","clientRequestId":"parent"}),
+    );
+    let task_id = task["id"].as_str().unwrap();
+    let first = peer.wait_for_status(task_id, "waiting_approval");
+    peer.call(
+        "approval/respond",
+        json!({
+            "taskId":task_id,"approvalId":first["pendingApproval"]["id"],"decision":"allow_once"
+        }),
+    );
+    let second = peer.wait_for_status(task_id, "waiting_approval");
+    let approval = &second["pendingApproval"]["id"];
+    assert_ne!(*approval, first["pendingApproval"]["id"]);
+    let scope = json!({"taskId":task_id});
+    let before = peer.call("events/list", scope.clone());
+    drop(peer);
+    let mut peer = Peer::start_with_model_fixture(&path, Some(&url));
+    assert_eq!(
+        peer.request(
+            "approval/resumeRun",
+            json!({
+                "sessionId":session["id"],"parentRequestId":"parent","clientRequestId":"child",
+                "approvalId":approval,"decision":"deny"
+            })
+        )["error"]["code"],
+        -32009
+    );
+    assert_eq!(peer.call("events/list", scope.clone()), before);
+    assert_eq!(peer.call("task/get", scope), second);
+    assert_eq!(model.requests().len(), 2);
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn pending_approval_inbox_migrates_preserves_cursors_and_tracks_resolution() {
     let directory = std::env::temp_dir()
         .canonicalize()

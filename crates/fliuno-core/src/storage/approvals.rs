@@ -99,7 +99,7 @@ pub(super) fn record(tx: &Transaction<'_>, task: &Task) -> Result<()> {
     Ok(())
 }
 
-fn sql_timestamp(value: u64) -> Result<i64> {
+pub(super) fn sql_timestamp(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| Error::Invalid("approval timestamp must fit i64".into()))
 }
 

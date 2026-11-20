@@ -120,15 +120,13 @@ impl Kernel {
         }
         let approval = task
             .pending_approval
-            .as_ref()
+            .take()
             .filter(|a| a.id == approval_id && a.task_id == task_id)
-            .ok_or_else(|| Error::Conflict("approval does not belong to this task".into()))?
-            .clone();
+            .ok_or_else(|| Error::Conflict("approval does not belong to this task".into()))?;
         let resolved = EventKind::ApprovalResolved {
             approval_id: approval_id.into(),
             decision,
         };
-        task.pending_approval = None;
         let failure = if decision == ApprovalDecision::Deny {
             Some("tool execution denied".into())
         } else {

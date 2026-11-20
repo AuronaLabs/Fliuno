@@ -895,3 +895,9 @@ Windows 调试构建的本机 stdio 测量使用同一数据库的副本，先�
 真实服务进程保存长输入、中断并重启；恢复查询不改变任务、事件或请求次数，只有明确同意后才再次请求模型。Debian Linux 6.12.107 来宾通过 12 项相关进程测试，另覆盖审批、外部工具超时和远端提交结果不明。日志：`D:/Fliuno-Native-Test/guest-resume-projection.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：515 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-resume-projection-check.log`。
+
+## 0.0.3 审批续跑边界预检（2026-11-20）
+
+`approval/resumeRun` 先通过 `pending_approvals`、过期时间和 `task_run_ends` 的边界事件完成只读核对，再构造审批执行所需的完整任务。普通 `approval/respond` 处理第一项工具后，旧父运行 ID 不能提交同一任务后续执行段的审批；跨重启仍保持原事件水位和模型请求次数。Windows 审批进程测试 7 项通过，包含该边界场景；核心 81 项单测和目标 crate Clippy 通过。
+
+Debian Linux 6.12.107 来宾通过 7 项审批进程测试。Windows `scripts/check.ps1` 以退出码 0 完成：516 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/guest-approval-boundary.log`、`D:/Fliuno-Native-Test/windows-approval-boundary-check.log`。

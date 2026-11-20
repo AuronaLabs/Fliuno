@@ -133,22 +133,32 @@ impl Kernel {
                 "only model tool approvals can resume a run".into(),
             ));
         }
-        self.get_pending_approval(&parent.task.id, &p.approval_id)?;
         let start = validate_event_cursor(parent.start_sequence.unwrap_or(0))?;
-        // Only the first pause in this segment is answerable with its run ID.
-        // A model step resumed through a different API cannot be claimed here.
-        let first: Option<String> = self
+        // Check live inbox membership and the segment's first pause before
+        // loading the task. Only the boundary event needs JSON inspection.
+        let matches_boundary: Option<bool> = self
             .db
             .prepare_cached(
-                "SELECT json_extract(data,'$.approval.id') FROM events WHERE sequence=(
-                SELECT sequence FROM task_run_ends WHERE task_id=?1 AND sequence>?2
-                ORDER BY sequence LIMIT 1
-             )",
+                "SELECT EXISTS(SELECT 1 FROM events e WHERE e.sequence=(
+                    SELECT sequence FROM task_run_ends
+                    WHERE task_id=p.task_id AND sequence>?3 ORDER BY sequence LIMIT 1
+                 ) AND json_extract(e.data,'$.approval.id')=p.approval_id)
+                 FROM pending_approvals p WHERE p.approval_id=?1 AND p.task_id=?2
+                   AND p.kind=0 AND (p.expires_at IS NULL OR p.expires_at>?4)",
             )?
-            .query_row(params![parent.task.id, start], |row| row.get(0))
-            .optional()?
-            .flatten();
-        if first.as_deref() != Some(p.approval_id.as_str()) {
+            .query_row(
+                params![
+                    p.approval_id,
+                    parent.task.id,
+                    start,
+                    approvals::sql_timestamp(agent::now_ms()?)?
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let matches_boundary =
+            matches_boundary.ok_or_else(|| Error::NotFound("pending approval".into()))?;
+        if !matches_boundary {
             return Err(Error::Conflict(
                 "approval did not interrupt this run".into(),
             ));
