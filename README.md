@@ -53,7 +53,7 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 
 `initialize` 握手后，依次调用 `workspace/open` → `session/create` → `task/start`。宿主可用同一套接口展示待审批操作、订阅执行进度和取回交付物。
 
-[完整接入步骤](docs/setup.md#再启动自己的服务) · [Rust 客户端](docs/protocol.md#rust-调用方) · [AG-UI HTTP / SSE](docs/ag-ui.md#http-接入)
+[完整接入步骤](docs/setup.md#再启动自己的服务) · [工作台接入顺序](docs/README.md#工作台要展示什么) · [AG-UI HTTP / SSE](docs/ag-ui.md#http-接入)
 
 ## 能力一览
 

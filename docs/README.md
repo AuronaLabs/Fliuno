@@ -31,17 +31,18 @@
 
 ### 工作台要展示什么
 
-**最小接入顺序**
+1. **加载工作台**：[握手](setup.md#再启动自己的服务)读取服务能力，再用[工作台实时订阅](protocol.md#工作台实时订阅)取得初始快照，接上后续变动。
+2. **提交任务**：[提交并保存任务 ID](protocol.md#任务提交与重试)。如果提交后断线、还没收到任务 ID，用同一个 `clientRequestId` 重试。
+3. **处理审批**：展示[待审批操作](protocol.md#待审批快照)，待用户[允许或拒绝](protocol.md#决定与运行)。
+4. **展示交付物**：[订阅交付物目录](protocol.md#交付物目录订阅)，按需[分段下载](protocol.md#审批事件与产物)。
 
-1. [提交任务](protocol.md#任务提交与重试)，在断线重试时复用请求 ID。
-2. 展示[待审批操作](protocol.md#待审批快照)，由用户[允许或拒绝](protocol.md#决定与运行)。
-3. [订阅交付物目录](protocol.md#交付物目录订阅)，按需[分段下载](protocol.md#审批事件与产物)。
+**重新连接时**，从上次已处理的游标[补读工作台变动](protocol.md#任务变动摘要)。采用 HTTP / SSE 的宿主，用原运行 ID 和 `Last-Event-ID` [续传消息](ag-ui.md#sse-输出与续传)。
 
 <details>
 <summary>进阶：重连、批量操作、历史和用量</summary>
 
-- **工作台刷新**：[工作台快照](protocol.md#工作台快照) · [实时订阅](protocol.md#工作台实时订阅) · [按修订回放](protocol.md#任务摘要修订回放)
-- **断线补读**：[按游标读变动摘要](protocol.md#任务变动摘要)；或[回放任务 ID](protocol.md#任务变动回放)后[批量取摘要](protocol.md#批量读取任务摘要)。
+- **工作台刷新**：[独立读取快照](protocol.md#工作台快照) · [按修订回放](protocol.md#任务摘要修订回放)
+- **分开读取变动和详情**：[回放任务 ID](protocol.md#任务变动回放)，再[批量取摘要](protocol.md#批量读取任务摘要)。
 - **恢复与批量操作**：[判断能否恢复](protocol.md#任务恢复判断) · [批量取消任务](protocol.md#批量取消任务) · [核对审批结果](protocol.md#批量读取审批决定) · [校验交付物摘要](protocol.md#批量读取交付物摘要)
 - **目录与历史**：[会话目录](protocol.md#会话目录) · [任务目录](protocol.md#任务目录) · [历史分页](context.md#会话历史分页) · [历史搜索](protocol.md#查找历史任务)
 - **模型用量**：[累计用量](protocol.md#用量汇总) · [批量汇总](protocol.md#批量用量汇总) · [逐次报告](protocol.md#回放用量报告)
