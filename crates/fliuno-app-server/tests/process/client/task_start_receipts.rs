@@ -143,3 +143,45 @@ fn summary_retry_receipts_survive_restart_and_commit_with_the_task_and_first_eve
     drop(db);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn image_receipt_reuses_valid_input_but_rejects_malformed_and_changed_parts() {
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
+    let root = std::env::temp_dir().join(format!("fliuno-image-receipt-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let path = root.join("kernel.db");
+    let mut peer = Peer::start(&path);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let mut request = json!({
+        "sessionId":session["id"], "clientRequestId":"image",
+        "input":[{"type":"image", "mimeType":"image/png", "data":"invalid"}]
+    });
+    assert_eq!(
+        peer.request("task/startSummary", request.clone())["error"]["code"],
+        -32602
+    );
+    request["input"][0]["data"] = json!(PNG);
+    let started = peer.call("task/startSummary", request.clone());
+    let task_id = started["id"].as_str().unwrap();
+    peer.wait_for_status(task_id, "waiting_approval");
+    drop(peer);
+    let mut peer = Peer::start(&path);
+    let summary = peer.call("task/startSummary", request.clone());
+    assert_eq!(summary["id"], task_id);
+    assert_eq!(summary["inputPreview"], "[image]");
+    assert_eq!(summary["status"], "waiting_approval");
+    let mut changed = request.clone();
+    changed["input"][0]["data"] = json!("iVBORw0KGgo=");
+    assert_eq!(
+        peer.request("task/startSummary", changed)["error"]["code"],
+        -32009
+    );
+    request["input"][0]["mimeType"] = json!("image/jpeg");
+    assert_eq!(
+        peer.request("task/startSummary", request)["error"]["code"],
+        -32602
+    );
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

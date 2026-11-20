@@ -62,6 +62,13 @@ impl StartInput<'_> {
         }
     }
 
+    fn validate_media(self) -> Result<()> {
+        if let Self::Parts(parts) = self {
+            validate_image_input(parts).map_err(|message| Error::Invalid(message.into()))?;
+        }
+        Ok(())
+    }
+
     fn matches(self, message: Option<&Message>) -> bool {
         match (self, message) {
             (Self::Text(expected), Some(Message::User { text })) => expected == text,
@@ -157,6 +164,7 @@ impl Kernel {
     }
 
     fn create_prepared_task(&mut self, request: StartRequest<'_>) -> Result<(Task, bool)> {
+        request.input.validate_media()?;
         if let Some(task) = self.find_matching_task_start(&request)? {
             return Ok((task, false));
         }
@@ -175,18 +183,21 @@ impl Kernel {
             p.context,
             p.max_model_steps,
         )?;
-        if let Some(key) = request.key {
-            match self.lookup_task_start(&request, key)? {
-                StartLookup::Missing => {}
-                StartLookup::Existing(summary) => return Ok(TaskSummaryStart::Existing(summary)),
-                StartLookup::Legacy => {
-                    let task = self
-                        .find_matching_task_start(&request)?
-                        .ok_or_else(|| Error::NotFound("task request".into()))?;
-                    let summary = self.get_task_summary(&task.id)?;
-                    return Ok(TaskSummaryStart::Existing(summary));
-                }
-            }
+        let lookup = request.key.map_or(Ok(StartLookup::Missing), |key| {
+            self.lookup_task_start(&request, key)
+        });
+        if let Ok(StartLookup::Existing(summary)) = lookup {
+            // The receipt was issued only after validating identical input.
+            return Ok(TaskSummaryStart::Existing(summary));
+        }
+        // Keep validation for new requests, legacy bindings and mismatches.
+        request.input.validate_media()?;
+        if matches!(lookup?, StartLookup::Legacy) {
+            let task = self
+                .find_matching_task_start(&request)?
+                .ok_or_else(|| Error::NotFound("task request".into()))?;
+            let summary = self.get_task_summary(&task.id)?;
+            return Ok(TaskSummaryStart::Existing(summary));
         }
         Ok(TaskSummaryStart::Created(Box::new(
             self.create_fresh_task(request)?,
@@ -205,7 +216,8 @@ impl Kernel {
         match input {
             StartInput::Text(text) => validate_input(text)?,
             StartInput::Parts(parts) if backend == TaskBackend::Model => {
-                validate_image_input(parts).map_err(|message| Error::Invalid(message.into()))?;
+                validate_image_input_limits(parts)
+                    .map_err(|message| Error::Invalid(message.into()))?;
             }
             StartInput::Parts(_) => {
                 return Err(Error::Invalid(

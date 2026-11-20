@@ -70,8 +70,8 @@ impl UserContentPart {
     }
 }
 
-/// This validates transport and MIME consistency without parsing image pixels.
-pub fn validate_image_input(parts: &[UserContentPart]) -> Result<(), &'static str> {
+/// Bound the work needed to verify or compare an image input.
+pub fn validate_image_input_limits(parts: &[UserContentPart]) -> Result<(), &'static str> {
     if parts.len() > MAX_INPUT_PARTS {
         return Err("input must have at most 32 parts");
     }
@@ -93,6 +93,12 @@ pub fn validate_image_input(parts: &[UserContentPart]) -> Result<(), &'static st
     if text_bytes > MAX_TASK_TEXT_BYTES {
         return Err("input text exceeds 256 KiB");
     }
+    Ok(())
+}
+
+/// This validates transport and MIME consistency without parsing image pixels.
+pub fn validate_image_input(parts: &[UserContentPart]) -> Result<(), &'static str> {
+    validate_image_input_limits(parts)?;
     // Reuse one bounded scratch buffer. The encoded strings remain canonical for retries.
     let mut decoded = Vec::new();
     for part in parts {
