@@ -59,9 +59,12 @@ impl AgUiRunInput {
         session: &str,
     ) -> Result<(ApprovalResumeParams, String), AgUiRunError> {
         self.validate(session)?;
-        let parent = self.parent_run_id.ok_or(AgUiRunError::UnsupportedInput)?;
-        validate_run_id(&parent)?;
-        if parent == self.run_id || !self.messages.is_empty() {
+        let parent = self
+            .parent_run_id
+            .as_deref()
+            .ok_or(AgUiRunError::UnsupportedInput)?;
+        validate_run_id(parent)?;
+        if parent == self.run_id || self.has_messages() {
             return Err(AgUiRunError::UnsupportedInput);
         }
         let [entry]: [ResumeEntry; 1] = self
@@ -82,7 +85,7 @@ impl AgUiRunInput {
         Ok((
             ApprovalResumeParams {
                 session_id: session.to_owned(),
-                parent_request_id: request_key(&parent, true),
+                parent_request_id: request_key(parent, true),
                 client_request_id: request_key(&self.run_id, true),
                 approval_id: entry.interrupt_id,
                 decision,

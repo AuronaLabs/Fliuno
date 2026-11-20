@@ -10,10 +10,16 @@ use fliuno_protocol::{
     TaskInput, TaskRequestLookupParams, TaskStartParams, TaskStatus, TaskSummary, UserContentPart,
     validate_multipart_input,
 };
-use serde::Deserialize;
+use serde::{
+    Deserialize, Deserializer,
+    de::{SeqAccess, Visitor},
+};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::io::{BufRead, Write};
+use std::{
+    fmt,
+    io::{BufRead, Write},
+};
 
 const MAX_RUN_ID_BYTES: usize = 512;
 
@@ -77,7 +83,7 @@ pub struct AgUiRunInput {
     protocol_version: Option<String>,
     pub(super) parent_run_id: Option<String>,
     state: Option<Value>,
-    pub(super) messages: Vec<Message>,
+    messages: RunMessages,
     #[serde(default)]
     tools: Vec<serde::de::IgnoredAny>,
     #[serde(default)]
@@ -87,8 +93,43 @@ pub struct AgUiRunInput {
     pub(super) resume: Vec<ResumeEntry>,
 }
 
+struct RunMessages {
+    last: Option<Message>,
+    unsupported: bool,
+}
+
+impl<'de> Deserialize<'de> for RunMessages {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_seq(RunMessagesVisitor)
+    }
+}
+
+struct RunMessagesVisitor;
+
+impl<'de> Visitor<'de> for RunMessagesVisitor {
+    type Value = RunMessages;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("an array of AG-UI messages")
+    }
+
+    fn visit_seq<S: SeqAccess<'de>>(self, mut seq: S) -> Result<Self::Value, S::Error> {
+        let mut messages = RunMessages {
+            last: None,
+            unsupported: false,
+        };
+        while let Some(message) = seq.next_element::<Message>()? {
+            // Check every message, but release prior content as soon as it is superseded.
+            messages.unsupported |=
+                message.encrypted_value.is_some() || !message.tool_calls.is_empty();
+            messages.last = Some(message);
+        }
+        Ok(messages)
+    }
+}
+
 #[derive(Deserialize)]
-pub(super) struct Message {
+struct Message {
     #[serde(rename = "id")]
     _id: String,
     role: Role,
@@ -195,6 +236,10 @@ impl AgUiRunInput {
         self.parent_run_id.is_some() || !self.resume.is_empty()
     }
 
+    pub(super) fn has_messages(&self) -> bool {
+        self.messages.last.is_some()
+    }
+
     pub(super) fn validate(&self, session_id: &str) -> Result<(), AgUiRunError> {
         if self.thread_id != session_id || session_id.is_empty() {
             return Err(AgUiRunError::WrongThread);
@@ -211,10 +256,7 @@ impl AgUiRunInput {
             || !no_state(self.forwarded_props.as_ref())
             || !self.tools.is_empty()
             || !self.context.is_empty()
-            || self
-                .messages
-                .iter()
-                .any(|message| message.encrypted_value.is_some() || !message.tool_calls.is_empty())
+            || self.messages.unsupported
         {
             return Err(AgUiRunError::UnsupportedInput);
         }
@@ -234,8 +276,7 @@ impl AgUiRunInput {
         // user message; replayed client history cannot replace stored context.
         let Some(message) = self
             .messages
-            .into_iter()
-            .last()
+            .last
             .filter(|message| message.role == Role::User)
         else {
             return Err(AgUiRunError::UserText);

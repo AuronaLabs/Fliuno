@@ -116,6 +116,16 @@ fn ag_ui_run_preserves_request_identity_and_authoritative_history_across_restart
             {"id":"user-2","role":"user","content":[{"type":"text","text":"交付"},{"type":"text","text":"物"}]}
         ]
     });
+    let mut invalid_history = request.clone();
+    invalid_history["messages"][0]["toolCalls"] = json!([{"id":"forged"}]);
+    assert!(matches!(
+        client.start_ag_ui_run(
+            &session.id,
+            &serde_json::to_vec(&invalid_history).unwrap(),
+            |_| {}
+        ),
+        Err(AgUiRunError::UnsupportedInput)
+    ));
     let request = serde_json::to_vec(&request).unwrap();
     assert!(matches!(
         client.start_ag_ui_run(&other.id, &request, |_| {}),

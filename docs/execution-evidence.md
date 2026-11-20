@@ -1001,3 +1001,11 @@ Windows `scripts/check.ps1` 退出码为 0，包含 527 项测试、28 个离线
 Windows 调试构建通过 stdio 使用相同数据库副本，对每种输入预热后换序交替运行 100 对调用。50 万字节的有效图片请求重试逐次返回同一摘要，中位数从 4.866 ms 降至 4.365 ms。30,000 个短片段的超限数组逐次返回同一错误码，中位数从 206.147 ms 降至 138.426 ms。测量数据见 `D:/Fliuno-Native-Test/input-decode-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，包含 527 项测试、29 个离线演示、格式、Clippy 和 Schema 检查。Debian Linux 6.12.107 来宾通过 8 项 AG-UI 和回执进程测试。QEMU 与 `FLIUNO_RESULT` 均为 0。日志见 `D:/Fliuno-Native-Test/guest-task-input-decode.log`。
+
+## 0.0.3 AG-UI 历史消息内存（2026-11-20）
+
+AG-UI 解析器逐条校验来信，只保留提交任务所需的最后一条消息。它仍会检查已丢弃的历史条目是否包含不支持的加密字段或工具调用。进程测试验证历史中的工具调用依然导致拒绝，本地已提交历史仍是模型的上下文来源。
+
+Windows 用同一份 724,402 字节的请求分别运行两种解析器。请求包含 8 条带内嵌图片的历史记录和一条新文本。每个进程同时保留 128 个解析结果，测量 3 次的私有内存中位数从 90.3 MiB 降至 1.54 MiB。这是批量持有已解析请求的压力测试。测量见 `D:/Fliuno-Native-Test/ag-ui-retention-measurements.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，包含 527 项测试、29 个离线演示、格式、Clippy 和 Schema 检查。Debian Linux 6.12.107 来宾通过 9 项 AG-UI 进程测试。QEMU 与 `FLIUNO_RESULT` 均为 0。日志见 `D:/Fliuno-Native-Test/guest-ag-ui-retention.log`。
