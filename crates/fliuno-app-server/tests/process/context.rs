@@ -5,6 +5,8 @@ use super::*;
 mod history_list;
 #[path = "context/history_search.rs"]
 mod history_search;
+#[path = "context/window.rs"]
+mod window;
 
 fn approve_report(peer: &mut Peer, session: &Value, input: &str, key: &str) -> Value {
     let task = peer.call(
@@ -242,7 +244,7 @@ fn fit_recent_skips_large_turns_and_keeps_the_selection_across_restart() {
             .unwrap()
             .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
             .unwrap(),
-        48
+        49
     );
     let mut different = request;
     different["context"]["selection"] = json!("recent");

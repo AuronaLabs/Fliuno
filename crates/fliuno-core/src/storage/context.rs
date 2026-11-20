@@ -182,12 +182,13 @@ impl Kernel {
     ) -> Result<(u64, Vec<ContextTurn>)> {
         let total = self.context_turn_count(session, through)?;
         let through = validate_event_cursor(through)?;
+        let after = validate_event_cursor(options.after_sequence.unwrap_or(0))?;
         let ids = options
             .task_ids
             .as_ref()
             .ok_or_else(|| Error::Invalid("selected context requires taskIds".into()))?;
         let sql = format!(
-            "{} WHERE s.session_id=?1 AND s.task_id=?2 AND s.sequence<=?3",
+            "{} WHERE s.session_id=?1 AND s.task_id=?2 AND s.sequence<=?3 AND s.sequence>?5",
             projection(options.detail, "?4", "")
         );
         let mut statement = self.db.prepare_cached(&sql)?;
@@ -196,7 +197,8 @@ impl Kernel {
         // The caller measures the completed response, including its envelope.
         let mut remaining = options.max_bytes as usize;
         for id in ids {
-            let mut rows = statement.query(params![session, id, through, remaining as i64])?;
+            let mut rows =
+                statement.query(params![session, id, through, remaining as i64, after])?;
             let row = rows.next()?.ok_or_else(|| {
                 Error::Invalid(
                     "selected context task is not a completed record in this session".into(),
@@ -235,6 +237,7 @@ impl Kernel {
         mut visit: impl FnMut(Option<&str>) -> Result<bool>,
     ) -> Result<()> {
         let through = validate_event_cursor(through)?;
+        let after = validate_event_cursor(options.after_sequence.unwrap_or(0))?;
         let candidates = match options.selection {
             ContextSelection::Recent => options.max_turns,
             ContextSelection::FitRecent => {
@@ -247,11 +250,17 @@ impl Kernel {
             }
         };
         let sql = format!(
-            "{} WHERE s.session_id=?1 AND s.sequence<=?2 ORDER BY s.sequence DESC LIMIT ?4",
+            "{} WHERE s.session_id=?1 AND s.sequence<=?2 AND s.sequence>?5 ORDER BY s.sequence DESC LIMIT ?4",
             projection(options.detail, "?3", "")
         );
         let mut statement = self.db.prepare_cached(&sql)?;
-        let mut rows = statement.query(params![session, through, options.max_bytes, candidates])?;
+        let mut rows = statement.query(params![
+            session,
+            through,
+            options.max_bytes,
+            candidates,
+            after
+        ])?;
         while let Some(row) = rows.next()? {
             let data = row
                 .get_ref(0)?

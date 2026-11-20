@@ -551,6 +551,15 @@
               "format": "uint32",
               "minimum": 1,
               "maximum": 512
+            },
+            "afterSequence": {
+              "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -1300,6 +1309,15 @@
               "format": "uint32",
               "minimum": 1,
               "maximum": 512
+            },
+            "afterSequence": {
+              "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -1621,6 +1639,15 @@
               "format": "uint32",
               "minimum": 1,
               "maximum": 512
+            },
+            "afterSequence": {
+              "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -4432,6 +4459,15 @@
               "format": "uint32",
               "minimum": 1,
               "maximum": 512
+            },
+            "afterSequence": {
+              "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
             }
           },
           "additionalProperties": false
@@ -6183,6 +6219,15 @@
               "format": "uint32",
               "minimum": 1,
               "maximum": 512
+            },
+            "afterSequence": {
+              "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
             }
           },
           "additionalProperties": false

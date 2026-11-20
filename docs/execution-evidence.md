@@ -1087,3 +1087,9 @@ Windows `scripts/check.ps1` 退出码为 0，包含 532 项测试、29 个离线
 Windows 本机调试构建对同一数据库的两个副本发出 `session/context` 请求。夹具包含 24,920 和 246,105 字节的精简对话正文，预算为 262,144 字节。预热后按随机平衡顺序测量各 200 对请求，校验错误或结果一致。选择两条时的拒绝请求中位耗时从 1.080 降至 0.868 ms。只选第一条的对照请求中位数为 2.074 → 2.107 ms。脚本和日志位于 `D:/Fliuno-Native-Test/selected-context-budget-benchmark.py` 与 `D:/Fliuno-Native-Test/selected-context-budget-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0。533 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志为 `%TEMP%/fliuno-selected-context-budget-windows.log`。
+
+## 0.0.3 从事件下界选择会话上下文（2026-11-20）
+
+实际 stdio 请求验证了四种选择方式、空窗口、越界请求、从 v48 升级后的旧快照读取，以及进程重启后通过两个任务入口重试同一请求键。查询计划确认完整记录和精简记录都使用 `session_turns_cursor` 限定完成序号范围。[协议用法](context.md#从指定事件之后选择历史)
+
+Windows `scripts/check.ps1` 退出码为 0，包含 534 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查。Debian 6.12.107 来宾的 14 项上下文和历史进程测试全部通过，`FLIUNO_RESULT=0`。日志位于 `%TEMP%/fliuno-context-window-windows.log` 和 `D:/Fliuno-Native-Test/guest-context-window.log`。

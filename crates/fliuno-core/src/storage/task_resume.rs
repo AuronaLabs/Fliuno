@@ -25,7 +25,7 @@ pub(super) fn migrate(db: &mut Connection) -> Result<()> {
            data TEXT NOT NULL
          ) WITHOUT ROWID",
     )?;
-    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.pragma_update(None, "user_version", 48)?;
     tx.commit()?;
     Ok(())
 }

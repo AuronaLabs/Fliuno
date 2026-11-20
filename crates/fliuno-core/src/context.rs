@@ -17,6 +17,11 @@ pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
             "context maxTurns must be 1..32 and maxBytes 1024..262144".into(),
         ));
     }
+    if options.mode == ContextMode::Isolated && options.after_sequence.unwrap_or(0) > 0 {
+        return Err(Error::Invalid(
+            "context afterSequence requires session mode".into(),
+        ));
+    }
     if let Some(ids) = &options.task_ids {
         let unique: std::collections::BTreeSet<_> = ids.iter().collect();
         if options.mode != ContextMode::Session
@@ -74,6 +79,7 @@ pub(crate) fn normalize_options(mut options: ContextOptions) -> Result<ContextOp
     validate_options(&options)?;
     // Preserve the snapshot wire shape and keyed identity of legacy defaults.
     options.scan_limit = options.scan_limit.filter(|&n| n != MAX_CONTEXT_CANDIDATES);
+    options.after_sequence = options.after_sequence.filter(|&sequence| sequence != 0);
     if let Some(ids) = &mut options.task_ids {
         ids.sort_unstable();
     }
@@ -106,6 +112,12 @@ impl Kernel {
         if through_sequence > watermark {
             return Err(Error::Invalid(
                 "throughSequence exceeds the current event sequence".into(),
+            ));
+        }
+        let after_sequence = options.after_sequence.unwrap_or(0);
+        if after_sequence > through_sequence {
+            return Err(Error::Invalid(
+                "context afterSequence exceeds throughSequence".into(),
             ));
         }
         let mut snapshot = TaskContext {
@@ -173,7 +185,7 @@ impl Kernel {
             let matcher = search::HistoryMatcher::new(&query, history.role);
             self.scan_conversation(
                 search::HistoryScope::Session(session),
-                0,
+                after_sequence,
                 through_sequence,
                 snapshot
                     .options

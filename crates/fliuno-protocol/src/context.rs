@@ -74,6 +74,10 @@ pub struct ContextOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1, max = MAX_CONTEXT_SCAN_LIMIT))]
     pub scan_limit: Option<u32>,
+    /// Include only records completed strictly after this event cursor.
+    /// Omit or set to zero to consider the entire session history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_sequence: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -102,6 +106,7 @@ impl Default for ContextOptions {
             task_ids: None,
             history_query: None,
             scan_limit: None,
+            after_sequence: None,
         }
     }
 }
