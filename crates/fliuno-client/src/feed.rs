@@ -123,6 +123,19 @@ impl EventFeed {
         })
     }
 
+    /// Reconcile one revision per task in each pinned event window.
+    /// Check `latestTaskSummaryRevisionReplay` before selecting this reader.
+    pub fn next_latest_task_summary_revisions<R: BufRead, W: Write>(
+        &mut self,
+        client: &mut Client<R, W>,
+        limit: u32,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<Option<TaskSummaryChangesPage>, Error> {
+        self.next_with(client, on_notification, |replay, client, observe| {
+            replay.next_latest_task_summary_revisions(client, limit, observe)
+        })
+    }
+
     fn next_with<R: BufRead, W: Write, T>(
         &mut self,
         client: &mut Client<R, W>,

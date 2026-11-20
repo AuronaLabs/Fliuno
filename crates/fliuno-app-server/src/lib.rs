@@ -505,6 +505,7 @@ impl RpcServer {
             capabilities["taskChangeReplay"] = json!(true);
             capabilities["taskSummaryChangeReplay"] = json!(true);
             capabilities["taskSummaryRevisionReplay"] = json!(true);
+            capabilities["latestTaskSummaryRevisionReplay"] = json!(true);
             capabilities["maxTaskSummaryChangeEvents"] = json!(MAX_TASK_SUMMARY_CHANGE_EVENTS);
             capabilities["maxTaskSummaryBatch"] = json!(MAX_TASK_SUMMARY_BATCH);
             capabilities["workSnapshot"] = json!(true);
@@ -1043,6 +1044,10 @@ impl RpcServer {
             "events/listTaskSummaryRevisions" => {
                 let p: TaskSummaryChangesParams = decode(params)?;
                 json!(self.kernel()?.list_task_summary_revisions(p)?)
+            }
+            "events/listLatestTaskSummaryRevisions" => {
+                let p: TaskSummaryChangesParams = decode(params)?;
+                json!(self.kernel()?.list_latest_task_summary_revisions(p)?)
             }
             "events/getWatermark" => {
                 if params != json!({}) {

@@ -59,7 +59,7 @@
 - **批量任务摘要**。`task/getSummaries` 一次按 ID 刷新最多 64 个任务的状态、待审批数和预览，保留请求顺序并返回同一查询快照的事件水位。[批量读取任务摘要](docs/protocol.md#批量读取任务摘要)
 - **轻量任务变动回放**。`events/listTaskChanges` 只返回受影响任务的 ID 和页内最后序号，适合工作台断线后批量刷新摘要。[任务变动回放](docs/protocol.md#任务变动回放)
 - **一次读取变动摘要**。`events/listTaskSummaryChanges` 同时返回回放页与当前摘要，省去一次查询往返；摘要水位独立于事件游标。[任务变动摘要](docs/protocol.md#任务变动摘要)
-- **摘要修订回放**。`events/listTaskSummaryRevisions` 跳过没有修改摘要的提交，保留旧游标并从 SQLite v45 启用修订索引。[任务摘要修订回放](docs/protocol.md#任务摘要修订回放)
+- **摘要修订回放**。`events/listTaskSummaryRevisions` 跳过没有修改摘要的提交，保留旧游标并从 SQLite v45 启用修订索引。重连时可用 `events/listLatestTaskSummaryRevisions`，让固定回放窗口里的每项任务只返回一次。[按窗口合并摘要修订](docs/protocol.md#按窗口合并摘要修订)
 - **持久交付物摘要**。新产物保存时绑定正文 SHA-256；旧产物首次查询时补算，重复查询只读元数据，Rust 客户端继续校验收到的内容。[审批、事件与产物](docs/protocol.md#审批事件与产物)
 - **交付物下载续传**。Rust 客户端可在重连后从暂存文件的现有长度继续，用原 SHA-256 校验整份文件。[Rust 调用方](docs/protocol.md#rust-调用方)
 - **交付物目录订阅**。一次调用读取固定目录首页并建立同范围的事件订阅，Rust 客户端可分别续读目录和事件。[交付物目录订阅](docs/protocol.md#交付物目录订阅)

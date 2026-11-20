@@ -78,7 +78,8 @@
 
 - [x] `events/listTaskSummaryChanges` 在一个 SQLite 读快照内找出变动任务并读取当前摘要，Rust 客户端区分已消费游标与摘要水位。
 
-- [x] `events/listTaskSummaryRevisions` 按实际摘要修订回放。SQLite v45 无需历史回扫；客户端可沿用先前的事件游标，并跨越升级边界继续读取。
+- [x] `events/listTaskSummaryRevisions` 按实际摘要修订回放。SQLite v45 无需历史回扫，客户端可沿用先前的事件游标，并跨越升级边界继续读取。
+- [x] 工作台可按固定事件窗口合并摘要修订。每个任务只返回一次，空页也会推进游标。
 
 - [x] `artifacts/digest` 读取持久 SHA-256；旧产物按需补算，不增加启动扫描或改动目录游标，Rust 下载客户端继续验证实际字节。
 

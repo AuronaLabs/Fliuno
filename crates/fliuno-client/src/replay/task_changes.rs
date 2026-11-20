@@ -25,6 +25,7 @@ impl EventReplay {
             page.next_after,
             page.has_more,
             limit,
+            false,
             page.changes
                 .iter()
                 .map(|c| (c.task_id.as_str(), c.sequence)),
@@ -66,6 +67,22 @@ impl EventReplay {
         )
     }
 
+    /// Page tasks at their latest revision in this fixed event window.
+    /// An empty continuation page still advances the scanned cursor.
+    pub fn next_latest_task_summary_revisions<R: BufRead, W: Write>(
+        &mut self,
+        client: &mut Client<R, W>,
+        limit: u32,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<Option<TaskSummaryChangesPage>, Error> {
+        self.read_task_summary_changes(
+            client,
+            "events/listLatestTaskSummaryRevisions",
+            limit,
+            on_notification,
+        )
+    }
+
     fn read_task_summary_changes<R: BufRead, W: Write>(
         &mut self,
         client: &mut Client<R, W>,
@@ -93,16 +110,18 @@ impl EventReplay {
         {
             return Err(Error::InvalidReplayPage);
         }
+        let scanned_cursor = method == "events/listLatestTaskSummaryRevisions";
         self.advance_task_changes(
             page.through_sequence,
             page.next_after,
             page.has_more,
             limit,
+            scanned_cursor,
             page.changes
                 .iter()
                 .map(|c| (c.summary.id.as_str(), c.sequence)),
         )?;
-        Ok((!page.changes.is_empty()).then_some(page))
+        Ok((!page.changes.is_empty() || (scanned_cursor && page.has_more)).then_some(page))
     }
 
     fn task_changes_request(&self, limit: u32) -> Result<Option<TaskChangesParams>, Error> {
@@ -135,6 +154,7 @@ impl EventReplay {
         next_after: u64,
         has_more: bool,
         limit: u32,
+        scanned_cursor: bool,
         changes: impl ExactSizeIterator<Item = (&'a str, u64)>,
     ) -> Result<(), Error> {
         if through != self.through || changes.len() > limit as usize {
@@ -154,7 +174,10 @@ impl EventReplay {
             last = sequence;
         }
         if has_more {
-            if last == self.after || last == through || next_after != last {
+            if !(self.after < next_after && next_after < through)
+                || last > next_after
+                || (!scanned_cursor && next_after != last)
+            {
                 return Err(Error::InvalidReplayPage);
             }
         } else if next_after != through {

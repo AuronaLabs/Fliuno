@@ -140,6 +140,7 @@ staged.sync_all()?;
 | `modelUsage/getSummary` | `{scope:{kind:"task",taskId}}`、`{scope:{kind:"session",sessionId}}` 或 `{scope:{kind:"workspace",workspaceId}}` | `{throughSequence,totals}`，读取该范围内已保存报告的累计值 |
 | `modelUsage/getSummaries` | `{scopes:[scope,...]}` | `{throughSequence,items}`，按输入顺序返回同一读视图中的累计值 |
 | `events/listTaskChanges` | `{taskId?,sessionId?,workspaceId?,after?,through?,limit?}` | 固定水位并回放发生变动的任务 ID，每页去重，不返回事件正文 |
+| `events/listLatestTaskSummaryRevisions` | `{taskId?,sessionId?,workspaceId?,after?,through?,limit?}` | [按窗口合并摘要修订](#按窗口合并摘要修订)，整个窗口内每个任务只返回一次 |
 | `events/getWatermark` | `{}` | 当前已提交的全局 `throughSequence`，供多个回放读取方共用 |
 | `events/getTaskWatermarks` | `{taskIds}` | 按输入顺序返回每个任务的最新事件序号；没有持久事件的项为 `null` |
 | `events/listAll` | `{after?:0, through?, limit?:100, targetBytes?}` | 全任务共享全局序号的事件页 |
@@ -432,6 +433,14 @@ Rust 的 `EventReplay::next_task_summary_changes` 与 `EventFeed::next_task_summ
 迁移保存当时的全局事件水位，不重扫历史。旧游标可以继续使用；跨越升级边界的一页共用同一预算，并按任务去重。`changes[].sequence` 是该任务在本页最后一条命中记录的序号，`summary` 仍是查询时的当前摘要。即使尾页没有修订，也保存 `nextAfter` 继续；`summaryThroughSequence` 仅用于判断摘要新旧。
 
 Rust 的 `EventReplay::next_task_summary_revisions` 和 `EventFeed::next_task_summary_revisions` 复用原有游标校验和缺口恢复。实时通知仍提供通用事件水位，可能推进到没有摘要变化的位置。旧服务可以继续使用 `events/listTaskSummaryChanges`，其按事件刷新语义保持不变。
+
+#### 按窗口合并摘要修订
+
+服务声明 `latestTaskSummaryRevisionReplay` 时，重连的工作台可用 `events/listLatestTaskSummaryRevisions`。请求和响应沿用摘要修订回放的结构。首次读取时省略 `through` 可捕获当前事件水位。翻页时保留首次返回的 `throughSequence`，把上页的 `nextAfter` 作为新的 `after`。
+
+在整个固定窗口中，每个任务只出现在最后一条命中修订的位置。窗口跨越 SQLite v45 的升级边界时，旧段仍按任务事件判断变动。`limit` 限制每页返回的任务数，默认为 64，范围为 1 至 64。服务每页最多检查 1,000 条记录，因此 `changes` 为空且 `hasMore` 为真时仍需保存 `nextAfter` 并继续。摘要可能包含窗口结束后的变动。保存 `nextAfter` 作为回放进度，使用 `summaryThroughSequence` 判断摘要新旧。
+
+Rust 的 `EventReplay::next_latest_task_summary_revisions` 和 `EventFeed::next_latest_task_summary_revisions` 共享原事件游标。它们会返回带有续页游标的空页。连接旧服务时可按服务能力选择原摘要修订回放。
 
 ### 审批收件箱与决定
 

@@ -59,7 +59,8 @@ pub struct TaskSummaryChangesParams {
     /// Inclusive end of the event window. Omit to capture the current watermark.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub through: Option<u64>,
-    /// Maximum matching events to examine before deduplicating tasks.
+    /// Maximum events to examine before deduplication. Latest revision replay
+    /// uses this as a result limit and scans up to MAX_TASK_CHANGE_EVENTS.
     #[serde(default = "default_summary_change_limit")]
     #[schemars(range(min = 1, max = MAX_TASK_SUMMARY_CHANGE_EVENTS))]
     pub limit: u32,

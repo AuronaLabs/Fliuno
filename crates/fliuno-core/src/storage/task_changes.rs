@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 impl Kernel {
     pub fn list_task_changes(&self, request: &TaskChangesParams) -> Result<TaskChangesPage> {
-        self.read_task_changes(request, false).map(|(page, _)| page)
+        self.read_task_changes(request, ChangeSource::Events)
+            .map(|(page, _)| page)
     }
 
     /// Extend a bounded replay page with current task summaries in one read view.
@@ -12,7 +13,7 @@ impl Kernel {
         &self,
         request: TaskSummaryChangesParams,
     ) -> Result<TaskSummaryChangesPage> {
-        self.read_task_summary_changes(request, false)
+        self.read_task_summary_changes(request, ChangeSource::Events)
     }
 
     /// Use narrow summary revisions, with a conservative prefix for old stores.
@@ -20,13 +21,21 @@ impl Kernel {
         &self,
         request: TaskSummaryChangesParams,
     ) -> Result<TaskSummaryChangesPage> {
-        self.read_task_summary_changes(request, true)
+        self.read_task_summary_changes(request, ChangeSource::Revisions)
+    }
+
+    /// Return each task at its last matching revision in the whole replay window.
+    pub fn list_latest_task_summary_revisions(
+        &self,
+        request: TaskSummaryChangesParams,
+    ) -> Result<TaskSummaryChangesPage> {
+        self.read_task_summary_changes(request, ChangeSource::LatestRevisions)
     }
 
     fn read_task_summary_changes(
         &self,
         request: TaskSummaryChangesParams,
-        revisions: bool,
+        source: ChangeSource,
     ) -> Result<TaskSummaryChangesPage> {
         if !(1..=MAX_TASK_SUMMARY_CHANGE_EVENTS).contains(&request.limit) {
             return Err(Error::Invalid(format!(
@@ -45,7 +54,7 @@ impl Kernel {
                 through: request.through,
                 limit: request.limit,
             },
-            revisions,
+            source,
         )?;
         let mut changes = Vec::with_capacity(page.changes.len());
         if !page.changes.is_empty() {
@@ -73,7 +82,7 @@ impl Kernel {
     fn read_task_changes(
         &self,
         request: &TaskChangesParams,
-        revisions: bool,
+        source: ChangeSource,
     ) -> Result<(TaskChangesPage, u64)> {
         let (events_sql, revisions_sql, owner) = match (
             &request.task_id,
@@ -129,15 +138,36 @@ impl Kernel {
         if request.after > through || through > now {
             return Err(Error::Invalid("invalid task change replay window".into()));
         }
-        let cutover = if revisions {
+        let cutover = if source != ChangeSource::Events {
             task_revisions::legacy_through(&self.db)?
         } else {
             through
         };
+        let latest = if source == ChangeSource::LatestRevisions {
+            Some(Supersession {
+                later: self.db.prepare_cached(
+                    "SELECT 1 FROM task_summary_revisions
+                     WHERE task_id=?1 AND sequence>?2 AND sequence<=?3
+                     UNION ALL
+                     SELECT 1 FROM events WHERE task_id=?1 AND sequence>?2 AND sequence<=?4
+                     LIMIT 1",
+                )?,
+                through: through as i64,
+                legacy_through: through.min(cutover) as i64,
+            })
+        } else {
+            None
+        };
         let mut scan = ChangeScan {
             found: HashMap::new(),
-            left: request.limit,
+            left: if latest.is_some() {
+                MAX_TASK_CHANGE_EVENTS
+            } else {
+                request.limit
+            },
+            result_limit: request.limit as usize,
             last: request.after,
+            latest,
         };
         // Ordered, disjoint ranges share one page budget, including the
         // extra row used to detect a continuation across the upgrade boundary.
@@ -173,13 +203,28 @@ impl Kernel {
     }
 }
 
-struct ChangeScan {
-    found: HashMap<String, u64>,
-    left: u32,
-    last: u64,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChangeSource {
+    Events,
+    Revisions,
+    LatestRevisions,
 }
 
-impl ChangeScan {
+struct Supersession<'db> {
+    later: rusqlite::CachedStatement<'db>,
+    through: i64,
+    legacy_through: i64,
+}
+
+struct ChangeScan<'db> {
+    found: HashMap<String, u64>,
+    left: u32,
+    result_limit: usize,
+    last: u64,
+    latest: Option<Supersession<'db>>,
+}
+
+impl ChangeScan<'_> {
     fn segment(
         &mut self,
         db: &Connection,
@@ -194,12 +239,24 @@ impl ChangeScan {
         let mut stmt = db.prepare_cached(sql)?;
         let mut rows = stmt.query(params![owner, after as i64, through as i64, self.left + 1])?;
         while let Some(row) = rows.next()? {
-            if self.left == 0 {
+            if self.left == 0 || self.found.len() == self.result_limit {
                 return Ok(true);
             }
             self.left -= 1;
             self.last = row.get::<_, i64>(0)? as u64;
             let id = row.get_ref(1)?.as_str().map_err(rusqlite::Error::from)?;
+            // The two ordered sources share a fixed through bound. A later
+            // revision outside this window will be eligible in the next one.
+            if let Some(latest) = &mut self.latest
+                && latest.later.exists(params![
+                    id,
+                    self.last as i64,
+                    latest.through,
+                    latest.legacy_through
+                ])?
+            {
+                continue;
+            }
             if let Some(sequence) = self.found.get_mut(id) {
                 *sequence = self.last;
             } else {

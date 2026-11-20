@@ -451,6 +451,22 @@ fn summary_revision_replay_crosses_upgrade_and_skips_unchanged_commits() {
         peer.call(rpc, before.clone()),
         peer.call("events/listTaskSummaryChanges", before)
     );
+    let latest_rpc = "events/listLatestTaskSummaryRevisions";
+    let latest = peer.call(
+        latest_rpc,
+        json!({"workspaceId":workspace,"after":cut-1,"through":through,"limit":1}),
+    );
+    assert_eq!(latest["changes"].as_array().unwrap().len(), 1);
+    assert_eq!(latest["changes"][0]["sequence"], selected[2]);
+    assert_eq!(latest["changes"][0]["summary"]["id"], task_id);
+    assert_eq!(latest["nextAfter"], through);
+    assert_eq!(latest["hasMore"], false);
+    let latest_legacy = peer.call(
+        latest_rpc,
+        json!({"workspaceId":workspace,"after":0,"through":cut,"limit":1}),
+    );
+    assert_eq!(latest_legacy["changes"][0]["sequence"], cut);
+    assert_eq!(latest_legacy["hasMore"], false);
     let first_page = peer.call(
         rpc,
         json!({"workspaceId":workspace,"after":cut-1,"through":through,"limit":1}),
@@ -549,7 +565,7 @@ fn summary_revision_replay_crosses_upgrade_and_skips_unchanged_commits() {
             .unwrap();
         if let Some(page) = work
             .events
-            .next_task_summary_revisions(&mut client, 1, |_| {})
+            .next_latest_task_summary_revisions(&mut client, 1, |_| {})
             .unwrap()
         {
             break page;
@@ -559,6 +575,104 @@ fn summary_revision_replay_crosses_upgrade_and_skips_unchanged_commits() {
     };
     assert_eq!(live.changes[0].summary.id, unrelated["id"]);
     assert_eq!(live.changes[0].summary.status, TaskStatus::Cancelled);
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn latest_revision_replay_advances_empty_pages_and_pins_the_window_end() {
+    let root = std::env::temp_dir().join(format!(
+        "fliuno-coalesce-revisions-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}))["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let session = peer.call("session/create", json!({"workspaceId":workspace}))["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let task = peer.call(
+        "task/startSummary",
+        json!({"sessionId":session,"input":"prepare a chart"}),
+    )["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    peer.wait_for_status(&task, "waiting_approval");
+    let after = peer.call("events/getWatermark", json!({}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    drop(peer);
+
+    // Seed a previously recorded hotspot without running thousands of model turns.
+    let mut db_handle = rusqlite::Connection::open(&db).unwrap();
+    let tx = db_handle.transaction().unwrap();
+    let count = fliuno_protocol::MAX_TASK_CHANGE_EVENTS + 1;
+    tx.execute(
+        "WITH RECURSIVE copies(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM copies WHERE n<?2)
+         INSERT INTO events(task_id,data)
+         SELECT ?1,(SELECT data FROM events WHERE task_id=?1 ORDER BY sequence LIMIT 1) FROM copies",
+        rusqlite::params![task, count],
+    ).unwrap();
+    tx.execute(
+        "INSERT INTO task_summary_revisions(sequence,task_id,session_id,workspace_id)
+         SELECT sequence,task_id,?2,?3 FROM events WHERE task_id=?1 AND sequence>?4",
+        rusqlite::params![task, session, workspace, after as i64],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+    drop(db_handle);
+
+    let (server, mut client) = super::ag_ui_run::connect(&db);
+    assert_eq!(
+        client.info().capabilities["latestTaskSummaryRevisionReplay"],
+        true
+    );
+    let through = client.event_watermark(|_| {}).unwrap();
+    assert_eq!(through, after + u64::from(count));
+    let mut replay = EventReplay::new(ReplayScope::Session(session), after, through).unwrap();
+    let empty = replay
+        .next_latest_task_summary_revisions(&mut client, 1, |_| {})
+        .unwrap()
+        .unwrap();
+    assert!(empty.changes.is_empty() && empty.has_more);
+    assert_eq!(empty.next_after, through - 1);
+    assert_eq!(replay.cursor(), empty.next_after);
+
+    // A new durable revision is visible in the summary but belongs to a later window.
+    let updated: TaskSummary = client
+        .call("task/cancelSummary", &json!({"taskId":task}), |_| {})
+        .unwrap();
+    assert_eq!(updated.status, TaskStatus::Cancelled);
+    let tail = replay
+        .next_latest_task_summary_revisions(&mut client, 1, |_| {})
+        .unwrap()
+        .unwrap();
+    assert_eq!(tail.changes.len(), 1);
+    assert_eq!(tail.changes[0].sequence, through);
+    assert_eq!(tail.changes[0].summary.id, task);
+    assert_eq!(tail.changes[0].summary.status, TaskStatus::Cancelled);
+    assert!(tail.summary_through_sequence > through);
+    assert_eq!(replay.cursor(), through);
+    assert!(!tail.has_more);
+
+    let mut next = EventReplay::new(
+        ReplayScope::Task(task),
+        through,
+        tail.summary_through_sequence,
+    )
+    .unwrap();
+    let updated = next
+        .next_latest_task_summary_revisions(&mut client, 1, |_| {})
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.changes[0].sequence, tail.summary_through_sequence);
     drop(client);
     drop(server);
     fs::remove_dir_all(root).unwrap();

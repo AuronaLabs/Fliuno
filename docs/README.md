@@ -47,7 +47,7 @@
 <details>
 <summary>进阶：重连、批量操作、历史和用量</summary>
 
-- **工作台刷新**：[独立读取快照](protocol.md#工作台快照) · [按修订回放](protocol.md#任务摘要修订回放)
+- **工作台刷新**：[独立读取快照](protocol.md#工作台快照) · [按窗口合并修订](protocol.md#按窗口合并摘要修订) · [按修订回放](protocol.md#任务摘要修订回放)
 - **分开读取变动和详情**：[回放任务 ID](protocol.md#任务变动回放)，再[批量取摘要](protocol.md#批量读取任务摘要)。
 - **恢复与批量操作**：[判断能否恢复](protocol.md#任务恢复判断) · [批量查询恢复状态](protocol.md#批量查询恢复状态) · [批量取消任务](protocol.md#批量取消任务) · [核对审批结果](protocol.md#批量读取审批决定) · [校验交付物摘要](protocol.md#批量读取交付物摘要)
 - **目录与历史**：[会话目录](protocol.md#会话目录) · [任务目录](protocol.md#任务目录) · [历史分页](context.md#会话历史分页) · [订阅会话历史](context.md#订阅会话历史) · [历史搜索](protocol.md#查找历史任务) · [只搜新完成的任务](protocol.md#只搜索新完成的任务)
