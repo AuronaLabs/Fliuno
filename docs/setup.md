@@ -21,7 +21,7 @@
 
 ### 先运行离线演示
 
-用 Python 启动示例。它会构建应用服务，用临时数据库演示审批、交付物保存和事件回放，无需 API Key。
+示例会构建应用服务，在临时数据库里提交任务、批准一次交付物写入，最后回放事件。整个过程无需 API Key。
 
 ```sh
 python examples/demo.py
@@ -31,14 +31,13 @@ python examples/demo.py
 
 ### 再启动自己的服务
 
+让宿主把应用服务作为子进程启动。以下命令将任务数据库存放在仓库的 `.fliuno` 目录：
+
 ```sh
 cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 ```
 
-> [!TIP]
-> 把服务作为子进程启动，通过 **stdin** 逐行发送 JSON-RPC 2.0，通过 **stdout** 读取响应与通知。**stderr** 单独用于诊断。
-
-第一条请求是：
+通过 **stdin** 发送下面的握手请求，以换行结尾。通过 **stdout** 逐行读取 JSON-RPC 响应和通知，**stderr** 留给诊断日志。
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"0.1","clientName":"my-client"}}
@@ -51,7 +50,7 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 | **收取交付物** | 用 `artifacts/list` 查看产物，用 `artifacts/read` 分段读取正文。 |
 | **订阅和重连** | 用 `events/setScope` 订阅任务、会话或工作区。重连或收到 `notifications/eventGap` 时，按范围和持久游标补读。 |
 
-[应用协议参考](protocol.md#方法) · [Rust 客户端](protocol.md#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
+[工作台接入顺序](README.md#工作台要展示什么) · [应用协议参考](protocol.md#方法) · [Rust 客户端](protocol.md#rust-调用方) · [AG-UI HTTP](ag-ui.md#http-接入)
 
 ### 导出协议 Schema
 

@@ -1,21 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="128" viewBox="0 0 1120 128" role="img" aria-labelledby="title desc">
-  <title id="title">Fliuno documentation</title>
-  <desc id="desc">A single path branches into three.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="140" viewBox="0 0 1120 140" role="img" aria-labelledby="title desc">
+  <title id="title">Fliuno handbook</title>
+  <desc id="desc">Three reading paths: quickstart, integration, and kernel development.</desc>
   <defs>
-    <clipPath id="frame"><rect x="0.5" y="0.5" width="1119" height="127" rx="23" fill="#151417" stroke="none"/></clipPath>
-    <pattern id="grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#35313c"/></pattern>
+    <clipPath id="frame"><rect x="0.5" y="0.5" width="1119" height="139" rx="23" fill="#121b1a" stroke="none"/></clipPath>
+    <pattern id="grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#314440"/></pattern>
   </defs>
   <g clip-path="url(#frame)">
-    <rect x="0" y="0" width="1120" height="128" rx="23" fill="#151417" stroke="none"/>
-    <rect x="526.4" y="0" width="593.6" height="128" rx="0" fill="url(#grid)" stroke="none"/>
-    <g transform="translate(56 47)"><rect x="0" y="0" width="34" height="34" rx="9" fill="#ffb789" stroke="none"/><path d="M9 25V13l4-4h12M9 17h10" fill="none" stroke="#151417" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24.5" cy="17" r="1.7" fill="#151417"/></g>
-    <text x="104" y="45" font-family="'Cascadia Mono', Consolas, monospace" font-size="11" fill="#ffb789" font-weight="650" letter-spacing="1.4" text-anchor="start">FLIUNO / HANDBOOK</text>
-    <text x="104" y="83" font-family="system-ui, 'Segoe UI', sans-serif" font-size="42" fill="#fff5ec" font-weight="750" letter-spacing="0" text-anchor="start">Documentation</text>
-    <path d="M762 64H1058M860 64v-22H1058M860 64v22H1058" fill="none" stroke="#494454" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <rect x="758" y="60" width="8" height="8" rx="2" fill="#ffb789" stroke="none"/>
-    <rect x="1055" y="39" width="6" height="6" rx="2" fill="#ffb789" stroke="none"/>
-    <rect x="1055" y="61" width="6" height="6" rx="2" fill="#9de2d1" stroke="none"/>
-    <rect x="1055" y="83" width="6" height="6" rx="2" fill="#c3baca" stroke="none"/>
+    <rect x="0" y="0" width="1120" height="140" rx="23" fill="#121b1a" stroke="none"/>
+    <rect x="560" y="0" width="560" height="140" rx="0" fill="url(#grid)" stroke="none"/>
+    <g transform="translate(56 53)"><rect x="0" y="0" width="34" height="34" rx="9" fill="#a4e8c8" stroke="none"/><path d="M9 25V13l4-4h12M9 17h10" fill="none" stroke="#121b1a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24.5" cy="17" r="1.7" fill="#121b1a"/></g>
+    <text x="104" y="45" font-family="'Cascadia Mono', Consolas, monospace" font-size="12" fill="#a4e8c8" font-weight="650" letter-spacing="1.4" text-anchor="start">FLIUNO / DOCS</text>
+    <text x="104" y="89" font-family="system-ui, 'Segoe UI', sans-serif" font-size="48" fill="#f0f8f4" font-weight="750" letter-spacing="0" text-anchor="start">Handbook</text>
+    <path d="M615 70H929M719 70v-32H929M719 70v32H929" fill="none" stroke="#3a504b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="611" y="66" width="8" height="8" rx="2" fill="#a4e8c8" stroke="none"/>
+    <rect x="926" y="35" width="6" height="6" rx="2" fill="#a4e8c8" stroke="none"/>
+    <text x="944" y="43" font-family="'Cascadia Mono', Consolas, monospace" font-size="13" fill="#a4e8c8" font-weight="650" letter-spacing="0" text-anchor="start">01  QUICKSTART</text>
+    <rect x="926" y="67" width="6" height="6" rx="2" fill="#ffca9e" stroke="none"/>
+    <text x="944" y="75" font-family="'Cascadia Mono', Consolas, monospace" font-size="13" fill="#ffca9e" font-weight="650" letter-spacing="0" text-anchor="start">02  INTEGRATE</text>
+    <rect x="926" y="99" width="6" height="6" rx="2" fill="#b2c6bf" stroke="none"/>
+    <text x="944" y="107" font-family="'Cascadia Mono', Consolas, monospace" font-size="13" fill="#b2c6bf" font-weight="650" letter-spacing="0" text-anchor="start">03  KERNEL</text>
   </g>
-  <rect x="0.5" y="0.5" width="1119" height="127" rx="23" fill="none" stroke="#494454"/>
+  <rect x="0.5" y="0.5" width="1119" height="139" rx="23" fill="none" stroke="#3a504b"/>
 </svg>

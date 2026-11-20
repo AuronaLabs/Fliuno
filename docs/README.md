@@ -3,21 +3,21 @@
     <source media="(max-width: 600px) and (prefers-color-scheme: light)" srcset="assets/fliuno-docs-compact-light.svg">
     <source media="(max-width: 600px)" srcset="assets/fliuno-docs-compact.svg">
     <source media="(prefers-color-scheme: light)" srcset="assets/fliuno-docs-light.svg">
-    <img src="assets/fliuno-docs.svg" alt="" width="960">
+    <img src="assets/fliuno-docs.svg" alt="" width="1120">
   </picture>
 </p>
 
 # Fliuno 文档中心
 
-[项目首页](../README.md) › 文档中心
+[项目首页](../README.md) · [更新记录](../CHANGELOG.md) · [开发路线图](roadmap.md)
 
 ## 从这里开始
 
-1. **第一次运行**：先[跑一次离线任务](../README.md#跑一次离线任务)，再按需[配置模型](setup.md#真实模型)。
-2. **把 Fliuno 接进应用**：[启动服务并握手](setup.md#再启动自己的服务)，再[选择连接方式](#连接方式)。
-3. **修改内核**：[看模块依赖](architecture.md#领域与依赖)，了解[授权边界](authority.md)，然后[运行工程检查](setup.md#检查与演示)。
+1. **先跑起来** · [准备环境](setup.md#快速开始) → [运行离线任务](../README.md#跑一次离线任务) → [配置模型](setup.md#真实模型)
+2. **接入宿主** · [启动服务并握手](setup.md#再启动自己的服务) → [选择连接方式](#连接方式) → [展示任务、审批与交付](#工作台要展示什么)
+3. **修改内核** · [查看模块依赖](architecture.md#领域与依赖) → [理解授权边界](authority.md) → [运行工程检查](setup.md#检查与演示)
 
-**按主题浏览：** [接入客户端](#接入客户端) · [模型、工具与 Agent](#模型工具与-agent) · [本机执行与隔离](#本机执行与隔离) · [内核与开发](#内核与开发)
+**按主题查找：** [接入客户端](#接入客户端) · [模型、工具与 Agent](#模型工具与-agent) · [本机执行与隔离](#本机执行与隔离) · [内核与开发](#内核与开发)
 
 ## 接入客户端
 
@@ -25,18 +25,19 @@
 
 | 宿主形态 | 接入文档 |
 | --- | --- |
-| **任意语言子进程** | [stdio / JSON-RPC](protocol.md#传输) · [JSON Schema](../protocol/fliuno.schema.json) |
-| **Rust 应用** | [类型化客户端与事件补读](protocol.md#rust-调用方) |
-| **HTTP 宿主** | [挂载 AG-UI 路由](ag-ui.md#http-接入) · [SSE 续传](ag-ui.md#sse-输出与续传) · [离线示例](../examples/ag_ui_http_demo.py) |
+| **任意语言** | 将内核作为子进程启动，使用 [stdio JSON-RPC](protocol.md#传输) 和 [JSON Schema](../protocol/fliuno.schema.json)。 |
+| **Rust 应用** | 使用[类型化客户端](protocol.md#rust-调用方)发出请求并补读事件。 |
+| **HTTP 宿主** | [挂载 AG-UI 路由](ag-ui.md#http-接入)，按需[SSE 续传](ag-ui.md#sse-输出与续传)。[离线示例](../examples/ag_ui_http_demo.py) |
 
 ### 工作台要展示什么
 
-1. **加载工作台**：[握手](setup.md#再启动自己的服务)读取服务能力，再用[工作台实时订阅](protocol.md#工作台实时订阅)取得初始快照，接上后续变动。
-2. **提交任务**：[提交并保存任务 ID](protocol.md#任务提交与重试)。如果提交后断线、还没收到任务 ID，用同一个 `clientRequestId` 重试。
-3. **处理审批**：展示[待审批操作](protocol.md#待审批快照)，待用户[允许或拒绝](protocol.md#决定与运行)。
-4. **展示交付物**：[订阅交付物目录](protocol.md#交付物目录订阅)，按需[分段下载](protocol.md#审批事件与产物)。
+1. **加载工作台。** [握手](setup.md#再启动自己的服务)读取服务能力，再[订阅工作台](protocol.md#工作台实时订阅)，用初始快照填充视图，随后接收变动。
+2. **提交任务。** [提交并保存任务 ID](protocol.md#任务提交与重试)。如果断线时还没收到 ID，用同一个 `clientRequestId` 重试。
+3. **处理审批。** 展示[待审批操作](protocol.md#待审批快照)，收到用户选择后提交[允许或拒绝](protocol.md#决定与运行)。
+4. **收取交付物。** [订阅交付物目录](protocol.md#交付物目录订阅)，按需[分段下载](protocol.md#审批事件与产物)。
 
-**重新连接时**，从上次已处理的游标[补读工作台变动](protocol.md#任务变动摘要)。采用 HTTP / SSE 的宿主，用原运行 ID 和 `Last-Event-ID` [续传消息](ag-ui.md#sse-输出与续传)。
+> [!TIP]
+> 重连后从最后已处理的游标[补读工作台变动](protocol.md#任务变动摘要)。用 AG-UI 时，带上原运行 ID 和 `Last-Event-ID` [续传 SSE 消息](ag-ui.md#sse-输出与续传)。
 
 <details>
 <summary>进阶：重连、批量操作、历史和用量</summary>
@@ -76,7 +77,5 @@
 | **[会话上下文](context.md)** | 历史选择、冻结快照和模型请求预算 |
 | **[验收与性能记录](execution-evidence.md)** · [检查与演示](setup.md#检查与演示) | 可复现的命令、双平台验收和性能测量 |
 | **[内核调研](research.md)** | 模型、工具、Agent 和系统隔离的选型依据 |
-
-**版本与进度**：[更新记录](../CHANGELOG.md) · [开发路线图](roadmap.md)
 
 [回到阅读入口](#从这里开始) · [返回项目首页](../README.md)
