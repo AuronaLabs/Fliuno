@@ -10,7 +10,7 @@ use std::fmt;
 pub const MAX_TASK_TEXT_BYTES: usize = 256 * 1024;
 const MAX_MEDIA_BASE64_BYTES: usize = 512 * 1024;
 const MAX_INPUT_PARTS: usize = 32;
-const MAX_INPUT_MEDIA: usize = 4;
+pub const MAX_INPUT_MEDIA: usize = 4;
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(untagged)]
@@ -114,6 +114,25 @@ impl ImageMimeType {
 }
 
 impl UserContentPart {
+    /// Convert bounded, locally stored binary data to a provider input part.
+    pub fn from_media_bytes(media_type: &str, bytes: &[u8]) -> Result<Self, &'static str> {
+        let image = match media_type {
+            "image/png" => Some(ImageMimeType::Png),
+            "image/jpeg" => Some(ImageMimeType::Jpeg),
+            "image/webp" => Some(ImageMimeType::Webp),
+            PDF_MIME_TYPE => None,
+            _ => return Err("artifact input must be PNG, JPEG, WebP or PDF"),
+        };
+        if !matches_media_header(image, bytes) {
+            return Err("artifact input header does not match its MIME type");
+        }
+        let data = STANDARD.encode(bytes);
+        Ok(match image {
+            Some(mime_type) => Self::Image { mime_type, data },
+            None => Self::Pdf { data },
+        })
+    }
+
     /// Text for summaries, indexing and future task context. Media bytes stay in this task.
     pub fn text_projection(&self) -> &str {
         match self {
@@ -126,12 +145,20 @@ impl UserContentPart {
 
 /// Bound the work needed to verify or compare multipart input.
 pub fn validate_multipart_input_limits(parts: &[UserContentPart]) -> Result<(), &'static str> {
-    if parts.len() > MAX_INPUT_PARTS {
+    multipart_input_budget(parts, 0).map(|_| ())
+}
+
+/// Return remaining Base64 bytes after counting both inline and referenced media.
+pub fn multipart_input_budget(
+    parts: &[UserContentPart],
+    references: usize,
+) -> Result<usize, &'static str> {
+    if parts.len().saturating_add(references) > MAX_INPUT_PARTS {
         return Err("input must have at most 32 parts");
     }
     let mut text_bytes = 0;
     let mut media_bytes = 0;
-    let mut media = 0;
+    let mut media = references;
     for part in parts {
         match part {
             UserContentPart::Text { text } => text_bytes += text.len(),
@@ -149,12 +176,17 @@ pub fn validate_multipart_input_limits(parts: &[UserContentPart]) -> Result<(), 
     if text_bytes > MAX_TASK_TEXT_BYTES {
         return Err("input text exceeds 256 KiB");
     }
-    Ok(())
+    Ok(MAX_MEDIA_BASE64_BYTES - media_bytes)
 }
 
 /// This validates transport and MIME consistency without parsing images or documents.
 pub fn validate_multipart_input(parts: &[UserContentPart]) -> Result<(), &'static str> {
     validate_multipart_input_limits(parts)?;
+    validate_inline_media(parts)
+}
+
+/// Check the bytes after the caller has checked the multipart size budget.
+pub fn validate_inline_media(parts: &[UserContentPart]) -> Result<(), &'static str> {
     // Reuse one bounded scratch buffer. The encoded strings remain canonical for retries.
     let mut decoded = Vec::new();
     for part in parts {
@@ -167,13 +199,16 @@ pub fn validate_multipart_input(parts: &[UserContentPart]) -> Result<(), &'stati
         STANDARD
             .decode_vec(data, &mut decoded)
             .map_err(|_| "inline media must use standard padded base64")?;
-        let matches = match image_type {
-            Some(mime_type) => mime_type.matches_header(&decoded),
-            None => decoded.starts_with(b"%PDF-"),
-        };
-        if !matches {
+        if !matches_media_header(image_type.copied(), &decoded) {
             return Err("inline media header does not match its MIME type");
         }
     }
     Ok(())
+}
+
+fn matches_media_header(image: Option<ImageMimeType>, bytes: &[u8]) -> bool {
+    match image {
+        Some(mime_type) => mime_type.matches_header(bytes),
+        None => bytes.starts_with(b"%PDF-"),
+    }
 }

@@ -1064,6 +1064,14 @@
         "input": {
           "$ref": "#/$defs/TaskInput"
         },
+        "artifactInputs": {
+          "description": "Append immutable binary artifacts from the task's session in this order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactGetParams"
+          },
+          "maxItems": 4
+        },
         "clientRequestId": {
           "type": [
             "string",
@@ -1183,6 +1191,22 @@
             "image/png",
             "image/jpeg",
             "image/webp"
+          ]
+        },
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
           ]
         },
         "TaskBackend": {
@@ -1361,6 +1385,14 @@
         "input": {
           "$ref": "#/$defs/TaskInput"
         },
+        "artifactInputs": {
+          "description": "Append immutable binary artifacts from the task's session in this order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactGetParams"
+          },
+          "maxItems": 4
+        },
         "clientRequestId": {
           "type": [
             "string",
@@ -1480,6 +1512,22 @@
             "image/png",
             "image/jpeg",
             "image/webp"
+          ]
+        },
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
           ]
         },
         "TaskBackend": {

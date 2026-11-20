@@ -347,6 +347,40 @@ impl Kernel {
             .ok_or_else(|| Error::NotFound("artifact".into()))
     }
 
+    /// Resolve an attachment by its owning session before opening its body.
+    pub(crate) fn read_artifact_input(
+        &self,
+        session: &str,
+        reference: &ArtifactGetParams,
+        remaining: usize,
+    ) -> Result<(UserContentPart, usize)> {
+        let (rowid, media_type, binary): (i64, String, bool) = self.db.prepare_cached(
+            "SELECT b.rowid,json_extract(a.data,'$.mediaType'),COALESCE(json_extract(a.data,'$.binary'),0)
+             FROM tasks t JOIN artifacts a ON a.task_id=t.id
+             JOIN artifact_bodies b ON b.artifact_id=a.id
+             WHERE t.session_id=?1 AND t.id=?2 AND a.id=?3",
+        )?.query_row(params![session, reference.task_id, reference.artifact_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        }).optional()?.ok_or_else(|| Error::NotFound("artifact in session".into()))?;
+        if !binary {
+            return Err(Error::Invalid("artifact input must be binary".into()));
+        }
+        let blob = self
+            .db
+            .blob_open("main", "artifact_bodies", "body", rowid, true)?;
+        let length = blob.len();
+        let encoded = base64::encoded_len(length, true)
+            .filter(|size| *size <= remaining)
+            .ok_or_else(|| {
+                Error::Invalid("artifact inputs exceed the 512 KiB base64 input budget".into())
+            })?;
+        let mut bytes = vec![0; length];
+        blob.read_at_exact(&mut bytes, 0)?;
+        let part = UserContentPart::from_media_bytes(&media_type, &bytes)
+            .map_err(|message| Error::Invalid(message.into()))?;
+        Ok((part, encoded))
+    }
+
     /// Return one byte range and the immutable content length, even when the
     /// cursor falls inside a UTF-8 character.
     pub fn read_artifact_chunk(

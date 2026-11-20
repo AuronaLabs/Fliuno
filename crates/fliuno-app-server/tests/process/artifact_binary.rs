@@ -145,3 +145,138 @@ fn binary_artifact_requires_approval_and_preserves_raw_bytes_across_restart() {
     }
     fs::remove_dir(root).unwrap();
 }
+
+#[test]
+fn artifact_task_input_keeps_scope_order_and_retry_identity() {
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
+    const PDF: &str = "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAxMCAxMF0gPj4KZW5kb2JqCnhyZWYKMCA0CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA0IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxODIKJSVFT0YK";
+    let root = std::env::temp_dir().join(format!("fliuno-artifact-input-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let fixture = Fixture::start(move |request| {
+        assert_eq!(request.path, "/v1/responses");
+        let input = request.body["input"].as_array().unwrap();
+        let current = &input.last().unwrap()["content"];
+        let complete =
+            || json!([{"type":"message","content":[{"type":"output_text","text":"done"}]}]);
+        let output = if let Some(parts) = current.as_array() {
+            assert_eq!(
+                parts,
+                &vec![
+                    json!({"type":"input_text","text":"Review the artifacts"}),
+                    json!({"type":"input_file","filename":"document.pdf","file_data":format!("data:application/pdf;base64,{PDF}")}),
+                    json!({"type":"input_image","detail":"auto","image_url":format!("data:image/png;base64,{PNG}")}),
+                ]
+            );
+            complete()
+        } else if input
+            .iter()
+            .any(|item| item["type"] == "function_call_output")
+        {
+            complete()
+        } else {
+            let (media, data) = match current.as_str().unwrap() {
+                "create pdf" => ("application/pdf", PDF),
+                "create png" => ("image/png", PNG),
+                other => panic!("unexpected model request: {other}"),
+            };
+            let args =
+                json!({"title":"attachment","mediaType":media,"contentBase64":data}).to_string();
+            json!([{"type":"function_call","call_id":"new-artifact","name":"artifact_create_binary","arguments":args}])
+        };
+        Response::json(200, json!({"status":"completed","output":output}))
+    });
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&fixture.url("/v1/")));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let other = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let mut create_artifact =
+        |text| {
+            let task = peer.call(
+                "task/start",
+                json!({"sessionId":session["id"],"input":text}),
+            );
+            let id = task["id"].as_str().unwrap();
+            let waiting = peer.wait_for_status(id, "waiting_approval");
+            peer.call("approval/respond", json!({
+            "taskId":id,"approvalId":waiting["pendingApproval"]["id"],"decision":"allow_once"
+        }));
+            peer.wait_for_status(id, "completed");
+            let manifest = peer.call("artifacts/listSummaries", json!({"taskId":id}));
+            json!({"taskId":id,"artifactId":manifest["items"][0]["id"]})
+        };
+    let document = create_artifact("create pdf");
+    let image = create_artifact("create png");
+    let request = json!({
+        "sessionId":session["id"],"clientRequestId":"reuse-artifacts",
+        "input":"Review the artifacts","artifactInputs":[document,image]
+    });
+    let mut cross_session = request.clone();
+    cross_session["sessionId"] = other["id"].clone();
+    assert_eq!(
+        peer.request("task/startSummary", cross_session)["error"]["code"],
+        -32004
+    );
+    let mut invalid_pair = request.clone();
+    invalid_pair["artifactInputs"][0]["taskId"] = image["taskId"].clone();
+    assert_eq!(
+        peer.request("task/startSummary", invalid_pair)["error"]["code"],
+        -32004
+    );
+    let mut over_budget = request.clone();
+    let oversized = STANDARD.encode([b"%PDF-".as_slice(), &vec![b' '; 384 * 1024 - 5]].concat());
+    over_budget["input"] = json!([{"type":"pdf","data":oversized}]);
+    assert_eq!(
+        peer.request("task/startSummary", over_budget)["error"]["code"],
+        -32602
+    );
+    let mut agent = request.clone();
+    agent["backend"] = json!({"type":"external_agent","agentId":"external"});
+    assert_eq!(
+        peer.request("task/startSummary", agent)["error"]["code"],
+        -32602
+    );
+    let summary = peer.call("task/startSummary", request.clone());
+    let id = summary["id"].as_str().unwrap();
+    assert_eq!(
+        summary["inputPreview"],
+        "Review the artifacts[document][image]"
+    );
+    peer.wait_for_status(id, "completed");
+    drop(peer);
+
+    // Alter the source body in this isolated fixture to prove retries read
+    // the receipt and the original task snapshot without resolving references.
+    let connection = rusqlite::Connection::open(&db).unwrap();
+    connection
+        .execute(
+            "UPDATE artifact_bodies SET body=x'00' WHERE artifact_id=?1",
+            [image["artifactId"].as_str().unwrap()],
+        )
+        .unwrap();
+    drop(connection);
+    let mut peer = Peer::start(&db);
+    assert_eq!(peer.call("task/startSummary", request.clone())["id"], id);
+    let full = peer.call("task/start", request.clone());
+    assert_eq!(full["id"], id);
+    assert_eq!(full["messages"][0]["parts"][1]["data"], PDF);
+    assert_eq!(full["messages"][0]["parts"][2]["data"], PNG);
+    let mut changed = request.clone();
+    changed["artifactInputs"] = json!([image, document]);
+    assert_eq!(
+        peer.request("task/startSummary", changed)["error"]["code"],
+        -32009
+    );
+    let mut inline = request.clone();
+    inline.as_object_mut().unwrap().remove("artifactInputs");
+    inline["input"] = full["messages"][0]["parts"].clone();
+    assert_eq!(peer.request("task/start", inline)["error"]["code"], -32009);
+    let mut fresh = request;
+    fresh["clientRequestId"] = json!("new-reference");
+    assert_eq!(
+        peer.request("task/startSummary", fresh)["error"]["code"],
+        -32602
+    );
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}

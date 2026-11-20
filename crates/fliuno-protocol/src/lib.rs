@@ -695,6 +695,10 @@ pub const MAX_TASK_MODEL_STEPS: u32 = DEFAULT_TASK_MODEL_STEPS;
 pub struct TaskStartParams {
     pub session_id: String,
     pub input: TaskInput,
+    /// Append immutable binary artifacts from the task's session in this order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_INPUT_MEDIA))]
+    pub artifact_inputs: Vec<ArtifactGetParams>,
     #[serde(default)]
     pub client_request_id: Option<String>,
     #[serde(default)]

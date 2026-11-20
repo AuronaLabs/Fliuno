@@ -212,7 +212,7 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 
 ### 任务提交与重试
 
-提交前为这次操作生成 `clientRequestId`，并保存原始输入、后端、上下文选项和模型尝试上限。若等待 `task/startSummary` 响应时断线，在同一会话内原样重试。已接受的请求会返回同一任务的**当前**摘要，不再次调度模型或工具；已中断的任务仍须按原 `task/resume` 规则显式处理。复用同一键但改变输入、后端、规范化后的上下文或模型尝试上限会返回 `-32009`。如果只剩下会话和请求 ID，可以用 `task/getSummaryByRequest` 找回任务。
+提交前为这次操作生成 `clientRequestId`，并保存原始输入、交付物引用、后端、上下文选项和模型尝试上限。若等待 `task/startSummary` 响应时断线，在同一会话内原样重试。已接受的请求会返回同一任务的**当前**摘要，不再次调度模型或工具；已中断的任务仍须按原 `task/resume` 规则显式处理。复用同一键但改变输入、后端、规范化后的上下文或模型尝试上限会返回 `-32009`。如果只剩下会话和请求 ID，可以用 `task/getSummaryByRequest` 找回任务。
 
 SQLite v44 将普通有键提交的输入 SHA-256、后端和规范化后的上下文选项随任务与首个事件提交。新任务的摘要重试只核对这个回执和当前摘要。旧任务仍通过原快照核对，升级不扫描历史正文。同一键空间中的审批续跑和远端续接继续按各自的规则识别。
 
@@ -225,6 +225,23 @@ SQLite v44 将普通有键提交的输入 SHA-256、后端和规范化后的上�
 ### 内嵌 PDF 输入
 
 声明 `initialize.capabilities.taskPdfInput` 的服务在同一个 `input` 数组中接受 `{ "type": "pdf", "data": "…" }`。`data` 是 PDF 文件的标准 Base64 编码。图片和 PDF 合计最多 4 个，编码总长最多 512 KiB，文字和片段上限沿用图片输入约定。重试保留片段种类和顺序。任务摘要和新任务的历史上下文用 `[document]` 表示 PDF。 [查看 AG-UI 接入](ag-ui.md#提交内嵌-pdf)
+
+### 将交付物用作任务输入
+
+声明 `initialize.capabilities.taskArtifactInput` 的服务允许在本机 `task/start` 和 `task/startSummary` 上设置 `artifactInputs`。每项包含源 `taskId` 和 `artifactId`。例如，使用同一会话里生成的报告作为下一项任务的输入时，可以提交以下参数。
+
+```json
+{
+  "sessionId": "session_example",
+  "input": "检查报告中的数据是否一致",
+  "artifactInputs": [{"taskId":"task_source","artifactId":"artifact_report"}],
+  "clientRequestId": "review-report"
+}
+```
+
+引用只接受目标会话内已提交的 PNG、JPEG、WebP 和 PDF 二进制交付物。内核按数组顺序把交付物附在 `input` 后面，沿用 32 个片段、4 个媒体和 512 KiB Base64 的总上限。只传交付物时可以将 `input` 设为空字符串。客户端可以通过 [交付物目录](#交付物目录订阅) 取得两个 ID。
+
+任务创建时把交付物字节写入任务快照。同一 `clientRequestId` 使用同一份输入和有序引用时，重试直接返回原任务。更换引用、改变顺序或改用内嵌字节会产生请求键冲突。不存在或不属于目标会话的交付物返回 `-32004`。格式或大小不符合约定时返回 `-32602`。
 
 ### 模型尝试次数
 

@@ -289,6 +289,7 @@ impl AgUiRunInput {
             TaskStartParams {
                 session_id: session_id.to_owned(),
                 input,
+                artifact_inputs: Vec::new(),
                 client_request_id: Some(request_key(&self.run_id, options.interrupt_on_approval)),
                 backend: Default::default(),
                 context: None,

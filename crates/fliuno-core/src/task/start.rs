@@ -25,12 +25,12 @@ pub(crate) struct StartRequest<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub(crate) enum StartInput<'a> {
+enum Prompt<'a> {
     Text(&'a str),
     Parts(&'a [UserContentPart]),
 }
 
-impl<'a> From<&'a TaskInput> for StartInput<'a> {
+impl<'a> From<&'a TaskInput> for Prompt<'a> {
     fn from(input: &'a TaskInput) -> Self {
         match input {
             TaskInput::Text(text) => Self::Text(text),
@@ -39,7 +39,7 @@ impl<'a> From<&'a TaskInput> for StartInput<'a> {
     }
 }
 
-impl StartInput<'_> {
+impl Prompt<'_> {
     pub(crate) fn digest(self) -> [u8; 32] {
         match self {
             Self::Text(text) => Sha256::digest(text.as_bytes()).into(),
@@ -65,7 +65,7 @@ impl StartInput<'_> {
 
     fn validate_media(self) -> Result<()> {
         if let Self::Parts(parts) = self {
-            validate_multipart_input(parts).map_err(|message| Error::Invalid(message.into()))?;
+            validate_inline_media(parts).map_err(|message| Error::Invalid(message.into()))?;
         }
         Ok(())
     }
@@ -85,6 +85,82 @@ impl StartInput<'_> {
                 parts: parts.to_vec(),
             },
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct StartInput<'a> {
+    prompt: Prompt<'a>,
+    artifacts: &'a [ArtifactGetParams],
+}
+
+impl StartInput<'_> {
+    pub(crate) fn digest(self) -> [u8; 32] {
+        let prompt = self.prompt.digest();
+        if self.artifacts.is_empty() {
+            return prompt;
+        }
+        let mut digest = Sha256::new();
+        digest.update(b"\xfffliuno-artifact-inputs-v1");
+        digest.update(prompt);
+        for reference in self.artifacts {
+            for value in [&reference.task_id, &reference.artifact_id] {
+                digest.update((value.len() as u64).to_be_bytes());
+                digest.update(value.as_bytes());
+            }
+        }
+        digest.finalize().into()
+    }
+
+    fn validate_limits(self, backend: &TaskBackend) -> Result<()> {
+        if *backend != TaskBackend::Model
+            && (!self.artifacts.is_empty() || matches!(self.prompt, Prompt::Parts(_)))
+        {
+            return Err(Error::Invalid(
+                "multipart input applies only to model tasks".into(),
+            ));
+        }
+        if self.artifacts.len() > MAX_INPUT_MEDIA
+            || self.artifacts.iter().any(|reference| {
+                [&reference.task_id, &reference.artifact_id]
+                    .iter()
+                    .any(|id| {
+                        id.is_empty() || id.len() > 128 || !id.bytes().all(|b| b.is_ascii_graphic())
+                    })
+            })
+        {
+            return Err(Error::Invalid(
+                "artifact inputs need at most four pairs of valid identifiers".into(),
+            ));
+        }
+        match self.prompt {
+            Prompt::Text(text) if self.artifacts.is_empty() || !text.is_empty() => {
+                validate_input(text)
+            }
+            Prompt::Text(_) => Ok(()),
+            Prompt::Parts(parts) => multipart_input_budget(parts, self.artifacts.len())
+                .map(|_| ())
+                .map_err(|message| Error::Invalid(message.into())),
+        }
+    }
+
+    fn message(self, kernel: &Kernel, session: &str) -> Result<Message> {
+        if self.artifacts.is_empty() {
+            return Ok(self.prompt.message());
+        }
+        let mut parts = match self.prompt {
+            Prompt::Text("") => Vec::new(),
+            Prompt::Text(text) => vec![UserContentPart::Text { text: text.into() }],
+            Prompt::Parts(parts) => parts.to_vec(),
+        };
+        let mut remaining = multipart_input_budget(&parts, self.artifacts.len())
+            .map_err(|message| Error::Invalid(message.into()))?;
+        for reference in self.artifacts {
+            let (part, used) = kernel.read_artifact_input(session, reference, remaining)?;
+            remaining -= used;
+            parts.push(part);
+        }
+        Ok(Message::UserParts { parts })
     }
 }
 
@@ -142,7 +218,10 @@ impl Kernel {
     ) -> Result<(Task, bool)> {
         let request = self.prepare_task_start(
             session_id,
-            StartInput::Text(input),
+            StartInput {
+                prompt: Prompt::Text(input),
+                artifacts: &[],
+            },
             key,
             backend,
             context_options,
@@ -155,7 +234,10 @@ impl Kernel {
     pub fn create_task_from_params(&mut self, p: TaskStartParams) -> Result<(Task, bool)> {
         let request = self.prepare_task_start(
             &p.session_id,
-            (&p.input).into(),
+            StartInput {
+                prompt: (&p.input).into(),
+                artifacts: &p.artifact_inputs,
+            },
             p.client_request_id.as_deref(),
             p.backend,
             p.context,
@@ -165,11 +247,10 @@ impl Kernel {
     }
 
     fn create_prepared_task(&mut self, request: StartRequest<'_>) -> Result<(Task, bool)> {
-        request.input.validate_media()?;
-        if let Some(task) = self.find_matching_task_start(&request)? {
-            return Ok((task, false));
+        match self.create_prepared_summary(request)? {
+            TaskSummaryStart::Existing(summary) => Ok((self.get_task(&summary.id)?, false)),
+            TaskSummaryStart::Created(task) => Ok((*task, true)),
         }
-        Ok((self.create_fresh_task(request)?, true))
     }
 
     /// Unless the binding predates the compact receipt, a duplicate summary
@@ -178,12 +259,19 @@ impl Kernel {
         let p = params;
         let request = self.prepare_task_start(
             &p.session_id,
-            (&p.input).into(),
+            StartInput {
+                prompt: (&p.input).into(),
+                artifacts: &p.artifact_inputs,
+            },
             p.client_request_id.as_deref(),
             p.backend,
             p.context,
             p.max_model_steps,
         )?;
+        self.create_prepared_summary(request)
+    }
+
+    fn create_prepared_summary(&mut self, request: StartRequest<'_>) -> Result<TaskSummaryStart> {
         let lookup = request.key.map_or(Ok(StartLookup::Missing), |key| {
             self.lookup_task_start(&request, key)
         });
@@ -192,7 +280,7 @@ impl Kernel {
             return Ok(TaskSummaryStart::Existing(summary));
         }
         // Keep validation for new requests, legacy bindings and mismatches.
-        request.input.validate_media()?;
+        request.input.prompt.validate_media()?;
         if matches!(lookup?, StartLookup::Legacy) {
             let task = self
                 .find_matching_task_start(&request)?
@@ -214,18 +302,7 @@ impl Kernel {
         options: Option<ContextOptions>,
         max_model_steps: Option<u32>,
     ) -> Result<StartRequest<'a>> {
-        match input {
-            StartInput::Text(text) => validate_input(text)?,
-            StartInput::Parts(parts) if backend == TaskBackend::Model => {
-                validate_multipart_input_limits(parts)
-                    .map_err(|message| Error::Invalid(message.into()))?;
-            }
-            StartInput::Parts(_) => {
-                return Err(Error::Invalid(
-                    "multipart input applies only to model tasks".into(),
-                ));
-            }
-        }
+        input.validate_limits(&backend)?;
         self.require_session(session)?;
         if let Some(limit) = max_model_steps {
             if backend != TaskBackend::Model {
@@ -270,7 +347,8 @@ impl Kernel {
                 "request ID already belongs to a resumed run".into(),
             ));
         }
-        let same_input = request.input.matches(task.messages.first());
+        let same_input = request.input.artifacts.is_empty()
+            && request.input.prompt.matches(task.messages.first());
         let same_context = task
             .context
             .as_ref()
@@ -309,12 +387,13 @@ impl Kernel {
                     .authority(),
             ),
         };
+        let message = input.message(self, session)?;
         let context = self.session_context(session, options)?;
         let task = Task {
             id: new_id("task"),
             session_id: session.into(),
             status: TaskStatus::Running,
-            messages: vec![input.message()],
+            messages: vec![message],
             context: Some(context),
             pending_approval: None,
             in_flight_tool: None,
