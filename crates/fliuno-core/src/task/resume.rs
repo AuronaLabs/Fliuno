@@ -1,35 +1,8 @@
 //! Read-only resume decisions and the corresponding durable state transition.
 use super::*;
+use crate::storage::ResumeFacts;
 use TaskResumeDisposition as Disposition;
-use serde::{Deserialize, Deserializer, de::IgnoredAny};
 use std::borrow::Cow;
-
-/// The recovery rules need operation presence, not the operation's payload.
-/// Deserialize this view for a status read, or borrow it from a full task when
-/// applying a transition. Missing fields use the same defaults as `Task`.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ResumeFacts<'a> {
-    id: Cow<'a, str>,
-    status: TaskStatus,
-    model_steps: u32,
-    max_model_steps: Option<u32>,
-    #[serde(default)]
-    backend: Cow<'a, TaskBackend>,
-    backend_authority: Option<Cow<'a, str>>,
-    #[serde(default, deserialize_with = "present")]
-    agent_run: bool,
-    #[serde(default, deserialize_with = "present")]
-    remote_continuation: bool,
-    #[serde(default, deserialize_with = "present")]
-    in_flight_tool: bool,
-    #[serde(default)]
-    model_outcome_unknown: bool,
-}
-
-fn present<'de, D: Deserializer<'de>>(input: D) -> std::result::Result<bool, D::Error> {
-    Option::<IgnoredAny>::deserialize(input).map(|value| value.is_some())
-}
 
 impl ResumeFacts<'_> {
     fn remaining_model_steps(&self) -> Option<u32> {
@@ -41,7 +14,6 @@ impl ResumeFacts<'_> {
 impl<'a> From<&'a Task> for ResumeFacts<'a> {
     fn from(task: &'a Task) -> Self {
         Self {
-            id: Cow::Borrowed(&task.id),
             status: task.status,
             model_steps: task.model_steps,
             max_model_steps: task.max_model_steps,
@@ -58,12 +30,12 @@ impl<'a> From<&'a Task> for ResumeFacts<'a> {
 impl Kernel {
     /// Inspect current recovery policy without queuing work or changing evidence.
     pub fn get_task_resume_status(&self, task_id: &str) -> Result<TaskResumeStatus> {
-        let task: ResumeFacts<'_> = self.read_task_projection(task_id)?;
+        let task = self.read_resume_facts(task_id)?;
         Ok(TaskResumeStatus {
             disposition: self.resume_disposition(&task),
             remaining_model_steps: task.remaining_model_steps(),
             status: task.status,
-            task_id: task.id.into_owned(),
+            task_id: task_id.into(),
         })
     }
 

@@ -901,3 +901,11 @@ Windows `scripts/check.ps1` 以退出码 0 完成：515 项测试、28 个离线
 `approval/resumeRun` 先通过 `pending_approvals`、过期时间和 `task_run_ends` 的边界事件完成只读核对，再构造审批执行所需的完整任务。普通 `approval/respond` 处理第一项工具后，旧父运行 ID 不能提交同一任务后续执行段的审批；跨重启仍保持原事件水位和模型请求次数。Windows 审批进程测试 7 项通过，包含该边界场景；核心 81 项单测和目标 crate Clippy 通过。
 
 Debian Linux 6.12.107 来宾通过 7 项审批进程测试。Windows `scripts/check.ps1` 以退出码 0 完成：516 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/guest-approval-boundary.log`、`D:/Fliuno-Native-Test/windows-approval-boundary-check.log`。
+
+## 0.0.3 恢复查询的 SQLite 字段提取（2026-11-20）
+
+SQLite 直接返回 `task/getResumeStatus` 所需的字段：状态、后端、注册身份、模型尝试次数和操作是否存在。SQLite 仍需读任务 JSON，Rust 只解码这几个字段；`task/resume` 仍读取完整快照，沿用相同的恢复规则。旧快照中的省略字段和显式 `null` 用例通过，无数据库迁移。[任务恢复判断](protocol.md#任务恢复判断)
+
+Windows 调试构建对比上一版 Serde 字段筛选实现。使用同一数据库的两个副本，预热 25 对后交替测量 200 对 stdio 请求，逐次核对结果相同。977 字节快照的中位耗时为 0.222 → 0.220 ms；896,921 字节快照为 18.50 → 2.03 ms，p95 为 23.10 → 3.21 ms。测量含进程间通信，使用本机离线模型产生的两个待审批快照。日志：`D:/Fliuno-Native-Test/resume-sql-final-benchmark.log`。
+
+Debian Linux 6.12.107 来宾通过 12 项进程测试，覆盖带转义长输入跨重启恢复、尝试次数用尽、审批与外部结果不明。Windows `scripts/check.ps1` 以退出码 0 完成：516 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/guest-resume-sql.log`、`D:/Fliuno-Native-Test/windows-resume-sql-check.log`。

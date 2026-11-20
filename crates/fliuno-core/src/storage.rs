@@ -11,6 +11,7 @@ mod run_boundaries;
 mod sessions;
 mod task_cancel;
 mod task_changes;
+mod task_resume;
 mod task_revisions;
 mod task_starts;
 mod task_summaries;
@@ -19,17 +20,17 @@ mod workspaces;
 use super::*;
 pub use replay::MAX_EVENT_TARGET_BYTES;
 use rusqlite::{OptionalExtension, params};
-use serde::de::DeserializeOwned;
 use std::{
     fs::{self, OpenOptions},
     path::Path,
 };
+pub(crate) use task_resume::ResumeFacts;
 
 pub(crate) const SCHEMA_VERSION: u32 = 46;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
-fn read_task<T: DeserializeOwned>(db: &Connection, id: &str) -> Result<T> {
+fn read_task(db: &Connection, id: &str) -> Result<Task> {
     let mut statement = db.prepare_cached("SELECT data FROM tasks WHERE id=?1")?;
     let mut rows = statement.query([id])?;
     let row = rows.next()?.ok_or_else(|| Error::NotFound("task".into()))?;
@@ -468,10 +469,6 @@ impl Kernel {
     }
 
     pub fn get_task(&self, id: &str) -> Result<Task> {
-        read_task(&self.db, id)
-    }
-
-    pub(crate) fn read_task_projection<T: DeserializeOwned>(&self, id: &str) -> Result<T> {
         read_task(&self.db, id)
     }
 

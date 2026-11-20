@@ -58,7 +58,7 @@ impl Kernel {
             }
             // Keep only one full task in memory and hold lightweight publish
             // data until the whole batch commits.
-            let mut task: Task = read_task(&tx, &item.task.id)?;
+            let mut task = read_task(&tx, &item.task.id)?;
             let events = transition_to_cancelled(&mut task);
             let sequences = write_transition(&tx, &task, &events, &[], None, None)?;
             item.task = task_summaries::summarize(&task);
