@@ -1107,3 +1107,20 @@ Windows `scripts/check.ps1` 退出码为 0。535 项测试、29 个离线演示�
 真实 stdio 测试在预览固定范围后完成另一项任务，再提交并逐字段比较冻结快照。测试覆盖 v49 旧回执、两个预览上界一致性、零水位、越界无写入、重启后的摘要与完整任务重试。[协议用法](context.md#提交任务时固定预览范围)
 
 Windows `scripts/check.ps1` 退出码为 0，536 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾的 15 项上下文和历史进程测试全部通过，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-context-pinned-window-windows.log` 和 `D:/Fliuno-Native-Test/guest-context-pinned-window.log`。
+
+## 0.0.3 固定历史水位的累计计数（2026-11-20）
+
+SQLite v51 从会话完成序号索引回填每 128 条记录的累计计数。日常写入与任务完成、事件和历史投影一起提交。测试覆盖多个会话交错、v50 升级、计数点前后和写入失败时的事务回滚。[会话上下文](context.md#提交任务时固定预览范围)
+
+Windows 本机调试构建对同一份含 100,000 条完成记录的数据库夹具发出 `session/context` 请求。每个场景预热 20 对后，交替测量 100 对请求并逐次验证快照相同。
+
+| 水位包含的完成记录 | 请求中位耗时（v50 → v51） |
+| ---: | ---: |
+| 100 | 0.680 → 0.718 ms |
+| 50,000 | 9.464 → 0.803 ms |
+| 99,000 | 16.757 → 0.791 ms |
+| 100,000（当前水位） | 0.507 → 0.532 ms |
+
+脚本和日志位于 `D:/Fliuno-Native-Test/history-count-checkpoints-benchmark.py` 和 `D:/Fliuno-Native-Test/history-count-checkpoints-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，537 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾的 15 项上下文和历史进程测试及 1 项累计计数回滚测试全部通过，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-history-count-checkpoints-windows.log` 和 `D:/Fliuno-Native-Test/guest-history-count-checkpoints.log`。
