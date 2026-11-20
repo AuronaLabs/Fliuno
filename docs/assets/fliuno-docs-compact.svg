@@ -15,22 +15,22 @@
     <rect width="620" height="216" fill="url(#paper)"/>
     <rect x="319" width="301" height="216" fill="url(#grid)"/>
     <g transform="translate(40 26)">
-  <rect width="36" height="36" rx="10" fill="#9ce9cd"/>
-  <path d="M10 26V14l4-4h12M10 18h10" fill="none" stroke="#112c26" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="25" cy="18" r="1.7" fill="#112c26"/>
-</g>
+      <rect width="36" height="36" rx="10" fill="#9ce9cd"/>
+      <path d="M10 26V14l4-4h12M10 18h10" fill="none" stroke="#112c26" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="25" cy="18" r="1.7" fill="#112c26"/>
+    </g>
     <text x="90" y="49" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="650" letter-spacing="1.35" fill="#9ce9cd">FLIUNO DOCUMENTATION</text>
     <text x="38" y="118" font-family="system-ui, Segoe UI, sans-serif" font-size="56" font-weight="740" letter-spacing="-2.5" fill="#f0f8f5">Handbook</text>
     <path d="M42 172H564" fill="none" stroke="#3a5351" stroke-width="1.5"/>
     <circle cx="42" cy="172" r="5" fill="#9ce9cd"/>
-<rect x="52" y="156" width="124" height="32" rx="8" fill="#132728" stroke="#304a47"/>
-<text x="63" y="178" font-family="system-ui, Segoe UI, sans-serif" font-size="17" font-weight="630" letter-spacing="0" fill="#f0f8f5">Quickstart</text>
-<circle cx="229" cy="172" r="5" fill="#ffc697"/>
-<rect x="239" y="156" width="124" height="32" rx="8" fill="#132728" stroke="#304a47"/>
-<text x="250" y="178" font-family="system-ui, Segoe UI, sans-serif" font-size="17" font-weight="630" letter-spacing="0" fill="#f0f8f5">Integration</text>
-<circle cx="432" cy="172" r="5" fill="#b7cec8"/>
-<rect x="442" y="156" width="124" height="32" rx="8" fill="#132728" stroke="#304a47"/>
-<text x="453" y="178" font-family="system-ui, Segoe UI, sans-serif" font-size="17" font-weight="630" letter-spacing="0" fill="#f0f8f5">Kernel</text>
+    <rect x="52" y="156" width="124" height="32" rx="8" fill="#132728" stroke="#304a47"/>
+    <text x="63" y="178" font-family="system-ui, Segoe UI, sans-serif" font-size="17" font-weight="630" letter-spacing="0" fill="#f0f8f5">Quickstart</text>
+    <circle cx="229" cy="172" r="5" fill="#ffc697"/>
+    <rect x="239" y="156" width="124" height="32" rx="8" fill="#132728" stroke="#304a47"/>
+    <text x="250" y="178" font-family="system-ui, Segoe UI, sans-serif" font-size="17" font-weight="630" letter-spacing="0" fill="#f0f8f5">Integration</text>
+    <circle cx="432" cy="172" r="5" fill="#b7cec8"/>
+    <rect x="442" y="156" width="124" height="32" rx="8" fill="#132728" stroke="#304a47"/>
+    <text x="453" y="178" font-family="system-ui, Segoe UI, sans-serif" font-size="17" font-weight="630" letter-spacing="0" fill="#f0f8f5">Kernel</text>
   </g>
   <rect x=".5" y=".5" width="619" height="215" rx="23.5" fill="none" stroke="#3a5351"/>
 </svg>

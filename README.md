@@ -9,17 +9,19 @@
 
 # Fliuno
 
-**面向桌面工作台与其他宿主应用的本机 Rust Agent 内核。** 宿主提交任务，让用户决定是否允许关键操作，再接收交付物。内核将任务、审批与事件保存在 SQLite 中，客户端重连后可以从上次的游标继续读取。
+**Fliuno 是面向桌面工作台的本机 Rust Agent 内核。** 应用提交任务，用户审批关键操作，内核保存交付物。任务和事件写入 SQLite，客户端断线后可以从上次的游标继续读取。
 
-**[快速体验](#快速开始)** · **[宿主接入](#接入自己的客户端)** · **[文档中心](docs/README.md)**
+**[运行离线演示](#快速开始)** · **[接入工作台](docs/README.md#工作台要展示什么)** · **[浏览文档](docs/README.md)**
 
-[已发布 `0.0.2`](CHANGELOG.md#002) · [开发中 `0.0.3`](CHANGELOG.md#003-开发中) · [路线图](docs/roadmap.md)
+当前发布版 [v0.0.2](CHANGELOG.md#002) · [v0.0.3 开发记录](CHANGELOG.md#003-开发中)
 
 ## 快速开始
 
 ### 跑一次离线任务
 
-在仓库根目录运行。需要 [Rust 1.89+、C/C++ 构建工具和 Python](docs/setup.md#快速开始)，无需 API Key。脚本会使用临时数据库，自动提交任务并批准一次 `artifact_create`。
+在仓库根目录运行即可体验一次完整任务。演示无需 API Key，会在临时数据库中提交任务并批准一次 `artifact_create`。
+
+需要 Rust 1.89+、C/C++ 构建工具和 Python。[环境要求](docs/setup.md#快速开始)
 
 ```sh
 python examples/demo.py
@@ -34,7 +36,7 @@ Result: completed
 Artifacts: 1
 ```
 
-脚本也会检查审批前没有交付物。运行 `python examples/demo.py --deny` 可验证拒绝路径：任务结束为 `failed`，交付物为 `0`。[查看演示源码](examples/demo.py)
+试试 `python examples/demo.py --deny`。拒绝后任务以 `failed` 结束，交付物数量为 `0`。[查看演示源码](examples/demo.py)
 
 ### 接入自己的客户端
 

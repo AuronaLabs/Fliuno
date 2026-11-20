@@ -16,27 +16,27 @@
     <rect x="300" width="320" height="490" fill="url(#grid)"/>
     <path d="M250 490h42l180-180h620" fill="none" stroke="#3a5351" opacity=".5"/>
     <g transform="translate(42 35)">
-  <rect width="36" height="36" rx="10" fill="#9ce9cd"/>
-  <path d="M10 26V14l4-4h12M10 18h10" fill="none" stroke="#112c26" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="25" cy="18" r="1.7" fill="#112c26"/>
-</g>
+      <rect width="36" height="36" rx="10" fill="#9ce9cd"/>
+      <path d="M10 26V14l4-4h12M10 18h10" fill="none" stroke="#112c26" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="25" cy="18" r="1.7" fill="#112c26"/>
+    </g>
     <text x="92" y="58" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="650" letter-spacing="1.35" fill="#9ce9cd">RUST  /  LOCAL EXECUTION</text>
     <text x="39" y="160" font-family="system-ui, Segoe UI, sans-serif" font-size="85" font-weight="740" letter-spacing="-4.5" fill="#f0f8f5">Fliuno</text>
     <text x="42" y="204" font-family="system-ui, Segoe UI, sans-serif" font-size="28" font-weight="540" letter-spacing="0" fill="#b7cec8">Agent kernel for workspaces</text>
     <g transform="translate(42 247)">
-  <rect width="535" height="202" rx="16" fill="#132728" stroke="#3a5351"/>
-  <text x="22" y="29" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="650" letter-spacing="1.8" fill="#b7cec8">TASK TIMELINE</text>
-  <path d="M22 43H513M27 61V167" fill="none" stroke="#304a47" stroke-width="1.5"/>
-  <circle cx="27" cy="61" r="5" fill="#9ce9cd"/>
-<text x="48" y="67" font-family="system-ui, Segoe UI, sans-serif" font-size="24" font-weight="650" letter-spacing="0" fill="#f0f8f5">Task submitted</text>
-<text x="310" y="67" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="17" font-weight="500" letter-spacing="0" fill="#9ce9cd">task/start</text>
-<circle cx="27" cy="115" r="5" fill="#ffc697"/>
-<text x="48" y="121" font-family="system-ui, Segoe UI, sans-serif" font-size="24" font-weight="650" letter-spacing="0" fill="#f0f8f5">Approval required</text>
-<text x="310" y="121" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="17" font-weight="500" letter-spacing="0" fill="#ffc697">waiting_approval</text>
-<circle cx="27" cy="169" r="5" fill="#9ce9cd"/>
-<text x="48" y="175" font-family="system-ui, Segoe UI, sans-serif" font-size="24" font-weight="650" letter-spacing="0" fill="#f0f8f5">Deliverable saved</text>
-<text x="310" y="175" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="17" font-weight="500" letter-spacing="0" fill="#9ce9cd">completed</text>
-</g>
+      <rect width="535" height="202" rx="16" fill="#132728" stroke="#3a5351"/>
+      <text x="22" y="29" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="650" letter-spacing="1.8" fill="#b7cec8">TASK TIMELINE</text>
+      <path d="M22 43H513M27 61V167" fill="none" stroke="#304a47" stroke-width="1.5"/>
+      <circle cx="27" cy="61" r="5" fill="#9ce9cd"/>
+      <text x="48" y="67" font-family="system-ui, Segoe UI, sans-serif" font-size="24" font-weight="650" letter-spacing="0" fill="#f0f8f5">Task submitted</text>
+      <text x="310" y="67" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="17" font-weight="500" letter-spacing="0" fill="#9ce9cd">task/start</text>
+      <circle cx="27" cy="115" r="5" fill="#ffc697"/>
+      <text x="48" y="121" font-family="system-ui, Segoe UI, sans-serif" font-size="24" font-weight="650" letter-spacing="0" fill="#f0f8f5">Approval required</text>
+      <text x="310" y="121" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="17" font-weight="500" letter-spacing="0" fill="#ffc697">waiting_approval</text>
+      <circle cx="27" cy="169" r="5" fill="#9ce9cd"/>
+      <text x="48" y="175" font-family="system-ui, Segoe UI, sans-serif" font-size="24" font-weight="650" letter-spacing="0" fill="#f0f8f5">Deliverable saved</text>
+      <text x="310" y="175" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="17" font-weight="500" letter-spacing="0" fill="#9ce9cd">completed</text>
+    </g>
   </g>
   <rect x=".5" y=".5" width="619" height="489" rx="23.5" fill="none" stroke="#3a5351"/>
 </svg>

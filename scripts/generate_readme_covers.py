@@ -7,120 +7,123 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parents[1] / 'docs' / 'assets'
 PALETTES = {
-    '': dict(bg='#121b1a', panel='#1b2725', line='#3a504b', grid='#314440', ink='#f0f8f4',
-             muted='#b2c6bf', accent='#a4e8c8', amber='#ffca9e'),
-    '-light': dict(bg='#f1f7f3', panel='#fbfdfa', line='#b3c9be', grid='#d4e4dc', ink='#172c26',
-                   muted='#466158', accent='#1b6e54', amber='#8a471c'),
+    '': dict(start='#0d1b1d', end='#17302f', grid='#6e9990', line='#3a5351',
+             panel='#132728', panel_line='#304a47', accent='#9ce9cd',
+             logo='#112c26', ink='#f0f8f5', muted='#b7cec8', amber='#ffc697'),
+    '-light': dict(start='#f7faf6', end='#e8f3ed', grid='#60877b', line='#afc9bf',
+                   panel='#ffffff', panel_line='#cfdfd7', accent='#18664f',
+                   logo='#ffffff', ink='#12302c', muted='#435f58', amber='#874521'),
 }
-SANS = "system-ui, 'Segoe UI', sans-serif"
-MONO = "'Cascadia Mono', Consolas, monospace"
+SANS = 'system-ui, Segoe UI, sans-serif'
+MONO = 'ui-monospace, Cascadia Mono, Consolas, monospace'
 
 
-def text(x, y, label, size, fill, *, mono=False, weight=650, spacing=0, anchor='start'):
+def text(x, y, label, size, color, *, weight=650, spacing=0, mono=False):
     font = MONO if mono else SANS
-    return (f'<text x="{x}" y="{y}" font-family="{font}" font-size="{size}" fill="{fill}" '
-            f'font-weight="{weight}" letter-spacing="{spacing}" text-anchor="{anchor}">{escape(label)}</text>')
+    return (f'<text x="{x}" y="{y}" font-family="{font}" font-size="{size}" '
+            f'font-weight="{weight}" letter-spacing="{spacing}" fill="{color}">{escape(label)}</text>')
 
 
-def rect(x, y, w, h, radius, fill, stroke='none'):
-    return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{radius}" fill="{fill}" stroke="{stroke}"/>'
+def logo(x, y, colors):
+    accent, ink = colors['accent'], colors['logo']
+    return [
+        f'<g transform="translate({x} {y})">',
+        f'  <rect width="36" height="36" rx="10" fill="{accent}"/>',
+        f'  <path d="M10 26V14l4-4h12M10 18h10" fill="none" stroke="{ink}" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>',
+        f'  <circle cx="25" cy="18" r="1.7" fill="{ink}"/>',
+        '</g>',
+    ]
 
 
-def path(d, color, width=1):
-    return f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{width}" stroke-linecap="round" stroke-linejoin="round"/>'
-
-
-def logo(x, y, c):
-    return (f'<g transform="translate({x} {y})">'
-            + rect(0, 0, 34, 34, 9, c['accent'])
-            + path('M9 25V13l4-4h12M9 17h10', c['bg'], 2.8)
-            + f'<circle cx="24.5" cy="17" r="1.7" fill="{c["bg"]}"/></g>')
-
-
-def cover(w, h, title, desc, c, pieces):
+def cover(width, height, grid_x, title, description, colors, content):
     return '\n'.join([
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" aria-labelledby="title desc">',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
         f'  <title id="title">{escape(title)}</title>',
-        f'  <desc id="desc">{escape(desc)}</desc>',
+        f'  <desc id="desc">{escape(description)}</desc>',
         '  <defs>',
-        f'    <clipPath id="frame">{rect(.5, .5, w-1, h-1, 23, c["bg"])}</clipPath>',
-        f'    <pattern id="grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="{c["grid"]}"/></pattern>',
+        '    <linearGradient id="paper" x1="0%" y1="10%" x2="100%" y2="95%">',
+        f'      <stop stop-color="{colors["start"]}"/>',
+        f'      <stop offset="1" stop-color="{colors["end"]}"/>',
+        '    </linearGradient>',
+        '    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">',
+        f'      <circle cx="2" cy="2" r="1" fill="{colors["grid"]}" opacity=".38"/>',
+        '    </pattern>',
+        f'    <clipPath id="frame"><rect width="{width}" height="{height}" rx="24"/></clipPath>',
         '  </defs>',
         '  <g clip-path="url(#frame)">',
-        '    ' + rect(0, 0, w, h, 23, c['bg']),
-        *['    ' + piece for piece in pieces],
+        f'    <rect width="{width}" height="{height}" fill="url(#paper)"/>',
+        f'    <rect x="{grid_x}" width="{width-grid_x}" height="{height}" fill="url(#grid)"/>',
+        *(f'    {line}' for line in content),
         '  </g>',
-        '  ' + rect(.5, .5, w-1, h-1, 23, 'none', c['line']),
+        f'  <rect x=".5" y=".5" width="{width-1}" height="{height-1}" rx="23.5" fill="none" stroke="{colors["line"]}"/>',
         '</svg>',
         '',
     ])
 
 
-def lifecycle(x, y, w, c, compact):
-    inset, first, spacing = (16, 56, 34) if compact else (24, 75, 42)
-    height = 161 if compact else 201
-    nodes = [
-        ('Task submitted', 'task/start', c['muted']),
-        ('Approval required', 'waiting_approval', c['amber']),
-        ('Deliverable saved', 'completed', c['accent']),
+def timeline(colors, compact):
+    x, y, width, height = (42, 247, 535, 202) if compact else (566, 72, 497, 190)
+    row_positions = (61, 115, 169) if compact else (61, 112, 163)
+    state_x = 310 if compact else 282
+    records = [
+        ('Task submitted', 'task/start', colors['accent']),
+        ('Approval required', 'waiting_approval', colors['amber']),
+        ('Deliverable saved', 'completed', colors['accent']),
     ]
-    pieces = [f'<g transform="translate({x} {y})">',
-              rect(0, 0, w, height, 10, c['panel'], c['line']),
-              text(inset, 24 if compact else 29, 'TASK TRACE', 12, c['muted'], mono=True, spacing=1.3),
-              text(w-inset, 24 if compact else 29, 'LOCAL RUN', 12, c['muted'], mono=True, anchor='end'),
-              path(f'M{inset} {first-19}H{w-inset}', c['line']),
-              path(f'M{inset+5} {first}v{2*spacing}', c['line'], 2)]
-    for i, (label, state, color) in enumerate(nodes):
-        mid = first + i * spacing
-        pieces += [rect(inset, mid-5, 10, 10, 3, color),
-                   text(inset+24, mid+5, label, 17 if compact else 20, c['ink']),
-                   text(w-inset, mid+4, state, 13 if compact else 15, color, mono=True, anchor='end')]
-    pieces.append('</g>')
-    return pieces
+    timeline_end = 167 if compact else 163
+    content = [
+        f'<g transform="translate({x} {y})">',
+        f'  <rect width="{width}" height="{height}" rx="16" fill="{colors["panel"]}" stroke="{colors["line"]}"/>',
+        '  ' + text(22, 29, 'TASK TIMELINE', 15, colors['muted'], spacing=1.8, mono=True),
+        f'  <path d="M22 43H{width-22}M27 61V{timeline_end}" fill="none" stroke="{colors["panel_line"]}" stroke-width="1.5"/>',
+    ]
+    for row_y, (label, state, color) in zip(row_positions, records):
+        content += [
+            f'  <circle cx="27" cy="{row_y}" r="5" fill="{color}"/>',
+            '  ' + text(48, row_y+6, label, 24 if compact else 21, colors['ink']),
+            '  ' + text(state_x, row_y+6, state, 17 if compact else 15, color, weight=500, mono=True),
+        ]
+    return content + ['</g>']
 
 
-def project(c, compact):
-    w, h = (440, 326) if compact else (1120, 292)
-    x = 22 if compact else 56
-    logo_y = 20 if compact else 45
-    pieces = [rect(w//2, 0, w-w//2, h, 0, 'url(#grid)'),
-              logo(x, logo_y, c),
-              text(x+48, logo_y+22, 'LOCAL AGENT KERNEL', 12 if compact else 13,
-                   c['accent'], mono=True, spacing=1.4)]
-    if compact:
-        pieces += [text(x-2, 106, 'Fliuno', 59, c['ink'], weight=780),
-                   text(x, 134, 'From task to deliverable.', 20, c['muted'], weight=500)]
-    else:
-        pieces += [text(x-5, 173, 'Fliuno', 104, c['ink'], weight=780),
-                   text(x, 215, 'From task to deliverable.', 27, c['muted'], weight=500)]
-    pieces += lifecycle(x if compact else 544, 145 if compact else 45,
-                        w-2*x if compact else 520, c, compact)
-    return cover(w, h, 'Fliuno | Local agent kernel',
-                 'A local task trace: submit a task, review the approval, and collect the saved deliverable.',
-                 c, pieces)
+def project(colors, compact):
+    width, height, grid_x = (620, 490, 300) if compact else (1120, 330, 559)
+    x, y = (42, 35) if compact else (54, 42)
+    track = 'M250 490h42l180-180h620' if compact else 'M509 330h42l170-170h1120'
+    content = [
+        f'<path d="{track}" fill="none" stroke="{colors["line"]}" opacity=".5"/>',
+        *logo(x, y, colors),
+        text(x+50, y+23, 'RUST  /  LOCAL EXECUTION', 15, colors['accent'], spacing=1.35, mono=True),
+        text(x-3, 160 if compact else 180, 'Fliuno', 85 if compact else 92, colors['ink'], weight=740, spacing=-4.5),
+        text(x, 204 if compact else 224, 'Agent kernel for workspaces', 28 if compact else 29, colors['muted'], weight=540),
+        *timeline(colors, compact),
+    ]
+    return cover(width, height, grid_x, 'Fliuno',
+                 'A local Rust agent kernel. A task is submitted, approved and saved as a deliverable.',
+                 colors, content)
 
 
-def guide(c, compact):
-    w, h = (440, 106) if compact else (1120, 140)
-    x = 22 if compact else 56
-    y = 36 if compact else 53
-    pieces = [rect(w//2, 0, w-w//2, h, 0, 'url(#grid)'),
-              logo(x, y, c),
-              text(x+48, y-(2 if compact else 8), 'FLIUNO / DOCS', 12, c['accent'], mono=True, spacing=1.4),
-              text(x+48, y+36, 'Handbook', 35 if compact else 48, c['ink'], weight=750)]
-    entry, end = (305, 409) if compact else (615, 929)
-    center = h // 2
-    split = entry + (end - entry) // 3
-    step = 19 if compact else 32
-    pieces += [path(f'M{entry} {center}H{end}M{split} {center}v-{step}H{end}M{split} {center}v{step}H{end}', c['line'], 1.5),
-               rect(entry - 4, center - 4, 8, 8, 2, c['accent'])]
-    for dy, label, color in [(-step, '01  QUICKSTART', c['accent']),
-                             (0, '02  INTEGRATE', c['amber']),
-                             (step, '03  KERNEL', c['muted'])]:
-        pieces.append(rect(end-3, center+dy-3, 6, 6, 2, color))
-        if not compact:
-            pieces.append(text(end+15, center+dy+5, label, 13, color, mono=True))
-    return cover(w, h, 'Fliuno handbook', 'Three reading paths: quickstart, integration, and kernel development.', c, pieces)
+def guide(colors, compact):
+    width, height, grid_x = (620, 216, 319) if compact else (1120, 172, 500)
+    x, y = (40, 26) if compact else (54, 33)
+    track = 'M42 172H564' if compact else 'M527 53H548V88H1028'
+    row_y, chip_width = (172, 124) if compact else (88, 112)
+    positions = (42, 229, 432) if compact else (571, 732, 903)
+    topics = [('Quickstart', colors['accent']), ('Integration', colors['amber']), ('Kernel', colors['muted'])]
+    content = [
+        *logo(x, y, colors),
+        text(x+50, y+23, 'FLIUNO DOCUMENTATION', 15, colors['accent'], spacing=1.35, mono=True),
+        text(x-2, 118 if compact else 122, 'Handbook', 56, colors['ink'], weight=740, spacing=-2.5),
+        f'<path d="{track}" fill="none" stroke="{colors["line"]}" stroke-width="1.5"/>',
+    ]
+    for column_x, (label, color) in zip(positions, topics):
+        content += [
+            f'<circle cx="{column_x}" cy="{row_y}" r="5" fill="{color}"/>',
+            f'<rect x="{column_x+10}" y="{row_y-16}" width="{chip_width}" height="32" rx="8" fill="{colors["panel"]}" stroke="{colors["panel_line"]}"/>',
+            text(column_x+21, row_y+6, label, 17 if compact else 16, colors['ink'], weight=630),
+        ]
+    return cover(width, height, grid_x, 'Fliuno handbook',
+                 'Quickstart, integration and kernel documentation.', colors, content)
 
 
 if __name__ == '__main__':
