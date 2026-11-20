@@ -148,23 +148,28 @@ pub(super) fn migrate_workspace_turns(db: &mut Connection) -> Result<()> {
 
 impl Kernel {
     /// Only matched conversation records may load the full tool history.
-    pub(crate) fn full_context_candidate(
+    pub(crate) fn visit_full_context_candidate(
         &self,
         session: &str,
         sequence: u64,
         max_bytes: u32,
-    ) -> Result<Option<ContextTurn>> {
-        let data: Option<String> = self
-            .db
-            .prepare_cached(
-                "SELECT CASE WHEN octet_length(data)<=?3 THEN data END
+        visit: impl FnOnce(Option<&str>) -> Result<bool>,
+    ) -> Result<bool> {
+        let mut statement = self.db.prepare_cached(
+            "SELECT CASE WHEN octet_length(data)<=?3 THEN data END
              FROM session_turns WHERE session_id=?1 AND sequence=?2",
-            )?
-            .query_row(
-                params![session, validate_event_cursor(sequence)?, max_bytes],
-                |row| row.get(0),
-            )?;
-        Ok(data.as_deref().map(serde_json::from_str).transpose()?)
+        )?;
+        let mut rows = statement.query(params![
+            session,
+            validate_event_cursor(sequence)?,
+            max_bytes
+        ])?;
+        let row = rows.next()?.ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        visit(
+            row.get_ref(0)?
+                .as_str_or_null()
+                .map_err(rusqlite::Error::from)?,
+        )
     }
 
     /// Read only selected projections. A foreign, unfinished or absent ID has
@@ -237,7 +242,7 @@ impl Kernel {
         session: &str,
         through: u64,
         options: &ContextOptions,
-        mut visit: impl FnMut(Option<ContextTurn>) -> Result<bool>,
+        mut visit: impl FnMut(Option<&str>) -> Result<bool>,
     ) -> Result<()> {
         let through = validate_event_cursor(through)?;
         let candidates = match options.selection {
@@ -256,13 +261,13 @@ impl Kernel {
             projection(options.detail, "?3", "")
         );
         let mut statement = self.db.prepare_cached(&sql)?;
-        let rows = statement.query_map(
-            params![session, through, options.max_bytes, candidates],
-            |row| row.get::<_, Option<String>>(0),
-        )?;
-        for row in rows {
-            let turn = row?.as_deref().map(serde_json::from_str).transpose()?;
-            if !visit(turn)? {
+        let mut rows = statement.query(params![session, through, options.max_bytes, candidates])?;
+        while let Some(row) = rows.next()? {
+            let data = row
+                .get_ref(0)?
+                .as_str_or_null()
+                .map_err(rusqlite::Error::from)?;
+            if !visit(data)? {
                 break;
             }
         }

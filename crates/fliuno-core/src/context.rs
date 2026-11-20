@@ -137,22 +137,35 @@ impl Kernel {
         let mut omitted = self.context_turn_count(session, through_sequence)?;
         let limit = snapshot.options.max_bytes as usize;
         let selection = snapshot.options.selection;
+        let detail = snapshot.options.detail;
         let max_turns = snapshot.options.max_turns as usize;
         if envelope + omitted.max(1).ilog10() as usize > limit {
             return Err(Error::Invalid("context options exceed maxBytes".into()));
         }
-        let mut admit = |turn: Option<ContextTurn>| {
-            let Some(turn) = turn else {
+        let mut admit = |data: Option<&str>, conversation_only: bool| {
+            let Some(data) = data else {
                 return Ok(selection != ContextSelection::Recent);
             };
-            let next_bytes = array_bytes + json_size(&turn)? + usize::from(array_bytes > 0);
+            // Text-only projections round-trip at their stored JSON size.
+            // Arbitrary tool values can change size on decode (e.g. floats).
+            let (turn, turn_bytes) = if conversation_only {
+                (None, data.len())
+            } else {
+                let turn: ContextTurn = serde_json::from_str(data)?;
+                let bytes = json_size(&turn)?;
+                (Some(turn), bytes)
+            };
+            let next_bytes = array_bytes + turn_bytes + usize::from(array_bytes > 0);
             let remaining = omitted - 1;
             if envelope + next_bytes + remaining.max(1).ilog10() as usize > limit {
                 return Ok(selection != ContextSelection::Recent);
             }
             array_bytes = next_bytes;
             omitted = remaining;
-            snapshot.turns.push(turn);
+            snapshot.turns.push(match turn {
+                Some(turn) => turn,
+                None => serde_json::from_str(data)?,
+            });
             Ok(snapshot.turns.len() < max_turns)
         };
         if let Some(history) = &snapshot.options.history_query {
@@ -173,18 +186,22 @@ impl Kernel {
                     if !matcher.matches(data)? {
                         return Ok(true);
                     }
-                    let candidate = if snapshot.options.detail == ContextDetail::Full
-                        && row.has_compact_projection
-                    {
-                        self.full_context_candidate(session, row.sequence, limit as u32)?
+                    if detail == ContextDetail::Full && row.has_compact_projection {
+                        self.visit_full_context_candidate(
+                            session,
+                            row.sequence,
+                            limit as u32,
+                            |data| admit(data, false),
+                        )
                     } else {
-                        Some(serde_json::from_str(data)?)
-                    };
-                    admit(candidate)
+                        admit(Some(data), true)
+                    }
                 },
             )?;
         } else {
-            self.visit_context_candidates(session, through_sequence, &snapshot.options, admit)?;
+            self.visit_context_candidates(session, through_sequence, &snapshot.options, |data| {
+                admit(data, detail == ContextDetail::Conversation)
+            })?;
         }
         snapshot.turns.reverse();
         snapshot.omitted_turns = omitted;

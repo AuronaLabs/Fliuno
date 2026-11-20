@@ -962,3 +962,11 @@ Windows `scripts/check.ps1` 以退出码 0 完成。522 项测试、28 个离线
 `workspace_sha256_batch` 通过一次普通工作区读取审批计算一组文件摘要。真实进程测试验证越界路径在审批前被拒绝、拒绝审批时没有工具结果、重启后审批仍对应原路径清单，以及允许后计算的是实际读取的字节。结果按批准的顺序返回，接受空文件和恰好 8 MiB 的文件，超限一字节、缺失、目录各自标记为不可用。进程测试还验证已完成结果在再次重启后保持一致。见[工具契约](protocol.md#内置工具与作用域)。
 
 Windows `scripts/check.ps1` 退出码为 0，包含 523 项测试、28 个离线演示、格式、Clippy 和 Schema 检查。Debian Linux 6.12.107 来宾通过批量摘要和工作区搜索两项进程测试，覆盖真实 FIFO 和末级符号链接。日志见 `target/workspace-hash-batch-windows-check.log` 和 `D:/Fliuno-Native-Test/guest-workspace-hash-batch-final.log`。
+
+## 0.0.3 上下文选取按字节预算解码（2026-11-20）
+
+内核从 SQLite 借用候选正文。精简对话先按已存的紧凑 JSON 字节数判断是否能纳入，完整工具值继续按重新序列化后的大小计量。核心测试覆盖多字节字符、转义、刚好够用、少一字节、遗漏计数位数变化，以及工具浮点值解码后长度变化的情况。
+
+Windows 调试构建在同一数据库的两个副本上经 stdio 读上下文。夹具含 18 条完成记录，32 KiB 预算保留最新一条和最早一条，中间 16 条无法放入剩余预算。预热后交替测量每个策略 100 对调用，逐次核对快照一致。`fit_recent` 的中位数从 29.410 ms 降至 4.988 ms，`match_recent` 从 37.223 ms 降至 15.977 ms。日志见 `D:/Fliuno-Native-Test/context-fit-sizing-benchmark.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成，包含 524 项测试、28 个离线演示、格式、Clippy 和 Schema 检查。Debian Linux 6.12.107 来宾通过 14 项相关进程测试。22 页 Markdown 的 504 处本地引用校验通过。日志见 `target/context-fit-sizing-windows-final.log` 和 `D:/Fliuno-Native-Test/guest-context-fit-sizing.log`。

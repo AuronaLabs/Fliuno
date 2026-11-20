@@ -166,36 +166,91 @@ fn recent_context_honors_the_exact_json_limit_across_omission_digit_changes() {
     let escaped = "\u{754c}\n\"\\".repeat(220);
     let older = complete(&mut kernel, &session.id, "older", &escaped);
     let newer = complete(&mut kernel, &session.id, "newer", &escaped);
+    for detail in [ContextDetail::Full, ContextDetail::Conversation] {
+        let mut options = ContextOptions {
+            max_turns: 2,
+            max_bytes: 9999,
+            detail,
+            ..ContextOptions::default()
+        };
+        let mut expected = kernel
+            .session_context(&session.id, options.clone())
+            .unwrap();
+        assert_eq!(expected.omitted_turns, 9);
+        assert_eq!(expected.turns[0].task_id, older.id);
+        assert_eq!(expected.turns[1].task_id, newer.id);
+        options.max_bytes = serde_json::to_vec(&expected).unwrap().len() as u32;
+        expected.options = options.clone();
+        let exact = kernel
+            .session_context(&session.id, options.clone())
+            .unwrap();
+        assert_eq!(
+            serde_json::to_vec(&exact).unwrap().len(),
+            options.max_bytes as usize
+        );
+        assert_eq!(
+            serde_json::to_value(&exact).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+
+        options.max_bytes -= 1;
+        let bounded = kernel.session_context(&session.id, options).unwrap();
+        assert_eq!(bounded.omitted_turns, 10);
+        assert_eq!(bounded.turns.len(), 1);
+        assert_eq!(bounded.turns[0].task_id, newer.id);
+    }
+}
+
+#[test]
+fn full_context_budget_uses_decoded_tool_values() {
+    let (mut kernel, session) = setup();
+    let completed = complete(
+        &mut kernel,
+        &session.id,
+        "historic input",
+        &"x".repeat(2000),
+    );
+    let data: String = kernel
+        .db
+        .query_row(
+            "SELECT data FROM session_turns WHERE task_id=?1",
+            [&completed.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut turn: ContextTurn = serde_json::from_str(&data).unwrap();
+    // A stored tool number may have a different spelling after decoding.
+    // Exercise that size change with and without float_roundtrip enabled.
+    turn.messages.push(ContextMessage::ToolResult {
+        call_id: "historical-result".into(),
+        output: json!(8.971135692166839e-150),
+    });
+    let stored = serde_json::to_string(&turn)
+        .unwrap()
+        .replace("e-150", "e-0150");
+    let decoded: ContextTurn = serde_json::from_str(&stored).unwrap();
+    assert!(json_size(&decoded).unwrap() < stored.len());
+    kernel
+        .db
+        .execute(
+            "UPDATE session_turns SET data=?1 WHERE task_id=?2",
+            (&stored, &completed.id),
+        )
+        .unwrap();
     let mut options = ContextOptions {
-        max_turns: 2,
         max_bytes: 9999,
         ..ContextOptions::default()
     };
-    let mut expected = kernel
+    let expected = kernel
         .session_context(&session.id, options.clone())
         .unwrap();
-    assert_eq!(expected.omitted_turns, 9);
-    assert_eq!(expected.turns[0].task_id, older.id);
-    assert_eq!(expected.turns[1].task_id, newer.id);
-    options.max_bytes = serde_json::to_vec(&expected).unwrap().len() as u32;
-    expected.options = options.clone();
-    let exact = kernel
-        .session_context(&session.id, options.clone())
-        .unwrap();
+    options.max_bytes = json_size(&expected).unwrap() as u32;
+    let actual = kernel.session_context(&session.id, options).unwrap();
+    assert_eq!(actual.turns[0].task_id, completed.id);
     assert_eq!(
-        serde_json::to_vec(&exact).unwrap().len(),
-        options.max_bytes as usize
+        json_size(&actual).unwrap(),
+        actual.options.max_bytes as usize
     );
-    assert_eq!(
-        serde_json::to_value(&exact).unwrap(),
-        serde_json::to_value(expected).unwrap()
-    );
-
-    options.max_bytes -= 1;
-    let bounded = kernel.session_context(&session.id, options).unwrap();
-    assert_eq!(bounded.omitted_turns, 10);
-    assert_eq!(bounded.turns.len(), 1);
-    assert_eq!(bounded.turns[0].task_id, newer.id);
 }
 
 #[test]
