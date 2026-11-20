@@ -652,7 +652,7 @@ async fn ag_ui_http_reuses_artifacts_only_in_opted_in_sessions_and_root_runs() {
     use fliuno_protocol::{Message, UserContentPart};
     use http_wire::{Fixture, Response};
 
-    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
+    const TEXT: &str = "工作报告\n三项已完成。";
     let root = std::env::temp_dir().join(format!("fliuno-ag-ui-artifact-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();
     let db = root.join("kernel.db");
@@ -665,8 +665,8 @@ async fn ag_ui_http_reuses_artifacts_only_in_opted_in_sessions_and_root_runs() {
         {
             json!([{"type":"message","content":[{"type":"output_text","text":"saved"}]}])
         } else {
-            let arguments = json!({"title":"chart","mediaType":"image/png","contentBase64":PNG});
-            json!([{"type":"function_call","call_id":"chart","name":"artifact_create_binary","arguments":arguments.to_string()}])
+            let arguments = json!({"title":"report","content":TEXT});
+            json!([{"type":"function_call","call_id":"report","name":"artifact_create","arguments":arguments.to_string()}])
         };
         Response::json(200, json!({"status":"completed","output":output}))
     });
@@ -684,7 +684,7 @@ async fn ag_ui_http_reuses_artifacts_only_in_opted_in_sessions_and_root_runs() {
             let other = create_session();
             let source = peer.call(
                 "task/start",
-                json!({"sessionId":session,"input":"save chart"}),
+                json!({"sessionId":session,"input":"save report"}),
             );
             let id = source["id"].as_str().unwrap();
             let waiting = peer.wait_for_status(id, "waiting_approval");
@@ -739,7 +739,7 @@ async fn ag_ui_http_reuses_artifacts_only_in_opted_in_sessions_and_root_runs() {
     };
     let props = json!({"fliuno":{"artifactInputs":[artifact]}});
     let run = json!({
-        "threadId":session,"runId":"review-chart",
+        "threadId":session,"runId":"review-report",
         "messages":[{"id":"u","role":"user","content":""}],"forwardedProps":props
     });
     let mut outside = run.clone();
@@ -755,20 +755,19 @@ async fn ag_ui_http_reuses_artifacts_only_in_opted_in_sessions_and_root_runs() {
     assert_eq!(response.status(), StatusCode::OK);
     let sse = response.text().await.unwrap();
     assert!(sse.contains("approval_required"), "{sse}");
-    assert!(!sse.contains(PNG));
     let task: Task = {
         let mut locked = client.lock().await;
         let run = locked
-            .attach_ag_ui_interrupt_run(&session, "review-chart", |_| {})
+            .attach_ag_ui_interrupt_run(&session, "review-report", |_| {})
             .unwrap();
         locked
             .call("task/get", &json!({"taskId":run.task().id}), |_| {})
             .unwrap()
     };
     assert!(matches!(&task.messages[0], Message::UserParts { parts } if
-        matches!(parts.as_slice(), [UserContentPart::Image { data, .. }] if data == PNG)));
+        matches!(parts.as_slice(), [UserContentPart::Text { text }] if text == TEXT)));
     let review = json!({
-        "threadId":session,"runId":"review-child","parentRunId":"review-chart","messages":[],
+        "threadId":session,"runId":"review-child","parentRunId":"review-report","messages":[],
         "resume":[{"interruptId":task.pending_approval.unwrap().id,"status":"resolved","payload":{"decision":"allow_once"}}]
     });
     let mut invalid_review = review.clone();

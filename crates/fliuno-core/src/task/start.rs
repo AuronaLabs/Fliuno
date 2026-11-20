@@ -120,7 +120,7 @@ impl StartInput<'_> {
                 "multipart input applies only to model tasks".into(),
             ));
         }
-        if self.artifacts.len() > MAX_INPUT_MEDIA
+        if self.artifacts.len() > MAX_TASK_ARTIFACT_INPUTS
             || self.artifacts.iter().any(|reference| {
                 [&reference.task_id, &reference.artifact_id]
                     .iter()
@@ -138,7 +138,11 @@ impl StartInput<'_> {
                 validate_input(text)
             }
             Prompt::Text(_) => Ok(()),
-            Prompt::Parts(parts) => multipart_input_budget(parts, self.artifacts.len())
+            Prompt::Parts(parts) if self.artifacts.is_empty() => {
+                validate_multipart_input_limits(parts)
+                    .map_err(|message| Error::Invalid(message.into()))
+            }
+            Prompt::Parts(parts) => TaskInputBudget::with_parts(parts, self.artifacts.len())
                 .map(|_| ())
                 .map_err(|message| Error::Invalid(message.into())),
         }
@@ -153,12 +157,16 @@ impl StartInput<'_> {
             Prompt::Text(text) => vec![UserContentPart::Text { text: text.into() }],
             Prompt::Parts(parts) => parts.to_vec(),
         };
-        let mut remaining = multipart_input_budget(&parts, self.artifacts.len())
+        let mut budget = TaskInputBudget::with_parts(&parts, self.artifacts.len())
             .map_err(|message| Error::Invalid(message.into()))?;
         for reference in self.artifacts {
-            let (part, used) = kernel.read_artifact_input(session, reference, remaining)?;
-            remaining -= used;
-            parts.push(part);
+            parts.push(kernel.read_artifact_input(session, reference, &mut budget)?);
+        }
+        if parts
+            .iter()
+            .all(|part| matches!(part, UserContentPart::Text { text } if text.trim().is_empty()))
+        {
+            return Err(Error::Invalid("input text must not be empty".into()));
         }
         Ok(Message::UserParts { parts })
     }

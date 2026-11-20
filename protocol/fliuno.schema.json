@@ -1083,7 +1083,7 @@
           "$ref": "#/$defs/TaskInput"
         },
         "artifactInputs": {
-          "description": "Append immutable binary artifacts from the task's session in this order.",
+          "description": "Append immutable UTF-8 text, image or PDF artifacts from the same session in this order.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ArtifactGetParams"
@@ -1422,7 +1422,7 @@
           "$ref": "#/$defs/TaskInput"
         },
         "artifactInputs": {
-          "description": "Append immutable binary artifacts from the task's session in this order.",
+          "description": "Append immutable UTF-8 text, image or PDF artifacts from the same session in this order.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ArtifactGetParams"

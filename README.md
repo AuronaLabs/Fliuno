@@ -54,7 +54,7 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 | --- | --- |
 | **任务与审批** | 展示进度、待审批操作和执行结果。[接入工作台](docs/README.md#工作台要展示什么) |
 | **历史与重连** | 补读断线期间的变动，把预览过的历史范围固定到新任务。[恢复同步](docs/README.md#重连与恢复) · [会话上下文](docs/context.md#提交任务时固定预览范围) |
-| **交付物** | 浏览和下载文件，把同一会话的图片或 PDF 交给下一项任务。[交付物目录](docs/protocol.md#交付物目录订阅) · [复用交付物](docs/protocol.md#将交付物用作任务输入) |
+| **交付物** | 浏览和下载文件，把同一会话的文本报告、图片或 PDF 交给下一项任务。[交付物目录](docs/protocol.md#交付物目录订阅) · [复用交付物](docs/protocol.md#将交付物用作任务输入) |
 | **模型、工具与 Agent** | 连接 OpenAI、Anthropic 或 Gemini，通过 MCP、ACP 或 A2A 扩展能力。[集成方式](docs/README.md#模型工具与-agent) |
 | **本机命令与终端** | 运行宿主注册的命令，按 Windows 或 Linux 的平台条件启用进程隔离。[本机执行与隔离](docs/README.md#本机执行与隔离) |
 

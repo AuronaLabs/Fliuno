@@ -6,9 +6,9 @@ use super::{
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
     ApprovalDetails, ApprovalRun, ApprovalRunPendingParams, ApprovalRunReplay, ApprovalRunWindow,
-    ArtifactGetParams, ImageMimeType, MAX_APP_REQUEST_BYTES, MAX_INPUT_MEDIA, MAX_TASK_MODEL_STEPS,
-    MAX_TASK_TEXT_BYTES, TaskIdParams, TaskInput, TaskRequestLookupParams, TaskStartParams,
-    TaskStatus, TaskSummary, UserContentPart, validate_multipart_input,
+    ArtifactGetParams, ImageMimeType, MAX_APP_REQUEST_BYTES, MAX_TASK_ARTIFACT_INPUTS,
+    MAX_TASK_MODEL_STEPS, MAX_TASK_TEXT_BYTES, TaskIdParams, TaskInput, TaskRequestLookupParams,
+    TaskStartParams, TaskStatus, TaskSummary, UserContentPart, validate_multipart_input,
 };
 use serde::{
     Deserialize, Deserializer,
@@ -295,7 +295,9 @@ impl AgUiRunInput {
             return Err(AgUiRunError::UnsupportedInput);
         }
         let artifact_inputs = match self.forwarded_props.and_then(|props| props.fliuno) {
-            Some(props) if (1..=MAX_INPUT_MEDIA).contains(&props.artifact_inputs.len()) => {
+            Some(props)
+                if (1..=MAX_TASK_ARTIFACT_INPUTS).contains(&props.artifact_inputs.len()) =>
+            {
                 props.artifact_inputs
             }
             Some(_) => return Err(AgUiRunError::UnsupportedInput),

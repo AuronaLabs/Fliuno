@@ -457,6 +457,7 @@ impl RpcServer {
             capabilities["taskImageInput"] = json!(true);
             capabilities["taskPdfInput"] = json!(true);
             capabilities["taskArtifactInput"] = json!(true);
+            capabilities["taskTextArtifactInput"] = json!(true);
             capabilities["maxTaskModelSteps"] = json!(MAX_TASK_MODEL_STEPS);
             capabilities["taskResumeStatus"] = json!(true);
             capabilities["taskResumeStatusBatch"] = json!(true);

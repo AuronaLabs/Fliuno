@@ -1142,3 +1142,11 @@ Windows 本机调试构建通过 stdio 对同一事件窗口比较两种读取�
 脚本和日志位于 `D:/Fliuno-Native-Test/model-usage-range-benchmark.py` 和 `D:/Fliuno-Native-Test/model-usage-range-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，538 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 3 项用量进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-model-usage-range-windows.log` 和 `D:/Fliuno-Native-Test/guest-model-usage-range.log`。
+
+## 0.0.3 文本交付物作为任务输入（2026-11-20）
+
+真实 stdio 测试通过模型与审批生成 UTF-8 报告，再验证同一会话的文本续用、与 PDF 和图片混排、四个媒体之外加入文本、跨会话拒绝和超出共用文本预算时的拒绝。进程重启后，报告源在隔离夹具中改成非法 UTF-8，新请求拒绝读取，原请求键仍返回已冻结的文本。AG-UI HTTP 测试覆盖宿主启用开关、不同会话与审批续跑的边界。[应用协议](protocol.md#将交付物用作任务输入)
+
+Windows 本机调试构建比较内嵌和引用同一份 192 KiB UTF-8 报告。两种任务提交后核对的输入原文相同。每种方式预热 20 次，再交替测量 100 次 `task/startSummary` 重试，请求参数从 203,099 字节降到 287 字节，往返中位耗时从 3.630 ms 降到 0.447 ms。脚本和日志位于 `D:/Fliuno-Native-Test/text-artifact-input-benchmark.py` 和 `D:/Fliuno-Native-Test/text-artifact-input-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，538 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 15 项交付物进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-text-artifact-input-windows.log` 和 `D:/Fliuno-Native-Test/guest-text-artifact-input.log`。

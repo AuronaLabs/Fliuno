@@ -148,6 +148,7 @@ fn binary_artifact_requires_approval_and_preserves_raw_bytes_across_restart() {
 
 #[test]
 fn artifact_task_input_keeps_scope_order_and_retry_identity() {
+    const TEXT: &str = "报告\n共有三条记录。";
     const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
     const PDF: &str = "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAxMCAxMF0gPj4KZW5kb2JqCnhyZWYKMCA0CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAwMCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA0IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxODIKJSVFT0YK";
     let root = std::env::temp_dir().join(format!("fliuno-artifact-input-{}", uuid::Uuid::new_v4()));
@@ -160,20 +161,34 @@ fn artifact_task_input_keeps_scope_order_and_retry_identity() {
         let complete =
             || json!([{"type":"message","content":[{"type":"output_text","text":"done"}]}]);
         let output = if let Some(parts) = current.as_array() {
-            assert_eq!(
-                parts,
-                &vec![
-                    json!({"type":"input_text","text":"Review the artifacts"}),
-                    json!({"type":"input_file","filename":"document.pdf","file_data":format!("data:application/pdf;base64,{PDF}")}),
-                    json!({"type":"input_image","detail":"auto","image_url":format!("data:image/png;base64,{PNG}")}),
-                ]
-            );
+            let text = json!({"type":"input_text","text":TEXT});
+            let image = json!({"type":"input_image","detail":"auto","image_url":format!("data:image/png;base64,{PNG}")});
+            match parts.len() {
+                1 => assert_eq!(parts, &[text]),
+                4 => assert_eq!(
+                    parts,
+                    &[
+                        json!({"type":"input_text","text":"Review the artifacts"}),
+                        json!({"type":"input_file","filename":"document.pdf","file_data":format!("data:application/pdf;base64,{PDF}")}),
+                        text,
+                        image,
+                    ]
+                ),
+                5 => assert_eq!(
+                    parts,
+                    &[image.clone(), image.clone(), image.clone(), image, text]
+                ),
+                _ => panic!("unexpected provider parts"),
+            }
             complete()
         } else if input
             .iter()
             .any(|item| item["type"] == "function_call_output")
         {
             complete()
+        } else if current == "create text" {
+            let args = json!({"title":"report","content":TEXT}).to_string();
+            json!([{"type":"function_call","call_id":"new-artifact","name":"artifact_create","arguments":args}])
         } else {
             let (media, data) = match current.as_str().unwrap() {
                 "create pdf" => ("application/pdf", PDF),
@@ -207,9 +222,42 @@ fn artifact_task_input_keeps_scope_order_and_retry_identity() {
         };
     let document = create_artifact("create pdf");
     let image = create_artifact("create png");
+    let text = create_artifact("create text");
+    let text_only = json!({
+        "sessionId":session["id"],"input":"","artifactInputs":[text],
+        "clientRequestId":"reuse-text","context":{"mode":"isolated"}
+    });
+    let mut too_much_text = text_only.clone();
+    too_much_text["input"] = json!("x".repeat(fliuno_protocol::MAX_TASK_TEXT_BYTES));
+    assert_eq!(
+        peer.request("task/startSummary", too_much_text)["error"]["code"],
+        -32602
+    );
+    let started = peer.call("task/start", text_only.clone());
+    let text_task = started["id"].as_str().unwrap();
+    assert_eq!(
+        started["messages"][0]["parts"],
+        json!([{"type":"text","text":TEXT}])
+    );
+    peer.wait_for_status(text_task, "completed");
+
+    let mut all_media_slots = text_only.clone();
+    all_media_slots["clientRequestId"] = json!("text-plus-four-images");
+    all_media_slots["input"] = json!(vec![
+        json!({"type":"image","mimeType":"image/png","data":PNG});
+        4
+    ]);
+    let mut too_many_media = all_media_slots.clone();
+    too_many_media["artifactInputs"] = json!([image]);
+    assert_eq!(
+        peer.request("task/startSummary", too_many_media)["error"]["code"],
+        -32602
+    );
+    let full_media = peer.call("task/startSummary", all_media_slots);
+    peer.wait_for_status(full_media["id"].as_str().unwrap(), "completed");
     let request = json!({
         "sessionId":session["id"],"clientRequestId":"reuse-artifacts",
-        "input":"Review the artifacts","artifactInputs":[document,image]
+        "input":"Review the artifacts","artifactInputs":[document,text,image]
     });
     let mut cross_session = request.clone();
     cross_session["sessionId"] = other["id"].clone();
@@ -240,7 +288,7 @@ fn artifact_task_input_keeps_scope_order_and_retry_identity() {
     let id = summary["id"].as_str().unwrap();
     assert_eq!(
         summary["inputPreview"],
-        "Review the artifacts[document][image]"
+        format!("Review the artifacts[document]{TEXT}[image]")
     );
     peer.wait_for_status(id, "completed");
     drop(peer);
@@ -250,8 +298,11 @@ fn artifact_task_input_keeps_scope_order_and_retry_identity() {
     let connection = rusqlite::Connection::open(&db).unwrap();
     connection
         .execute(
-            "UPDATE artifact_bodies SET body=x'00' WHERE artifact_id=?1",
-            [image["artifactId"].as_str().unwrap()],
+            "UPDATE artifact_bodies SET body=x'ff' WHERE artifact_id IN (?1,?2)",
+            [
+                image["artifactId"].as_str().unwrap(),
+                text["artifactId"].as_str().unwrap(),
+            ],
         )
         .unwrap();
     drop(connection);
@@ -260,9 +311,24 @@ fn artifact_task_input_keeps_scope_order_and_retry_identity() {
     let full = peer.call("task/start", request.clone());
     assert_eq!(full["id"], id);
     assert_eq!(full["messages"][0]["parts"][1]["data"], PDF);
-    assert_eq!(full["messages"][0]["parts"][2]["data"], PNG);
+    assert_eq!(full["messages"][0]["parts"][2]["text"], TEXT);
+    assert_eq!(full["messages"][0]["parts"][3]["data"], PNG);
+    assert_eq!(
+        peer.call("task/startSummary", text_only.clone())["id"],
+        text_task
+    );
+    let mut bad_text = text_only;
+    bad_text["clientRequestId"] = json!("new-text-reference");
+    let invalid = peer.request("task/startSummary", bad_text);
+    assert_eq!(invalid["error"]["code"], -32602);
+    assert!(
+        invalid["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("UTF-8")
+    );
     let mut changed = request.clone();
-    changed["artifactInputs"] = json!([image, document]);
+    changed["artifactInputs"] = json!([image, text, document]);
     assert_eq!(
         peer.request("task/startSummary", changed)["error"]["code"],
         -32009
@@ -273,6 +339,7 @@ fn artifact_task_input_keeps_scope_order_and_retry_identity() {
     assert_eq!(peer.request("task/start", inline)["error"]["code"], -32009);
     let mut fresh = request;
     fresh["clientRequestId"] = json!("new-reference");
+    fresh["artifactInputs"] = json!([image]);
     assert_eq!(
         peer.request("task/startSummary", fresh)["error"]["code"],
         -32602

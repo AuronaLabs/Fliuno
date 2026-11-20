@@ -352,8 +352,8 @@ impl Kernel {
         &self,
         session: &str,
         reference: &ArtifactGetParams,
-        remaining: usize,
-    ) -> Result<(UserContentPart, usize)> {
+        budget: &mut TaskInputBudget,
+    ) -> Result<UserContentPart> {
         let (rowid, media_type, binary): (i64, String, bool) = self.db.prepare_cached(
             "SELECT b.rowid,json_extract(a.data,'$.mediaType'),COALESCE(json_extract(a.data,'$.binary'),0)
              FROM tasks t JOIN artifacts a ON a.task_id=t.id
@@ -362,23 +362,29 @@ impl Kernel {
         )?.query_row(params![session, reference.task_id, reference.artifact_id], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         }).optional()?.ok_or_else(|| Error::NotFound("artifact in session".into()))?;
-        if !binary {
-            return Err(Error::Invalid("artifact input must be binary".into()));
-        }
         let blob = self
             .db
             .blob_open("main", "artifact_bodies", "body", rowid, true)?;
         let length = blob.len();
-        let encoded = base64::encoded_len(length, true)
-            .filter(|size| *size <= remaining)
-            .ok_or_else(|| {
-                Error::Invalid("artifact inputs exceed the 512 KiB base64 input budget".into())
-            })?;
+        // Charge the raw text or encoded media size before allocating the body.
+        if binary {
+            let encoded = base64::encoded_len(length, true)
+                .ok_or_else(|| Error::Invalid("artifact input size overflow".into()))?;
+            budget.reserve_media(encoded)
+        } else {
+            budget.reserve_text(length)
+        }
+        .map_err(|message| Error::Invalid(message.into()))?;
         let mut bytes = vec![0; length];
         blob.read_at_exact(&mut bytes, 0)?;
-        let part = UserContentPart::from_media_bytes(&media_type, &bytes)
-            .map_err(|message| Error::Invalid(message.into()))?;
-        Ok((part, encoded))
+        if binary {
+            UserContentPart::from_media_bytes(&media_type, &bytes)
+                .map_err(|message| Error::Invalid(message.into()))
+        } else {
+            let text = String::from_utf8(bytes)
+                .map_err(|_| Error::Invalid("text artifact input must be UTF-8".into()))?;
+            Ok(UserContentPart::Text { text })
+        }
     }
 
     /// Return one byte range and the immutable content length, even when the

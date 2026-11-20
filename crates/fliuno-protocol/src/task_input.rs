@@ -11,6 +11,7 @@ pub const MAX_TASK_TEXT_BYTES: usize = 256 * 1024;
 const MAX_MEDIA_BASE64_BYTES: usize = 512 * 1024;
 const MAX_INPUT_PARTS: usize = 32;
 pub const MAX_INPUT_MEDIA: usize = 4;
+pub const MAX_TASK_ARTIFACT_INPUTS: usize = 4;
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(untagged)]
@@ -143,40 +144,78 @@ impl UserContentPart {
     }
 }
 
+const MEDIA_LIMIT_ERROR: &str =
+    "multipart input needs 1..4 images or PDF documents with at most 512 KiB of total base64 data";
+
+/// Shared byte and media limits for inline parts and resolved artifact inputs.
+pub struct TaskInputBudget {
+    text_bytes_left: usize,
+    base64_bytes_left: usize,
+    media_left: usize,
+}
+
+impl TaskInputBudget {
+    /// Reserve slots before resolving references. Their contents are charged
+    /// only after the storage layer has checked the owner and body length.
+    pub fn with_parts(
+        parts: &[UserContentPart],
+        additional_parts: usize,
+    ) -> Result<Self, &'static str> {
+        if parts.len().saturating_add(additional_parts) > MAX_INPUT_PARTS {
+            return Err("input must have at most 32 parts");
+        }
+        let mut budget = Self {
+            text_bytes_left: MAX_TASK_TEXT_BYTES,
+            base64_bytes_left: MAX_MEDIA_BASE64_BYTES,
+            media_left: MAX_INPUT_MEDIA,
+        };
+        for part in parts {
+            match part {
+                UserContentPart::Text { text } => budget.reserve_text(text.len())?,
+                UserContentPart::Image { data, .. } | UserContentPart::Pdf { data } => {
+                    budget.reserve_media(data.len())?;
+                }
+            }
+        }
+        Ok(budget)
+    }
+
+    pub fn reserve_text(&mut self, bytes: usize) -> Result<(), &'static str> {
+        self.text_bytes_left = self
+            .text_bytes_left
+            .checked_sub(bytes)
+            .ok_or("input text exceeds 256 KiB")?;
+        Ok(())
+    }
+
+    pub fn reserve_media(&mut self, base64_bytes: usize) -> Result<(), &'static str> {
+        if self.media_left == 0 || base64_bytes > self.base64_bytes_left {
+            return Err(MEDIA_LIMIT_ERROR);
+        }
+        self.media_left -= 1;
+        self.base64_bytes_left -= base64_bytes;
+        Ok(())
+    }
+}
+
 /// Bound the work needed to verify or compare multipart input.
 pub fn validate_multipart_input_limits(parts: &[UserContentPart]) -> Result<(), &'static str> {
     multipart_input_budget(parts, 0).map(|_| ())
 }
 
-/// Return remaining Base64 bytes after counting both inline and referenced media.
+/// Return the remaining Base64 budget when all references are known media.
 pub fn multipart_input_budget(
     parts: &[UserContentPart],
     references: usize,
 ) -> Result<usize, &'static str> {
-    if parts.len().saturating_add(references) > MAX_INPUT_PARTS {
-        return Err("input must have at most 32 parts");
+    let mut budget = TaskInputBudget::with_parts(parts, references)?;
+    for _ in 0..references {
+        budget.reserve_media(0)?;
     }
-    let mut text_bytes = 0;
-    let mut media_bytes = 0;
-    let mut media = references;
-    for part in parts {
-        match part {
-            UserContentPart::Text { text } => text_bytes += text.len(),
-            UserContentPart::Image { data, .. } | UserContentPart::Pdf { data } => {
-                media_bytes += data.len();
-                media += 1;
-            }
-        }
+    if budget.media_left == MAX_INPUT_MEDIA {
+        return Err(MEDIA_LIMIT_ERROR);
     }
-    if !(1..=MAX_INPUT_MEDIA).contains(&media) || media_bytes > MAX_MEDIA_BASE64_BYTES {
-        return Err(
-            "multipart input needs 1..4 images or PDF documents with at most 512 KiB of total base64 data",
-        );
-    }
-    if text_bytes > MAX_TASK_TEXT_BYTES {
-        return Err("input text exceeds 256 KiB");
-    }
-    Ok(MAX_MEDIA_BASE64_BYTES - media_bytes)
+    Ok(budget.base64_bytes_left)
 }
 
 /// This validates transport and MIME consistency without parsing images or documents.
