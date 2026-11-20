@@ -188,3 +188,11 @@ pub struct ArtifactChunk {
     pub content_bytes: u64,
     pub data_base64: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactDownloadStart {
+    pub digest: ArtifactDigest,
+    /// The first range, starting at offset zero, up to MAX_ARTIFACT_READ_BYTES.
+    pub first_chunk: ArtifactChunk,
+}

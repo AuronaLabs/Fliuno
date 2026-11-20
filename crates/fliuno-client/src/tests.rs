@@ -212,6 +212,119 @@ fn artifact_download_rejects_malformed_ranges_before_writing_and_keeps_connectio
 }
 
 #[test]
+fn artifact_download_start_uses_the_first_chunk_or_legacy_reads() {
+    use fliuno_protocol::ArtifactGetParams;
+    let artifact = ArtifactGetParams {
+        task_id: "t".into(),
+        artifact_id: "a".into(),
+    };
+    let digest = json!({"contentBytes":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"});
+    let chunk = json!({"offset":0,"nextOffset":3,"contentBytes":3,"dataBase64":"YWJj"});
+    for (supported, methods) in [
+        (true, vec!["initialize", "artifacts/openDownload"]),
+        (
+            false,
+            vec!["initialize", "artifacts/digest", "artifacts/read"],
+        ),
+    ] {
+        let mut info: Value = serde_json::from_str(HANDSHAKE).unwrap();
+        if supported {
+            info["result"]["capabilities"]["artifactDownloadStart"] = json!(true);
+        }
+        let frames = if supported {
+            vec![json!({"digest":digest,"firstChunk":chunk})]
+        } else {
+            vec![digest.clone(), chunk.clone()]
+        };
+        let mut wire = format!("{info}\n");
+        for (index, result) in frames.into_iter().enumerate() {
+            wire += &format!(
+                "{}\n",
+                json!({"jsonrpc":"2.0","id":index+2,"result":result})
+            );
+        }
+        let mut client = Client::connect(
+            Cursor::new(wire.into_bytes()),
+            Vec::new(),
+            "download-start",
+            |_| {},
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        let got = client
+            .download_artifact_with_digest(
+                &artifact,
+                &mut output,
+                |value| {
+                    assert_eq!(serde_json::to_value(value).unwrap(), digest);
+                    Ok(())
+                },
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(output, b"abc");
+        assert_eq!(serde_json::to_value(got).unwrap(), digest);
+        let (_, written) = client.into_parts();
+        let requests: Vec<Value> = written
+            .split(|&byte| byte == b'\n')
+            .filter(|line| !line.is_empty())
+            .map(|line| serde_json::from_slice(line).unwrap())
+            .collect();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request["method"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            methods
+        );
+    }
+}
+
+#[test]
+fn artifact_download_start_preserves_output_on_bad_first_chunk_or_checkpoint_failure() {
+    use fliuno_protocol::ArtifactGetParams;
+    use std::io;
+    let artifact = ArtifactGetParams {
+        task_id: "t".into(),
+        artifact_id: "a".into(),
+    };
+    let mut info: Value = serde_json::from_str(HANDSHAKE).unwrap();
+    info["result"]["capabilities"]["artifactDownloadStart"] = json!(true);
+    let mut wire = format!("{info}\n");
+    for (id, end) in [(2, 1), (3, 3)] {
+        wire += &format!(
+            "{}\n",
+            json!({"jsonrpc":"2.0","id":id,"result":{
+                "digest":{"contentBytes":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
+                "firstChunk":{"offset":0,"nextOffset":end,"contentBytes":3,"dataBase64":"YWJj"}
+            }})
+        );
+    }
+    let mut client = Client::connect(
+        Cursor::new(wire.into_bytes()),
+        Vec::new(),
+        "download-checkpoint",
+        |_| {},
+    )
+    .unwrap();
+    let mut output = Vec::new();
+    assert!(matches!(
+        client.download_artifact_with_digest(
+            &artifact,
+            &mut output,
+            |_| panic!("bad chunk must not reach checkpoint"),
+            |_| {}
+        ),
+        Err(Error::InvalidArtifactChunk)
+    ));
+    assert!(output.is_empty());
+    assert!(
+        matches!(client.download_artifact_with_digest(&artifact, &mut output, |_| Err(io::ErrorKind::PermissionDenied.into()), |_| {}), Err(Error::ArtifactCheckpoint(error)) if error.kind()==io::ErrorKind::PermissionDenied)
+    );
+    assert!(output.is_empty());
+}
+
+#[test]
 fn artifact_download_checks_empty_body_against_pinned_digest() {
     use fliuno_protocol::{ArtifactDigest, ArtifactGetParams};
     let mut client = fake_client(concat!(

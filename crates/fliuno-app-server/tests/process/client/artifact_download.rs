@@ -6,20 +6,32 @@ struct ReadProbe {
     stdin: ChildStdin,
     remaining: Option<usize>,
     offsets: Vec<u64>,
+    opened: bool,
 }
 
 impl Write for ReadProbe {
     fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let request: Value = serde_json::from_slice(bytes).unwrap();
-        if request["method"] == "artifacts/read" {
+        let method = request["method"].as_str().unwrap();
+        assert_ne!(
+            method, "artifacts/digest",
+            "a separate digest RPC is unnecessary"
+        );
+        if matches!(method, "artifacts/openDownload" | "artifacts/read") {
             if let Some(remaining) = &mut self.remaining {
                 if *remaining == 0 {
                     return Err(io::ErrorKind::BrokenPipe.into());
                 }
                 *remaining -= 1;
             }
-            self.offsets
-                .push(request["params"]["after"].as_u64().unwrap());
+            if method == "artifacts/openDownload" {
+                assert!(self.offsets.is_empty());
+                self.opened = true;
+                self.offsets.push(0);
+            } else {
+                self.offsets
+                    .push(request["params"]["after"].as_u64().unwrap());
+            }
         }
         self.stdin.write_all(bytes)?;
         Ok(bytes.len())
@@ -62,16 +74,25 @@ fn artifact_download_resumes_a_staging_file_after_server_restart() {
         stdin,
         remaining: Some(1),
         offsets: Vec::new(),
+        opened: false,
     });
-    let expected = client.artifact_digest(&artifact, |_| {}).unwrap();
-    assert_eq!(expected.content_bytes, content.len() as u64);
+    assert_eq!(client.info().capabilities["artifactDownloadStart"], true);
     let path = root.join("staging.part");
     let mut file = fs::File::create_new(&path).unwrap();
+    let mut saved = None;
     assert!(
-        matches!(client.download_artifact(&artifact, &expected, &mut file, |_| {}),
+        matches!(client.download_artifact_with_digest(&artifact, &mut file, |digest| {
+            assert_eq!(fs::metadata(&path)?.len(), 0);
+            saved = Some(serde_json::to_vec(digest)?);
+            Ok(())
+        }, |_| {}),
         Err(Error::Io(e)) if e.kind() == io::ErrorKind::BrokenPipe)
     );
+    let expected: fliuno_protocol::ArtifactDigest =
+        serde_json::from_slice(&saved.unwrap()).unwrap();
+    assert_eq!(expected.content_bytes, content.len() as u64);
     let (_, probe) = client.into_parts();
+    assert!(probe.opened);
     assert_eq!(probe.offsets, [0]);
     assert_eq!(
         file.metadata().unwrap().len(),
@@ -90,6 +111,7 @@ fn artifact_download_resumes_a_staging_file_after_server_restart() {
         stdin,
         remaining: None,
         offsets: Vec::new(),
+        opened: false,
     });
     let mut file = fs::OpenOptions::new()
         .read(true)
@@ -104,6 +126,7 @@ fn artifact_download_resumes_a_staging_file_after_server_restart() {
         .resume_artifact_download(&artifact, &expected, &mut file, |_| {})
         .unwrap();
     let (_, probe) = client.into_parts();
+    assert!(!probe.opened);
     let stride = u64::from(MAX_ARTIFACT_READ_BYTES);
     assert_eq!(probe.offsets, [kept, kept + stride, kept + 2 * stride]);
     assert_eq!(fs::read(&path).unwrap(), content.as_bytes());

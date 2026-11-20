@@ -55,6 +55,8 @@ let event: Event = client.call("events/get", &EventGetParams { sequence: 1 }, |n
 
 `Client::artifact_digest` 读取产物的正文长度和 SHA-256，调用方也可直接提供已保存的摘要。`Client::download_artifact` 按 64 KiB 分段读取，检查每段的长度和偏移，将原始字节写入调用方提供的 `Write`，返回前校验完整 SHA-256。需要在验证完成后才对外可见时，先写到临时文件，再由调用方发布。失败时输出中可能已有部分字节。
 
+首次下载且尚无摘要时，可用 `Client::download_artifact_with_digest`。客户端通过 `artifacts/openDownload` 取得摘要和首块，验证首块格式后，在任何正文写入前调用 `record_digest`。宿主可以在这里将摘要与产物 ID 一起持久保存；回调失败就停止写入。下载完成前仍校验完整 SHA-256。连接旧服务时，客户端自动改用 `artifacts/digest` 和 `artifacts/read`。
+
 重连后，可用 `Client::resume_artifact_download` 继续写入原暂存文件。保持原 `taskId`、`artifactId`、`contentBytes` 和 `sha256`，独占打开暂存文件供读写，不截断已有内容：
 
 ```rust
@@ -153,6 +155,7 @@ staged.sync_all()?;
 | `artifacts/getSummary` | `{taskId,artifactId}` | 单份 ArtifactSummary |
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
 | `artifacts/digest` | `{taskId,artifactId}` | 正文的 `contentBytes` 与小写十六进制 `sha256` |
+| `artifacts/openDownload` | `{taskId,artifactId}` | `{digest,firstChunk}`，一次取得摘要和首块 |
 | `artifacts/getDigests` | `{artifacts:[{taskId,artifactId},…]}` | 同顺序的 `{items}`，只读取已保存的摘要 |
 | `artifacts/read` | `{taskId,artifactId,after?,limit?}` | 返回 `{offset,nextOffset,contentBytes,dataBase64}` |
 
@@ -196,6 +199,10 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 `artifactCatalogSnapshots` 表示支持 `artifacts/listSnapshot`。接口使用相同的作用域、类型筛选及目录游标，额外返回全局目录水位 `throughSequence`。首次可省略该字段；后续页沿用返回的水位和作用域、筛选条件，把前一页的 `nextAfter` 传为 `after`。序号大于 `after` 且小于等于水位的产物才参与查询，包括归档会话中的产物。该水位重启后仍可使用，新的产物不会混入。`after` 大于水位，或水位超出当前目录，返回 `-32602`。如需读取快照之后新增的产物，可从旧水位续查并省略 `throughSequence`。目录水位独立于事件序号和任务产物游标。
 
 客户端可通过 `artifactByteReads` 和 `maxArtifactReadBytes` 探测分块读取。从 `after:0` 开始，每次以返回的 `nextOffset` 续读。默认读取 32 KiB，每块最多 64 KiB。对 `dataBase64` 做标准 Base64 解码并拼接字节。若产物是文本，再按 UTF-8 解码，因为块边界可能切开一个字符。`nextOffset` 等于 `contentBytes` 时已经读完。处于末尾的请求返回空块，超过末尾的偏移返回 `-32602`，产物不属于指定任务时返回 `-32004`。同一产物的偏移在服务重启后仍可使用。SQLite v21 将已有正文移到独立 BLOB 表，保留产物 ID、清单游标和字节偏移。升级在一个事务内完成，迁移中数据库需要空间写入新正文。
+
+#### 一次取得摘要和首块
+
+服务声明 `artifactDownloadStart: true` 时，可调用 `artifacts/openDownload`。`digest` 与 `artifacts/digest` 的响应相同；`firstChunk` 等同于 `artifacts/read` 使用 `after:0`、`limit:65536` 的结果。若 `nextOffset` 小于 `contentBytes`，继续用普通分块读取；否则首块已包含整个正文。空产物返回空首块。旧产物缺少摘要时仍按需计算并保存，使用相同的 8 MiB 摘要预算和任务归属检查。该入口不产生任务事件，无需数据库迁移。
 
 `artifacts/digest` 返回原始字节的 `{contentBytes,sha256}`。`initialize.capabilities.maxArtifactDigestBytes` 公布支持摘要的大小上限，目前为 8 MiB。若服务声明 `storedArtifactDigests:true`，新产物在提交正文时同时保存摘要，后续读取不再打开正文；没有保存摘要的旧产物在第一次查询时分块计算并保存。升级无需启动时扫描正文，不改变目录游标，也不会为补算摘要新增事件。调用形式和返回字段与旧服务相同。
 

@@ -3,10 +3,11 @@ use crate::{Client, Error, Notification};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use fliuno_protocol::{
     ArtifactChunk, ArtifactDigest, ArtifactDigestBatch, ArtifactDigestBatchParams,
-    ArtifactDigestEntry, ArtifactGetParams, ArtifactReadParams, MAX_ARTIFACT_READ_BYTES,
+    ArtifactDigestEntry, ArtifactDownloadStart, ArtifactGetParams, ArtifactReadParams,
+    MAX_ARTIFACT_READ_BYTES,
 };
 use sha2::{Digest, Sha256};
-use std::io::{BufRead, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 
 impl<R: BufRead, W: Write> Client<R, W> {
     /// Fetch the digest of the stored body. A caller with a pinned digest can
@@ -51,6 +52,46 @@ impl<R: BufRead, W: Write> Client<R, W> {
     ) -> Result<(), Error> {
         // Preserve the server identity/length check for a fresh empty download.
         Download::new(expected)?.receive(self, artifact, output, on_notification)
+    }
+
+    /// Start a download without a pinned digest. Persist the received digest in
+    /// `record_digest` before writing any bytes so an interrupted download can
+    /// resume with [`Self::resume_artifact_download`]. An error from the callback
+    /// leaves the output untouched. The caller owns flushing and publication.
+    pub fn download_artifact_with_digest(
+        &mut self,
+        artifact: &ArtifactGetParams,
+        output: &mut impl Write,
+        record_digest: impl FnOnce(&ArtifactDigest) -> io::Result<()>,
+        mut on_notification: impl FnMut(Notification),
+    ) -> Result<ArtifactDigest, Error> {
+        let (digest, first_chunk) = if self
+            .info()
+            .capabilities
+            .get("artifactDownloadStart")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            let start: ArtifactDownloadStart =
+                self.call("artifacts/openDownload", artifact, &mut on_notification)?;
+            (start.digest, Some(start.first_chunk))
+        } else {
+            (self.artifact_digest(artifact, &mut on_notification)?, None)
+        };
+        let mut download = Download::new(&digest)?;
+        let first = first_chunk
+            .map(|chunk| download.decode(chunk))
+            .transpose()?;
+        record_digest(&digest).map_err(Error::ArtifactCheckpoint)?;
+        if let Some(count) = first {
+            download.write_chunk(count, output)?;
+            if download.after == digest.content_bytes {
+                download.verify()?;
+                return Ok(digest);
+            }
+        }
+        download.receive(self, artifact, output, on_notification)?;
+        Ok(digest)
     }
 
     /// Continue an interrupted download into an exclusively owned staging file.
@@ -144,29 +185,40 @@ impl<'a> Download<'a> {
         loop {
             let chunk: ArtifactChunk =
                 client.call("artifacts/read", &request, &mut on_notification)?;
-            let count = (self.expected.content_bytes - request.after).min(u64::from(request.limit));
-            let end = request.after + count;
-            if chunk.content_bytes != self.expected.content_bytes
-                || chunk.offset != request.after
-                || chunk.next_offset != end
-                || chunk.data_base64.len() != (count as usize).div_ceil(3) * 4
-            {
-                return Err(Error::InvalidArtifactChunk);
-            }
-            let decoded = STANDARD
-                .decode_slice(chunk.data_base64, &mut self.buffer)
-                .map_err(|_| Error::InvalidArtifactChunk)?;
-            if decoded != count as usize {
-                return Err(Error::InvalidArtifactChunk);
-            }
-            let bytes = &self.buffer[..decoded];
-            output.write_all(bytes).map_err(Error::ArtifactOutput)?;
-            self.sha256.update(bytes);
-            if end == self.expected.content_bytes {
+            let count = self.decode(chunk)?;
+            self.write_chunk(count, output)?;
+            if self.after == self.expected.content_bytes {
                 return self.verify();
             }
-            request.after = end;
+            request.after = self.after;
         }
+    }
+
+    fn decode(&mut self, chunk: ArtifactChunk) -> Result<usize, Error> {
+        let count =
+            (self.expected.content_bytes - self.after).min(u64::from(MAX_ARTIFACT_READ_BYTES));
+        if chunk.content_bytes != self.expected.content_bytes
+            || chunk.offset != self.after
+            || chunk.next_offset != self.after + count
+            || chunk.data_base64.len() != (count as usize).div_ceil(3) * 4
+        {
+            return Err(Error::InvalidArtifactChunk);
+        }
+        let decoded = STANDARD
+            .decode_slice(chunk.data_base64, &mut self.buffer)
+            .map_err(|_| Error::InvalidArtifactChunk)?;
+        if decoded != count as usize {
+            return Err(Error::InvalidArtifactChunk);
+        }
+        Ok(decoded)
+    }
+
+    fn write_chunk(&mut self, count: usize, output: &mut impl Write) -> Result<(), Error> {
+        let bytes = &self.buffer[..count];
+        output.write_all(bytes).map_err(Error::ArtifactOutput)?;
+        self.sha256.update(bytes);
+        self.after += count as u64;
+        Ok(())
     }
 
     fn verify(self) -> Result<(), Error> {

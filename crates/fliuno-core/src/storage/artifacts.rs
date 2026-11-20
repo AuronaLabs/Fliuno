@@ -406,6 +406,21 @@ impl Kernel {
         })
     }
 
+    /// Read the checksum and first bounded range for a new download.
+    pub fn open_artifact_download(
+        &self,
+        task_id: &str,
+        artifact_id: &str,
+    ) -> Result<(ArtifactDigest, Vec<u8>)> {
+        let digest = self.digest_artifact(task_id, artifact_id)?;
+        let (length, data) =
+            self.read_artifact_chunk(task_id, artifact_id, 0, MAX_ARTIFACT_READ_BYTES)?;
+        if length != digest.content_bytes {
+            return Err(rusqlite::Error::InvalidQuery.into());
+        }
+        Ok((digest, data))
+    }
+
     fn backfill_artifact_digest(
         &self,
         task_id: &str,

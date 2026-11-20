@@ -2,6 +2,8 @@
 
 ## 0.0.3 开发中
 
+- **交付物下载少一次往返**。`artifacts/openDownload` 一次返回 SHA-256、正文长度和首块。Rust 客户端可在写入前保存摘要，沿用现有续传与完整校验，也兼容旧服务。[下载协议](docs/protocol.md#一次取得摘要和首块)
+
 - **会话历史订阅**。`session/subscribeHistory` 一次返回历史首页并挂接同一会话的事件水位通知。历史清单支持 `afterSequence`，重启后可以从已消费的水位只读取新完成的对话。[订阅与续页](docs/context.md#订阅会话历史)
 
 - **增量历史搜索**。会话和工作区搜索接受 `afterSequence`，用上次处理完的水位只查新完成的任务。Rust 客户端持久化查询范围，续页时校验越界结果。[搜索范围](docs/protocol.md#只搜索新完成的任务)

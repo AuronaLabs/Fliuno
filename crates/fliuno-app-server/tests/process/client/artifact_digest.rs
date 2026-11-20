@@ -106,6 +106,11 @@ fn stored_digests_cover_both_new_and_legacy_artifact_bytes_across_restart() {
         );
     }
     let old_key = serde_json::to_value(&old).unwrap();
+    let opened = peer.call("artifacts/openDownload", old_key.clone());
+    assert_eq!(opened["digest"], expected);
+    let mut read = old_key.clone();
+    read["limit"] = json!(fliuno_protocol::MAX_ARTIFACT_READ_BYTES);
+    assert_eq!(opened["firstChunk"], peer.call("artifacts/read", read));
     assert_eq!(peer.call("artifacts/digest", old_key), expected);
     assert_eq!(peer.call("events/getWatermark", json!({})), pinned);
     assert_eq!(
@@ -115,6 +120,16 @@ fn stored_digests_cover_both_new_and_legacy_artifact_bytes_across_restart() {
         )["error"]["code"],
         -32602
     );
+    for (artifact, code) in [
+        (&wrong_task, -32004),
+        (&missing, -32004),
+        (&oversized, -32602),
+    ] {
+        assert_eq!(
+            peer.request("artifacts/openDownload", json!(artifact))["error"]["code"],
+            code
+        );
+    }
     drop(peer);
 
     {

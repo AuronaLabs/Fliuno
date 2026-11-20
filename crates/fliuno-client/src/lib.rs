@@ -95,6 +95,8 @@ pub enum Error {
     InvalidArtifactPrefix,
     #[error("reading artifact staging data: {0}")]
     ArtifactStagingRead(#[source] io::Error),
+    #[error("recording the artifact download digest: {0}")]
+    ArtifactCheckpoint(#[source] io::Error),
     #[error("writing artifact output: {0}")]
     ArtifactOutput(#[source] io::Error),
     #[error("invalid terminal output limit or byte cursor")]

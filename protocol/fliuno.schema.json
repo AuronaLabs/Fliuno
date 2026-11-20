@@ -3396,6 +3396,24 @@
         "artifactId"
       ]
     },
+    "artifacts/openDownload": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactGetParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "artifactId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "artifactId"
+      ]
+    },
     "artifacts/digest": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ArtifactGetParams",
@@ -8741,6 +8759,75 @@
         "contentBytes",
         "dataBase64"
       ]
+    },
+    "ArtifactDownloadStart": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactDownloadStart",
+      "type": "object",
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/ArtifactDigest"
+        },
+        "firstChunk": {
+          "description": "The first range, starting at offset zero, up to MAX_ARTIFACT_READ_BYTES.",
+          "$ref": "#/$defs/ArtifactChunk"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "firstChunk"
+      ],
+      "$defs": {
+        "ArtifactDigest": {
+          "type": "object",
+          "properties": {
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "contentBytes",
+            "sha256"
+          ]
+        },
+        "ArtifactChunk": {
+          "type": "object",
+          "properties": {
+            "offset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "nextOffset": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "dataBase64": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "offset",
+            "nextOffset",
+            "contentBytes",
+            "dataBase64"
+          ]
+        }
+      }
     },
     "ArtifactDigest": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
