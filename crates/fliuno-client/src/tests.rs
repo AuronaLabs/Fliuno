@@ -173,6 +173,42 @@ fn borrowed_envelopes_preserve_null_results_and_reject_conflicting_fields() {
 }
 
 #[test]
+fn artifact_batch_open_rejects_slot_mismatches_and_wrong_prefixes() {
+    use fliuno_protocol::{ArtifactDownloadBatchParams, ArtifactGetParams};
+    let item = ArtifactGetParams {
+        task_id: "t".into(),
+        artifact_id: "a".into(),
+    };
+    let request = ArtifactDownloadBatchParams {
+        artifacts: vec![item.clone(), item],
+        limit: 1,
+    };
+    let missing = json!({"status":"missing"});
+    let ready = json!({"status":"ready","download":{
+        "digest":{"sha256":"0".repeat(64),"contentBytes":2},
+        "firstChunk":{"offset":0,"nextOffset":1,"contentBytes":2,"dataBase64":"AA=="}
+    }});
+    let mut wrong_prefix = ready.clone();
+    wrong_prefix["download"]["firstChunk"]["nextOffset"] = json!(2);
+    for (items, prefix_error) in [
+        (json!([missing]), false),
+        (json!([ready, missing]), false),
+        (json!([wrong_prefix, wrong_prefix]), true),
+    ] {
+        let response = json!({"jsonrpc":"2.0","id":2,"result":{"items":items}});
+        let mut client = fake_client(format!("{response}\n").as_bytes());
+        let error = client
+            .open_artifact_downloads(&request, |_| {})
+            .unwrap_err();
+        if prefix_error {
+            assert!(matches!(error, Error::InvalidArtifactChunk));
+        } else {
+            assert!(matches!(error, Error::InvalidResult));
+        }
+    }
+}
+
+#[test]
 fn artifact_download_rejects_malformed_ranges_before_writing_and_keeps_connection() {
     use fliuno_protocol::{ArtifactDigest, ArtifactGetParams};
     let first = json!({"offset":0,"nextOffset":2,"contentBytes":2,"dataBase64":"AAE="});

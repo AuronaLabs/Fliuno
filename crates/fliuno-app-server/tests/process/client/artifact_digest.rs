@@ -1,7 +1,7 @@
 use super::*;
 use fliuno_protocol::{
     ArtifactDigestBatchParams, ArtifactDigestEntry, MAX_ARTIFACT_DIGEST_BATCH,
-    MAX_ARTIFACT_DIGEST_BYTES, MAX_ARTIFACT_DIGEST_ID_BYTES,
+    MAX_ARTIFACT_DIGEST_BYTES, MAX_ARTIFACT_DIGEST_ID_BYTES, MAX_ARTIFACT_DOWNLOAD_BATCH,
 };
 
 #[test]
@@ -105,6 +105,49 @@ fn stored_digests_cover_both_new_and_legacy_artifact_bytes_across_restart() {
             -32602
         );
     }
+    let prefix = peer.call(
+        "artifacts/read",
+        json!({"taskId":new.task_id,"artifactId":new.artifact_id,"limit":17}),
+    );
+    let available = json!({"status":"ready","download":{"digest":expected,"firstChunk":prefix}});
+    assert_eq!(
+        peer.call(
+            "artifacts/openDownloads",
+            json!({"artifacts":lookup["artifacts"],"limit":17})
+        ),
+        json!({"items":[
+            {"status":"unrecorded","contentBytes":content.len()},
+            {"status":"missing"},available,{"status":"missing"},available,
+            {"status":"unrecorded","contentBytes":MAX_ARTIFACT_DIGEST_BYTES+1},
+        ]})
+    );
+    let max = vec![&new; MAX_ARTIFACT_DOWNLOAD_BATCH];
+    let batch = peer.call("artifacts/openDownloads", json!({"artifacts":max}));
+    let entries = batch["items"].as_array().unwrap();
+    assert_eq!(entries.len(), MAX_ARTIFACT_DOWNLOAD_BATCH);
+    assert!(entries.iter().all(|item| item == &entries[0]));
+    assert_eq!(
+        entries[0]["download"]["firstChunk"]["nextOffset"],
+        16 * 1024
+    );
+    for invalid in [
+        json!({"artifacts":[]}),
+        json!({"artifacts":vec![&missing;MAX_ARTIFACT_DOWNLOAD_BATCH+1]}),
+        json!({"artifacts":max,"limit":16*1024+1}),
+        json!({"artifacts":[new],"limit":0}),
+        json!({"artifacts":[new],"limit":65537}),
+        json!({"artifacts":[{"taskId":new.task_id,"artifactId":"bad id"}]}),
+    ] {
+        assert_eq!(
+            peer.request("artifacts/openDownloads", invalid)["error"]["code"],
+            -32602
+        );
+    }
+    assert_eq!(peer.call("events/getWatermark", json!({})), pinned);
+    assert_eq!(
+        peer.call("artifacts/getDigests", json!({"artifacts":[old]}))["items"][0]["status"],
+        "unrecorded"
+    );
     let old_key = serde_json::to_value(&old).unwrap();
     let opened = peer.call("artifacts/openDownload", old_key.clone());
     assert_eq!(opened["digest"], expected);

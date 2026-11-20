@@ -121,7 +121,7 @@ mod base64_body {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ArtifactDigest {
     pub content_bytes: u64,
@@ -180,7 +180,7 @@ pub struct ArtifactReadParams {
     pub limit: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ArtifactChunk {
     pub offset: u64,
@@ -189,10 +189,55 @@ pub struct ArtifactChunk {
     pub data_base64: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ArtifactDownloadStart {
     pub digest: ArtifactDigest,
     /// The first range, starting at offset zero, up to MAX_ARTIFACT_READ_BYTES.
     pub first_chunk: ArtifactChunk,
+}
+
+pub const MAX_ARTIFACT_DOWNLOAD_BATCH: usize = 16;
+pub const MAX_ARTIFACT_DOWNLOAD_BATCH_BYTES: usize = 256 * 1024;
+
+const fn default_artifact_download_batch_limit() -> u32 {
+    16 * 1024
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactDownloadBatchParams {
+    #[schemars(length(min = 1, max = MAX_ARTIFACT_DOWNLOAD_BATCH))]
+    pub artifacts: Vec<super::ArtifactGetParams>,
+    /// Raw prefix bytes per requested item, including duplicate positions.
+    /// `artifacts.len() * limit` must be at most 256 KiB.
+    #[serde(default = "default_artifact_download_batch_limit")]
+    #[schemars(range(min = 1, max = MAX_ARTIFACT_READ_BYTES))]
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ArtifactDownloadBatchEntry {
+    Ready {
+        download: ArtifactDownloadStart,
+    },
+    /// This body has no stored checksum. Use the single download entry point to backfill it.
+    Unrecorded {
+        content_bytes: u64,
+    },
+    Missing,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactDownloadBatch {
+    /// One entry per request, preserving order and duplicates.
+    #[schemars(length(min = 1, max = MAX_ARTIFACT_DOWNLOAD_BATCH))]
+    pub items: Vec<ArtifactDownloadBatchEntry>,
 }

@@ -558,6 +558,10 @@ impl RpcServer {
                 json!(fliuno_protocol::MAX_SESSION_ARCHIVE_BATCH);
             capabilities["artifactByteReads"] = json!(true);
             capabilities["artifactDownloadStart"] = json!(true);
+            capabilities["artifactDownloadStartBatch"] = json!(true);
+            capabilities["maxArtifactDownloadBatch"] = json!(MAX_ARTIFACT_DOWNLOAD_BATCH);
+            capabilities["maxArtifactDownloadBatchBytes"] =
+                json!(MAX_ARTIFACT_DOWNLOAD_BATCH_BYTES);
             capabilities["storedArtifactDigests"] = json!(true);
             capabilities["artifactDigestBatch"] = json!(true);
             capabilities["maxArtifactDigestBatch"] = json!(MAX_ARTIFACT_DIGEST_BATCH);
@@ -1171,6 +1175,9 @@ impl RpcServer {
                 })
             }
 
+            "artifacts/openDownloads" => {
+                json!(self.kernel()?.open_artifact_downloads(&decode(params)?)?)
+            }
             "artifacts/read" => {
                 let p: ArtifactReadParams = decode(params)?;
                 let (content_bytes, bytes) = self.kernel()?.read_artifact_chunk(

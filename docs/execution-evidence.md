@@ -1150,3 +1150,11 @@ Windows `scripts/check.ps1` 退出码为 0，538 项测试、29 个离线演示�
 Windows 本机调试构建比较内嵌和引用同一份 192 KiB UTF-8 报告。两种任务提交后核对的输入原文相同。每种方式预热 20 次，再交替测量 100 次 `task/startSummary` 重试，请求参数从 203,099 字节降到 287 字节，往返中位耗时从 3.630 ms 降到 0.447 ms。脚本和日志位于 `D:/Fliuno-Native-Test/text-artifact-input-benchmark.py` 和 `D:/Fliuno-Native-Test/text-artifact-input-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，538 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 15 项交付物进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-text-artifact-input-windows.log` 和 `D:/Fliuno-Native-Test/guest-text-artifact-input.log`。
+
+## 0.0.3 批量下载首块（2026-11-20）
+
+真实 stdio 和 Rust 客户端测试覆盖混合状态与重复位置、任务归属、整批字节上限、旧摘要保持未记录、小文件在首块中完成校验、大文件先保存摘要再写入暂存，以及服务重启后从原偏移续传。独立客户端用例拒绝结果数量不符、同一交付物的重复项状态不一致和首块偏移错误。[应用协议](protocol.md#批量下载首块)
+
+Windows 本机调试构建通过 stdio 打开 16 个各 2 KiB 的交付物。对比逐项调用 `artifacts/openDownload` 与一次 `artifacts/openDownloads`，预热 20 对后交替测量 100 对，每对核对摘要和正文完全一致。请求从 16 次降到 1 次，中位耗时从 6.844 ms 降到 3.418 ms，响应中位数从 47,328 字节降到 47,265 字节。脚本和日志见 `D:/Fliuno-Native-Test/artifact-download-batch-benchmark.py` 与 `D:/Fliuno-Native-Test/artifact-download-batch-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，540 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 4 项 Rust 客户端交付物进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-artifact-download-batch-windows.log` 和 `D:/Fliuno-Native-Test/guest-artifact-download-batch.log`。

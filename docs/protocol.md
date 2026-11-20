@@ -161,6 +161,7 @@ staged.sync_all()?;
 | `artifacts/get` | `{taskId,artifactId}` | 单份完整 Artifact |
 | `artifacts/digest` | `{taskId,artifactId}` | 正文的 `contentBytes` 与小写十六进制 `sha256` |
 | `artifacts/openDownload` | `{taskId,artifactId}` | `{digest,firstChunk}`，一次取得摘要和首块 |
+| `artifacts/openDownloads` | `{artifacts:[{taskId,artifactId},…],limit?:16384}` | [批量下载首块](#批量下载首块)，按输入顺序返回首块和摘要状态 |
 | `artifacts/getDigests` | `{artifacts:[{taskId,artifactId},…]}` | 同顺序的 `{items}`，只读取已保存的摘要 |
 | `artifacts/read` | `{taskId,artifactId,after?,limit?}` | 返回 `{offset,nextOffset,contentBytes,dataBase64}` |
 
@@ -208,6 +209,16 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 #### 一次取得摘要和首块
 
 服务声明 `artifactDownloadStart: true` 时，可调用 `artifacts/openDownload`。`digest` 与 `artifacts/digest` 的响应相同；`firstChunk` 等同于 `artifacts/read` 使用 `after:0`、`limit:65536` 的结果。若 `nextOffset` 小于 `contentBytes`，继续用普通分块读取；否则首块已包含整个正文。空产物返回空首块。旧产物缺少摘要时仍按需计算并保存，使用相同的 8 MiB 摘要预算和任务归属检查。该入口不产生任务事件，无需数据库迁移。
+
+#### 批量下载首块
+
+`initialize.capabilities.artifactDownloadStartBatch` 声明支持 `artifacts/openDownloads`。`maxArtifactDownloadBatch` 公布项数上限（16），`maxArtifactDownloadBatchBytes` 公布整批首块字节上限（256 KiB）。`limit` 是每项的原始字节数，默认 16 KiB，可设为 1 至 65536。`artifacts.length * limit` 需在整批上限内，重复项也计入预算。两个 ID 各须为 1 至 128 个可见 ASCII 字节。
+
+整批在同一个 SQLite 读事务中打开，`items` 保留顺序和重复位置。`ready` 的 `download` 为 `{digest,firstChunk}`，首块从 0 开始，较小的交付物可在这一次请求中读完。`missing` 表示不存在或不属于指定任务。`unrecorded` 带 `contentBytes`，客户端可对需要下载的旧记录调用 `artifacts/openDownload`，按需计算并保存摘要。
+
+Rust 调用方可用 `Client::open_artifact_downloads`，再把 `ready` 的结果与请求中的同一项传给 `Client::download_artifact_from_start`。客户端在写入任何正文前调用摘要回调，完成时校验 SHA-256。中断后可使用当前暂存长度和保存的摘要续传。
+
+#### 获取交付物摘要
 
 `artifacts/digest` 返回原始字节的 `{contentBytes,sha256}`。`initialize.capabilities.maxArtifactDigestBytes` 公布支持摘要的大小上限，目前为 8 MiB。若服务声明 `storedArtifactDigests:true`，新产物在提交正文时同时保存摘要，后续读取不再打开正文；没有保存摘要的旧产物在第一次查询时分块计算并保存。升级无需启动时扫描正文，不改变目录游标，也不会为补算摘要新增事件。调用形式和返回字段与旧服务相同。
 

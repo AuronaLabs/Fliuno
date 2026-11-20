@@ -11,12 +11,19 @@ impl Kernel {
                 "artifacts must contain 1 to {MAX_ARTIFACT_DIGEST_BATCH} entries"
             )));
         }
+        self.lookup_artifact_digests(&request.artifacts)
+            .map(|items| ArtifactDigestBatch { items })
+    }
+
+    pub(super) fn lookup_artifact_digests(
+        &self,
+        artifacts: &[ArtifactGetParams],
+    ) -> Result<Vec<ArtifactDigestEntry>> {
         let valid_id = |id: &str| {
             (1..=MAX_ARTIFACT_DIGEST_ID_BYTES).contains(&id.len())
                 && id.bytes().all(|byte| byte.is_ascii_graphic())
         };
-        if request
-            .artifacts
+        if artifacts
             .iter()
             .any(|target| !valid_id(&target.task_id) || !valid_id(&target.artifact_id))
         {
@@ -34,9 +41,9 @@ impl Kernel {
              LEFT JOIN artifacts AS a ON a.id=requested.value ->> '$.artifactId'
                 AND a.task_id=requested.value ->> '$.taskId'",
         )?;
-        let targets = serde_json::to_string(&request.artifacts)?;
+        let targets = serde_json::to_string(artifacts)?;
         let mut rows = statement.query([targets])?;
-        let mut items = vec![ArtifactDigestEntry::Missing; request.artifacts.len()];
+        let mut items = vec![ArtifactDigestEntry::Missing; artifacts.len()];
         while let Some(row) = rows.next()? {
             if !row.get::<_, bool>(1)? {
                 continue;
@@ -54,6 +61,6 @@ impl Kernel {
                 None => ArtifactDigestEntry::Unrecorded { content_bytes },
             };
         }
-        Ok(ArtifactDigestBatch { items })
+        Ok(items)
     }
 }

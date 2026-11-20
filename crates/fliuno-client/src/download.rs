@@ -3,11 +3,15 @@ use crate::{Client, Error, Notification};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use fliuno_protocol::{
     ArtifactChunk, ArtifactDigest, ArtifactDigestBatch, ArtifactDigestBatchParams,
-    ArtifactDigestEntry, ArtifactDownloadStart, ArtifactGetParams, ArtifactReadParams,
+    ArtifactDigestEntry, ArtifactDownloadBatch, ArtifactDownloadBatchEntry,
+    ArtifactDownloadBatchParams, ArtifactDownloadStart, ArtifactGetParams, ArtifactReadParams,
     MAX_ARTIFACT_READ_BYTES,
 };
 use sha2::{Digest, Sha256};
-use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
+use std::{
+    collections::HashMap,
+    io::{self, BufRead, Read, Seek, SeekFrom, Write},
+};
 
 impl<R: BufRead, W: Write> Client<R, W> {
     /// Fetch the digest of the stored body. A caller with a pinned digest can
@@ -40,6 +44,40 @@ impl<R: BufRead, W: Write> Client<R, W> {
         Ok(batch)
     }
 
+    /// Obtain the saved digest and first range of each item in request order.
+    /// Callers should negotiate `artifactDownloadStartBatch` before using this method.
+    pub fn open_artifact_downloads(
+        &mut self,
+        request: &ArtifactDownloadBatchParams,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<ArtifactDownloadBatch, Error> {
+        let batch: ArtifactDownloadBatch =
+            self.call("artifacts/openDownloads", request, on_notification)?;
+        if batch.items.len() != request.artifacts.len() {
+            return Err(Error::InvalidResult);
+        }
+        let mut seen = HashMap::with_capacity(batch.items.len());
+        for (artifact, item) in request.artifacts.iter().zip(&batch.items) {
+            let key = (&artifact.task_id, &artifact.artifact_id);
+            if let Some(previous) = seen.insert(key, item) {
+                if previous != item {
+                    return Err(Error::InvalidResult);
+                }
+                continue;
+            }
+            if let ArtifactDownloadBatchEntry::Ready { download } = item {
+                validate_sha256(&download.digest.sha256)?;
+                validate_chunk(
+                    &download.first_chunk,
+                    0,
+                    download.digest.content_bytes,
+                    request.limit,
+                )?;
+            }
+        }
+        Ok(batch)
+    }
+
     /// Stream the artifact into `output` and verify its final SHA-256.
     /// Use a staging writer if a partial or unverified download must not be
     /// visible at its destination. The caller owns publication and flushing.
@@ -65,7 +103,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         record_digest: impl FnOnce(&ArtifactDigest) -> io::Result<()>,
         mut on_notification: impl FnMut(Notification),
     ) -> Result<ArtifactDigest, Error> {
-        let (digest, first_chunk) = if self
+        if self
             .info()
             .capabilities
             .get("artifactDownloadStart")
@@ -74,23 +112,57 @@ impl<R: BufRead, W: Write> Client<R, W> {
         {
             let start: ArtifactDownloadStart =
                 self.call("artifacts/openDownload", artifact, &mut on_notification)?;
-            (start.digest, Some(start.first_chunk))
-        } else {
-            (self.artifact_digest(artifact, &mut on_notification)?, None)
-        };
-        let mut download = Download::new(&digest)?;
-        let first = first_chunk
-            .map(|chunk| download.decode(chunk))
-            .transpose()?;
-        record_digest(&digest).map_err(Error::ArtifactCheckpoint)?;
-        if let Some(count) = first {
-            download.write_chunk(count, output)?;
-            if download.after == digest.content_bytes {
-                download.verify()?;
-                return Ok(digest);
-            }
+            validate_chunk(
+                &start.first_chunk,
+                0,
+                start.digest.content_bytes,
+                MAX_ARTIFACT_READ_BYTES,
+            )?;
+            return self.download_artifact_from_start(
+                artifact,
+                start,
+                output,
+                record_digest,
+                on_notification,
+            );
         }
+        let digest = self.artifact_digest(artifact, &mut on_notification)?;
+        let download = Download::new(&digest)?;
+        record_digest(&digest).map_err(Error::ArtifactCheckpoint)?;
         download.receive(self, artifact, output, on_notification)?;
+        Ok(digest)
+    }
+
+    /// Consume a verified range shape from a batch and fetch any remaining bytes.
+    /// Pass the artifact identity from the same request position. The digest is
+    /// recorded before writing into the caller's staging writer.
+    pub fn download_artifact_from_start(
+        &mut self,
+        artifact: &ArtifactGetParams,
+        start: ArtifactDownloadStart,
+        output: &mut impl Write,
+        record_digest: impl FnOnce(&ArtifactDigest) -> io::Result<()>,
+        on_notification: impl FnMut(Notification),
+    ) -> Result<ArtifactDigest, Error> {
+        let ArtifactDownloadStart {
+            digest,
+            first_chunk,
+        } = start;
+        let prefix_bytes = u32::try_from(first_chunk.next_offset)
+            .ok()
+            .filter(|bytes| {
+                *bytes <= MAX_ARTIFACT_READ_BYTES && (*bytes != 0 || digest.content_bytes == 0)
+            })
+            .ok_or(Error::InvalidArtifactChunk)?;
+        let mut download = Download::new(&digest)?;
+        let count = download.decode(first_chunk, prefix_bytes)?;
+        record_digest(&digest).map_err(Error::ArtifactCheckpoint)?;
+        download.write_chunk(count, output)?;
+        if download.after == digest.content_bytes {
+            download.verify()?;
+        } else {
+            download.receive(self, artifact, output, on_notification)?;
+        }
         Ok(digest)
     }
 
@@ -124,6 +196,26 @@ fn validate_sha256(sha256: &str) -> Result<(), Error> {
         return Err(Error::InvalidArtifactDigest);
     }
     Ok(())
+}
+
+fn validate_chunk(
+    chunk: &ArtifactChunk,
+    offset: u64,
+    length: u64,
+    limit: u32,
+) -> Result<usize, Error> {
+    if offset > length || limit > MAX_ARTIFACT_READ_BYTES {
+        return Err(Error::InvalidArtifactChunk);
+    }
+    let count = (length - offset).min(u64::from(limit)) as usize;
+    if chunk.content_bytes != length
+        || chunk.offset != offset
+        || chunk.next_offset != offset + count as u64
+        || chunk.data_base64.len() != count.div_ceil(3) * 4
+    {
+        return Err(Error::InvalidArtifactChunk);
+    }
+    Ok(count)
 }
 
 struct Download<'a> {
@@ -185,7 +277,7 @@ impl<'a> Download<'a> {
         loop {
             let chunk: ArtifactChunk =
                 client.call("artifacts/read", &request, &mut on_notification)?;
-            let count = self.decode(chunk)?;
+            let count = self.decode(chunk, request.limit)?;
             self.write_chunk(count, output)?;
             if self.after == self.expected.content_bytes {
                 return self.verify();
@@ -194,20 +286,12 @@ impl<'a> Download<'a> {
         }
     }
 
-    fn decode(&mut self, chunk: ArtifactChunk) -> Result<usize, Error> {
-        let count =
-            (self.expected.content_bytes - self.after).min(u64::from(MAX_ARTIFACT_READ_BYTES));
-        if chunk.content_bytes != self.expected.content_bytes
-            || chunk.offset != self.after
-            || chunk.next_offset != self.after + count
-            || chunk.data_base64.len() != (count as usize).div_ceil(3) * 4
-        {
-            return Err(Error::InvalidArtifactChunk);
-        }
+    fn decode(&mut self, chunk: ArtifactChunk, limit: u32) -> Result<usize, Error> {
+        let count = validate_chunk(&chunk, self.after, self.expected.content_bytes, limit)?;
         let decoded = STANDARD
             .decode_slice(chunk.data_base64, &mut self.buffer)
             .map_err(|_| Error::InvalidArtifactChunk)?;
-        if decoded != count as usize {
+        if decoded != count {
             return Err(Error::InvalidArtifactChunk);
         }
         Ok(decoded)
