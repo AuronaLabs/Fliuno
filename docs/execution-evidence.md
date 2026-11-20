@@ -885,3 +885,13 @@ Windows `scripts/check.ps1` 以退出码 0 完成：512 项测试、28 个离线
 真实 HTTP 进程在已结束的父运行和子运行中各只发送一次 `approval/getRunReplay` 和一页 `events/list`。该页以各自的最后事件为上限；跨执行段的游标返回 `400`，不发送 `events/list`。环回流式供应商测试验证进行中的执行段取得任务最新水位，完成后以本段结束事件为上限。Debian Linux 6.12.107 来宾通过 15 项进程测试，覆盖这些重连行为及审批读写和迁移。日志：`D:/Fliuno-Native-Test/guest-ag-ui-run-replay.log`。
 
 Windows `scripts/check.ps1` 以退出码 0 完成：514 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-ag-ui-run-replay-check.log`。
+
+## 0.0.3 恢复状态按需解码（2026-11-20）
+
+`task/getResumeStatus` 从 SQLite 行借用任务 JSON，只解码状态、运行标志、注册身份和模型次数。消息、上下文和工具参数仍需扫描以跳过 JSON，但不再构造这些对象。真正恢复仍读完整任务，与只读查询共用同一判断。旧快照中省略的可选字段沿用原默认值，无数据库迁移。[任务恢复判断](protocol.md#任务恢复判断)
+
+Windows 调试构建的本机 stdio 测量使用同一数据库的副本，先预热 25 对再交替执行 200 对只读请求，逐次核对返回相同。短输入产生 977 字节快照，中位数从 0.287 降到 0.244 ms；约 250 KiB 的带转义输入产生约 876 KiB 快照，中位数从 25.90 降到 15.01 ms，p95 从 34.14 降到 20.92 ms。测量包含进程间通信，不能直接外推到 release 构建。日志：`D:/Fliuno-Native-Test/resume-projection-benchmark.log`。
+
+真实服务进程保存长输入、中断并重启；恢复查询不改变任务、事件或请求次数，只有明确同意后才再次请求模型。Debian Linux 6.12.107 来宾通过 12 项相关进程测试，另覆盖审批、外部工具超时和远端提交结果不明。日志：`D:/Fliuno-Native-Test/guest-resume-projection.log`。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：515 项测试、28 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志：`D:/Fliuno-Native-Test/windows-resume-projection-check.log`。

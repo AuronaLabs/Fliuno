@@ -242,13 +242,13 @@ impl Kernel {
 }
 
 fn model_step_budget_spent(task: &Task) -> bool {
-    remaining_model_steps(task) == 0
+    remaining_model_steps(task.max_model_steps, task.model_steps) == 0
 }
 
-fn remaining_model_steps(task: &Task) -> u32 {
-    task.max_model_steps
+fn remaining_model_steps(limit: Option<u32>, attempts: u32) -> u32 {
+    limit
         .unwrap_or(DEFAULT_TASK_MODEL_STEPS)
-        .saturating_sub(task.model_steps)
+        .saturating_sub(attempts)
 }
 
 /// Prepare the same cancellation transition for single and batch callers.

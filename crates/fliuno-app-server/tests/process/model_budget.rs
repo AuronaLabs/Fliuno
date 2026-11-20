@@ -460,20 +460,23 @@ fn resume_status_requires_consent_only_when_another_model_attempt_is_available()
     let mut peer = Peer::start_with_model_fixture(&db, Some(&url));
     let workspace = peer.call("workspace/open", json!({"root":directory.0}));
     let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let fragment = "retry \"this\" task\n";
+    let input = fragment.repeat(250 * 1024 / fragment.len());
     let task = peer.call(
         "task/start",
-        json!({"sessionId":session["id"],"input":"retry me","maxModelSteps":2}),
+        json!({"sessionId":session["id"],"input":input,"maxModelSteps":2}),
     );
     let id = task["id"].as_str().unwrap();
     let interrupted = peer.wait_for_status(id, "interrupted");
     let lookup = json!({"taskId":id});
     let before = peer.call("events/list", lookup.clone());
-    assert_eq!(
-        peer.call("task/getResumeStatus", lookup.clone()),
-        json!({
-            "taskId":id,"status":"interrupted","disposition":"retry_uncertain_model_step","remainingModelSteps":1
-        })
-    );
+    let status = json!({
+        "taskId":id,"status":"interrupted","disposition":"retry_uncertain_model_step","remainingModelSteps":1
+    });
+    assert_eq!(peer.call("task/getResumeStatus", lookup.clone()), status);
+    drop(peer);
+    let mut peer = Peer::start_with_model_fixture(&db, Some(&url));
+    assert_eq!(peer.call("task/getResumeStatus", lookup.clone()), status);
     assert_eq!(
         peer.request("task/resume", lookup.clone())["error"]["code"],
         -32009

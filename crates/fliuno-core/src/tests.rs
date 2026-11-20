@@ -929,3 +929,35 @@ fn resume_status_for_work_interrupted_before_dispatch_allows_resume_without_cons
         TaskStatus::WaitingApproval
     );
 }
+
+#[test]
+fn resume_status_uses_the_full_snapshot_defaults_for_old_rows() {
+    let (mut kernel, session) = setup();
+    let (task, _) = kernel
+        .create_task_with_key(&session.id, "queued task", None)
+        .unwrap();
+    kernel.interrupt_running_tasks().unwrap();
+    // These optional fields were absent from older snapshots.
+    kernel
+        .db
+        .execute(
+            "UPDATE tasks SET data=json_remove(data,'$.backend','$.backendAuthority',
+           '$.maxModelSteps','$.modelOutcomeUnknown','$.inFlightTool','$.agentRun',
+           '$.remoteContinuation') WHERE id=?1",
+            [&task.id],
+        )
+        .unwrap();
+    let status = kernel.get_task_resume_status(&task.id).unwrap();
+    assert_eq!(status.task_id, task.id);
+    assert_eq!(status.status, TaskStatus::Interrupted);
+    assert_eq!(status.disposition, TaskResumeDisposition::Ready);
+    assert_eq!(status.remaining_model_steps, Some(DEFAULT_TASK_MODEL_STEPS));
+    assert!(matches!(
+        kernel.get_task_resume_status("no such task"),
+        Err(Error::NotFound(_))
+    ));
+    assert_eq!(
+        kernel.prepare_resume_task(&task.id, false).unwrap().status,
+        TaskStatus::Running
+    );
+}
