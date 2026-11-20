@@ -6,9 +6,9 @@ use super::{
 use crate::{Client, Error, Notification};
 use fliuno_protocol::{
     ApprovalDetails, ApprovalRun, ApprovalRunPendingParams, ApprovalRunReplay, ApprovalRunWindow,
-    ImageMimeType, MAX_APP_REQUEST_BYTES, MAX_TASK_MODEL_STEPS, MAX_TASK_TEXT_BYTES, TaskIdParams,
-    TaskInput, TaskRequestLookupParams, TaskStartParams, TaskStatus, TaskSummary, UserContentPart,
-    validate_multipart_input,
+    ArtifactGetParams, ImageMimeType, MAX_APP_REQUEST_BYTES, MAX_INPUT_MEDIA, MAX_TASK_MODEL_STEPS,
+    MAX_TASK_TEXT_BYTES, TaskIdParams, TaskInput, TaskRequestLookupParams, TaskStartParams,
+    TaskStatus, TaskSummary, UserContentPart, validate_multipart_input,
 };
 use serde::{
     Deserialize, Deserializer,
@@ -43,6 +43,8 @@ pub enum AgUiRunError {
     ImageInputUnavailable,
     #[error("the server does not support inline PDF input")]
     PdfInputUnavailable,
+    #[error("the server does not support stored artifact input")]
+    ArtifactInputUnavailable,
     #[error("the server returned a task outside the selected session or backend")]
     InvalidResult,
     #[error("AG-UI model step limit must be 1 to {MAX_TASK_MODEL_STEPS}")]
@@ -88,9 +90,21 @@ pub struct AgUiRunInput {
     tools: Vec<serde::de::IgnoredAny>,
     #[serde(default)]
     context: Vec<serde::de::IgnoredAny>,
-    forwarded_props: Option<Value>,
+    forwarded_props: Option<ForwardedProps>,
     #[serde(default)]
     pub(super) resume: Vec<ResumeEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ForwardedProps {
+    fliuno: Option<FliunoForwardedProps>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FliunoForwardedProps {
+    artifact_inputs: Vec<ArtifactGetParams>,
 }
 
 struct RunMessages {
@@ -179,7 +193,7 @@ enum PdfMimeType {
 }
 
 impl UserContent {
-    fn into_input(self) -> Result<TaskInput, AgUiRunError> {
+    fn into_input(self, has_artifacts: bool) -> Result<TaskInput, AgUiRunError> {
         let text: String = match self {
             Self::String(text) => text,
             Self::Parts(parts)
@@ -217,7 +231,9 @@ impl UserContent {
                 })
                 .collect(),
         };
-        if text.len() > MAX_TASK_TEXT_BYTES || text.trim().is_empty() {
+        if text.len() > MAX_TASK_TEXT_BYTES
+            || (text.trim().is_empty() && !(has_artifacts && text.is_empty()))
+        {
             return Err(AgUiRunError::UserText);
         }
         Ok(TaskInput::Text(text))
@@ -234,6 +250,13 @@ impl AgUiRunInput {
 
     pub fn is_resume(&self) -> bool {
         self.parent_run_id.is_some() || !self.resume.is_empty()
+    }
+
+    /// Whether the request uses the Fliuno extension for stored attachments.
+    pub fn requests_artifact_inputs(&self) -> bool {
+        self.forwarded_props
+            .as_ref()
+            .is_some_and(|props| props.fliuno.is_some())
     }
 
     pub(super) fn has_messages(&self) -> bool {
@@ -253,7 +276,6 @@ impl AgUiRunInput {
             .as_deref()
             .is_some_and(|version| version != "1.0")
             || !no_state(self.state.as_ref())
-            || !no_state(self.forwarded_props.as_ref())
             || !self.tools.is_empty()
             || !self.context.is_empty()
             || self.messages.unsupported
@@ -272,6 +294,13 @@ impl AgUiRunInput {
         if self.is_resume() {
             return Err(AgUiRunError::UnsupportedInput);
         }
+        let artifact_inputs = match self.forwarded_props.and_then(|props| props.fliuno) {
+            Some(props) if (1..=MAX_INPUT_MEDIA).contains(&props.artifact_inputs.len()) => {
+                props.artifact_inputs
+            }
+            Some(_) => return Err(AgUiRunError::UnsupportedInput),
+            None => Vec::new(),
+        };
         // The kernel already captured prior committed turns. Use only the new
         // user message; replayed client history cannot replace stored context.
         let Some(message) = self
@@ -284,12 +313,12 @@ impl AgUiRunInput {
         let input = message
             .content
             .ok_or(AgUiRunError::UserText)?
-            .into_input()?;
+            .into_input(!artifact_inputs.is_empty())?;
         Ok((
             TaskStartParams {
                 session_id: session_id.to_owned(),
                 input,
-                artifact_inputs: Vec::new(),
+                artifact_inputs,
                 client_request_id: Some(request_key(&self.run_id, options.interrupt_on_approval)),
                 backend: Default::default(),
                 context: None,
@@ -504,7 +533,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
         let (request, run_id) = input.into_task(session_id, options)?;
-        if matches!(request.input, TaskInput::Parts(_)) {
+        if !request.artifact_inputs.is_empty() || matches!(request.input, TaskInput::Parts(_)) {
             return Err(AgUiRunError::UnsupportedInput);
         }
         self.submit_ag_ui_run(session_id, request, run_id, options, on_notification)
@@ -530,8 +559,13 @@ impl<R: BufRead, W: Write> Client<R, W> {
         options: AgUiRunOptions,
         on_notification: impl FnMut(Notification),
     ) -> Result<AgUiRun, AgUiRunError> {
+        let capabilities = &self.info().capabilities;
+        if !request.artifact_inputs.is_empty()
+            && capabilities.get("taskArtifactInput") != Some(&Value::Bool(true))
+        {
+            return Err(AgUiRunError::ArtifactInputUnavailable);
+        }
         if let TaskInput::Parts(parts) = &request.input {
-            let capabilities = &self.info().capabilities;
             if capabilities.get("taskImageInput") != Some(&Value::Bool(true))
                 && parts
                     .iter()

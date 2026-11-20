@@ -64,7 +64,7 @@ impl AgUiRunInput {
             .as_deref()
             .ok_or(AgUiRunError::UnsupportedInput)?;
         validate_run_id(parent)?;
-        if parent == self.run_id || self.has_messages() {
+        if parent == self.run_id || self.has_messages() || self.requests_artifact_inputs() {
             return Err(AgUiRunError::UnsupportedInput);
         }
         let [entry]: [ResumeEntry; 1] = self

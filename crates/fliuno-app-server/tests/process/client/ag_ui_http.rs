@@ -644,3 +644,155 @@ async fn ag_ui_http_inline_media_is_authorized_and_durable() {
     drop(server);
     fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+async fn ag_ui_http_reuses_artifacts_only_in_opted_in_sessions_and_root_runs() {
+    use axum::http::{HeaderMap, StatusCode};
+    use fliuno_ag_ui_http::RouterBuilder;
+    use fliuno_protocol::{Message, UserContentPart};
+    use http_wire::{Fixture, Response};
+
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0AAAAASUVORK5CYII=";
+    let root = std::env::temp_dir().join(format!("fliuno-ag-ui-artifact-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let fixture = Fixture::start(|request| {
+        let output = if request.body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["type"] == "function_call_output")
+        {
+            json!([{"type":"message","content":[{"type":"output_text","text":"saved"}]}])
+        } else {
+            let arguments = json!({"title":"chart","mediaType":"image/png","contentBase64":PNG});
+            json!([{"type":"function_call","call_id":"chart","name":"artifact_create_binary","arguments":arguments.to_string()}])
+        };
+        Response::json(200, json!({"status":"completed","output":output}))
+    });
+    let (session, other, artifact) =
+        {
+            let mut peer = Peer::start_with_model_fixture(&db, Some(&fixture.url("/v1/")));
+            let workspace = peer.call("workspace/open", json!({"root":root}));
+            let mut create_session = || {
+                peer.call("session/create", json!({"workspaceId":workspace["id"]}))["id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            };
+            let session = create_session();
+            let other = create_session();
+            let source = peer.call(
+                "task/start",
+                json!({"sessionId":session,"input":"save chart"}),
+            );
+            let id = source["id"].as_str().unwrap();
+            let waiting = peer.wait_for_status(id, "waiting_approval");
+            peer.call("approval/respond", json!({
+            "taskId":id,"approvalId":waiting["pendingApproval"]["id"],"decision":"allow_once"
+        }));
+            peer.wait_for_status(id, "completed");
+            let manifest = peer.call("artifacts/listSummaries", json!({"taskId":id}));
+            (
+                session,
+                other,
+                json!({"taskId":id,"artifactId":manifest["items"][0]["id"]}),
+            )
+        };
+    let (server, client) = super::ag_ui_run::connect(&db);
+    let client = Arc::new(Mutex::new(client));
+    let submitter = {
+        let session = session.clone();
+        let other = other.clone();
+        move |headers: &HeaderMap| match headers.get("authorization")?.to_str().ok()? {
+            "Bearer runner" => Some(session.clone()),
+            "Bearer other" => Some(other.clone()),
+            _ => None,
+        }
+    };
+    let reviewer = {
+        let session = session.clone();
+        move |headers: &HeaderMap| {
+            (headers.get("authorization")? == "Bearer reviewer").then(|| session.clone())
+        }
+    };
+    let enabled = RouterBuilder::new(client.clone(), submitter.clone())
+        .interrupts(reviewer)
+        .artifact_inputs()
+        .build();
+    let disabled = RouterBuilder::new(client.clone(), submitter).build();
+    let routes = axum::Router::new()
+        .nest("/on", enabled)
+        .nest("/off", disabled);
+    let socket = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", socket.local_addr().unwrap());
+    let listener = tokio::spawn(async move { axum::serve(socket, routes).await.unwrap() });
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .build()
+        .unwrap();
+    let send = |route, token, body: &Value| {
+        http.post(format!("{base}/{route}/run"))
+            .bearer_auth(token)
+            .json(body)
+            .send()
+    };
+    let props = json!({"fliuno":{"artifactInputs":[artifact]}});
+    let run = json!({
+        "threadId":session,"runId":"review-chart",
+        "messages":[{"id":"u","role":"user","content":""}],"forwardedProps":props
+    });
+    let mut outside = run.clone();
+    outside["threadId"] = json!(other);
+    for (route, token, input, status) in [
+        ("off", "runner", &run, StatusCode::BAD_REQUEST),
+        ("on", "reviewer", &run, StatusCode::UNAUTHORIZED),
+        ("on", "other", &outside, StatusCode::NOT_FOUND),
+    ] {
+        assert_eq!(send(route, token, input).await.unwrap().status(), status);
+    }
+    let response = send("on", "runner", &run).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let sse = response.text().await.unwrap();
+    assert!(sse.contains("approval_required"), "{sse}");
+    assert!(!sse.contains(PNG));
+    let task: Task = {
+        let mut locked = client.lock().await;
+        let run = locked
+            .attach_ag_ui_interrupt_run(&session, "review-chart", |_| {})
+            .unwrap();
+        locked
+            .call("task/get", &json!({"taskId":run.task().id}), |_| {})
+            .unwrap()
+    };
+    assert!(matches!(&task.messages[0], Message::UserParts { parts } if
+        matches!(parts.as_slice(), [UserContentPart::Image { data, .. }] if data == PNG)));
+    let review = json!({
+        "threadId":session,"runId":"review-child","parentRunId":"review-chart","messages":[],
+        "resume":[{"interruptId":task.pending_approval.unwrap().id,"status":"resolved","payload":{"decision":"allow_once"}}]
+    });
+    let mut invalid_review = review.clone();
+    invalid_review["forwardedProps"] = props;
+    assert_eq!(
+        send("on", "reviewer", &invalid_review)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        send("on", "runner", &review).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let response = send("on", "reviewer", &review).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.text().await.unwrap().contains("RUN_FINISHED"));
+    let response = send("on", "runner", &run).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.text().await.unwrap(), sse);
+    listener.abort();
+    assert!(listener.await.unwrap_err().is_cancelled());
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}

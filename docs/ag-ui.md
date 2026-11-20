@@ -2,12 +2,12 @@
 
 [文档中心](README.md) › [接入客户端](README.md#接入客户端) · [应用协议](protocol.md#rust-调用方)
 
-宿主可以通过 Rust 客户端提交文本、内嵌图片或 PDF，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批可以由宿主通过应用协议处理，也可以挂载独立授权的审批入口。
+宿主可以通过 Rust 客户端提交文本、内嵌图片、PDF 或同一会话的交付物引用，并把已提交的任务事件转换成 AG-UI 消息。`fliuno-ag-ui-http` 提供可嵌入的 HTTP 路由，宿主负责监听地址和会话授权。审批可以由宿主通过应用协议处理，也可以挂载独立授权的审批入口。
 
 | 要做什么 | 对应步骤 |
 | --- | --- |
 | **挂载 HTTP 接口** | [路由与宿主授权](#http-接入) · [宿主模型尝试上限](#宿主模型尝试上限) · [离线示例](../examples/ag_ui_http_demo.py) |
-| **运行任务并展示进度** | [提交文本任务](#提交文本任务) · [提交内嵌图片](#提交内嵌图片) · [提交内嵌 PDF](#提交内嵌-pdf) · [投影内核事件](#投影内核事件) |
+| **运行任务并展示进度** | [提交文本任务](#提交文本任务) · [提交内嵌图片](#提交内嵌图片) · [提交内嵌 PDF](#提交内嵌-pdf) · [复用交付物](#引用已有交付物) · [投影内核事件](#投影内核事件) |
 | **恢复运行** | [SSE 输出与续传](#sse-输出与续传) · [审批中断与续跑](#审批中断与续跑) |
 
 ## 提交文本任务
@@ -32,7 +32,7 @@
 | `runId` | 非空且不含控制字符，最多 512 个 UTF-8 字节。同一会话用同一 `runId` 重试相同输入只创建一个任务。 |
 | `messages` | 接受 `user` 或 `assistant` 消息，最后一条必须是 `user`。内核使用最后一条消息和本地会话历史。正文支持最多 256 KiB 的文本，也支持[内嵌图片](#提交内嵌图片)和 [PDF](#提交内嵌-pdf)。 |
 | `protocolVersion` | 可省略。提供时使用 `1.0`。 |
-| 其余输入 | JSON 正文最多 1 MiB。`state` 和 `forwardedProps` 可省略、设为 `null` 或空对象。`tools`、`context` 和 `resume` 可省略或使用空数组。当前不支持 `parentRunId`、工具调用、加密消息或其他媒体。 |
+| 其余输入 | JSON 正文最多 1 MiB。`state` 可省略、设为 `null` 或空对象。`forwardedProps` 也接受这些值，并可用 Fliuno 扩展[引用已有交付物](#引用已有交付物)。`tools`、`context` 和 `resume` 可省略或使用空数组。当前不支持 `parentRunId`、工具调用、加密消息或其他媒体。 |
 
 用返回值的 `task()` 取得已创建的任务摘要。连接中断后，可以调用 `Client::attach_ag_ui_run(session_id, run_id, on_notification)`，从数据库找回同一个任务。用 `run.subscribe_sse(...)` 输出事件，即可沿用首次执行的 `runId`。后续显式恢复的执行段仍使用各自派生的 ID。
 
@@ -60,6 +60,27 @@
 ```sh
 python examples/ag_ui_http_demo.py --interrupts --inline-media
 ```
+
+### 引用已有交付物
+
+宿主可调用 `RouterBuilder::new(client, authorize).artifact_inputs().build()`，允许 `POST /run` 使用 `forwardedProps.fliuno.artifactInputs`。Rust 客户端的 `start_ag_ui_run` 和 `start_ag_ui_input_run` 也识别这个扩展，并检查服务是否声明 `taskArtifactInput`。
+
+```json
+{
+  "threadId": "session_example",
+  "runId": "review-report",
+  "messages": [{"id":"msg-1","role":"user","content":"检查报告中的数字"}],
+  "forwardedProps": {
+    "fliuno": {
+      "artifactInputs": [{"taskId":"task_source","artifactId":"artifact_report"}]
+    }
+  }
+}
+```
+
+内核只接受授权会话内已经提交的 PNG、JPEG、WebP 或 PDF，并按引用顺序附在新消息之后。只提交交付物时，最后一条用户消息的 `content` 可以设为 `""`。内嵌媒体与引用共用任务输入预算。重试时沿用同一 `runId`、原消息与有序引用。可从交付物目录取得所需 ID。[应用协议](protocol.md#将交付物用作任务输入)
+
+扩展只适用于初始运行，审批续跑请求携带审批决定。引用与模型供应商的文件句柄使用独立字段。宿主未启用扩展或输入超限时返回 `400`，引用不属于授权会话或不存在时返回 `404`，同一运行 ID 的输入发生冲突时返回 `409`。内核缺少 `taskArtifactInput` 能力时，HTTP 返回 `502`。
 
 ## 投影内核事件
 

@@ -39,6 +39,7 @@ struct Gateway<R, W> {
     streams: Arc<Semaphore>,
     reviewer: Option<Box<Authorize>>,
     run_options: AgUiRunOptions,
+    artifact_inputs: bool,
     controls: Arc<Semaphore>,
     watermark: Mutex<Option<(Instant, u64)>>,
     tasks: task_poll::TaskPoll,
@@ -51,6 +52,7 @@ pub struct RouterBuilder<R, W> {
     authorize: Box<Authorize>,
     reviewer: Option<Box<Authorize>>,
     run_options: AgUiRunOptions,
+    artifact_inputs: bool,
 }
 
 impl<R: BufRead + Send + 'static, W: Write + Send + 'static> RouterBuilder<R, W> {
@@ -64,6 +66,7 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> RouterBuilder<R, W>
             authorize: Box::new(authorize),
             reviewer: None,
             run_options: AgUiRunOptions::default(),
+            artifact_inputs: false,
         }
     }
 
@@ -94,8 +97,21 @@ impl<R: BufRead + Send + 'static, W: Write + Send + 'static> RouterBuilder<R, W>
         self
     }
 
+    /// Allow root runs to reference deliverables in the authorized session.
+    /// The kernel checks ownership and applies the shared media budget.
+    pub fn artifact_inputs(mut self) -> Self {
+        self.artifact_inputs = true;
+        self
+    }
+
     pub fn build(self) -> Router {
-        build_router(self.client, self.authorize, self.reviewer, self.run_options)
+        build_router(
+            self.client,
+            self.authorize,
+            self.reviewer,
+            self.run_options,
+            self.artifact_inputs,
+        )
     }
 }
 
@@ -153,6 +169,7 @@ fn build_router<R, W>(
     authorize: Box<Authorize>,
     reviewer: Option<Box<Authorize>>,
     run_options: AgUiRunOptions,
+    artifact_inputs: bool,
 ) -> Router
 where
     R: BufRead + Send + 'static,
@@ -165,6 +182,7 @@ where
         streams: Arc::new(Semaphore::new(16)),
         reviewer,
         run_options,
+        artifact_inputs,
         controls: Arc::new(Semaphore::new(8)),
         watermark: Mutex::new(None),
         tasks: task_poll::TaskPoll::default(),
@@ -248,6 +266,9 @@ async fn start<R: BufRead + Send + 'static, W: Write + Send + 'static>(
     let options = gateway.run_options;
     let resume = options.interrupt_on_approval && input.is_resume();
     let session = if resume { reviewer } else { submitter }.ok_or(StatusCode::UNAUTHORIZED)?;
+    if input.requests_artifact_inputs() && !gateway.artifact_inputs {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let (replay, through, task) = gateway
         .rpc(move |client| {
             let notify = |_| {};
@@ -419,7 +440,8 @@ fn run_status(error: AgUiRunError) -> StatusCode {
         AgUiRunError::InvalidResult
         | AgUiRunError::ModelStepLimitUnavailable
         | AgUiRunError::ImageInputUnavailable
-        | AgUiRunError::PdfInputUnavailable => StatusCode::BAD_GATEWAY,
+        | AgUiRunError::PdfInputUnavailable
+        | AgUiRunError::ArtifactInputUnavailable => StatusCode::BAD_GATEWAY,
         _ => StatusCode::BAD_REQUEST,
     }
 }
