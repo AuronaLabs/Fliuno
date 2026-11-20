@@ -1190,3 +1190,19 @@ Windows 本机调试构建测量 16 项详情。每组预热 20 轮，再交替�
 批量详情接口对重复键只查询一次，仍按原位置返回完整详情，并对每个位置计入字节预算。测量脚本与原始结果见 `D:/Fliuno-Native-Test/approval-details-benchmark.py` 和 `D:/Fliuno-Native-Test/approval-details-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，544 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 10 项 stdio 审批与 3 项 ACP 进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-approval-details-windows.log` 和 `D:/Fliuno-Native-Test/guest-approval-details-recheck.log`。
+
+## 0.0.3 摘要修订回放复用索引查询（2026-11-20）
+
+`events/listLatestTaskSummaryRevisions` 按页保存同一任务在固定窗口中的最后修订位置。扫描跨越 SQLite v45 的升级边界时，已有新段修订的任务使用新段末尾，否则查询旧段事件。单页缓存最多随扫描的 1,000 条记录增长。既有进程测试覆盖升级边界、范围过滤、空页续读、重启和实时订阅。
+
+Windows 本机调试构建比较同一个 SQLite 夹具上的两套服务。预热 20 对后交替测量 100 对，逐对核对完整响应页及游标。表中记录完整窗口 stdio 回放的中位耗时。
+
+| 回放场景 | 优化前 | 优化后 |
+| --- | ---: | ---: |
+| 64 项任务交错产生 4,096 条修订，5 页 | 16.698 ms | 11.556 ms |
+| 64 项任务各一条最终修订，1 页 | 4.307 ms | 4.466 ms |
+| 单项任务的 64 条修订，1 页 | 0.576 ms | 0.552 ms |
+
+测量脚本和日志见 `D:/Fliuno-Native-Test/summary-revision-lookup-benchmark.py` 和 `D:/Fliuno-Native-Test/summary-revision-lookup-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，544 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 4 项任务回放与 2 项工作台进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-summary-revision-lookup-windows.log` 和 `D:/Fliuno-Native-Test/guest-summary-revision-lookup.log`。

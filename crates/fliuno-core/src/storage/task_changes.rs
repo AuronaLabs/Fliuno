@@ -145,15 +145,17 @@ impl Kernel {
         };
         let latest = if source == ChangeSource::LatestRevisions {
             Some(Supersession {
-                later: self.db.prepare_cached(
-                    "SELECT 1 FROM task_summary_revisions
-                     WHERE task_id=?1 AND sequence>?2 AND sequence<=?3
-                     UNION ALL
-                     SELECT 1 FROM events WHERE task_id=?1 AND sequence>?2 AND sequence<=?4
-                     LIMIT 1",
+                last_in_window: self.db.prepare_cached(
+                    "SELECT COALESCE(
+                         (SELECT sequence FROM task_summary_revisions
+                          WHERE task_id=?1 AND sequence>?3 AND sequence<=?2
+                          ORDER BY sequence DESC LIMIT 1),
+                         (SELECT sequence FROM events WHERE task_id=?1 AND sequence<=?3
+                          ORDER BY sequence DESC LIMIT 1))",
                 )?,
                 through: through as i64,
                 legacy_through: through.min(cutover) as i64,
+                by_task: HashMap::new(),
             })
         } else {
             None
@@ -211,9 +213,36 @@ enum ChangeSource {
 }
 
 struct Supersession<'db> {
-    later: rusqlite::CachedStatement<'db>,
+    last_in_window: rusqlite::CachedStatement<'db>,
     through: i64,
     legacy_through: i64,
+    by_task: HashMap<String, u64>,
+}
+
+impl Supersession<'_> {
+    fn includes(&mut self, task_id: &str, sequence: u64) -> Result<bool> {
+        // Scope membership is fixed for each task. Its final sequence is
+        // therefore shared by every hit in this page, across both segments.
+        if let Some(&last) = self.by_task.get(task_id) {
+            if last == sequence {
+                self.by_task.remove(task_id);
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        let last: i64 = self
+            .last_in_window
+            .query_row(params![task_id, self.through, self.legacy_through], |row| {
+                row.get(0)
+            })?;
+        let last = last as u64;
+        // The final hit appears at most once in the ordered scan. Keep only
+        // tasks that may repeat, and release the entry on the final hit.
+        if last != sequence {
+            self.by_task.insert(task_id.to_owned(), last);
+        }
+        Ok(last == sequence)
+    }
 }
 
 struct ChangeScan<'db> {
@@ -245,15 +274,8 @@ impl ChangeScan<'_> {
             self.left -= 1;
             self.last = row.get::<_, i64>(0)? as u64;
             let id = row.get_ref(1)?.as_str().map_err(rusqlite::Error::from)?;
-            // The two ordered sources share a fixed through bound. A later
-            // revision outside this window will be eligible in the next one.
             if let Some(latest) = &mut self.latest
-                && latest.later.exists(params![
-                    id,
-                    self.last as i64,
-                    latest.through,
-                    latest.legacy_through
-                ])?
+                && !latest.includes(id, self.last)?
             {
                 continue;
             }
