@@ -1093,3 +1093,11 @@ Windows `scripts/check.ps1` 退出码为 0。533 项测试、29 个离线演示�
 实际 stdio 请求验证了四种选择方式、空窗口、越界请求、从 v48 升级后的旧快照读取，以及进程重启后通过两个任务入口重试同一请求键。查询计划确认完整记录和精简记录都使用 `session_turns_cursor` 限定完成序号范围。[协议用法](context.md#从指定事件之后选择历史)
 
 Windows `scripts/check.ps1` 退出码为 0，包含 534 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查。Debian 6.12.107 来宾的 14 项上下文和历史进程测试全部通过，`FLIUNO_RESULT=0`。日志位于 `%TEMP%/fliuno-context-window-windows.log` 和 `D:/Fliuno-Native-Test/guest-context-window.log`。
+
+## 0.0.3 按请求键批查任务（2026-11-20）
+
+真实 stdio 测试覆盖重启后按会话找回任务、相同键在不同会话各自绑定、缺失键、重复键、输入限制和事件水位。历史绑定没有紧凑回执或完整任务正文不可读时，查询仍能读取摘要。Debian 6.12.107 来宾通过 5 项任务摘要和提交回执进程测试，`FLIUNO_RESULT=0`。日志见 `D:/Fliuno-Native-Test/guest-request-summary-batch.log`。[协议用法](protocol.md#按请求键批查任务)
+
+Windows 本机调试构建在同一进程中交替测试 64 个请求键。预热 10 对后测量 60 对，每次核对摘要顺序、内容和批次水位。串行查询改用批量查询后，请求数为 64 → 1，响应字节数中位数为 20,224 → 17,927，耗时中位数为 18.137 → 3.185 ms。脚本和日志见 `D:/Fliuno-Native-Test/request-summary-batch-benchmark.py` 与 `D:/Fliuno-Native-Test/request-summary-batch-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0。535 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。日志见 `%TEMP%/fliuno-request-summary-batch-windows.log`。

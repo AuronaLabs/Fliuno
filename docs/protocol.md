@@ -103,6 +103,7 @@ staged.sync_all()?;
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, maxModelSteps?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/startSummary` | 与 `task/start` 相同 | 使用同一任务创建和调度流程，返回 `TaskSummary` |
 | `task/getSummaryByRequest` | `{sessionId,clientRequestId}` | 通过会话和请求键读取当前 `TaskSummary` |
+| `task/getSummariesByRequest` | `{sessionId,clientRequestIds}` | [按请求键批查任务](#按请求键批查任务)，返回同一水位的 `TaskSummaryBatch` |
 | `task/get` | `{taskId}` | Task |
 | `task/getSummary` | `{taskId}` | 单条 `TaskSummary`，可以轻量轮询任务状态 |
 | `task/getSummaries` | `{taskIds,workspaceId?,sessionId?}` | 从同一查询快照按请求顺序返回摘要或 `null`，附上事件水位 |
@@ -218,6 +219,18 @@ A2A 导入的二进制附件在 `agentRun.artifacts` 中通过 `sourceId` 和可
 提交前为这次操作生成 `clientRequestId`，并保存原始输入、交付物引用、后端、上下文选项和模型尝试上限。若等待 `task/startSummary` 响应时断线，在同一会话内原样重试。已接受的请求会返回同一任务的**当前**摘要，不再次调度模型或工具；已中断的任务仍须按原 `task/resume` 规则显式处理。复用同一键但改变输入、后端、规范化后的上下文或模型尝试上限会返回 `-32009`。如果只剩下会话和请求 ID，可以用 `task/getSummaryByRequest` 找回任务。
 
 SQLite v44 将普通有键提交的输入 SHA-256、后端和规范化后的上下文选项随任务与首个事件提交。新任务的摘要重试只核对这个回执和当前摘要。旧任务仍通过原快照核对，升级不扫描历史正文。同一键空间中的审批续跑和远端续接继续按各自的规则识别。
+
+#### 按请求键批查任务
+
+握手声明 `taskSummaryByRequestBatch` 时，宿主可用 `task/getSummariesByRequest` 核对同一会话中多次提交的结果。一次传入 1 至 64 个 `clientRequestId`，上限也可从 `maxTaskSummaryByRequestBatch` 读取。`items` 与请求键逐项对应，重复键保留重复位置，当前会话中没有绑定的键返回 `null`。
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"task/getSummariesByRequest","params":{"sessionId":"<session-id>","clientRequestIds":["draft-report","make-chart"]}}
+```
+
+响应中的 `throughSequence` 与摘要来自同一次读取。查询涵盖已有的任务请求绑定，包括旧版本没有紧凑回执的绑定。请求不会创建任务或触发恢复。会话不存在返回 `-32004`，键格式或数量不合法返回 `-32602`。
+
+Rust 宿主可以调用 `Client::get_task_summaries_by_request`，并用返回水位接续事件读取。连到旧服务时，可逐项使用 `task/getSummaryByRequest`。
 
 ### 内嵌图片输入
 

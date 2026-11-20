@@ -106,6 +106,13 @@ fn summary_retry_receipts_survive_restart_and_commit_with_the_task_and_first_eve
             json!({"sessionId":session_id,"clientRequestId":"compact"})
         )
     );
+    let batch = peer.call(
+        "task/getSummariesByRequest",
+        json!({"sessionId":session_id,"clientRequestIds":["compact","missing","legacy"]}),
+    );
+    assert_eq!(batch["items"][0], receipt);
+    assert!(batch["items"][1].is_null());
+    assert_eq!(batch["items"][2], legacy_retry);
     for (field, value) in [
         ("input", json!("待审阅".repeat(4000) + "!")),
         ("context", json!({"mode":"isolated"})),
@@ -198,5 +205,103 @@ fn image_receipt_reuses_valid_input_but_rejects_malformed_and_changed_parts() {
         -32602
     );
     drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn request_summary_batch_reconciles_keys_in_one_session_after_restart() {
+    use fliuno_protocol::{MAX_TASK_SUMMARY_BATCH, TaskRequestSummaryBatchParams};
+
+    let temp_dir = std::env::temp_dir().canonicalize().unwrap();
+    let root = temp_dir.join(format!(
+        "fliuno-request-summary-batch-{}",
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let ws = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let other = peer.call("session/create", json!({"workspaceId":ws["id"]}));
+    let start = |peer: &mut Peer, session: &Value, key: &str| {
+        let task = peer.call(
+            "task/startSummary",
+            json!({"sessionId":session["id"],"input":"draft report","clientRequestId":key}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval");
+        task["id"].as_str().unwrap().to_owned()
+    };
+    let waiting = start(&mut peer, &session, "shared");
+    let cancelled = start(&mut peer, &session, "cancelled");
+    let foreign_shared = start(&mut peer, &other, "shared");
+    start(&mut peer, &other, "other-only");
+    peer.call("task/cancelSummary", json!({"taskId":cancelled}));
+    drop(peer);
+
+    let (server, mut client) = super::ag_ui_run::connect(&db);
+    assert_eq!(
+        client.info().capabilities["taskSummaryByRequestBatch"],
+        true
+    );
+    assert_eq!(
+        client.info().capabilities["maxTaskSummaryByRequestBatch"],
+        MAX_TASK_SUMMARY_BATCH
+    );
+    let request = TaskRequestSummaryBatchParams {
+        session_id: session["id"].as_str().unwrap().to_owned(),
+        client_request_ids: ["cancelled", "other-only", "shared", "missing", "cancelled"]
+            .map(str::to_owned)
+            .to_vec(),
+    };
+    let before = client.event_watermark(|_| {}).unwrap();
+    let batch = client
+        .get_task_summaries_by_request(&request, |_| {})
+        .unwrap();
+    assert_eq!(batch.through_sequence, before);
+    for i in [0, 4] {
+        let summary = batch.items[i].as_ref().unwrap();
+        assert_eq!(summary.id, cancelled);
+        assert_eq!(summary.status, TaskStatus::Cancelled);
+    }
+    let summary = batch.items[2].as_ref().unwrap();
+    assert_eq!(summary.id, waiting);
+    assert_eq!(summary.status, TaskStatus::WaitingApproval);
+    assert!(batch.items[1].is_none() && batch.items[3].is_none());
+    let other_request = TaskRequestSummaryBatchParams {
+        session_id: other["id"].as_str().unwrap().to_owned(),
+        client_request_ids: vec!["shared".into()],
+    };
+    let other_batch = client
+        .get_task_summaries_by_request(&other_request, |_| {})
+        .unwrap();
+    assert_eq!(other_batch.items[0].as_ref().unwrap().id, foreign_shared);
+
+    for keys in [
+        vec![],
+        vec!["contains space".into()],
+        vec!["missing".into(); MAX_TASK_SUMMARY_BATCH + 1],
+    ] {
+        let bad = TaskRequestSummaryBatchParams {
+            client_request_ids: keys,
+            ..request.clone()
+        };
+        assert!(matches!(
+            client.get_task_summaries_by_request(&bad, |_| {}),
+            Err(fliuno_client::Error::Rpc { code: -32602, .. })
+        ));
+    }
+    let missing_session = TaskRequestSummaryBatchParams {
+        session_id: "missing-session".into(),
+        ..request
+    };
+    assert!(matches!(
+        client.get_task_summaries_by_request(&missing_session, |_| {}),
+        Err(fliuno_client::Error::Rpc { code: -32004, .. })
+    ));
+    assert_eq!(client.event_watermark(|_| {}).unwrap(), before);
+    drop(client);
+    drop(server);
+    let root = root.canonicalize().unwrap();
+    assert_eq!(root.parent(), Some(temp_dir.as_path()));
     fs::remove_dir_all(root).unwrap();
 }

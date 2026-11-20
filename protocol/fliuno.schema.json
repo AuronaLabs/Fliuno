@@ -1740,6 +1740,33 @@
         "clientRequestId"
       ]
     },
+    "task/getSummariesByRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskRequestSummaryBatchParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "clientRequestIds": {
+          "description": "The keys originally used as clientRequestId in the selected session.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[!-~]+$"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clientRequestIds"
+      ]
+    },
     "task/continueRemote": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskContinueRemoteParams",
@@ -5283,7 +5310,7 @@
       "type": "object",
       "properties": {
         "items": {
-          "description": "One entry per requested ID, including duplicates. Missing and out-of-scope rows are null.",
+          "description": "One entry per requested ID or key, including duplicates. Missing and out-of-scope rows are null.",
           "type": "array",
           "items": {
             "anyOf": [

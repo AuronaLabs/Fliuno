@@ -465,6 +465,8 @@ impl RpcServer {
             capabilities["taskCancelBatch"] = json!(true);
             capabilities["maxTaskCancelBatch"] = json!(MAX_TASK_CANCEL_BATCH);
             capabilities["taskSummaryByRequest"] = json!(true);
+            capabilities["taskSummaryByRequestBatch"] = json!(true);
+            capabilities["maxTaskSummaryByRequestBatch"] = json!(MAX_TASK_SUMMARY_BATCH);
             capabilities["sessionHistoryList"] = json!(true);
             capabilities["sessionHistoryAfterSequence"] = json!(true);
             capabilities["sessionHistorySubscription"] = json!(true);
@@ -820,6 +822,10 @@ impl RpcServer {
                     self.kernel()?
                         .get_task_summary_by_request(&p.session_id, &p.client_request_id)?
                 )
+            }
+            "task/getSummariesByRequest" => {
+                let p: TaskRequestSummaryBatchParams = decode(params)?;
+                json!(self.kernel()?.get_task_summaries_by_request(&p)?)
             }
             "task/getSummary" => {
                 let p: TaskIdParams = decode(params)?;

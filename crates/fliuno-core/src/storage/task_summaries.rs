@@ -191,23 +191,57 @@ impl Kernel {
              LEFT JOIN task_summaries AS summary ON summary.task_id=owner.task_id",
         )?;
         let ids = serde_json::to_string(&request.task_ids)?;
-        let mut rows = stmt.query(params![ids, request.workspace_id, request.session_id])?;
-        let mut items = vec![None; request.task_ids.len()];
-        let mut through_sequence = None;
-        while let Some(row) = rows.next()? {
-            if through_sequence.is_none() {
-                through_sequence = Some(row.get::<_, i64>(2)? as u64);
-            }
-            let index = usize::from(row.get::<_, u16>(0)?);
-            let data: Option<&str> = row
-                .get_ref(1)?
-                .as_str_or_null()
-                .map_err(rusqlite::Error::from)?;
-            items[index] = data.map(serde_json::from_str).transpose()?;
-        }
-        Ok(TaskSummaryBatch {
-            items,
-            through_sequence: through_sequence.ok_or(rusqlite::Error::QueryReturnedNoRows)?,
-        })
+        let rows = stmt.query(params![ids, request.workspace_id, request.session_id])?;
+        read_summary_batch(rows, request.task_ids.len())
     }
+
+    /// Reconcile submitted request keys in one session without reading task bodies.
+    pub fn get_task_summaries_by_request(
+        &self,
+        request: &TaskRequestSummaryBatchParams,
+    ) -> Result<TaskSummaryBatch> {
+        if request.client_request_ids.is_empty()
+            || request.client_request_ids.len() > MAX_TASK_SUMMARY_BATCH
+        {
+            return Err(Error::Invalid(format!(
+                "clientRequestIds must contain 1 to {MAX_TASK_SUMMARY_BATCH} entries"
+            )));
+        }
+        for key in &request.client_request_ids {
+            crate::task::validate_key(key)?;
+        }
+        self.require_session(&request.session_id)?;
+        // Include pre-receipt keys and continuations by reading the canonical
+        // binding. The session and key together select an indexed row.
+        let mut stmt = self.db.prepare_cached(
+            "SELECT requested.key, summary.data, (SELECT COALESCE(MAX(sequence),0) FROM events)
+             FROM json_each(?1) AS requested
+             LEFT JOIN task_requests AS binding
+                ON binding.session_id=?2 AND binding.request_key=requested.value
+             LEFT JOIN task_summaries AS summary ON summary.task_id=binding.task_id",
+        )?;
+        let keys = serde_json::to_string(&request.client_request_ids)?;
+        let rows = stmt.query(params![keys, request.session_id])?;
+        read_summary_batch(rows, request.client_request_ids.len())
+    }
+}
+
+fn read_summary_batch(mut rows: rusqlite::Rows<'_>, count: usize) -> Result<TaskSummaryBatch> {
+    let mut items = vec![None; count];
+    let mut through_sequence = None;
+    while let Some(row) = rows.next()? {
+        if through_sequence.is_none() {
+            through_sequence = Some(row.get::<_, i64>(2)? as u64);
+        }
+        let index = usize::from(row.get::<_, u16>(0)?);
+        let data = row
+            .get_ref(1)?
+            .as_str_or_null()
+            .map_err(rusqlite::Error::from)?;
+        items[index] = data.map(serde_json::from_str).transpose()?;
+    }
+    Ok(TaskSummaryBatch {
+        items,
+        through_sequence: through_sequence.ok_or(rusqlite::Error::QueryReturnedNoRows)?,
+    })
 }

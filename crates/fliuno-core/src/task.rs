@@ -273,7 +273,10 @@ pub(crate) fn validate_input(input: &str) -> Result<()> {
 }
 
 pub(crate) fn validate_key(key: &str) -> Result<()> {
-    if key.is_empty() || key.len() > 128 || !key.bytes().all(|b| b.is_ascii_graphic()) {
+    if key.is_empty()
+        || key.len() > fliuno_protocol::MAX_CLIENT_REQUEST_ID_BYTES
+        || !key.bytes().all(|b| b.is_ascii_graphic())
+    {
         return Err(Error::Invalid(
             "clientRequestId must be 1..128 printable ASCII bytes".into(),
         ));
