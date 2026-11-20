@@ -9,7 +9,7 @@
 | **从零启动** | [准备环境](#快速开始) → [离线演示](#先运行离线演示) → [启动服务并握手](#再启动自己的服务) |
 | **配置模型或外部服务** | [真实模型](#真实模型) · [MCP](#mcp) · [ACP 客户端](#acp-客户端) · [A2A 远程任务](#a2a-远程任务) |
 | **启用本机能力** | [文件与 Skills](#文件与-skills) · [注册命令](#主机注册的命令) · [跨轮次终端](#跨轮次终端) |
-| **验证工作区** | [工程检查和离线示例](#检查与演示) |
+| **验证工作区** | [工程检查和离线示例](#检查与演示) · [版本升级验证](#版本升级验证) |
 
 ## 快速开始
 
@@ -183,6 +183,26 @@ python examples/ag_ui_http_demo.py --interrupts --inline-media
 `check.ps1` 运行格式、Clippy、测试、生成契约一致性检查和离线进程演示；解释器演示需要本机 Node 24，Windows 另需 CPython 3.12。GitHub Actions 配置了 Windows/Linux 两个平台；本地验证结果不代表远程 CI 已经运行。
 
 开发和测试构建保留行号堆栈、关闭增量缓存，以控制 Windows 调试产物占用；需要调试局部变量时可通过本地 Cargo 配置覆盖 `profile.dev.debug=2`。
+
+
+## 版本升级验证
+
+验证从 `v0.0.2` 创建的 SQLite 数据库升级到当前开发版。将标签检出到独立目录构建旧服务，再构建当前服务。以下命令在仓库根目录运行。
+
+```powershell
+git worktree add --detach ../Fliuno-v0.0.2 v0.0.2
+cargo build --locked --manifest-path ../Fliuno-v0.0.2/Cargo.toml -p fliuno-app-server
+cargo build --locked -p fliuno-app-server
+python scripts/check_v002_upgrade.py `
+  ../Fliuno-v0.0.2/target/debug/fliuno-app-server.exe `
+  target/debug/fliuno-app-server.exe
+```
+
+Linux 上去掉两个可执行文件路径末尾的 `.exe`。如果配置了自定义 Cargo 构建目录，传入实际的可执行文件路径。
+
+脚本核对旧服务的 Schema，使用离线模型在临时目录创建数据库。升级后会检查归档会话、任务请求键、审批详情、交付物和旧事件，再允许原先待审批的任务继续执行。
+
+[实测结果](execution-evidence.md#从-v002-升级数据库) · [验证脚本](../scripts/check_v002_upgrade.py)
 
 ---
 

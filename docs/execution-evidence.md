@@ -7,6 +7,7 @@
 | 要查什么 | 记录 |
 | --- | --- |
 | **发布验收** | [0.0.2 Windows 与 Linux 双平台验收](#002-windows-与-linux-双平台验收) |
+| **版本升级** | [从 v0.0.2 升级数据库](#从-v002-升级数据库) |
 | **性能数据** | [0.0.3 性能摘录](#003-性能摘录) |
 | **恢复与重连** | [任务恢复判断](#003-任务恢复判断2026-11-20) · [批量查询恢复状态](#003-批量查询恢复状态2026-11-20) · [独立保存恢复字段](#003-独立保存恢复字段2026-11-20) · [AG-UI 审批重连](#003-ag-ui-审批重连2026-11-20) |
 | **本机命令执行** | [预算和停止顺序](#预算和停止顺序) · [报告字段](#报告字段) · [工程验证](#工程验证2026-11-18) |
@@ -1222,3 +1223,14 @@ Windows 调试构建查询同一工作区的 32 个会话，其中 24 个会话�
 测量脚本和日志见 `D:/Fliuno-Native-Test/work-session-counts-benchmark.py` 和 `D:/Fliuno-Native-Test/work-session-counts-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，545 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 3 项工作台进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-work-session-counts-windows.log` 和 `D:/Fliuno-Native-Test/guest-work-session-counts.log`。
+
+## 从 v0.0.2 升级数据库
+
+2026-11-20 用从 `v0.0.2` 标签提交 `caa2e259634141c7a603793265df22b52c9dc641` 构建的旧服务创建数据库，再由 0.0.3 开发版打开。旧服务先完成一项任务并写入 UTF-8 交付物，再让另一项任务停在待审批状态，最后归档会话。两次启动均通过应用协议 `0.1` 握手。
+
+| 平台 | 验证结果 |
+| --- | --- |
+| **Windows** | SQLite 从 v36 迁移到 v52，12 条旧事件的序号、任务 ID 及存储中的 JSON 字节完全一致。归档状态、任务请求键、审批详情、交付物 SHA-256 和原始字节保留。允许原待审批项后，游标从 `12` 推进到 `18`，只追加该任务的 6 条事件。再次重启后交付物仍只有 1 份，且 `PRAGMA integrity_check` 返回 `ok`。 |
+| **Debian 来宾** | 独立脚本运行两个 Linux 版服务，核对旧事件的序号、任务 ID 与类型，确认游标同样从 `12` 推进到 `18`，再次重启没有生成重复交付物。 |
+
+Windows 验证脚本见 [版本升级验证](setup.md#版本升级验证)。本机归档日志为 `D:/Fliuno-Native-Test/upgrade-v002-smoke.log`、`D:/Fliuno-Native-Test/upgrade-v002-linux-smoke.log` 和 `D:/Fliuno-Native-Test/upgrade-v002-linux-serial.log`。
