@@ -176,6 +176,7 @@ python examples/demo.py
 python examples/demo.py --deny
 python examples/context_demo.py
 python examples/ag_ui_http_demo.py
+python examples/ag_ui_http_demo.py --interrupts --inline-media
 ```
 
 `check.ps1` 运行格式、Clippy、测试、生成契约一致性检查和离线进程演示；解释器演示需要本机 Node 24，Windows 另需 CPython 3.12。GitHub Actions 配置了 Windows/Linux 两个平台；本地验证结果不代表远程 CI 已经运行。

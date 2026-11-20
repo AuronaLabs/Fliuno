@@ -13,6 +13,20 @@ import threading
 from rpc_client import ROOT, build_server
 
 
+PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yhE0A"
+    "AAAASUVORK5CYII="
+)
+PDF = (
+    "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2Jq"
+    "CjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2Jq"
+    "CjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAxMCAx"
+    "MF0gPj4KZW5kb2JqCnhyZWYKMCA0CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDAwOSAwMDAw"
+    "MCBuIAowMDAwMDAwMDU4IDAwMDAwIG4gCjAwMDAwMDAxMTUgMDAwMDAgbiAKdHJhaWxlcgo8PCAv"
+    "U2l6ZSA0IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgoxODQKJSVFT0YK"
+)
+
+
 def build_host(binary_directory):
     if not os.environ.get("FLIUNO_DEMO_BIN_DIR"):
         subprocess.run(["cargo", "build", "--quiet", "--locked", "-p", "fliuno-ag-ui-http",
@@ -35,7 +49,7 @@ def frames(response):
             event_id, until_blank = None, None
 
 
-def exercise(address, session, run_token, review_token, interrupts=False):
+def exercise(address, session, run_token, review_token, *, interrupts=False, inline_media=False):
     def request(connection, method, path, token, body=None, extra=None):
         headers = {"Authorization": f"Bearer {token}", **(extra or {})}
         if body is not None:
@@ -44,12 +58,29 @@ def exercise(address, session, run_token, review_token, interrupts=False):
         connection.request(method, path, body, headers)
         return connection.getresponse()
 
+    content = "Prepare an artifact."
+    expected_text = content
+    if inline_media:
+        content = [
+            {"type": "text", "text": "Review "},
+            {"type": "image", "source": {"type": "data", "mimeType": "image/png", "value": PNG}},
+            {"type": "text", "text": " and "},
+            {"type": "document", "source": {"type": "data", "mimeType": "application/pdf", "value": PDF}},
+        ]
+        expected_text = "Review [image] and [document]"
+
     run = http.client.HTTPConnection(address, timeout=10)
     control = http.client.HTTPConnection(address, timeout=10)
+    def review(approval_id):
+        details = request(control, "GET", f"/runs/offline-http-demo/approvals/{approval_id}", review_token)
+        assert details.status == 200
+        approval = json.load(details)["approval"]
+        assert approval["call"]["arguments"]["content"] == expected_text
+
     try:
         response = request(run, "POST", "/run", run_token, {
             "threadId": session, "runId": "offline-http-demo",
-            "messages": [{"id": "message-1", "role": "user", "content": "Prepare an artifact."}],
+            "messages": [{"id": "message-1", "role": "user", "content": content}],
         })
         assert response.status == 200 and response.headers["Content-Type"] == "text/event-stream"
         run_id = "offline-http-demo"
@@ -58,9 +89,11 @@ def exercise(address, session, run_token, review_token, interrupts=False):
             assert parent[-1][1]["type"] == "RUN_FINISHED"
             outcome = parent[-1][1]["outcome"]
             assert outcome["type"] == "interrupt"
+            approval_id = outcome["interrupts"][0]["id"]
+            review(approval_id)
             run_id = "offline-http-child"
             continuation = {"threadId": session, "runId": run_id, "parentRunId": "offline-http-demo",
-                            "messages": [], "resume": [{"interruptId": outcome["interrupts"][0]["id"],
+                            "messages": [], "resume": [{"interruptId": approval_id,
                                                        "status": "resolved", "payload": {"decision": "allow_once"}}]}
             rejected = request(control, "POST", "/run", run_token, continuation)
             assert rejected.status == 401
@@ -77,6 +110,8 @@ def exercise(address, session, run_token, review_token, interrupts=False):
                 delivered.append((event_id, event))
                 if event.get("name") == "fliuno.approval_requested":
                     approval = event["value"]["approvalId"]
+                    if inline_media:
+                        review(approval)
                     path = f"/runs/offline-http-demo/approvals/{approval}"
                     rejected = request(control, "POST", path, run_token, {"decision": "allow_once"})
                     assert rejected.status == 401
@@ -85,6 +120,12 @@ def exercise(address, session, run_token, review_token, interrupts=False):
                     assert accepted.status == 200
                     assert json.load(accepted)["data"]["decision"] == "allow_once"
         assert delivered[-1][1]["type"] == "RUN_FINISHED"
+        if inline_media:
+            all_frames = parent + delivered if interrupts else delivered
+            for _, event in all_frames:
+                encoded_event = json.dumps(event)
+                assert PNG not in encoded_event and PDF not in encoded_event
+            print(f"Demo approval text: {expected_text}")
         position = next(index for index, (_, event) in enumerate(delivered)
                         if event["type"] == "TEXT_MESSAGE_CONTENT")
         response = request(control, "GET", f"/runs/{run_id}", run_token,
@@ -101,6 +142,7 @@ def exercise(address, session, run_token, review_token, interrupts=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--interrupts", action="store_true", help="Resume a standard approval interrupt with a new run ID")
+    parser.add_argument("--inline-media", action="store_true", help="Submit a tiny PNG and PDF in the same message")
     args = parser.parse_args()
     server = build_server()
     host = build_host(server.parent)
@@ -117,7 +159,8 @@ def main():
             ready = queue.Queue(maxsize=1)
             threading.Thread(target=lambda: ready.put(child.stdout.readline()), daemon=True).start()
             launch = json.loads(ready.get(timeout=15))
-            exercise(launch["address"], launch["sessionId"], run_token, review_token, args.interrupts)
+            exercise(launch["address"], launch["sessionId"], run_token, review_token,
+                     interrupts=args.interrupts, inline_media=args.inline_media)
         finally:
             child.stdin.close()
             try:

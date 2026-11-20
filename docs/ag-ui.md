@@ -55,6 +55,12 @@
 
 在同一个 `content` 数组中加入 `{"type":"document","source":{"type":"data","mimeType":"application/pdf","value":"…"}}`。`value` 是 PDF 文件的标准 Base64 编码。可以和文本、图片混排，也可单独提交 PDF。Rust 客户端会检查 `taskPdfInput` 能力。PDF 字节保留在原任务，任务摘要和会话历史使用 `[document]` 占位符。模型必须支持 PDF 输入。
 
+运行以下离线演示可提交一张图片和一份 PDF，审批后按帧续传。演示使用本机模型夹具，在审批参数中显示媒体占位符。
+
+```sh
+python examples/ag_ui_http_demo.py --interrupts --inline-media
+```
+
 ## 投影内核事件
 
 对于已经通过本机协议创建的任务，`ag_ui::AgUiProjector` 可以直接将持久事件转成 AG-UI 事件对象。
