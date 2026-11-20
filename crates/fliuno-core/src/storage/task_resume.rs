@@ -1,8 +1,9 @@
-//! Project the recovery facts without sending task bodies through Serde.
+//! Store compact recovery facts with each task transition and read older snapshots on demand.
 use super::*;
 use std::borrow::Cow;
 
 /// Operation presence is sufficient; the payload is read only when recovering.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct ResumeFacts<'a> {
     pub(crate) status: TaskStatus,
     pub(crate) model_steps: u32,
@@ -15,7 +16,32 @@ pub(crate) struct ResumeFacts<'a> {
     pub(crate) model_outcome_unknown: bool,
 }
 
-// Keep the indexed point query and bounded lookup on the same projection.
+pub(super) fn migrate(db: &mut Connection) -> Result<()> {
+    let tx = db.transaction()?;
+    // Existing rows are loaded on demand until their next normal transition.
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS task_resume_facts (
+           task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+           data TEXT NOT NULL
+         ) WITHOUT ROWID",
+    )?;
+    tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+    tx.commit()?;
+    Ok(())
+}
+
+pub(super) fn record(tx: &rusqlite::Transaction<'_>, task: &Task) -> Result<()> {
+    let facts = serde_json::to_string(&ResumeFacts::from(task))?;
+    tx.prepare_cached(
+        "INSERT INTO task_resume_facts(task_id,data) VALUES(?1,?2)
+         ON CONFLICT(task_id) DO UPDATE SET data=excluded.data
+         WHERE task_resume_facts.data<>excluded.data",
+    )?
+    .execute(params![task.id, facts])?;
+    Ok(())
+}
+
+// Keep conversion of legacy snapshots identical for point and batch reads.
 macro_rules! resume_projection {
     () => {
         "task.data -> '$.status',
@@ -35,7 +61,11 @@ impl Kernel {
         let mut statement = self.db.prepare_cached(concat!(
             "SELECT ",
             resume_projection!(),
-            " FROM tasks AS task WHERE task.id=?1"
+            ", cached.data
+             FROM (SELECT ?1 AS id) AS requested
+             LEFT JOIN task_resume_facts AS cached ON cached.task_id=requested.id
+             LEFT JOIN tasks AS task ON task.id=requested.id AND cached.task_id IS NULL
+             WHERE cached.task_id IS NOT NULL OR task.id IS NOT NULL"
         ))?;
         let mut rows = statement.query([task_id])?;
         let row = rows.next()?.ok_or_else(|| Error::NotFound("task".into()))?;
@@ -51,12 +81,15 @@ impl Kernel {
         let mut statement = self.db.prepare_cached(concat!(
             "SELECT ",
             resume_projection!(),
-            ", requested.key, task.id IS NOT NULL, (SELECT COALESCE(MAX(sequence),0) FROM events)
+            ", cached.data, requested.key,
+             (cached.task_id IS NOT NULL OR task.id IS NOT NULL),
+             (SELECT COALESCE(MAX(sequence),0) FROM events)
              FROM json_each(?1) AS requested
              LEFT JOIN task_summary_status AS owner ON owner.task_id=requested.value
                 AND (?2 IS NULL OR owner.workspace_id=?2)
                 AND (?3 IS NULL OR owner.session_id=?3)
-             LEFT JOIN tasks AS task ON task.id=owner.task_id"
+             LEFT JOIN task_resume_facts AS cached ON cached.task_id=owner.task_id
+             LEFT JOIN tasks AS task ON task.id=owner.task_id AND cached.task_id IS NULL"
         ))?;
         let ids = serde_json::to_string(&request.task_ids)?;
         let mut rows = statement.query(params![ids, request.workspace_id, request.session_id])?;
@@ -65,10 +98,10 @@ impl Kernel {
         let mut through_sequence = None;
         while let Some(row) = rows.next()? {
             if through_sequence.is_none() {
-                through_sequence = Some(row.get::<_, i64>(11)? as u64);
+                through_sequence = Some(row.get::<_, i64>(12)? as u64);
             }
-            if row.get::<_, bool>(10)? {
-                let index = usize::from(row.get::<_, u16>(9)?);
+            if row.get::<_, bool>(11)? {
+                let index = usize::from(row.get::<_, u16>(10)?);
                 items[index] = Some(decode_facts(row)?);
             }
         }
@@ -85,6 +118,9 @@ fn decode_facts(row: &rusqlite::Row<'_>) -> Result<ResumeFacts<'static>> {
             .as_str_or_null()
             .map_err(rusqlite::Error::from)
     };
+    if let Some(data) = json(9)? {
+        return Ok(serde_json::from_str(data)?);
+    }
     Ok(ResumeFacts {
         status: serde_json::from_str(json(0)?.unwrap_or("null"))?,
         model_steps: row.get(1)?,

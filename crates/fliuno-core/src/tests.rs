@@ -937,7 +937,11 @@ fn resume_status_uses_the_full_snapshot_defaults_for_old_rows() {
         .create_task_with_key(&session.id, "queued task", None)
         .unwrap();
     kernel.interrupt_running_tasks().unwrap();
-    // These optional fields were absent from older snapshots.
+    // A row migrated from an old database has no compact recovery facts yet.
+    kernel
+        .db
+        .execute("DELETE FROM task_resume_facts WHERE task_id=?1", [&task.id])
+        .unwrap();
     kernel
         .db
         .execute(
@@ -960,4 +964,93 @@ fn resume_status_uses_the_full_snapshot_defaults_for_old_rows() {
         kernel.prepare_resume_task(&task.id, false).unwrap().status,
         TaskStatus::Running
     );
+}
+
+#[test]
+fn resume_facts_migrate_without_backfill_and_update_with_the_task_transaction() {
+    let directory = std::env::temp_dir().join(new_id("resume-facts"));
+    fs::create_dir(&directory).unwrap();
+    let path = directory.join("kernel.db");
+    let mut kernel = Kernel::open(&path, Box::new(DemoProvider)).unwrap();
+    let workspace = kernel.open_workspace(directory.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let pending = kernel.start_task(&session.id, "prepare report").unwrap();
+    let approval_id = &pending.pending_approval.as_ref().unwrap().id;
+    let before = kernel.get_task_resume_status(&pending.id).unwrap();
+    kernel
+        .db
+        .execute_batch("DROP TABLE task_resume_facts; PRAGMA user_version=47")
+        .unwrap();
+    drop(kernel);
+
+    // Upgrading a database with live approval state does not scan or rewrite task bodies.
+    let mut kernel = Kernel::open(&path, Box::new(DemoProvider)).unwrap();
+    let stored_facts = |kernel: &Kernel| {
+        kernel
+            .db
+            .query_row("SELECT COUNT(*) FROM task_resume_facts", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+    assert_eq!(stored_facts(&kernel), 0);
+    let request = TaskSummaryBatchParams {
+        task_ids: vec![pending.id.clone()],
+        workspace_id: None,
+        session_id: Some(session.id.clone()),
+    };
+    let legacy = kernel.get_task_resume_statuses(&request).unwrap();
+    assert_eq!(legacy.items, vec![Some(before.clone())]);
+    assert_eq!(kernel.get_task_resume_status(&pending.id).unwrap(), before);
+
+    kernel
+        .db
+        .execute_batch(
+            "CREATE TRIGGER fail_resume_projection BEFORE INSERT ON task_resume_facts
+         BEGIN SELECT RAISE(ABORT,'fixture'); END",
+        )
+        .unwrap();
+    assert!(
+        kernel
+            .respond_approval(&pending.id, approval_id, ApprovalDecision::Deny)
+            .is_err()
+    );
+    assert_eq!(kernel.get_task_resume_statuses(&request).unwrap(), legacy);
+    assert_eq!(
+        kernel.get_task(&pending.id).unwrap().status,
+        TaskStatus::WaitingApproval
+    );
+    kernel
+        .db
+        .execute_batch("DROP TRIGGER fail_resume_projection")
+        .unwrap();
+    let failed = kernel
+        .respond_approval(&pending.id, approval_id, ApprovalDecision::Deny)
+        .unwrap();
+    assert_eq!(stored_facts(&kernel), 1);
+    let current = kernel.get_task_resume_statuses(&request).unwrap();
+    assert!(current.through_sequence > legacy.through_sequence);
+    assert_eq!(current.items[0].as_ref().unwrap().status, failed.status);
+    assert_eq!(failed.status, TaskStatus::Failed);
+
+    // An unreadable body is deliberate fault injection. Read-only recovery uses its own row.
+    kernel
+        .db
+        .execute(
+            "UPDATE tasks SET data='unreadable body' WHERE id=?1",
+            [&pending.id],
+        )
+        .unwrap();
+    drop(kernel);
+    let restored = Kernel::open(&path, Box::new(DemoProvider)).unwrap();
+    assert_eq!(
+        restored.get_task_resume_statuses(&request).unwrap(),
+        current
+    );
+    assert_eq!(
+        restored.get_task_resume_status(&pending.id).unwrap(),
+        *current.items[0].as_ref().unwrap()
+    );
+    drop(restored);
+    fs::remove_dir_all(directory).unwrap();
 }

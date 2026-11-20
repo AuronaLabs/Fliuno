@@ -26,7 +26,7 @@ use std::{
 };
 pub(crate) use task_resume::ResumeFacts;
 
-pub(crate) const SCHEMA_VERSION: u32 = 47;
+pub(crate) const SCHEMA_VERSION: u32 = 48;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 const INSERT_EVENT: &str = "INSERT INTO events(task_id,data) VALUES(?1,?2)";
 
@@ -66,6 +66,7 @@ fn write_transition(
         serde_json::to_string(task)?
     ])?;
     let summary_changed = task_summaries::record(tx, task)?;
+    task_resume::record(tx, task)?;
     if let Some(continuation) = &task.remote_continuation
         && continuation.expected.state == AgentTaskState::InputRequired
     {
@@ -416,7 +417,10 @@ impl Kernel {
         }
         if version < 47 {
             // Frozen context options and keyed receipts can now contain scanLimit.
-            db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            db.pragma_update(None, "user_version", 47)?;
+        }
+        if version < 48 {
+            task_resume::migrate(&mut db)?;
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
