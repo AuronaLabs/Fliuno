@@ -41,6 +41,15 @@ fn validate_session_title(title: &str) -> Result<&str> {
     Ok(title.trim())
 }
 
+fn read_session(statement: &mut rusqlite::Statement<'_>, id: &str) -> Result<Session> {
+    let mut rows = statement.query([id])?;
+    let row = rows
+        .next()?
+        .ok_or_else(|| Error::NotFound("session".into()))?;
+    let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
+    Ok(serde_json::from_str(data)?)
+}
+
 impl Kernel {
     pub fn create_session(&mut self, workspace_id: &str) -> Result<Session> {
         self.create_session_with_title(workspace_id, None)
@@ -108,12 +117,7 @@ impl Kernel {
         let mut statement = self
             .db
             .prepare_cached("SELECT data FROM sessions WHERE id=?1")?;
-        let mut rows = statement.query([id])?;
-        let row = rows
-            .next()?
-            .ok_or_else(|| Error::NotFound("session".into()))?;
-        let data = row.get_ref(0)?.as_str().map_err(rusqlite::Error::from)?;
-        Ok(serde_json::from_str(data)?)
+        read_session(&mut statement, id)
     }
 
     pub fn rename_session(&mut self, id: &str, title: &str) -> Result<Session> {
@@ -160,22 +164,21 @@ impl Kernel {
 
         let tx = self.db.transaction()?;
         let mut sessions = Vec::with_capacity(ids.len());
-        for id in ids {
-            let data: Option<String> = tx
-                .query_row("SELECT data FROM sessions WHERE id=?1", [id], |row| {
-                    row.get(0)
-                })
-                .optional()?;
-            let data = data.ok_or_else(|| Error::NotFound("session".into()))?;
-            sessions.push(serde_json::from_str::<Session>(&data)?);
+        {
+            // Resolve the entire batch before updating any session.
+            let mut select = tx.prepare_cached("SELECT data FROM sessions WHERE id=?1")?;
+            for id in ids {
+                sessions.push(read_session(&mut select, id)?);
+            }
         }
-        for session in &mut sessions {
-            if session.archived != archived {
+        if sessions.iter().any(|session| session.archived != archived) {
+            let mut update = tx.prepare_cached("UPDATE sessions SET data=?2 WHERE id=?1")?;
+            for session in sessions
+                .iter_mut()
+                .filter(|session| session.archived != archived)
+            {
                 session.archived = archived;
-                tx.execute(
-                    "UPDATE sessions SET data=?2 WHERE id=?1",
-                    params![session.id, serde_json::to_string(session)?],
-                )?;
+                update.execute(params![session.id, serde_json::to_string(session)?])?;
             }
         }
         tx.commit()?;
@@ -183,10 +186,9 @@ impl Kernel {
     }
 
     fn save_session(&self, session: &Session) -> Result<()> {
-        self.db.execute(
-            "UPDATE sessions SET data=?2 WHERE id=?1",
-            params![session.id, serde_json::to_string(session)?],
-        )?;
+        self.db
+            .prepare_cached("UPDATE sessions SET data=?2 WHERE id=?1")?
+            .execute(params![session.id, serde_json::to_string(session)?])?;
         Ok(())
     }
 }

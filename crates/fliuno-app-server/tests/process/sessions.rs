@@ -358,15 +358,20 @@ fn session_archive_batch_is_atomic_ordered_idempotent_and_persistent() {
     let create = json!({"workspaceId":workspace["id"]});
     let first = peer.call("session/create", create.clone());
     let middle = peer.call("session/create", create.clone());
-    let last = peer.call("session/create", create);
+    let last = peer.call(
+        "session/create",
+        json!({"workspaceId":workspace["id"],"title":"Latest session"}),
+    );
     let ids = json!([last["id"], first["id"]]);
 
+    // Only reject the second update, after the first write is visible to SQLite.
     rusqlite::Connection::open(&db)
         .unwrap()
         .execute_batch(
             "CREATE TRIGGER reject_second_archive BEFORE UPDATE OF data ON sessions
          WHEN json_extract(NEW.data,'$.archived')=1
-           AND OLD.rowid=(SELECT max(rowid) FROM sessions)
+           AND OLD.rowid=(SELECT min(rowid) FROM sessions)
+           AND (SELECT json_extract(data,'$.archived') FROM sessions ORDER BY rowid DESC LIMIT 1)=1
          BEGIN SELECT RAISE(ABORT,'fixture'); END;",
         )
         .unwrap();
@@ -395,6 +400,7 @@ fn session_archive_batch_is_atomic_ordered_idempotent_and_persistent() {
     assert_eq!(archived["sessions"][0]["id"], last["id"]);
     assert_eq!(archived["sessions"][1]["id"], first["id"]);
     assert_eq!(archived["sessions"][0]["archived"], true);
+    assert_eq!(archived["sessions"][0]["title"], last["title"]);
     assert_eq!(peer.call("session/setArchivedBatch", request), archived);
 
     for invalid in [

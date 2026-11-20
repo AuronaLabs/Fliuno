@@ -1224,6 +1224,14 @@ Windows 调试构建查询同一工作区的 32 个会话，其中 24 个会话�
 
 Windows `scripts/check.ps1` 退出码为 0，545 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 3 项工作台进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-work-session-counts-windows.log` 和 `D:/Fliuno-Native-Test/guest-work-session-counts.log`。
 
+## 0.0.3 会话批量归档语句复用（2026-11-20）
+
+`session/setArchivedBatch` 最多一次更新 32 个会话。批次仍在同一 SQLite 事务内预检并读取全部会话，再提交需要变更的记录；只准备一次 SELECT 和一次 UPDATE，重复归档不会执行写入。进程测试通过在第二个写入前拒绝第一个写入之后的状态，验证事务回滚，也验证响应顺序、标题保留、重试和重启持久化。
+
+Windows 开发构建用 v0.0.3 优化前的旧服务二进制和当前服务交错处理 32 个会话的归档/恢复请求，预热 12 对、记录 80 对，并检查每个响应中的 ID、标题、归档状态和请求顺序。中位数从 **3.087 ms** 降至 **2.269 ms**（降低 26.5%），p95 从 **3.694 ms** 降至 **2.654 ms**。该数据是含 stdio 往返的整批耗时。复测脚本为 [会话批量归档基准](../scripts/benchmark_session_archive.py)。
+
+Windows `scripts/check.ps1` 以退出码 0 完成：**545 项测试、0 失败、0 忽略**，格式、两组严格 Clippy、协议 Schema 校验及 29 个离线演示通过。Debian Linux 6.12.107 来宾的真实 app-server 进程测试也通过（1 项批量归档进程测试，`FLIUNO_RESULT=0`）。日志见 `%TEMP%/fliuno-session-archive-windows.log`、`D:/Fliuno-Native-Test/session-archive-linux-build.log` 和 `D:/Fliuno-Native-Test/session-archive-linux-serial.log`。
+
 ## 从 v0.0.2 升级数据库
 
 2026-11-20 用从 `v0.0.2` 标签提交 `caa2e259634141c7a603793265df22b52c9dc641` 构建的旧服务创建数据库，再由 0.0.3 开发版打开。旧服务先完成一项任务并写入 UTF-8 交付物，再让另一项任务停在待审批状态，最后归档会话。两次启动均通过应用协议 `0.1` 握手。
