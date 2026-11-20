@@ -6,6 +6,9 @@ mod decisions;
 #[path = "approvals/snapshot.rs"]
 mod snapshot;
 
+#[path = "approvals/details.rs"]
+mod details;
+
 #[test]
 fn approval_run_binding_migrates_and_replays_one_decision_after_restart() {
     let root = std::env::temp_dir().join(format!("fliuno-approval-run-{}", uuid::Uuid::new_v4()));

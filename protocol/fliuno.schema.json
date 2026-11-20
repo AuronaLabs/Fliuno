@@ -2452,6 +2452,49 @@
         "approvalId"
       ]
     },
+    "approval/getBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalGetBatchParams",
+      "type": "object",
+      "properties": {
+        "approvals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ApprovalDecisionKey"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "approvals"
+      ],
+      "$defs": {
+        "ApprovalDecisionKey": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[!-~]+$"
+            },
+            "approvalId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[!-~]+$"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "approvalId"
+          ]
+        }
+      }
+    },
     "approval/getDecision": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ApprovalGetParams",
@@ -8976,6 +9019,181 @@
         }
       ],
       "$defs": {
+        "Approval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "authority": {
+              "description": "Absent in legacy snapshots, which cannot authorize a new execution.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "call"
+          ]
+        },
+        "ToolCall": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "arguments"
+          ]
+        },
+        "AgentApproval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "permissionId": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/AgentApprovalSource",
+              "default": "agent_permission"
+            },
+            "request": {
+              "description": "Untrusted, read-only peer context. Never interpreted as host authority."
+            },
+            "allowOnceAvailable": {
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "runId",
+            "permissionId",
+            "request",
+            "allowOnceAvailable",
+            "expiresAtUnixMs"
+          ]
+        },
+        "AgentApprovalSource": {
+          "type": "string",
+          "enum": [
+            "agent_permission",
+            "host_tool"
+          ]
+        }
+      }
+    },
+    "ApprovalGetBatch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ApprovalGetBatch",
+      "type": "object",
+      "properties": {
+        "items": {
+          "description": "One item per requested key, preserving order and duplicates. A null item\nmeans the approval is no longer pending or belongs to another task.",
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ApprovalDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "$defs": {
+        "ApprovalDetails": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "tool_call"
+                },
+                "approval": {
+                  "$ref": "#/$defs/Approval"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "approval"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "agent_permission"
+                },
+                "approval": {
+                  "$ref": "#/$defs/AgentApproval"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "approval"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "host_tool"
+                },
+                "approval": {
+                  "$ref": "#/$defs/AgentApproval"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "approval"
+              ]
+            }
+          ]
+        },
         "Approval": {
           "type": "object",
           "properties": {

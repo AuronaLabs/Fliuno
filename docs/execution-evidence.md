@@ -1175,3 +1175,18 @@ Windows 本机调试构建通过 stdio 查询每个快照。夹具在旧快照�
 测试脚本与日志见 `D:/Fliuno-Native-Test/approval-window-benchmark.py` 和 `D:/Fliuno-Native-Test/approval-window-benchmark.log`。
 
 Windows `scripts/check.ps1` 退出码为 0，541 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 8 项审批进程测试与 2 项工作台进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-approval-window-windows-recheck.log` 和 `D:/Fliuno-Native-Test/guest-approval-window.log`。
+
+## 0.0.3 批量读取待审批详情（2026-11-20）
+
+真实 stdio 测试对照单项详情，验证请求顺序、重复项、已关闭与归属不匹配的空位、重启保留以及整批紧凑 JSON 字节限制。ACP 实进程覆盖同一任务的多项权限、宿主文件操作详情和到期关闭。Rust 客户端拒绝条数不符、任务归属错误和重复项详情不一致的响应。[应用协议](protocol.md#批量读取待审批详情)
+
+Windows 本机调试构建测量 16 项详情。每组预热 20 轮，再交替测量 100 轮，每轮核对三种方式返回的详情完全相同。下表记录 stdio 往返耗时中位数。
+
+| 查询 | 逐项 `approval/get` | JSON-RPC 批量帧 | `approval/getBatch` |
+| --- | ---: | ---: | ---: |
+| 16 个不同审批 | 9.470 ms | 7.283 ms | 6.349 ms |
+| 同一审批请求 16 次 | 12.758 ms | 9.658 ms | 4.242 ms |
+
+批量详情接口对重复键只查询一次，仍按原位置返回完整详情，并对每个位置计入字节预算。测量脚本与原始结果见 `D:/Fliuno-Native-Test/approval-details-benchmark.py` 和 `D:/Fliuno-Native-Test/approval-details-benchmark.log`。
+
+Windows `scripts/check.ps1` 退出码为 0，544 项测试、29 个离线演示、格式、Clippy 和协议 Schema 检查通过。Debian 6.12.107 来宾通过 10 项 stdio 审批与 3 项 ACP 进程测试，`FLIUNO_RESULT=0`。日志见 `%TEMP%/fliuno-approval-details-windows.log` 和 `D:/Fliuno-Native-Test/guest-approval-details-recheck.log`。

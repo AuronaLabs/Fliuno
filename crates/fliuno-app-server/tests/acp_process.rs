@@ -425,6 +425,21 @@ fn persistent_grant_is_rejected_and_burst_permissions_remain_independent() {
         ),
         json!({"kind":"agent_permission","approval":second})
     );
+    let pending_items = pending["agentRun"]["pendingApprovals"].as_array().unwrap();
+    let keys: Vec<_> = pending_items
+        .iter()
+        .rev()
+        .map(|approval| json!({"taskId":burst["id"],"approvalId":approval["id"]}))
+        .collect();
+    let entries: Vec<_> = pending_items
+        .iter()
+        .rev()
+        .map(|approval| json!({"kind":"agent_permission","approval":approval}))
+        .collect();
+    assert_eq!(
+        peer.call("approval/getBatch", json!({"approvals":keys}))["items"],
+        json!(entries)
+    );
     for approval in pending["agentRun"]["pendingApprovals"].as_array().unwrap() {
         peer.call(
             "approval/respond",
@@ -453,6 +468,13 @@ fn expired_permission_is_closed_and_prompt_timeout_keeps_unknown_outcome() {
     let approval = waiting["agentRun"]["pendingApprovals"][0]["id"].clone();
     let done = peer.wait(&task["id"], |t| t["status"] == "completed");
     assert!(done["output"].as_str().unwrap().contains("cancelled"));
+    assert_eq!(
+        peer.call(
+            "approval/getBatch",
+            json!({"approvals":[{"taskId":task["id"],"approvalId":approval}]})
+        )["items"],
+        json!([null]),
+    );
     assert!(
         done["agentRun"]["pendingApprovals"]
             .as_array()
@@ -515,6 +537,14 @@ fn virtual_workspace_roundtrip_requires_distinct_write_and_read_approvals() {
             json!({"taskId":task["id"],"approvalId":write["id"]})
         ),
         json!({"kind":"host_tool","approval":write})
+    );
+    let live = peer.call(
+        "approval/getBatch",
+        json!({"approvals":[{"taskId":task["id"],"approvalId":write["id"]}]}),
+    );
+    assert_eq!(
+        live["items"],
+        json!([{"kind":"host_tool","approval":write}])
     );
     assert_eq!(write["request"]["call"]["name"], "workspace_replace_text");
     assert_eq!(write["request"]["preview"]["createsFile"], true);

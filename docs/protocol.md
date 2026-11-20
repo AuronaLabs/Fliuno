@@ -125,6 +125,7 @@ staged.sync_all()?;
 | `approval/listPending` | `{workspaceId?,sessionId?,after?:0,limit?:100,targetBytes?}` | `{items,nextAfter,hasMore}`，只包含当前待审批的摘要 |
 | `approval/listPendingSnapshot` | `{page:{workspaceId?,sessionId?,after?,limit?,targetBytes?},snapshot?}` | `{snapshot,page}`，在固定事件水位和到期判断时间读取待审批摘要 |
 | `approval/get` | `{taskId,approvalId}` | `{kind,approval}`，包含指定待审批项的完整请求 |
+| `approval/getBatch` | `{approvals:[{taskId,approvalId},...]}` | [批量读取仍待处理的审批详情](#批量读取待审批详情) |
 | `approval/getDecision` | `{taskId,approvalId}` | 已提交决定对应的 `Event`，用于重连核对 |
 | `approval/getDecisions` | `{approvals:[{taskId,approvalId},...]}` | [按请求顺序读取持久回执](#批量读取审批决定) |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
@@ -509,6 +510,18 @@ SQLite v41 在升级时记录可读取的最早水位，并保留待审批摘要
 `initialize.capabilities.approvalRunReplay` 表示可用 `approval/getRunReplay` 一次取得 `ApprovalRun` 和 `ApprovalRunWindow`。同一 SQLite 语句还返回可传给 `events/list.through` 的 `throughSequence`：执行段已结束时等于 `window.lastSequence`，否则是该任务最新提交的事件序号。`run.task` 仍是当前任务摘要，可反映后续执行段的状态；回放范围由 `window` 和水位决定。调用不写入状态，也不改变订阅。旧 RPC 保持原响应形状，不需要数据库迁移。
 
 `initialize.capabilities.approvalRunPending` 表示可以用 `approval/getRunPending` 按运行读取待审批工具。只有在该审批是运行的结束事件且尚未处理时才返回详情；同一任务后续执行段的审批不会通过旧请求键返回。
+
+#### 批量读取待审批详情
+
+服务声明 `pendingApprovalDetailsBatch:true` 后，可以用 `approval/getBatch` 从同一读事务和同一个到期判断时间读取 1～32 项详情。每个 `taskId` 或 `approvalId` 接受 1～128 个可见 ASCII 字符。`maxApprovalDetailsBatch` 和 `maxApprovalDetailsBatchBytes` 公布项数和字节上限。
+
+```json
+{"jsonrpc":"2.0","id":20,"method":"approval/getBatch","params":{"approvals":[{"taskId":"<task-id>","approvalId":"<approval-id>"}]}}
+```
+
+`items` 与请求逐项对应，保留输入顺序和重复位置。仍待处理的项与 `approval/get` 相同，返回 `{kind,approval}`。找不到、已过期、已关闭或归属任务不匹配的项返回 `null`。整个 `items` 数组的紧凑 JSON 上限是 256 KiB，包括括号、逗号和每个重复项。超限时返回 `-32602`，客户端可以拆小批次，用 `approval/get` 读取单项超大的详情。
+
+Rust 调用方可用 `Client::get_pending_approval_details`。用户做出决定后仍调用 `approval/respond`，由服务按提交时的状态和期限校验。
 
 #### 批量读取审批决定
 

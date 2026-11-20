@@ -1183,3 +1183,44 @@ fn host_ag_ui_model_step_limit_requires_server_support_before_submitting() {
     let (_, sent) = client.into_parts();
     assert_eq!(sent.iter().filter(|&&byte| byte == b'\n').count(), 1);
 }
+
+#[test]
+fn pending_approval_details_reject_misaligned_items_and_keep_the_connection() {
+    use fliuno_protocol::ApprovalGetBatchParams;
+
+    let key = json!({"taskId":"task","approvalId":"approval"});
+    let request: ApprovalGetBatchParams =
+        serde_json::from_value(json!({"approvals":[key,key]})).unwrap();
+    let detail = json!({"kind":"tool_call","approval":{"id":"approval","taskId":"task",
+        "call":{"id":"call","name":"artifact_create","arguments":{}},"authority":null}});
+    let mut foreign = detail.clone();
+    foreign["approval"]["taskId"] = json!("other-task");
+    let mut changed = detail.clone();
+    changed["approval"]["call"]["arguments"] = json!({"title":"changed"});
+    let invalid = [
+        json!({"items":[detail]}),
+        json!({"items":[foreign,foreign]}),
+        json!({"items":[detail,changed]}),
+    ];
+    let valid = json!({"items":[detail,detail]});
+    let mut frames = Vec::new();
+    for (index, result) in invalid.iter().chain(std::iter::once(&valid)).enumerate() {
+        writeln!(
+            frames,
+            "{}",
+            json!({"jsonrpc":"2.0","id":index+2,"result":result})
+        )
+        .unwrap();
+    }
+    let mut client = fake_client(&frames);
+    for _ in invalid {
+        assert!(matches!(
+            client.get_pending_approval_details(&request, |_| {}),
+            Err(Error::InvalidResult)
+        ));
+    }
+    let accepted = client
+        .get_pending_approval_details(&request, |_| {})
+        .unwrap();
+    assert_eq!(serde_json::to_value(accepted).unwrap(), valid);
+}

@@ -114,7 +114,18 @@ pub struct ApprovalGetParams {
     pub approval_id: String,
 }
 
+pub const MAX_APPROVAL_DETAILS_BATCH: usize = 32;
+/// Compact JSON bytes of the items array, including repeated entries.
+pub const MAX_APPROVAL_DETAILS_BATCH_BYTES: usize = 256 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalGetBatchParams {
+    #[schemars(length(min = 1, max = MAX_APPROVAL_DETAILS_BATCH))]
+    pub approvals: Vec<ApprovalDecisionKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ApprovalDetails {
     ToolCall { approval: super::Approval },
@@ -122,7 +133,16 @@ pub enum ApprovalDetails {
     HostTool { approval: super::AgentApproval },
 }
 
-/// Upper bounds for a receipt batch and each of its opaque identifiers.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalGetBatch {
+    /// One item per requested key, preserving order and duplicates. A null item
+    /// means the approval is no longer pending or belongs to another task.
+    #[schemars(length(min = 1, max = MAX_APPROVAL_DETAILS_BATCH))]
+    pub items: Vec<Option<ApprovalDetails>>,
+}
+
+/// Upper bounds for decision receipt batches and shared approval keys.
 pub const MAX_APPROVAL_DECISION_BATCH: usize = 64;
 pub const MAX_APPROVAL_DECISION_ID_BYTES: usize = 128;
 
