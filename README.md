@@ -11,9 +11,9 @@
 
 **面向桌面工作台的本机 Rust Agent 内核。** 当工作台提交一项任务，Fliuno 负责调用模型和工具、等待用户审批，并保存交付物。任务与事件写入 SQLite，客户端断线后可以从上次的游标继续读。
 
-**[快速开始](#快速开始)** · [应用接入](#接入自己的客户端) · [文档中心](docs/README.md) · [内核架构](docs/architecture.md)
+**[快速开始](#快速开始)** · [接入客户端](#接入自己的客户端) · [文档中心](docs/README.md)
 
-[已发布 v0.0.2](CHANGELOG.md#002) · [v0.0.3 开发记录](CHANGELOG.md#003-开发中)
+**版本**　[v0.0.2 发布记录](CHANGELOG.md#002) · [v0.0.3 开发中](CHANGELOG.md#003-开发中)
 
 ## 快速开始
 
@@ -25,7 +25,7 @@
 python examples/demo.py
 ```
 
-演示会在临时数据库中提交任务、批准一次操作，再读取交付物和事件。
+演示使用临时数据库，依次提交任务、批准操作并读取交付物。
 
 ```text
 Task: waiting_approval
@@ -68,4 +68,4 @@ pwsh -NoProfile -File scripts/check.ps1
 
 这条命令检查格式、Clippy、工作区测试、应用协议 Schema 和离线演示。
 
-[内核架构](docs/architecture.md) · [验收与性能记录](docs/execution-evidence.md) · [开发路线图](docs/roadmap.md)
+[内核架构](docs/architecture.md) · [验收与性能](docs/execution-evidence.md) · [版本升级验证](docs/setup.md#版本升级验证) · [开发路线图](docs/roadmap.md)
