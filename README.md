@@ -13,7 +13,7 @@
 
 **[运行离线演示](#快速开始)** · **[文档中心](docs/README.md)** · [内核架构](docs/architecture.md)
 
-开发中：[`0.0.3`](docs/roadmap.md#003-开发中) · 已发布：[`0.0.2`](CHANGELOG.md#002)
+开发中：[`0.0.3` 更新速览](CHANGELOG.md#003-开发中) · [开发路线图](docs/roadmap.md) · 已发布：[`0.0.2`](CHANGELOG.md#002)
 
 ## 快速开始
 
