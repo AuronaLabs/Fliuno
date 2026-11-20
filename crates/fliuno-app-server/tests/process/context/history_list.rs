@@ -1,6 +1,211 @@
 use super::*;
 
 #[test]
+fn session_history_subscription_hands_off_live_events_and_resumes_pages() {
+    use fliuno_client::{Error, SessionHistory};
+    use fliuno_protocol::{EventKind, SessionHistoryEntry, SessionHistorySubscribeParams};
+
+    let root = std::env::temp_dir().join(format!("fliuno-history-live-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let selected = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let other = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    approve_report(&mut peer, &selected, "Excluded prior history", "prior");
+    let after = peer.call("events/getWatermark", json!({}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    let first = approve_report(&mut peer, &selected, "First in this window", "first");
+    let second = approve_report(&mut peer, &selected, "Second in this window", "second");
+    let start = |peer: &mut Peer, session: &Value| {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":"Complete after subscribing"}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval")
+    };
+    let upcoming = start(&mut peer, &selected);
+    let foreign = start(&mut peer, &other);
+    drop(peer);
+
+    let (server, mut client) = super::history_search::connect(&db);
+    assert_eq!(
+        client.info().capabilities["sessionHistorySubscription"],
+        true
+    );
+    assert_eq!(
+        client.info().capabilities["sessionHistoryAfterSequence"],
+        true
+    );
+    let request = SessionHistorySubscribeParams {
+        session_id: selected["id"].as_str().unwrap().to_owned(),
+        after_sequence: Some(after),
+        limit: Some(1),
+        max_bytes: None,
+    };
+    let mut subscription = client
+        .subscribe_session_history(request.clone(), |_| {})
+        .unwrap();
+    let [SessionHistoryEntry::Turn { turn }] = subscription.page.entries.as_slice() else {
+        panic!("expected one compact history turn");
+    };
+    assert_eq!(turn.task_id, second["id"]);
+    let through = subscription.page.through_sequence;
+    assert_eq!(subscription.events.cursor(), through);
+    let checkpoint = serde_json::to_value(subscription.history.next_request().unwrap()).unwrap();
+    assert_eq!(checkpoint["afterSequence"], after);
+    assert_eq!(checkpoint["beforeSequence"], turn.completion_sequence);
+    assert_eq!(checkpoint["throughSequence"], through);
+
+    let rejected = SessionHistorySubscribeParams {
+        session_id: other["id"].as_str().unwrap().to_owned(),
+        after_sequence: Some(through + 1),
+        ..request.clone()
+    };
+    let mut observe = |note| {
+        let _ = subscription.events.observe(note);
+    };
+    assert!(matches!(
+        client.subscribe_session_history(rejected, &mut observe),
+        Err(Error::Rpc { code: -32602, .. })
+    ));
+    for task in [&foreign, &upcoming] {
+        let _: Value = client.call("approval/respond", &json!({"taskId":task["id"],"approvalId":task["pendingApproval"]["id"],"decision":"allow_once"}), &mut observe).unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let live_completion = loop {
+        assert!(
+            Instant::now() < deadline,
+            "live completion did not follow history snapshot"
+        );
+        client
+            .event_watermark(|note| {
+                let _ = subscription.events.observe(note);
+            })
+            .unwrap();
+        let mut completion = None;
+        while let Some(events) = subscription
+            .events
+            .next_page(&mut client, 16, None, |_| {})
+            .unwrap()
+        {
+            for event in events {
+                assert_eq!(event.task_id, upcoming["id"]);
+                assert!(event.sequence > through);
+                if matches!(event.data, EventKind::TaskCompleted { .. }) {
+                    completion = Some(event.sequence);
+                }
+            }
+        }
+        if let Some(sequence) = completion {
+            break sequence;
+        }
+        thread::sleep(Duration::from_millis(5));
+    };
+    drop(client);
+    drop(server);
+
+    let (server, mut client) = super::history_search::connect(&db);
+    let mut history = SessionHistory::new(serde_json::from_value(checkpoint).unwrap());
+    let tail = history.next_page(&mut client, |_| {}).unwrap().unwrap();
+    assert_eq!(tail.through_sequence, through);
+    let [SessionHistoryEntry::Turn { turn }] = tail.entries.as_slice() else {
+        panic!("expected the remaining turn in the original window");
+    };
+    assert_eq!(turn.task_id, first["id"]);
+    assert!(history.next_request().is_none());
+    let delta = client
+        .subscribe_session_history(
+            SessionHistorySubscribeParams {
+                after_sequence: Some(through),
+                ..request.clone()
+            },
+            |_| {},
+        )
+        .unwrap();
+    let [SessionHistoryEntry::Turn { turn }] = delta.page.entries.as_slice() else {
+        panic!("expected just the new completion after restart");
+    };
+    assert_eq!(turn.task_id, upcoming["id"]);
+    assert_eq!(turn.completion_sequence, live_completion);
+    assert!(delta.history.next_request().is_none());
+    assert_eq!(delta.events.cursor(), delta.page.through_sequence);
+    let empty = client
+        .subscribe_session_history(
+            SessionHistorySubscribeParams {
+                after_sequence: Some(delta.page.through_sequence),
+                ..request
+            },
+            |_| {},
+        )
+        .unwrap();
+    assert!(empty.page.entries.is_empty());
+    assert!(empty.history.next_request().is_none());
+    drop(client);
+    drop(server);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_history_subscription_orders_batch_response_before_scoped_notifications() {
+    let root = std::env::temp_dir().join(format!("fliuno-history-batch-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let mut peer = Peer::start(&root.join("kernel.db"));
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let selected = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let other = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let [included, excluded] = [&selected, &other].map(|session| {
+        let task = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":"Report"}),
+        );
+        peer.wait_for_status(task["id"].as_str().unwrap(), "waiting_approval")
+    });
+    let through = peer.call("events/getWatermark", json!({}))["throughSequence"]
+        .as_u64()
+        .unwrap();
+    let first_id = peer.id + 1;
+    peer.id += 2;
+    writeln!(peer.input, "{}", json!([
+        {"jsonrpc":"2.0","id":first_id,"method":"session/subscribeHistory","params":{"sessionId":selected["id"]}},
+        {"jsonrpc":"2.0","id":first_id+1,"method":"session/subscribeHistory","params":{"sessionId":other["id"],"maxBytes":1023}},
+        {"jsonrpc":"2.0","method":"task/cancel","params":{"taskId":excluded["id"]}},
+        {"jsonrpc":"2.0","method":"task/cancel","params":{"taskId":included["id"]}}
+    ])).unwrap();
+    peer.input.flush().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let reply = loop {
+        let frame = peer
+            .output
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .unwrap();
+        if frame.is_array() {
+            break frame;
+        }
+        assert_ne!(frame["method"], "notifications/eventWatermark");
+    };
+    assert_eq!(reply[0]["id"], first_id);
+    assert_eq!(
+        reply[0]["result"],
+        json!({"entries":[],"throughSequence":through,"nextBeforeSequence":null})
+    );
+    assert_eq!(reply[1]["error"]["code"], -32602);
+    let frame = peer
+        .output
+        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .unwrap();
+    assert_eq!(frame["method"], "notifications/eventWatermark");
+    let sequence = frame["params"]["throughSequence"].as_u64().unwrap();
+    assert!(sequence > through);
+    let event = peer.call("events/get", json!({"sequence":sequence}));
+    assert_eq!(event["taskId"], included["id"]);
+    assert_eq!(event["data"]["type"], "task_cancelled");
+    drop(peer);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn pages_actual_completions_after_restart() {
     let root = std::env::temp_dir().join(format!("fliuno-history-list-{}", uuid::Uuid::new_v4()));
     fs::create_dir(&root).unwrap();

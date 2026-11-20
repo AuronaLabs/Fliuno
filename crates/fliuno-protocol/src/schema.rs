@@ -32,6 +32,7 @@ pub fn schema_bundle() -> Value {
         "session/list" => schema::<SessionListParams>(),
         "session/context" => schema::<SessionContextParams>(),
         "session/listHistory" => schema::<SessionHistoryListParams>(),
+        "session/subscribeHistory" => schema::<SessionHistorySubscribeParams>(),
         "session/getHistoryTurn" => schema::<SessionHistoryGetParams>(),
         "session/searchHistory" => schema::<SessionHistorySearchParams>(),
         "terminal/list" => schema::<TerminalListParams>(),

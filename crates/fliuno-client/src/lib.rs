@@ -20,7 +20,7 @@ mod work;
 pub use approval_inbox::ApprovalInbox;
 pub use artifact_catalog::{ArtifactCatalog, ArtifactSubscription};
 pub use feed::EventFeed;
-pub use history::SessionHistory;
+pub use history::{SessionHistory, SessionHistorySubscription};
 pub use history_search::{HistorySearch, HistorySearchRequest};
 pub use replay::{EventReplay, ModelUsageScope, ReplayScope};
 pub use session_catalog::SessionCatalog;
@@ -57,6 +57,10 @@ pub enum Error {
     InvalidReplayPage,
     #[error("invalid conversation history page")]
     InvalidHistoryPage,
+    #[error("server does not support a lower bound for session history")]
+    UnsupportedSessionHistoryAfterSequence,
+    #[error("server does not support session history subscriptions")]
+    UnsupportedSessionHistorySubscription,
     #[error("server does not support a lower bound for history search")]
     UnsupportedHistorySearchAfterSequence,
     #[error(

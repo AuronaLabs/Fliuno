@@ -178,6 +178,9 @@ pub struct SessionHistoryListParams {
     /// Global event watermark. Required when continuing a page.
     #[serde(default)]
     pub through_sequence: Option<u64>,
+    /// Exclusive lower bound, preserved on every continuation page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_sequence: Option<u64>,
     /// Exclusive completion cursor returned by the previous page.
     #[serde(default)]
     pub before_sequence: Option<u64>,
@@ -187,6 +190,32 @@ pub struct SessionHistoryListParams {
     /// Compact JSON byte limit for the entries array. Defaults to 64 KiB.
     #[serde(default)]
     pub max_bytes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SessionHistorySubscribeParams {
+    pub session_id: String,
+    /// A previous fully consumed history watermark, exclusive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_sequence: Option<u64>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub max_bytes: Option<u32>,
+}
+
+impl From<SessionHistorySubscribeParams> for SessionHistoryListParams {
+    fn from(request: SessionHistorySubscribeParams) -> Self {
+        Self {
+            session_id: request.session_id,
+            through_sequence: None,
+            after_sequence: request.after_sequence,
+            before_sequence: None,
+            limit: request.limit,
+            max_bytes: request.max_bytes,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

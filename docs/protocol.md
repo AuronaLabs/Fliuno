@@ -93,7 +93,8 @@ staged.sync_all()?;
 | `session/setArchived` | `{sessionId,archived}` | 设置持久归档标记并返回 Session |
 | `session/setArchivedBatch` | `{sessionIds,archived}` | 原子更新 1..32 个会话，并按请求顺序返回 Session |
 | `session/context` | `{sessionId,throughSequence?,options?:{mode?,maxTurns?,maxBytes?,selection?,detail?,taskIds?}}` | TaskContext，预览指定序号的历史 |
-| `session/listHistory` | `{sessionId,throughSequence?,beforeSequence?,limit?,maxBytes?}` | SessionHistoryListPage，按完成序号倒序分页读取精简对话。见[会话历史分页](context.md#会话历史分页)。 |
+| `session/listHistory` | `{sessionId,afterSequence?,throughSequence?,beforeSequence?,limit?,maxBytes?}` | `SessionHistoryListPage`，按完成序号倒序分页读取精简对话。见[会话历史分页](context.md#会话历史分页)。 |
+| `session/subscribeHistory` | `{sessionId,afterSequence?,limit?,maxBytes?}` | `SessionHistoryListPage`，返回历史首页并切换到同会话的事件水位订阅。见[订阅会话历史](context.md#订阅会话历史)。 |
 | `session/getHistoryTurn` | `{sessionId,taskId,throughSequence?,maxBytes?}` | `SessionHistoryEntry`，直接读一条对话或返回超限引用。见[打开搜索命中](context.md#打开一条历史记录)。 |
 | `session/searchHistory` | `{sessionId,query,role?,throughSequence?,beforeSequence?,limit?,scanLimit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, maxModelSteps?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |

@@ -172,6 +172,7 @@ fn rust_client_can_pair_notifications_and_resolve_approval_over_stdio() {
     let mut history = SessionHistory::new(fliuno_protocol::SessionHistoryListParams {
         session_id: session.id.clone(),
         through_sequence: None,
+        after_sequence: None,
         before_sequence: None,
         limit: Some(1),
         max_bytes: Some(262_144),

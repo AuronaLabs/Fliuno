@@ -99,6 +99,18 @@ SQLite v22 从已完成记录回填精简投影。只有包含工具或宿主操
 
 Rust 客户端可将 `SessionHistoryListParams` 交给 `fliuno_client::SessionHistory::new`，逐次调用 `next_page`。持久化已消费记录时一并保存 `next_request()`，重连后把保存的参数交给同一构造函数即可续读。客户端核对水位、完成顺序和续页游标，请求失败时保留原参数。`through()` 提供固定水位，可用于从该位置补读新提交的会话事件。
 
+服务声明 `sessionHistoryAfterSequence: true` 时，`session/listHistory` 可用 `afterSequence` 排除指定水位及以前的完成记录。下界等于 `throughSequence` 时返回空页，大于它返回 `-32602`；续页的 `beforeSequence` 必须大于下界，且不超过 `throughSequence`。读取后续页时上下界都保持不变。
+
+### 订阅会话历史
+
+服务声明 `sessionHistorySubscription: true` 时，一次调用 `session/subscribeHistory` 即可读取历史首页并切换本连接的会话事件水位订阅。它支持 `sessionId`、`afterSequence`、`limit`、`maxBytes`，返回与 `session/listHistory` 相同的页结构。服务在同一个提交锁下读取首页并挂接订阅；参数不合法或会话不存在时不切换。收到响应前的通知仍属于旧订阅。
+
+```json
+{"jsonrpc":"2.0","id":6,"method":"session/subscribeHistory","params":{"sessionId":"<session-id>","afterSequence":320,"limit":16}}
+```
+
+Rust 的 `Client::subscribe_session_history` 返回 `SessionHistorySubscription { page, history, events }`。用 `history.next_page()` 读完固定的历史窗口；把之后收到的通知交给 `events.observe()`，再用 `events.next_page()` 从 `page.throughSequence` 之后补读事件，包括 `task_completed`。实时事件的消费游标与历史续页参数分别保存；只需要补齐对话记录时，可以用上个完整历史窗口的 `throughSequence` 作为下次订阅的 `afterSequence`。旧服务可分开读历史并[从快照水位补读会话事件](protocol.md#实时预览与事件通知)。
+
 ## 打开一条历史记录
 
 按关键词查找时，先用 [`session/searchHistory` 或 `workspace/searchHistory`](protocol.md#查找历史任务) 获得任务 ID 和完成序号。服务声明 `sessionHistoryGet` 后，客户端可以按命中直接读取对话，无需翻过前面的历史页。 稀疏搜索可按服务能力调大 `scanLimit`，减少翻过空页的往返；小窗口也可限制单次扫描，原游标仍能续用。

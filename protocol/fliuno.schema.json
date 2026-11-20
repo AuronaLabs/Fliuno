@@ -633,6 +633,15 @@
           "minimum": 0,
           "default": null
         },
+        "afterSequence": {
+          "description": "Exclusive lower bound, preserved on every continuation page.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "beforeSequence": {
           "description": "Exclusive completion cursor returned by the previous page.",
           "type": [
@@ -655,6 +664,47 @@
         },
         "maxBytes": {
           "description": "Compact JSON byte limit for the entries array. Defaults to 64 KiB.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "session/subscribeHistory": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionHistorySubscribeParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "afterSequence": {
+          "description": "A previous fully consumed history watermark, exclusive.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "limit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
+        "maxBytes": {
           "type": [
             "integer",
             "null"

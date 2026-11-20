@@ -56,11 +56,17 @@ impl Kernel {
                 "throughSequence exceeds the current event sequence".into(),
             ));
         }
+        let after = request.after_sequence.unwrap_or(0);
+        if after > through_sequence {
+            return Err(Error::Invalid(
+                "afterSequence exceeds throughSequence".into(),
+            ));
+        }
         let upper = match request.before_sequence {
-            Some(before) if before > 0 && before <= through_sequence => before - 1,
+            Some(before) if before > after && before <= through_sequence => before - 1,
             Some(_) => {
                 return Err(Error::Invalid(
-                    "beforeSequence must be within throughSequence".into(),
+                    "beforeSequence must be above afterSequence and within throughSequence".into(),
                 ));
             }
             None => through_sequence,
@@ -69,7 +75,7 @@ impl Kernel {
         let projection =
             conversation_projection("?3", ", s.task_id, s.sequence", "session_turns s");
         let sql = format!(
-            "{projection} WHERE s.session_id=?1 AND s.sequence<=?2 ORDER BY s.sequence DESC LIMIT ?4"
+            "{projection} WHERE s.session_id=?1 AND s.sequence<=?2 AND s.sequence>?5 ORDER BY s.sequence DESC LIMIT ?4"
         );
         let mut statement = self.db.prepare_cached(&sql)?;
         let mut rows = statement.query(params![
@@ -77,6 +83,7 @@ impl Kernel {
             validate_event_cursor(upper)?,
             max_bytes,
             limit + 1,
+            validate_event_cursor(after)?,
         ])?;
         let mut page = SessionHistoryListPage {
             through_sequence,

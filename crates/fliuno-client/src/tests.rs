@@ -295,6 +295,7 @@ fn history_checkpoint_retries_invalid_pages_without_skipping_entries() {
     let mut history = SessionHistory::new(SessionHistoryListParams {
         session_id: "session".into(),
         through_sequence: None,
+        after_sequence: None,
         before_sequence: None,
         limit: Some(1),
         max_bytes: Some(1024),

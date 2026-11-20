@@ -193,6 +193,27 @@ impl RpcServer {
         Ok(snapshot)
     }
 
+    fn subscribe_history(
+        &mut self,
+        request: SessionHistorySubscribeParams,
+    ) -> Result<SessionHistoryListPage, RpcError> {
+        let scope = EventScope::Session(request.session_id.clone());
+        let (page, receiver) = {
+            // Keep the commit lock until the receiver is registered. Failed
+            // history requests leave the previous subscription in place.
+            let kernel = self.kernel()?;
+            let page = kernel.list_session_history(&request.into())?;
+            let receiver = kernel.subscribe_event_watermarks(scope.clone())?;
+            (page, receiver)
+        };
+        self.install_event_delivery(
+            scope,
+            page.through_sequence,
+            EventDelivery::Watermarks(receiver),
+        );
+        Ok(page)
+    }
+
     fn subscribe_artifacts(
         &mut self,
         request: ArtifactCatalogParams,
@@ -440,6 +461,8 @@ impl RpcServer {
             capabilities["maxTaskCancelBatch"] = json!(MAX_TASK_CANCEL_BATCH);
             capabilities["taskSummaryByRequest"] = json!(true);
             capabilities["sessionHistoryList"] = json!(true);
+            capabilities["sessionHistoryAfterSequence"] = json!(true);
+            capabilities["sessionHistorySubscription"] = json!(true);
             capabilities["sessionHistoryGet"] = json!(true);
             capabilities["maxSessionHistoryBytes"] = json!(MAX_SESSION_HISTORY_BYTES);
             capabilities["maxSessionHistoryEntries"] = json!(MAX_SESSION_HISTORY_ENTRIES);
@@ -735,6 +758,10 @@ impl RpcServer {
             "session/listHistory" => {
                 let p: SessionHistoryListParams = decode(params)?;
                 json!(self.kernel()?.list_session_history(&p)?)
+            }
+            "session/subscribeHistory" => {
+                let p: SessionHistorySubscribeParams = decode(params)?;
+                json!(self.subscribe_history(p)?)
             }
             "session/getHistoryTurn" => {
                 let p: SessionHistoryGetParams = decode(params)?;
