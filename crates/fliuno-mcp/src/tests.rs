@@ -45,6 +45,132 @@ impl ServerHandler for Fixture {
     }
 }
 
+struct MrtrFixture {
+    calls: Arc<AtomicUsize>,
+}
+
+impl ServerHandler for MrtrFixture {
+    fn get_info(&self) -> ServerConfig {
+        let mut config = Fixture {
+            delay: Duration::ZERO,
+        }
+        .get_info();
+        config.protocol_version = rmcp::model::ProtocolVersion::V_2026_07_28;
+        config
+    }
+
+    async fn list_tools(
+        &self,
+        request: Option<PaginatedRequestParams>,
+        context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Fixture {
+            delay: Duration::ZERO,
+        }
+        .list_tools(request, context)
+        .await
+    }
+
+    async fn call_tool(
+        &self,
+        _request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let required = serde_json::from_value::<rmcp::model::InputRequiredResult>(json!({
+            "resultType":"input_required",
+            "inputRequests":{
+                "user-input":{
+                    "method":"elicitation/create",
+                    "params":{
+                        "mode":"form",
+                        "message":"Enter a short confirmation code",
+                        "requestedSchema":{
+                            "type":"object",
+                            "properties":{"code":{"type":"string"}},
+                            "required":["code"]
+                        }
+                    }
+                }
+            },
+            "requestState":"opaque-state"
+        }))
+        .unwrap();
+        Ok(required.into())
+    }
+}
+
+#[test]
+fn mrtr_input_required_is_unknown_and_never_replayed() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let runtime = Runtime::new().unwrap();
+    let (service, tools) = runtime.block_on(async {
+        let (client_io, server_io) = tokio::io::duplex(16384);
+        let client = client_config();
+        let client_peer_info = client.clone();
+        let server_peer_info = MrtrFixture {
+            calls: Arc::clone(&calls),
+        }
+        .get_info();
+        tokio::spawn({
+            let calls = Arc::clone(&calls);
+            async move {
+                rmcp::service::serve_directly::<RoleServer, _, _, _, _>(
+                    MrtrFixture { calls },
+                    server_io,
+                    Some(client_peer_info),
+                )
+                .waiting()
+                .await
+                .unwrap();
+            }
+        });
+        let service = rmcp::service::serve_directly::<rmcp::service::RoleClient, _, _, _, _>(
+            client,
+            client_io,
+            Some(server_peer_info.into()),
+        );
+        let tools = service.list_all_tools().await.unwrap();
+        (service, tools)
+    });
+    let host = Arc::new(Host {
+        authority: authority_digest_for_fixture(),
+        service: Mutex::new(service),
+        runtime,
+        timeout: TIMEOUT,
+    });
+    let tools = wrap_tools(host, "fixture", tools, None, false).unwrap();
+    let tool = &tools[0];
+    let context = ToolContext {
+        session_id: "session_test",
+        task_id: "task",
+        workspace: &fliuno_protocol::Workspace {
+            id: "ws".into(),
+            root: "unused".into(),
+        },
+    };
+    let call = ToolCall {
+        id: "call".into(),
+        name: tool.spec().name,
+        arguments: json!({"text":"needs input"}),
+    };
+
+    let first = tool.execute(&context, &call, &CancellationToken::new());
+    let observed = first
+        .as_ref()
+        .err()
+        .map_or_else(|| "unexpected success".to_owned(), ToString::to_string);
+    assert!(
+        matches!(&first, Err(ToolError::OutcomeUnknown(message)) if message.contains("continuation")),
+        "unexpected first result: {observed}"
+    );
+    assert!(matches!(
+        tool.execute(&context, &call, &CancellationToken::new()),
+        Err(ToolError::Failed(message)) if message.contains("host is closed")
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
 #[test]
 fn sdk_discovery_validation_and_execution_roundtrip() {
     let runtime = Runtime::new().unwrap();

@@ -47,6 +47,8 @@ HTTP `lifecycle` 默认 `auto`：首先使用 `2026-07-28` 的 `server/discover`
 - 请求发出后的网络错误、超时、取消、协议失败、HTTP 超限响应及目前不支持的 MRTR 多轮 continuation 都按结果未知处理，并关闭共享主机。内核保留 `inFlightTool`，重启不会重新发送该调用。协议层完整结果在序列化后超过工具输出预算也保留未知标记。
 - `isError: true` 是一个完整的 MCP 工具结果，并不代表 HTTP/JSON-RPC 传输失败。
 
+> **MRTR 续接边界**：收到 `input_required` 时，Fliuno 当前将调用记为结果未知并关闭该 host，不会自动补答或再次发送。核心工具执行还没有可持久化的暂停与恢复状态；接入续接前，需要让原获批调用在用户补答后恢复，并保留原审批、请求参数和不透明的 `requestState`。
+
 ## MCP Tasks
 
 客户端声明 `io.modelcontextprotocol/tasks` 能力。仅当远端在 `2026-07-28` 或更新协议中声明同一扩展时，才注册 Tasks 工具。`tools/call` 返回 `resultType:"task"` 时，Fliuno 将其任务句柄作为该工具的已知结果写入本地任务记录；不支持的对端仍按未知结果处理。
