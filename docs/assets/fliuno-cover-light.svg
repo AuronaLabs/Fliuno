@@ -1,33 +1,42 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="292" viewBox="0 0 1120 292" role="img" aria-labelledby="title desc">
-  <title id="title">Fliuno | Local agent kernel</title>
-  <desc id="desc">A local task trace: submit a task, review the approval, and collect the saved deliverable.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="330" viewBox="0 0 1120 330" role="img" aria-labelledby="title desc">
+  <title id="title">Fliuno</title>
+  <desc id="desc">A local Rust agent kernel. A task is submitted, approved and saved as a deliverable.</desc>
   <defs>
-    <clipPath id="frame"><rect x="0.5" y="0.5" width="1119" height="291" rx="23" fill="#f1f7f3" stroke="none"/></clipPath>
-    <pattern id="grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#d4e4dc"/></pattern>
+    <linearGradient id="paper" x1="0%" y1="10%" x2="100%" y2="95%">
+      <stop stop-color="#f7faf6"/>
+      <stop offset="1" stop-color="#e8f3ed"/>
+    </linearGradient>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#60877b" opacity=".38"/>
+    </pattern>
+    <clipPath id="frame"><rect width="1120" height="330" rx="24"/></clipPath>
   </defs>
   <g clip-path="url(#frame)">
-    <rect x="0" y="0" width="1120" height="292" rx="23" fill="#f1f7f3" stroke="none"/>
-    <rect x="560" y="0" width="560" height="292" rx="0" fill="url(#grid)" stroke="none"/>
-    <g transform="translate(56 45)"><rect x="0" y="0" width="34" height="34" rx="9" fill="#1b6e54" stroke="none"/><path d="M9 25V13l4-4h12M9 17h10" fill="none" stroke="#f1f7f3" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24.5" cy="17" r="1.7" fill="#f1f7f3"/></g>
-    <text x="104" y="67" font-family="'Cascadia Mono', Consolas, monospace" font-size="13" fill="#1b6e54" font-weight="650" letter-spacing="1.4" text-anchor="start">LOCAL AGENT KERNEL</text>
-    <text x="51" y="173" font-family="system-ui, 'Segoe UI', sans-serif" font-size="104" fill="#172c26" font-weight="780" letter-spacing="0" text-anchor="start">Fliuno</text>
-    <text x="56" y="215" font-family="system-ui, 'Segoe UI', sans-serif" font-size="27" fill="#466158" font-weight="500" letter-spacing="0" text-anchor="start">From task to deliverable.</text>
-    <g transform="translate(544 45)">
-    <rect x="0" y="0" width="520" height="201" rx="10" fill="#fbfdfa" stroke="#b3c9be"/>
-    <text x="24" y="29" font-family="'Cascadia Mono', Consolas, monospace" font-size="12" fill="#466158" font-weight="650" letter-spacing="1.3" text-anchor="start">TASK TRACE</text>
-    <text x="496" y="29" font-family="'Cascadia Mono', Consolas, monospace" font-size="12" fill="#466158" font-weight="650" letter-spacing="0" text-anchor="end">LOCAL RUN</text>
-    <path d="M24 56H496" fill="none" stroke="#b3c9be" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M29 75v84" fill="none" stroke="#b3c9be" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <rect x="24" y="70" width="10" height="10" rx="3" fill="#466158" stroke="none"/>
-    <text x="48" y="80" font-family="system-ui, 'Segoe UI', sans-serif" font-size="20" fill="#172c26" font-weight="650" letter-spacing="0" text-anchor="start">Task submitted</text>
-    <text x="496" y="79" font-family="'Cascadia Mono', Consolas, monospace" font-size="15" fill="#466158" font-weight="650" letter-spacing="0" text-anchor="end">task/start</text>
-    <rect x="24" y="112" width="10" height="10" rx="3" fill="#8a471c" stroke="none"/>
-    <text x="48" y="122" font-family="system-ui, 'Segoe UI', sans-serif" font-size="20" fill="#172c26" font-weight="650" letter-spacing="0" text-anchor="start">Approval required</text>
-    <text x="496" y="121" font-family="'Cascadia Mono', Consolas, monospace" font-size="15" fill="#8a471c" font-weight="650" letter-spacing="0" text-anchor="end">waiting_approval</text>
-    <rect x="24" y="154" width="10" height="10" rx="3" fill="#1b6e54" stroke="none"/>
-    <text x="48" y="164" font-family="system-ui, 'Segoe UI', sans-serif" font-size="20" fill="#172c26" font-weight="650" letter-spacing="0" text-anchor="start">Deliverable saved</text>
-    <text x="496" y="163" font-family="'Cascadia Mono', Consolas, monospace" font-size="15" fill="#1b6e54" font-weight="650" letter-spacing="0" text-anchor="end">completed</text>
-    </g>
+    <rect width="1120" height="330" fill="url(#paper)"/>
+    <rect x="559" width="561" height="330" fill="url(#grid)"/>
+    <path d="M509 330h42l170-170h1120" fill="none" stroke="#afc9bf" opacity=".5"/>
+    <g transform="translate(54 42)">
+  <rect width="36" height="36" rx="10" fill="#18664f"/>
+  <path d="M10 26V14l4-4h12M10 18h10" fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="25" cy="18" r="1.7" fill="#ffffff"/>
+</g>
+    <text x="104" y="65" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="650" letter-spacing="1.35" fill="#18664f">RUST  /  LOCAL EXECUTION</text>
+    <text x="51" y="180" font-family="system-ui, Segoe UI, sans-serif" font-size="92" font-weight="740" letter-spacing="-4.5" fill="#12302c">Fliuno</text>
+    <text x="54" y="224" font-family="system-ui, Segoe UI, sans-serif" font-size="29" font-weight="540" letter-spacing="0" fill="#435f58">Agent kernel for workspaces</text>
+    <g transform="translate(566 72)">
+  <rect width="497" height="190" rx="16" fill="#ffffff" stroke="#afc9bf"/>
+  <text x="22" y="29" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="650" letter-spacing="1.8" fill="#435f58">TASK TIMELINE</text>
+  <path d="M22 43H475M27 61V163" fill="none" stroke="#cfdfd7" stroke-width="1.5"/>
+  <circle cx="27" cy="61" r="5" fill="#18664f"/>
+<text x="48" y="67" font-family="system-ui, Segoe UI, sans-serif" font-size="21" font-weight="650" letter-spacing="0" fill="#12302c">Task submitted</text>
+<text x="282" y="67" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="500" letter-spacing="0" fill="#18664f">task/start</text>
+<circle cx="27" cy="112" r="5" fill="#874521"/>
+<text x="48" y="118" font-family="system-ui, Segoe UI, sans-serif" font-size="21" font-weight="650" letter-spacing="0" fill="#12302c">Approval required</text>
+<text x="282" y="118" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="500" letter-spacing="0" fill="#874521">waiting_approval</text>
+<circle cx="27" cy="163" r="5" fill="#18664f"/>
+<text x="48" y="169" font-family="system-ui, Segoe UI, sans-serif" font-size="21" font-weight="650" letter-spacing="0" fill="#12302c">Deliverable saved</text>
+<text x="282" y="169" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="500" letter-spacing="0" fill="#18664f">completed</text>
+</g>
   </g>
-  <rect x="0.5" y="0.5" width="1119" height="291" rx="23" fill="none" stroke="#b3c9be"/>
+  <rect x=".5" y=".5" width="1119" height="329" rx="23.5" fill="none" stroke="#afc9bf"/>
 </svg>

@@ -1,24 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="140" viewBox="0 0 1120 140" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="172" viewBox="0 0 1120 172" role="img" aria-labelledby="title desc">
   <title id="title">Fliuno handbook</title>
-  <desc id="desc">Three reading paths: quickstart, integration, and kernel development.</desc>
+  <desc id="desc">Quickstart, integration and kernel documentation.</desc>
   <defs>
-    <clipPath id="frame"><rect x="0.5" y="0.5" width="1119" height="139" rx="23" fill="#121b1a" stroke="none"/></clipPath>
-    <pattern id="grid" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#314440"/></pattern>
+    <linearGradient id="paper" x1="0%" y1="10%" x2="100%" y2="95%">
+      <stop stop-color="#0d1b1d"/>
+      <stop offset="1" stop-color="#17302f"/>
+    </linearGradient>
+    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#6e9990" opacity=".38"/>
+    </pattern>
+    <clipPath id="frame"><rect width="1120" height="172" rx="24"/></clipPath>
   </defs>
   <g clip-path="url(#frame)">
-    <rect x="0" y="0" width="1120" height="140" rx="23" fill="#121b1a" stroke="none"/>
-    <rect x="560" y="0" width="560" height="140" rx="0" fill="url(#grid)" stroke="none"/>
-    <g transform="translate(56 53)"><rect x="0" y="0" width="34" height="34" rx="9" fill="#a4e8c8" stroke="none"/><path d="M9 25V13l4-4h12M9 17h10" fill="none" stroke="#121b1a" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24.5" cy="17" r="1.7" fill="#121b1a"/></g>
-    <text x="104" y="45" font-family="'Cascadia Mono', Consolas, monospace" font-size="12" fill="#a4e8c8" font-weight="650" letter-spacing="1.4" text-anchor="start">FLIUNO / DOCS</text>
-    <text x="104" y="89" font-family="system-ui, 'Segoe UI', sans-serif" font-size="48" fill="#f0f8f4" font-weight="750" letter-spacing="0" text-anchor="start">Handbook</text>
-    <path d="M615 70H929M719 70v-32H929M719 70v32H929" fill="none" stroke="#3a504b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <rect x="611" y="66" width="8" height="8" rx="2" fill="#a4e8c8" stroke="none"/>
-    <rect x="926" y="35" width="6" height="6" rx="2" fill="#a4e8c8" stroke="none"/>
-    <text x="944" y="43" font-family="'Cascadia Mono', Consolas, monospace" font-size="13" fill="#a4e8c8" font-weight="650" letter-spacing="0" text-anchor="start">01  QUICKSTART</text>
-    <rect x="926" y="67" width="6" height="6" rx="2" fill="#ffca9e" stroke="none"/>
-    <text x="944" y="75" font-family="'Cascadia Mono', Consolas, monospace" font-size="13" fill="#ffca9e" font-weight="650" letter-spacing="0" text-anchor="start">02  INTEGRATE</text>
-    <rect x="926" y="99" width="6" height="6" rx="2" fill="#b2c6bf" stroke="none"/>
-    <text x="944" y="107" font-family="'Cascadia Mono', Consolas, monospace" font-size="13" fill="#b2c6bf" font-weight="650" letter-spacing="0" text-anchor="start">03  KERNEL</text>
+    <rect width="1120" height="172" fill="url(#paper)"/>
+    <rect x="500" width="620" height="172" fill="url(#grid)"/>
+    <g transform="translate(54 33)">
+  <rect width="36" height="36" rx="10" fill="#9ce9cd"/>
+  <path d="M10 26V14l4-4h12M10 18h10" fill="none" stroke="#112c26" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="25" cy="18" r="1.7" fill="#112c26"/>
+</g>
+    <text x="104" y="56" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="650" letter-spacing="1.35" fill="#9ce9cd">FLIUNO DOCUMENTATION</text>
+    <text x="52" y="122" font-family="system-ui, Segoe UI, sans-serif" font-size="56" font-weight="740" letter-spacing="-2.5" fill="#f0f8f5">Handbook</text>
+    <path d="M527 53H548V88H1028" fill="none" stroke="#3a5351" stroke-width="1.5"/>
+    <circle cx="571" cy="88" r="5" fill="#9ce9cd"/>
+<rect x="581" y="72" width="112" height="32" rx="8" fill="#132728" stroke="#304a47"/>
+<text x="592" y="94" font-family="system-ui, Segoe UI, sans-serif" font-size="16" font-weight="630" letter-spacing="0" fill="#f0f8f5">Quickstart</text>
+<circle cx="732" cy="88" r="5" fill="#ffc697"/>
+<rect x="742" y="72" width="112" height="32" rx="8" fill="#132728" stroke="#304a47"/>
+<text x="753" y="94" font-family="system-ui, Segoe UI, sans-serif" font-size="16" font-weight="630" letter-spacing="0" fill="#f0f8f5">Integration</text>
+<circle cx="903" cy="88" r="5" fill="#b7cec8"/>
+<rect x="913" y="72" width="112" height="32" rx="8" fill="#132728" stroke="#304a47"/>
+<text x="924" y="94" font-family="system-ui, Segoe UI, sans-serif" font-size="16" font-weight="630" letter-spacing="0" fill="#f0f8f5">Kernel</text>
   </g>
-  <rect x="0.5" y="0.5" width="1119" height="139" rx="23" fill="none" stroke="#3a504b"/>
+  <rect x=".5" y=".5" width="1119" height="171" rx="23.5" fill="none" stroke="#3a5351"/>
 </svg>
