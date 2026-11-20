@@ -1,36 +1,36 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="172" viewBox="0 0 1120 172" role="img" aria-labelledby="title desc">
-  <title id="title">Fliuno handbook</title>
-  <desc id="desc">Quickstart, integration and kernel documentation.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="162" viewBox="0 0 1120 162" role="img" aria-labelledby="title desc">
+  <title id="title">Fliuno 文档中心</title>
+  <desc id="desc">离线体验、客户端接入和内核开发。</desc>
   <defs>
     <linearGradient id="paper" x1="0%" y1="10%" x2="100%" y2="95%">
       <stop stop-color="#0d1b1d"/>
       <stop offset="1" stop-color="#17302f"/>
     </linearGradient>
     <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-      <circle cx="2" cy="2" r="1" fill="#6e9990" opacity=".38"/>
+      <circle cx="2" cy="2" r="1" fill="#6e9990" opacity=".25"/>
     </pattern>
-    <clipPath id="frame"><rect width="1120" height="172" rx="24"/></clipPath>
+    <clipPath id="frame"><rect width="1120" height="162" rx="24"/></clipPath>
   </defs>
   <g clip-path="url(#frame)">
-    <rect width="1120" height="172" fill="url(#paper)"/>
-    <rect x="500" width="620" height="172" fill="url(#grid)"/>
-    <g transform="translate(54 33)">
+    <rect width="1120" height="162" fill="url(#paper)"/>
+    <rect x="455" width="665" height="162" fill="url(#grid)"/>
+    <g transform="translate(54 29)">
       <rect width="36" height="36" rx="10" fill="#9ce9cd"/>
       <path d="M10 26V14l4-4h12M10 18h10" fill="none" stroke="#112c26" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
       <circle cx="25" cy="18" r="1.7" fill="#112c26"/>
     </g>
-    <text x="104" y="56" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="15" font-weight="650" letter-spacing="1.35" fill="#9ce9cd">FLIUNO DOCUMENTATION</text>
-    <text x="52" y="122" font-family="system-ui, Segoe UI, sans-serif" font-size="56" font-weight="740" letter-spacing="-2.5" fill="#f0f8f5">Handbook</text>
-    <path d="M527 53H548V88H1028" fill="none" stroke="#3a5351" stroke-width="1.5"/>
-    <circle cx="571" cy="88" r="5" fill="#9ce9cd"/>
-    <rect x="581" y="72" width="112" height="32" rx="8" fill="#132728" stroke="#304a47"/>
-    <text x="592" y="94" font-family="system-ui, Segoe UI, sans-serif" font-size="16" font-weight="630" letter-spacing="0" fill="#f0f8f5">Quickstart</text>
-    <circle cx="732" cy="88" r="5" fill="#ffc697"/>
-    <rect x="742" y="72" width="112" height="32" rx="8" fill="#132728" stroke="#304a47"/>
-    <text x="753" y="94" font-family="system-ui, Segoe UI, sans-serif" font-size="16" font-weight="630" letter-spacing="0" fill="#f0f8f5">Integration</text>
-    <circle cx="903" cy="88" r="5" fill="#b7cec8"/>
-    <rect x="913" y="72" width="112" height="32" rx="8" fill="#132728" stroke="#304a47"/>
-    <text x="924" y="94" font-family="system-ui, Segoe UI, sans-serif" font-size="16" font-weight="630" letter-spacing="0" fill="#f0f8f5">Kernel</text>
+    <text x="104" y="52" font-family="ui-monospace, Cascadia Mono, Consolas, monospace" font-size="16" font-weight="650" letter-spacing="2" fill="#9ce9cd">FLIUNO</text>
+    <text x="52" y="116" font-family="system-ui, Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="42" font-weight="700" letter-spacing="0" fill="#f0f8f5">文档中心</text>
+    <path d="M523 48V80H1066" fill="none" stroke="#3a5351" stroke-width="1.5"/>
+    <circle cx="561" cy="80" r="5" fill="#9ce9cd"/>
+    <rect x="575" y="59" width="142" height="42" rx="9" fill="#132728" stroke="#304a47"/>
+    <text x="590" y="88" font-family="system-ui, Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="600" letter-spacing="0" fill="#f0f8f5">离线体验</text>
+    <circle cx="729" cy="80" r="5" fill="#ffc697"/>
+    <rect x="743" y="59" width="142" height="42" rx="9" fill="#132728" stroke="#304a47"/>
+    <text x="758" y="88" font-family="system-ui, Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="600" letter-spacing="0" fill="#f0f8f5">客户端接入</text>
+    <circle cx="897" cy="80" r="5" fill="#b7cec8"/>
+    <rect x="911" y="59" width="142" height="42" rx="9" fill="#132728" stroke="#304a47"/>
+    <text x="926" y="88" font-family="system-ui, Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="600" letter-spacing="0" fill="#f0f8f5">内核开发</text>
   </g>
-  <rect x=".5" y=".5" width="1119" height="171" rx="23.5" fill="none" stroke="#3a5351"/>
+  <rect x=".5" y=".5" width="1119" height="161" rx="23.5" fill="none" stroke="#3a5351"/>
 </svg>
