@@ -42,7 +42,12 @@ fn task_memory_uses_opt_in_hybrid_retrieval_and_freezes_provenance() {
             json!({"workspaceId":workspace["id"],"key":key,"content":content}),
         )
     };
-    let preference = put(&mut peer, &first, "build-preference", "I prefer Rust.");
+    let preference = put(
+        &mut peer,
+        &first,
+        "build-preference",
+        "I prefer Rust. Use it for systems development.",
+    );
     let symbol = put(&mut peer, &first, "R", "Single letter selector.");
     let probe = put(&mut peer, &first, "index-race", "Old text.");
     put(&mut peer, &other, "private", "OTHER_WORKSPACE");
@@ -171,6 +176,7 @@ fn task_memory_uses_opt_in_hybrid_retrieval_and_freezes_provenance() {
         "task/start",
         json!({"sessionId":session["id"],"input":"Use `R`"}),
     );
+    assert_eq!(keyword["context"]["memories"].as_array().unwrap().len(), 1);
     assert_eq!(keyword["context"]["memories"][0]["id"], symbol["id"]);
     assert_eq!(keyword["context"]["memories"][0]["matchedBy"], "keyword");
     assert_eq!(

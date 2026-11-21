@@ -15,7 +15,7 @@
 ## 任务上下文
 
 - 只检索当前会话所属 workspace 中未删除的记忆，最多检查最近 4096 条候选记录。
-- 以输入和记忆 key/正文的词项重叠计分，额外识别有词边界的完整 key（例如 `R`）。中文、日文和韩文按相邻双字提取词项。开启语义检索后，达标的向量结果按排名与词项结果融合。
+- 以输入和记忆 key/正文的词项重叠计分，排除 `for`、`the`、`use` 等常见英文词。仍识别有词边界的完整 key（例如 `R`）。中文、日文和韩文按相邻双字提取词项。开启语义检索后，达标的向量结果按排名与词项结果融合。
 - 每个任务最多冻结 8 条、合计最多 16 KiB 正文；每条还必须能放入 `context.maxBytes` 的完整序列化预算。超预算项会跳过，继续检查后续候选。
 - `context.disableMemory:true` 保留会话历史但关闭本次记忆检索；隔离上下文也关闭检索。无匹配时省略 `memories`。
 - 冻结项包含记忆 ID、key、正文、revision、可选来源任务，以及 `matchedBy`（`keyword`、`semantic` 或 `both`）。语义检索回退时，如预算允许，快照含 `memoryFallback`。旧快照可能没有这些字段。上下文提示将记忆标为不可信的参考资料。
@@ -62,3 +62,24 @@
 - `task/start` 和 `task/startSummary` 仅给获准的工作区发起查询，发送最多 4 KiB 的当前输入文本。不会发送媒体、文件、历史或任务标识。关闭记忆、隔离上下文、外部 Agent 和已记录的幂等请求跳过查询；任务 Run 的子任务继续使用本机词项检索。
 - 查询最多等待 750 毫秒，网络调用不持有内核锁。端点不可用、无兼容索引、索引损坏或没有达到默认相似度 `0.65` 的候选时，使用本机词项检索。初始化能力 `taskMemoryHybridRetrieval` 表示已配置服务，`taskMemoryOptOut` 表示支持单次关闭。
 - 端点必须是 HTTPS，或使用环回 IP 的 HTTP。不跟随重定向。`apiKeyEnv` 只保存环境变量名称；密钥不会写入任务或内核数据库。启用前应确认端点可以收到所选工作区的记忆和当前输入文本。
+
+## 中英检索评测
+
+`scripts/benchmark_memory.py` 在真实 app-server 上重放 `scripts/memory_eval_cases.json`。校准和验收使用不同记忆与查询；每条查询使用新会话，从 `task/start` 响应检查实际冻结的记忆，随后取消 Demo Provider 的任务。计时包括本机 RPC、检索和任务落库，不包括取消、建索引或模型生成。命中按有相关记忆的问题计数；误注入按含任一无关记忆的问题计数。
+
+Windows 调试构建的校准结果（同一 Ryzen 5 5600H 主机，8 题各测 20 次）：`v0.0.4` 命中 2/5，误注入 2/8，p50/p95 为 3.18/4.32 ms；当前仅用词法时命中 3/5，误注入 0/8，p50/p95 为 3.77/5.42 ms。预设验收样本门槛：命中至少 5/7，误注入最多 1/12，本机 `task/start` p95 相比同一验收样本的旧版额外不超过 50 ms。跨工作区和失效记录禁止注入，另由进程测试验证。该小样本用于版本验收，不代表通用检索准确率或云端延迟。
+
+固定 E5 模型开启语义检索后的校准：余弦阈值 0.65 命中 5/5，但 8/8 有误注入；提高到 0.82 后仍有 5/8 误注入。更高的 0.84 将命中降到 3/5。独立验收样本尚未运行。
+
+构建 `v0.0.4` 源码与当前 app-server 后，用同一命令分别运行。基线不需要模型或第三方 Python 库：
+
+```powershell
+python scripts/benchmark_memory.py PATH_TO_V004_APP_SERVER --split calibration --repetitions 20
+```
+
+语义轨使用 [`intfloat/multilingual-e5-small`](https://huggingface.co/intfloat/multilingual-e5-small/tree/614241f622f53c4eeff9890bdc4f31cfecc418b3/onnx) 的 `onnx/model_qint8_avx512_vnni.onnx` 和 `onnx/tokenizer.json`。脚本校验两个文件的 SHA-256，通过回环 HTTP 提供向量。Windows 验证使用 Python 3.12、`numpy==2.4.4`、`onnxruntime==1.25.1` 和 `tokenizers==0.22.2`：
+
+```powershell
+python scripts/benchmark_memory.py PATH_TO_CURRENT_APP_SERVER --split calibration --repetitions 2 `
+    --weights PATH_TO_ONNX --tokenizer PATH_TO_TOKENIZER_JSON --minimum-similarity 0.82
+```

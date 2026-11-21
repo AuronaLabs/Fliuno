@@ -1,0 +1,44 @@
+{
+  "calibration": {
+    "memories": {
+      "infra-lang": "我喜欢用 Rust 做系统开发，写底层组件时优先使用它。",
+      "meeting-style": "团队每周站会采用异步文字更新，不开视频会议。",
+      "sales-clock": "Revenue dashboards use UTC to group orders into days.",
+      "R": "Single letter statistics environment selector."
+    },
+    "queries": [
+      ["帮我设计一个高性能操作系统内核", ["infra-lang"]],
+      ["What language would I reach for to build low-level software?", ["infra-lang"]],
+      ["怎么组织每周同步？", ["meeting-style"]],
+      ["销售报表按哪一时区划分日期？", ["sales-clock"]],
+      ["Use `R`.", ["R"]],
+      ["How do I make a sourdough starter?", []],
+      ["What's the difference between a lunar and solar eclipse?", []],
+      ["译一下这句古诗。", []]
+    ]
+  },
+  "holdout": {
+    "memories": {
+      "daemon-implementation": "For low-level systems programming I prefer Rust. It is my default for memory-safe native components.",
+      "document-delivery": "对外提供的合同和报价单应使用 PDF，保留原来的排版。",
+      "user-measurement": "For hiking plans use kilometers and meters; never use miles or feet.",
+      "daily-window": "生产环境每天北京时间凌晨两点到三点做例行维护。",
+      "Q": "One-letter key for the quarterly bookkeeping profile.",
+      "test-labels": "Mark newly added unit tests with the tag experiment-alpha."
+    },
+    "queries": [
+      ["给我规划一个低延迟的 OS 内核架构。", ["daemon-implementation"]],
+      ["Which language fits my preference for building a tiny bare-metal scheduler?", ["daemon-implementation"]],
+      ["How should I send an outside customer a quote without altering formatting?", ["document-delivery"]],
+      ["徒步行程的海拔和长度分别用什么单位？", ["user-measurement"]],
+      ["During which hour should I avoid production deployments in China?", ["daily-window"]],
+      ["Select `Q`.", ["Q"]],
+      ["Which label goes on a fresh automated check?", ["test-labels"]],
+      ["How do I repot an orchid?", []],
+      ["解释月球的潮汐锁定。", []],
+      ["Suggest piano exercises for a beginner.", []],
+      ["窗帘怎么拆下来清洗？", []],
+      ["Describe the plot of a silent film in five sentences.", []]
+    ]
+  }
+}

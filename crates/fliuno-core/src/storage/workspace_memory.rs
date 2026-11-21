@@ -741,7 +741,45 @@ fn contains_exact_key(input: &str, key: &str) -> bool {
 
 fn lexical_terms(text: &str, limit: usize) -> std::collections::BTreeSet<String> {
     fn flush_word(word: &mut String, terms: &mut std::collections::BTreeSet<String>, limit: usize) {
-        if word.chars().count() >= 2 && terms.len() < limit {
+        // Generic English words alone should not inject a workspace memory.
+        // Explicit keys are matched separately against the original input.
+        let common = matches!(
+            word.as_str(),
+            "an" | "and"
+                | "are"
+                | "as"
+                | "at"
+                | "be"
+                | "by"
+                | "do"
+                | "for"
+                | "from"
+                | "how"
+                | "in"
+                | "is"
+                | "it"
+                | "me"
+                | "my"
+                | "of"
+                | "on"
+                | "or"
+                | "should"
+                | "that"
+                | "the"
+                | "this"
+                | "to"
+                | "use"
+                | "was"
+                | "what"
+                | "when"
+                | "where"
+                | "which"
+                | "with"
+                | "would"
+                | "you"
+                | "your"
+        );
+        if !common && word.chars().count() >= 2 && terms.len() < limit {
             terms.insert(std::mem::take(word));
         } else {
             word.clear();
