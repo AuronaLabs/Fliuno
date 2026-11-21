@@ -34,6 +34,22 @@ pub(crate) struct NativePeer {
 }
 
 impl NativePeer {
+    pub fn state_directory(&self) -> Option<PathBuf> {
+        match &self.child {
+            Child::Isolated(child) => child.state_directory(),
+            #[cfg(any(windows, target_os = "linux"))]
+            Child::Trusted(_) => None,
+        }
+    }
+
+    pub fn checkpoint(&mut self) -> io::Result<()> {
+        match &mut self.child {
+            Child::Isolated(child) => child.checkpoint(),
+            #[cfg(any(windows, target_os = "linux"))]
+            Child::Trusted(_) => Err(io::ErrorKind::Unsupported.into()),
+        }
+    }
+
     pub fn new(
         child: Child,
         pipes: fliuno_sandbox::AsyncStdio,

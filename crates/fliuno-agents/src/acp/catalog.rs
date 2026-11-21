@@ -24,7 +24,7 @@ impl AcpBackend {
             let (client, _events) = tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => return Err(Unavailable),
-                connection = tokio::time::timeout_at(deadline, self.connect()) => {
+                connection = tokio::time::timeout_at(deadline, self.connect(None)) => {
                     connection.map_err(|_| Unavailable)?.map_err(|_| Unavailable)?
                 }
             };

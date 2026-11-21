@@ -26,8 +26,10 @@ struct Inner {
     initialized: InitializeResponse,
     shared: Arc<Shared>,
     directory: Option<PathBuf>,
+    state_directory: Option<PathBuf>,
+    checkpoint: CancellationToken,
     catalog: tokio::sync::Mutex<()>,
-    driver: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    driver: Mutex<Option<tokio::task::JoinHandle<Result<bool>>>>,
 }
 
 impl Drop for Inner {
@@ -106,9 +108,30 @@ impl Client {
         spec: fliuno_sandbox::LaunchSpec,
         options: ClientOptions,
     ) -> Result<(Self, Events)> {
+        Self::connect_isolated_inner(spec, options, None).await
+    }
+
+    pub async fn connect_isolated_with_state(
+        spec: fliuno_sandbox::LaunchSpec,
+        options: ClientOptions,
+        state: fliuno_sandbox::PrivateState,
+    ) -> Result<(Self, Events)> {
+        Self::connect_isolated_inner(spec, options, Some(state)).await
+    }
+
+    async fn connect_isolated_inner(
+        spec: fliuno_sandbox::LaunchSpec,
+        options: ClientOptions,
+        state: Option<fliuno_sandbox::PrivateState>,
+    ) -> Result<(Self, Events)> {
         options.validate()?;
         let timeout = options.request_timeout;
-        let launch = fliuno_sandbox::spawn_async(spec);
+        let launch = async move {
+            match state {
+                Some(state) => fliuno_sandbox::spawn_async_with_state(spec, state).await,
+                None => fliuno_sandbox::spawn_async(spec).await,
+            }
+        };
         // A timed-out blocking launch still drops its eventual Child result,
         // which tears down the Job/profile instead of leaking an orphan process.
         let (child, pipes) = tokio::time::timeout(timeout, launch)
@@ -176,6 +199,11 @@ impl Client {
         let reads = Arc::clone(&shared);
         let writes = Arc::clone(&shared);
         let worker = Arc::clone(&shared);
+        let state_directory = peer
+            .as_ref()
+            .and_then(transport::NativePeer::state_directory);
+        let checkpoint = CancellationToken::new();
+        let save = checkpoint.clone();
         let driver = tokio::spawn(async move {
             let _finished = DriverFinished(Arc::clone(&worker));
             let client = acp::Client
@@ -307,10 +335,22 @@ impl Client {
             }
             // Keep the protocol future alive until its process is killed, so a
             // stalled peer cannot keep a blocking pipe worker alive on shutdown.
-            if let Some(peer) = peer {
-                let _ = tokio::task::spawn_blocking(move || drop(peer)).await;
-            }
+            let result = match peer {
+                Some(mut peer) => {
+                    let save = save.is_cancelled();
+                    tokio::task::spawn_blocking(move || {
+                        if save {
+                            peer.checkpoint().map_err(|_| Error::Transport)?;
+                        }
+                        Ok(save)
+                    })
+                    .await
+                    .map_err(|_| Error::Transport)?
+                }
+                None => Ok(false),
+            };
             worker.fail(Error::Closed);
+            result
         });
         let ready = initialized.await.unwrap_or_else(|_| Err(shared.failure()));
         let (connection, initialized) = match ready {
@@ -330,6 +370,8 @@ impl Client {
                     initialized,
                     shared: Arc::clone(&shared),
                     directory,
+                    state_directory,
+                    checkpoint,
                     catalog: tokio::sync::Mutex::new(()),
                     driver: Mutex::new(Some(driver)),
                 }),
@@ -344,6 +386,10 @@ impl Client {
 
     pub fn private_directory(&self) -> Option<&Path> {
         self.inner.directory.as_deref()
+    }
+
+    pub fn private_state_directory(&self) -> Option<&Path> {
+        self.inner.state_directory.as_deref()
     }
 
     fn validate_private_cwd(&self, cwd: &Path) -> Result<()> {
@@ -520,12 +566,30 @@ impl Client {
 
     /// Stop the driver and wait until it has released its owned process.
     pub async fn close(&self) {
+        let _ = self.finish_driver().await;
+    }
+
+    /// Save private state after a successful turn and release the sandbox.
+    pub async fn close_with_checkpoint(&self) -> Result<()> {
+        if self.private_state_directory().is_none() {
+            return Err(Error::Unsupported("private state checkpoint"));
+        }
+        self.inner.checkpoint.cancel();
+        if self.finish_driver().await? {
+            Ok(())
+        } else {
+            Err(Error::Closed)
+        }
+    }
+
+    async fn finish_driver(&self) -> Result<bool> {
         self.inner.shared.stop.cancel();
         let driver = self.inner.driver.lock().unwrap().take();
         if let Some(driver) = driver {
-            let _ = driver.await;
+            driver.await.map_err(|_| Error::Transport)?
         } else {
             self.inner.shared.finished.cancelled().await;
+            Ok(false)
         }
     }
 }

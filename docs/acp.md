@@ -129,9 +129,19 @@ Windows 和 Linux 上可以在 `--acp-config` 中为可信 Agent 显式选择 `i
 
 Windows Job 在启动前应用已配置的 `resources.memoryMaxBytes` 和 `resources.pidsMax`。Linux 会使用可用的 cgroup v2，并可通过 `linuxCgroupParent` 指定委派目录。显式配置限额或委派目录时，无法建立 cgroup 就拒绝启动。Linux 的 `pidsMax` 按线程计数。在无可用委派且无显式约束的环境中，Linux 使用独立进程组。跨 app-server 硬崩溃的整树回收依赖 cgroup 和独立守护进程。
 
-`task/continueAgentSession` 的参数是 `taskId`、`input` 和 `clientRequestId`。`taskId` 指向成功结束的上一轮。Fliuno 从该任务取出 Agent 会话 ID 和原来的注册身份，把下一轮留在原来的 Fliuno 会话中。每轮最多成功取得一次续接名额。同一个请求键重试只返回原任务。Agent 必须在握手中声明 `sessionCapabilities.resume`，并能在固定目录重新打开该会话。
+`task/continueAgentSession` 的参数是 `taskId`、`input` 和 `clientRequestId`。`taskId` 指向成功结束的上一轮。Fliuno 从该任务取出 Agent 会话 ID 和原来的注册身份，把下一轮留在原来的 Fliuno 会话中。每轮最多成功取得一次续接名额。同一个请求键重试只返回原任务。Agent 必须在握手中声明 `sessionCapabilities.resume`，并能从宿主给出的 ACP cwd 与私有数据重新打开该会话。
 
 收到 `session/resume` 确认后，内核先保存 `agentSessionContinuation.submissionStarted`，再发送新 prompt。Agent 使用自己的会话历史，Fliuno 只发送本轮输入。Agent 拒绝恢复时，本次任务失败并释放上一轮的续接名额。提交之后发生断连、取消或重启时，名额保留，结果可能未知。内核不会再次提交该轮。`initialize.capabilities.agentSessionContinuation` 指示当前是否注册了此类后端，具体 Agent 在握手时确认支持。
+
+### 原生隔离下保存会话
+
+`native_scratch` 注册可设置 `sessionStateDirectory`，指向工作区外、由宿主控制的绝对现有目录。Linux 需要可用的 cgroup v2 委派，可用 `linuxCgroupParent` 指定；无法确认整树回收时，持久模式拒绝启动。未配置状态目录的注册仍使用临时沙箱。`trusted_host` 继续由 Agent 在固定 cwd 中自行持久化。
+
+每轮仍启动新的 AppContainer 或 Landlock 沙箱。私有 `fliuno-state` 子目录作为 ACP cwd；Windows 的用户与应用数据目录、Linux 的 HOME 和配置与数据目录也指向该树内。续接只恢复同一工作区、同一注册身份和上一轮任务的快照。Agent 需要支持把会话带到新的绝对路径；依赖固定机器路径的 Agent 不适用。`session/load` 仍是 SDK 客户端显式读取历史的独立能力，不会被续接当作回退。
+
+仅当收到正常的 `end_turn`、且进程回收成功后，才将该目录复制成新的只写一次快照。每份最多 32 MiB、1024 个文件和目录、12 层子目录；符号链接、Windows 重解析点、硬链接和特殊文件会拒绝保存。普通关闭、取消或异常退出的任务不能作为续接来源；若宿主在写完快照和提交任务终态之间退出，可能留下未被任务引用的目录。快照有独立的宿主管理和保留周期，可能包含 Agent 自己写入的凭据或会话数据，SQLite 备份不会复制它。
+
+Windows AppContainer 和 Debian 6.12 Linux 来宾（使用 cgroup v2 委派）均通过官方 SDK 本地 Agent 进程测试：不同工作区分别保存状态，硬重启后恢复同一会话，注册变更拒绝续接，结果未知的回合不会重发或成为新快照。Windows 运行 `cargo test --locked -p fliuno-app-server --features test-fixtures --test acp_process persistence::`；Linux 运行同一命令前，将 `FLIUNO_ACP_TEST_CGROUP_PARENT` 指向可写的委派目录。商业 Agent 互操作见上面的 OpenCode 记录，其运行模式是 `trusted_host`。
 
 ## 发现已保存的 Agent 会话
 
@@ -143,7 +153,7 @@ Windows Job 在启动前应用已配置的 `resources.memoryMaxBytes` 和 `resou
 
 ## 受控工作区文件代理
 
-`workspaceAccess:true` 在容器私有目录中创建空的 `workspace` 子目录并用作 ACP cwd。它只充当虚拟路径前缀；不复制宿主文件、不授予宿主目录 ACL。只接受此前缀下的普通路径组件，转为工作区相对路径后再经注册工具、策略与 `cap-std` 目录能力校验；Agent 直接进行 OS 文件读取仍不会得到宿主内容。
+`workspaceAccess:true` 默认在容器私有目录中创建空的 `workspace` 子目录作为 ACP cwd；启用隔离会话状态时则使用 `fliuno-state`。该 cwd 也充当代理访问的虚拟路径前缀；不复制宿主文件、不授予宿主目录 ACL。只接受此前缀下的普通路径组件，转为工作区相对路径后再经注册工具、策略与 `cap-std` 目录能力校验；Agent 直接进行 OS 文件读取仍不会得到宿主内容。
 
 每次读写生成独立 `source=host_tool` 审批；`source=agent_permission` 的允许不能代替它。读操作使用 `workspace_read_text`，支持从 1 开始的 line/limit，保留换行。写操作使用 `workspace_replace_text`：提案阶段在宿主读取旧基线并生成客户端 diff，不写入目标、不向 Agent 返回旧内容；执行时核对 SHA-256，新增文件使用 `create_new` 防止覆盖审批后出现的目标。拒绝最终文件的符号链接及多硬链接。与补丁一样，本进程写入串行化，但外部进程并发编辑不具备文件系统事务保证。
 

@@ -469,17 +469,27 @@ pub(super) fn spawn_service(spec: &LaunchSpec) -> io::Result<super::ServiceProce
     })
 }
 
-pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
+pub(super) fn spawn(spec: &LaunchSpec, state: Option<super::PrivateState>) -> io::Result<Child> {
     let directory = PrivateDirectory::create()?;
     let staged = directory.path.join("program");
     crate::program::stage(&spec.program, &staged, spec.program_sha256.as_deref())?;
     crate::assets::stage(&directory.path, &spec.assets)?;
+    let state = state
+        .map(|snapshot| snapshot.restore(&directory.path))
+        .transpose()?;
+    let home = state.as_ref().map(|state| state.home.as_path());
 
     let cgroup = cgroup::CgroupV2::try_create(
         spec.linux_cgroup_parent.as_deref(),
         &spec.resources,
         guardian::Lifetime::Host,
     )?;
+    if state.is_some() && cgroup.is_none() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "private state requires a delegated Linux cgroup v2",
+        ));
+    }
     let ruleset = create_ruleset(&directory.path)?;
     let seccomp = sandbox_filter();
     let mut command = Command::new(&staged);
@@ -488,7 +498,7 @@ pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
         .current_dir(&directory.path)
         .env_clear()
         .envs(&spec.env)
-        .env("HOME", &directory.path)
+        .env("HOME", home.unwrap_or(&directory.path))
         .env("TMPDIR", &directory.path)
         .env("TEMP", &directory.path)
         .env("PATH", "/usr/bin:/bin")
@@ -496,6 +506,13 @@ pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
+
+    if let Some(home) = &home {
+        command.env("XDG_CONFIG_HOME", home.join("config"));
+        command.env("XDG_DATA_HOME", home.join("data"));
+        command.env("XDG_STATE_HOME", home.join("state"));
+        command.env("XDG_CACHE_HOME", directory.path.join("cache"));
+    }
 
     prepare_child_process(&mut command, cgroup.as_ref())?;
 
@@ -579,6 +596,7 @@ pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
         stdin,
         stdout,
         stderr,
+        state: state.map(Box::new),
         inner: Process {
             owner: OwnedProcess::new(child, cgroup),
             directory,

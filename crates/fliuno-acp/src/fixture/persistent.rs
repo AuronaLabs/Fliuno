@@ -126,6 +126,7 @@ pub(super) fn agent() -> impl ConnectTo<Client> {
                 turns.push(text.text.clone());
                 fs::write(path, serde_json::to_vec(&turns).unwrap()).unwrap();
                 if text.text == "lose_response" {
+                    cx.send_notification(update(&session_id, "prompt stored"))?;
                     let _pending_response = responder;
                     std::future::pending::<()>().await;
                     return Ok(());

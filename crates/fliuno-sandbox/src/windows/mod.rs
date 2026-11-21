@@ -13,7 +13,7 @@ mod profile;
 pub(crate) mod service;
 mod stdio;
 
-use super::{Child, LaunchSpec};
+use super::{Child, LaunchSpec, PrivateState};
 use profile::Profile;
 use std::{
     io,
@@ -129,19 +129,26 @@ impl Process {
     pub(super) fn kill(&self) -> io::Result<()> {
         self.state.kill()
     }
+    pub(super) fn wait_for_empty_job(&self) -> io::Result<()> {
+        self.state.wait_for_empty_job()
+    }
 }
 
-pub(super) fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
-    spawn_with_pipes(spec, stdio::Pipes::create)
+pub(super) fn spawn(spec: &LaunchSpec, state: Option<PrivateState>) -> io::Result<Child> {
+    spawn_with_pipes(spec, state, stdio::Pipes::create)
 }
 
 #[cfg(feature = "async-io")]
-pub(super) fn spawn_async_pipes(spec: &LaunchSpec) -> io::Result<Child> {
-    spawn_with_pipes(spec, stdio::Pipes::create_async)
+pub(super) fn spawn_async_pipes(
+    spec: &LaunchSpec,
+    state: Option<PrivateState>,
+) -> io::Result<Child> {
+    spawn_with_pipes(spec, state, stdio::Pipes::create_async)
 }
 
 fn spawn_with_pipes(
     spec: &LaunchSpec,
+    state: Option<PrivateState>,
     create_pipes: fn(&str) -> io::Result<stdio::Pipes>,
 ) -> io::Result<Child> {
     let profile = Profile::create()?;
@@ -159,6 +166,9 @@ fn spawn_with_pipes(
     }
     let staged = profile.stage_program(&spec.program, spec.program_sha256.as_deref())?;
     crate::assets::stage(profile.directory(), &spec.assets)?;
+    let state = state
+        .map(|snapshot| snapshot.restore(profile.directory()))
+        .transpose()?;
     let mut env = spec.env.clone();
     // Replace even differently-cased spellings of these reserved locations.
     env.retain(|key, _| {
@@ -171,6 +181,13 @@ fn spawn_with_pipes(
             key.into(),
             profile.directory().to_string_lossy().into_owned(),
         );
+    }
+    if let Some(state) = &state {
+        let keys = ["HOME", "USERPROFILE", "LOCALAPPDATA", "APPDATA"];
+        env.retain(|key, _| !keys.iter().any(|name| key.eq_ignore_ascii_case(name)));
+        for key in keys {
+            env.insert(key.into(), state.home.to_string_lossy().into_owned());
+        }
     }
     if !env.keys().any(|key| key.eq_ignore_ascii_case("SystemRoot"))
         && let Some(root) = std::env::var_os("SystemRoot")
@@ -195,6 +212,7 @@ fn spawn_with_pipes(
         stdin: Some(stdin),
         stdout: Some(stdout),
         stderr: Some(stderr),
+        state: state.map(Box::new),
         inner: Process {
             state: JobProcess {
                 process: started.process,

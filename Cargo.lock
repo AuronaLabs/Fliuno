@@ -955,6 +955,7 @@ dependencies = [
 name = "fliuno-sandbox"
 version = "0.0.4"
 dependencies = [
+ "cap-fs-ext",
  "cap-std",
  "landlock",
  "libc",

@@ -14,6 +14,8 @@ use tokio::sync::mpsc;
 
 #[path = "acp/catalog.rs"]
 mod catalog;
+#[path = "acp/state.rs"]
+mod state;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -34,6 +36,9 @@ pub struct AcpAgentConfig {
     /// Fixed workspace of a trusted Agent's own state store and process.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
+    /// Existing host directory for opt-in, isolated ACP checkpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_state_directory: Option<PathBuf>,
     /// Permit the local RPC client to launch this trusted ACP catalog reader.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub session_catalog: bool,
@@ -91,6 +96,7 @@ struct AcpBackend {
     id: String,
     launch: fliuno_sandbox::LaunchSpec,
     trusted_cwd: Option<PathBuf>,
+    session_state_directory: Option<PathBuf>,
     session_catalog: bool,
     authentication_method: Option<String>,
     options: ClientOptions,
@@ -190,6 +196,7 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
         if config.session_catalog && trusted_cwd.is_none() {
             return Err("ACP sessionCatalog requires trusted_host".into());
         }
+        let session_state_directory = state::resolve_root(&config)?;
         let executable_digest = if trusted_cwd.is_some() {
             fliuno_sandbox::trusted_program_digest(&config.command)
         } else {
@@ -201,6 +208,9 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
         });
         if let Some(cwd) = &trusted_cwd {
             identity["resolvedCwd"] = serde_json::json!(cwd);
+        }
+        if let Some(directory) = &session_state_directory {
+            identity["resolvedSessionStateDirectory"] = serde_json::json!(directory);
         }
         let authority = fliuno_core::authority_digest("acp.registration.v1", &identity);
         let launch = fliuno_sandbox::LaunchSpec {
@@ -220,6 +230,7 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             id: config.id,
             launch,
             trusted_cwd,
+            session_state_directory,
             session_catalog: config.session_catalog,
             authentication_method: config.authentication_method,
             options: ClientOptions {
@@ -258,7 +269,7 @@ impl AgentBackend for AcpBackend {
     }
 
     fn supports_agent_session_continuation(&self) -> bool {
-        self.trusted_cwd.is_some()
+        self.trusted_cwd.is_some() || self.session_state_directory.is_some()
     }
 
     fn supports_agent_session_listing(&self) -> bool {
@@ -330,7 +341,10 @@ impl AcpBackend {
         Ok((state != Succeeded).then(authentication_required))
     }
 
-    async fn connect(&self) -> Result<(Client, Events), fliuno_acp::Error> {
+    async fn connect(
+        &self,
+        state: Option<fliuno_sandbox::PrivateState>,
+    ) -> Result<(Client, Events), fliuno_acp::Error> {
         #[cfg(any(windows, target_os = "linux"))]
         if let Some(cwd) = &self.trusted_cwd {
             let program = self.launch.program.clone();
@@ -363,7 +377,17 @@ impl AcpBackend {
             )
             .await;
         }
-        Client::connect_isolated(self.launch.clone(), self.options.clone()).await
+        match state {
+            Some(state) => {
+                Client::connect_isolated_with_state(
+                    self.launch.clone(),
+                    self.options.clone(),
+                    state,
+                )
+                .await
+            }
+            None => Client::connect_isolated(self.launch.clone(), self.options.clone()).await,
+        }
     }
 
     async fn run(
@@ -373,10 +397,17 @@ impl AcpBackend {
         mut commands: mpsc::Receiver<AgentCommand>,
         cancellation: &CancellationToken,
     ) -> Result<AgentOutcome, ()> {
+        let state = match self.private_state(request) {
+            Ok(state) => state,
+            Err(_) => {
+                eprintln!("fliuno: ACP private state setup failed");
+                return Ok(checkpoint_failed());
+            }
+        };
         let (client, mut events) = tokio::select! {
             biased;
             _ = cancellation.cancelled() => return Err(()),
-            result = self.connect() => result.map_err(|error| {
+            result = self.connect(state) => result.map_err(|error| {
                 // ACP errors expose only fixed local text and numeric remote
                 // codes, never peer messages, credentials or prompt content.
                 eprintln!("fliuno: ACP initialization failed: {error}");
@@ -390,6 +421,8 @@ impl AcpBackend {
             }
             let cwd = if let Some(cwd) = &self.trusted_cwd {
                 cwd.clone()
+            } else if let Some(cwd) = client.private_state_directory() {
+                cwd.to_path_buf()
             } else if self.options.filesystem {
                 let cwd = client.private_directory().ok_or(())?.join("workspace");
                 tokio::fs::create_dir(&cwd).await.map_err(|_| ())?;
@@ -502,8 +535,25 @@ impl AcpBackend {
         }.await;
         operations_cancel.cancel();
         // Always wait for Job/profile cleanup, including observer and wire errors.
-        client.close().await;
+        if client.private_state_directory().is_some()
+            && !cancellation.is_cancelled()
+            && matches!(&result, Ok(outcome) if outcome.stop_reason == Some(AgentStopReason::EndTurn))
+        {
+            if client.close_with_checkpoint().await.is_err() {
+                eprintln!("fliuno: ACP private state checkpoint failed");
+                return Ok(checkpoint_failed());
+            }
+        } else {
+            client.close().await;
+        }
         result
+    }
+}
+
+fn checkpoint_failed() -> AgentOutcome {
+    AgentOutcome {
+        stop_reason: Some(AgentStopReason::Failed),
+        outcome_unknown: false,
     }
 }
 

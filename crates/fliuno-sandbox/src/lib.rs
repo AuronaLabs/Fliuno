@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File, io, path::PathBuf, process::ExitStatus};
 mod assets;
 mod program;
+mod state;
 pub use assets::{
     MAX_ASSET_BYTES, MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES, StagedFile, staged_files_digest,
     validate_staged_files,
@@ -15,12 +16,14 @@ pub use assets::{
 pub use program::{
     MAX_PROGRAM_BYTES, MAX_TRUSTED_PROGRAM_BYTES, program_digest, trusted_program_digest,
 };
+pub use state::PrivateState;
 
 #[cfg(feature = "async-io")]
 mod async_stdio;
 #[cfg(feature = "async-io")]
 pub use async_stdio::{
     AsyncSpawnError, AsyncSpawnStage, AsyncStdio, PipeReader, PipeWriter, spawn_async,
+    spawn_async_with_state,
 };
 #[cfg(all(any(windows, target_os = "linux"), feature = "async-io"))]
 mod host;
@@ -339,6 +342,7 @@ pub struct Child {
     pub stdin: Option<File>,
     pub stdout: Option<File>,
     pub stderr: Option<File>,
+    state: Option<Box<state::PreparedState>>,
     #[cfg(windows)]
     inner: windows::Process,
     #[cfg(target_os = "linux")]
@@ -346,22 +350,47 @@ pub struct Child {
 }
 
 pub fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
+    spawn_inner(spec, None)
+}
+
+/// Launch with an optional restored state directory and an immutable next slot.
+pub fn spawn_with_state(spec: &LaunchSpec, state: PrivateState) -> io::Result<Child> {
+    spawn_inner(spec, Some(state))
+}
+
+fn spawn_inner(spec: &LaunchSpec, state: Option<PrivateState>) -> io::Result<Child> {
     spec.validate()?;
     #[cfg(windows)]
     {
-        windows::spawn(spec)
+        windows::spawn(spec, state)
     }
     #[cfg(target_os = "linux")]
     {
-        linux::spawn(spec)
+        linux::spawn(spec, state)
     }
     #[cfg(not(any(windows, target_os = "linux")))]
     {
+        let _ = state;
         Err(unsupported())
     }
 }
 
 impl Child {
+    pub fn state_directory(&self) -> Option<PathBuf> {
+        self.state.as_ref().map(|state| state.home.clone())
+    }
+
+    /// Stop the owned process before copying data to the host checkpoint slot.
+    pub fn checkpoint(&mut self) -> io::Result<()> {
+        let state = self.state.take().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "launch has no private state")
+        })?;
+        self.kill()?;
+        #[cfg(windows)]
+        self.inner.wait_for_empty_job()?;
+        state.capture()
+    }
+
     pub fn usage(&self) -> ProcessUsage {
         #[cfg(any(windows, target_os = "linux"))]
         {

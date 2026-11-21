@@ -1,6 +1,6 @@
 //! Reactor-backed native stdio. File IO's blocking pool is unsuitable for a
 //! pipe whose peer may stay alive when the owning future is cancelled.
-use crate::{Child, LaunchSpec};
+use crate::{Child, LaunchSpec, PrivateState};
 use std::{fmt, io};
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -50,15 +50,29 @@ impl std::error::Error for AsyncSpawnError {
 /// the worker, whose eventual Child result is dropped and kills the owned tree.
 /// Native startup itself remains synchronous and cannot be preempted.
 pub async fn spawn_async(spec: LaunchSpec) -> Result<(Child, AsyncStdio), AsyncSpawnError> {
+    spawn_async_inner(spec, None).await
+}
+
+pub async fn spawn_async_with_state(
+    spec: LaunchSpec,
+    state: PrivateState,
+) -> Result<(Child, AsyncStdio), AsyncSpawnError> {
+    spawn_async_inner(spec, Some(state)).await
+}
+
+async fn spawn_async_inner(
+    spec: LaunchSpec,
+    state: Option<PrivateState>,
+) -> Result<(Child, AsyncStdio), AsyncSpawnError> {
     let mut child = tokio::task::spawn_blocking(move || {
         spec.validate()?;
         #[cfg(windows)]
         {
-            crate::windows::spawn_async_pipes(&spec)
+            crate::windows::spawn_async_pipes(&spec, state)
         }
         #[cfg(not(windows))]
         {
-            crate::spawn(&spec)
+            crate::spawn_inner(&spec, state)
         }
     })
     .await

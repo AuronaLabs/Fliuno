@@ -1,4 +1,4 @@
-//! Explicitly trusted ACP turns retain one durable session across processes.
+//! Durable ACP sessions across owned native processes.
 use super::*;
 
 pub(super) fn trusted_config(directory: &Directory) -> PathBuf {
@@ -24,6 +24,113 @@ pub(super) fn trusted_config(directory: &Directory) -> PathBuf {
     )
     .unwrap();
     path
+}
+
+#[test]
+fn isolated_session_restores_only_its_checkpoint_after_hard_restart() {
+    #[cfg(target_os = "linux")]
+    let Some(parent) = std::env::var_os("FLIUNO_ACP_TEST_CGROUP_PARENT") else {
+        eprintln!(
+            "isolated state acceptance requires delegated cgroup v2 (FLIUNO_ACP_TEST_CGROUP_PARENT)"
+        );
+        return;
+    };
+    let directory = Directory::new();
+    let state_root = directory.0.join("private-state");
+    fs::create_dir(&state_root).unwrap();
+    let mut config = json!({"agents":[{
+        "id":"fixture", "command":env!("CARGO_BIN_EXE_fliuno-app-acp-fixture"),
+        "args":["--persistent-fixture"], "isolation":"native_scratch",
+        "sessionStateDirectory":state_root, "promptTimeoutMs":30000
+    }]});
+    #[cfg(target_os = "linux")]
+    {
+        config["agents"][0]["linuxCgroupParent"] = json!(PathBuf::from(parent));
+    }
+    let config_path = directory.0.join("agents.json");
+    fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+    let mut peer = Peer::start(&directory);
+    let open = |peer: &mut Peer, name: &str| {
+        let workspace = directory.0.join(name);
+        fs::create_dir(&workspace).unwrap();
+        let opened = peer.call("workspace/open", json!({"root":workspace}));
+        peer.call("session/create", json!({"workspaceId":opened["id"]}))["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let first = open(&mut peer, "first-workspace");
+    let other = open(&mut peer, "other-workspace");
+    let first_task = peer.start_task(&first, "alpha", "first");
+    let first = peer.wait(&first_task["id"], |task| task["status"] != "running");
+    assert_eq!(first["status"], "completed", "{first}");
+    let other_task = peer.start_task(&other, "unrelated", "first");
+    let other = peer.wait(&other_task["id"], |task| task["status"] != "running");
+    assert_eq!(other["status"], "completed", "{other}");
+    assert_eq!(other["output"], "unrelated");
+    let agent_session = &first["agentRun"]["sessionId"];
+    assert_ne!(other["agentRun"]["sessionId"], *agent_session);
+    let scopes: Vec<_> = fs::read_dir(&state_root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(scopes.len(), 2);
+    for scope in &scopes {
+        assert_eq!(fs::read_dir(scope).unwrap().count(), 1);
+    }
+    drop(peer);
+
+    let mut peer = Peer::start(&directory);
+    let request = json!({"taskId":first["id"],"input":"beta","clientRequestId":"continuation"});
+    let draft = peer.call("task/continueAgentSession", request.clone());
+    let second = peer.wait(&draft["id"], |task| task["status"] != "running");
+    assert_eq!(second["status"], "completed", "{second}");
+    assert_eq!(second["agentRun"]["sessionId"], *agent_session);
+    assert_eq!(second["output"], "alpha | beta");
+    assert_eq!(
+        peer.call("task/continueAgentSession", request)["id"],
+        second["id"]
+    );
+    let interrupted_request =
+        json!({"taskId":second["id"],"input":"lose_response","clientRequestId":"interrupted"});
+    let interrupted = peer.call("task/continueAgentSession", interrupted_request.clone());
+    let running = peer.wait(&interrupted["id"], |t| {
+        t["agentRun"]["text"] == "prompt stored"
+    });
+    assert_eq!(
+        running["agentSessionContinuation"]["submissionStarted"],
+        true
+    );
+    drop(peer);
+
+    let mut peer = Peer::start(&directory);
+    let interrupted = peer.call("task/get", json!({"taskId":interrupted["id"]}));
+    assert_eq!(interrupted["status"], "interrupted");
+    assert_eq!(interrupted["agentRun"]["outcomeUnknown"], true);
+    assert_eq!(
+        peer.call("task/continueAgentSession", interrupted_request)["id"],
+        interrupted["id"]
+    );
+    assert_eq!(
+        scopes
+            .iter()
+            .map(|scope| fs::read_dir(scope).unwrap().count())
+            .sum::<usize>(),
+        3
+    );
+    drop(peer);
+
+    config["agents"][0]["promptTimeoutMs"] = json!(29000);
+    fs::write(&config_path, serde_json::to_vec(&config).unwrap()).unwrap();
+    let mut peer = Peer::start(&directory);
+    let changed = peer.request(
+        "task/continueAgentSession",
+        json!({
+            "taskId":other["id"],"input":"wrong registration","clientRequestId":"changed"
+        }),
+    );
+    assert_eq!(changed["error"]["code"], -32009);
+    peer.stop();
 }
 
 #[test]
