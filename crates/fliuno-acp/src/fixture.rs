@@ -35,6 +35,7 @@ pub fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
             Some("--auth-hold") => Auth::Hold,
             Some("--auth-terminal") => Auth::Terminal,
             Some("--auth-duplicate") => Auth::Duplicate,
+            Some("--terminal") => Auth::TerminalFixture,
             _ => Auth::Off,
         };
         runtime.block_on(agent_with_auth(auth).connect_to(acp::Stdio::new()))?;
@@ -56,6 +57,7 @@ enum Auth {
     Hold,
     Terminal,
     Duplicate,
+    TerminalFixture,
 }
 
 fn agent_with_auth(auth: Auth) -> impl ConnectTo<Client> {
@@ -75,12 +77,12 @@ fn agent_with_auth(auth: Auth) -> impl ConnectTo<Client> {
             async move |request: InitializeRequest, responder, _cx| {
                 // Test fixtures require the adapter to advertise its true scope.
                 assert_eq!(request.client_capabilities.fs.read_text_file, request.client_capabilities.fs.write_text_file);
-                assert!(!request.client_capabilities.terminal);
+                assert_eq!(request.client_capabilities.terminal, auth == Auth::TerminalFixture);
                 let terminal = || AuthMethod::Terminal(AuthMethodTerminal::new("fixture-login", "private-terminal-descriptor")
                     .args(vec!["private-terminal-argument".into()]));
                 let protocol = || AuthMethod::Agent(AuthMethodAgent::new("fixture-login", "Fixture"));
                 let methods = match auth {
-                    Auth::Off => vec![],
+                    Auth::Off | Auth::TerminalFixture => vec![],
                     Auth::Terminal => vec![terminal()],
                     Auth::Duplicate => vec![protocol(), terminal()],
                     _ => vec![protocol()],
@@ -115,13 +117,15 @@ fn agent_with_auth(auth: Auth) -> impl ConnectTo<Client> {
         )
         .on_receive_request(
             async move |request: NewSessionRequest, responder, cx| {
-                if auth != Auth::Off && !authenticated.load(Ordering::SeqCst) {
+                if !matches!(auth, Auth::Off | Auth::TerminalFixture) && !authenticated.load(Ordering::SeqCst) {
                     return responder.respond_with_error(acp::Error::auth_required());
                 }
                 let id = SessionId::new(format!("session_{}", next_session.fetch_add(1, Ordering::SeqCst)));
                 directories.lock().unwrap().insert(id.clone(), request.cwd);
                 // Explicitly exercise notifications arriving before the response.
-                cx.send_notification(update(&id, "ready"))?;
+                if auth != Auth::TerminalFixture {
+                    cx.send_notification(update(&id, "ready"))?;
+                }
                 responder.respond(NewSessionResponse::new(id))
             },
             acp::on_receive_request!(),
@@ -243,6 +247,50 @@ fn agent_with_auth(auth: Auth) -> impl ConnectTo<Client> {
                             worker.send_notification(update(&session_id, serde_json::json!({
                                 "writeOk":write.is_ok(),"read":read.ok().map(|r| r.content),"directRead":std::fs::read(path).is_ok()
                             }).to_string()))?;
+                        }
+                        "terminal_normal" if auth == Auth::TerminalFixture => {
+                            let invalid = worker.send_request(CreateTerminalRequest::new(session_id.clone(), "render")
+                                .args(vec!["unapproved".into()])).block_task().await;
+                            assert!(invalid.is_err());
+                            let invalid = worker.send_request(CreateTerminalRequest::new(session_id.clone(), "unregistered")).block_task().await;
+                            assert!(invalid.is_err());
+                            let create = worker.send_request(CreateTerminalRequest::new(session_id.clone(), "render")
+                                .output_byte_limit(8)).block_task().await;
+                            if let Ok(created) = create {
+                                let id = created.terminal_id;
+                                let wrong_scope = worker.send_request(TerminalOutputRequest::new(SessionId::new("other"), id.clone())).block_task().await;
+                                assert!(wrong_scope.is_err());
+                                let status = worker.send_request(WaitForTerminalExitRequest::new(session_id.clone(), id.clone())).block_task().await.unwrap();
+                                assert_eq!(status.exit_status.exit_code, Some(0));
+                                let output = worker.send_request(TerminalOutputRequest::new(session_id.clone(), id.clone())).block_task().await.unwrap();
+                                assert_eq!(output.exit_status.unwrap().exit_code, Some(0));
+                                assert!(output.truncated);
+                                assert_eq!(output.output, "\u{754c}last");
+                                worker.send_request(ReleaseTerminalRequest::new(session_id.clone(), id.clone())).block_task().await.unwrap();
+                                assert!(worker.send_request(TerminalOutputRequest::new(session_id.clone(), id)).block_task().await.is_err());
+                                worker.send_notification(update(&session_id, "terminal-ok"))?;
+                            } else {
+                                worker.send_notification(update(&session_id, "terminal-denied"))?;
+                            }
+                        }
+                        "terminal_kill" | "terminal_cancel" if auth == Auth::TerminalFixture => {
+                            let id = worker.send_request(CreateTerminalRequest::new(session_id.clone(), "hold")).block_task().await.unwrap().terminal_id;
+                            loop {
+                                let output = worker.send_request(TerminalOutputRequest::new(session_id.clone(), id.clone())).block_task().await.unwrap();
+                                if output.output.contains('\n') {
+                                    worker.send_notification(update(&session_id, output.output.trim()))?;
+                                    break;
+                                }
+                                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                            }
+                            if text == "terminal_cancel" {
+                                cancel.cancelled().await;
+                            } else {
+                                worker.send_request(KillTerminalRequest::new(session_id.clone(), id.clone())).block_task().await.unwrap();
+                                let status = worker.send_request(WaitForTerminalExitRequest::new(session_id.clone(), id.clone())).block_task().await.unwrap().exit_status;
+                                assert!(status.exit_code.is_some_and(|code| code != 0) || status.signal.is_some());
+                                worker.send_request(ReleaseTerminalRequest::new(session_id.clone(), id)).block_task().await.unwrap();
+                            }
                         }
                         "host_write" => {
                             let result = worker.send_request(WriteTextFileRequest::new(session_id.clone(), cwd.join("existing.txt"), "new\n")).block_task().await;

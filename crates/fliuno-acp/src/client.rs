@@ -1,6 +1,6 @@
 use crate::{
     CancellationToken, ClientOptions, Error, Event, HostRequest, HostResponse, PermissionDecision,
-    Result, filesystem, permissions,
+    Result, TerminalRequest, TerminalResponse, filesystem, permissions,
     schema::*,
     state::{OpenGuard, Opening, PromptGuard, Shared, State, valid_session_id},
     transport,
@@ -14,6 +14,39 @@ use tokio::sync::{mpsc, oneshot};
 mod authentication;
 mod catalog;
 mod session;
+
+macro_rules! terminal_method {
+    ($client:expr, $worker:expr, $request:ty, $operation:ident, $result:ident) => {{
+        let shared = Arc::clone(&$worker);
+        $client.on_receive_request(
+            async move |request: $request, responder, cx| {
+                if !shared.options.terminal {
+                    return responder
+                        .respond_with_error(acp::Error::new(-32601, "Method not found"));
+                }
+                let Some(waiter) = filesystem::prepare(
+                    Arc::clone(&shared),
+                    HostRequest::Terminal(Box::new(TerminalRequest::$operation(request))),
+                ) else {
+                    return responder
+                        .respond_with_error(acp::Error::new(-32000, "Terminal request rejected"));
+                };
+                cx.spawn(async move {
+                    match waiter.resolve().await {
+                        HostResponse::Terminal(TerminalResponse::$result(response)) => {
+                            responder.respond(response)
+                        }
+                        _ => responder.respond_with_error(acp::Error::new(
+                            -32000,
+                            "Terminal request rejected",
+                        )),
+                    }
+                })
+            },
+            acp::on_receive_request!(),
+        )
+    }};
+}
 
 /// Cloneable handle. Dropping its last owner stops the driver and owned process.
 #[derive(Clone)]
@@ -292,6 +325,12 @@ impl Client {
                     },
                     acp::on_receive_request!(),
                 );
+            let client = terminal_method!(client, worker, CreateTerminalRequest, Create, Created);
+            let client = terminal_method!(client, worker, TerminalOutputRequest, Output, Output);
+            let client = terminal_method!(client, worker, WaitForTerminalExitRequest, Wait, Exited);
+            let client = terminal_method!(client, worker, KillTerminalRequest, Kill, Killed);
+            let client =
+                terminal_method!(client, worker, ReleaseTerminalRequest, Release, Released);
             let foreground = Arc::clone(&worker);
             let connected =
                 client.connect_with(transport, async move |connection: ConnectionTo<Agent>| {
@@ -300,9 +339,11 @@ impl Client {
                         connection
                             .send_request(
                                 InitializeRequest::new(ProtocolVersion::V1).client_capabilities(
-                                    ClientCapabilities::new().fs(FileSystemCapabilities::new()
-                                        .read_text_file(foreground.options.filesystem)
-                                        .write_text_file(foreground.options.filesystem)),
+                                    ClientCapabilities::new()
+                                        .terminal(foreground.options.terminal)
+                                        .fs(FileSystemCapabilities::new()
+                                            .read_text_file(foreground.options.filesystem)
+                                            .write_text_file(foreground.options.filesystem)),
                                 ),
                             )
                             .block_task(),

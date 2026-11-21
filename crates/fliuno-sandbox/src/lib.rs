@@ -385,10 +385,17 @@ impl Child {
         let state = self.state.take().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "launch has no private state")
         })?;
+        self.terminate_tree()?;
+        state.capture()
+    }
+
+    /// Terminate the workload and check the native containment is drained.
+    /// On Linux, callers that require complete tree ownership must use cgroup v2.
+    pub fn terminate_tree(&mut self) -> io::Result<()> {
         self.kill()?;
         #[cfg(windows)]
         self.inner.wait_for_empty_job()?;
-        state.capture()
+        Ok(())
     }
 
     pub fn usage(&self) -> ProcessUsage {

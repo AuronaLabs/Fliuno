@@ -4,7 +4,7 @@
 
 实现与验证基准：2026-11-18，官方 Rust SDK `agent-client-protocol 5.3.0`，稳定 ACP v1。`fliuno-acp` 是独立库，不依赖 `fliuno-core`、SQLite、模型 provider 或 UI。它使 Fliuno 可以作为 ACP 客户端连接另一个 Agent；没有将 Fliuno 伪装成 ACP 服务端。
 
-[支持范围](#当前接口) · [权限与取消](#权限与取消) · [配置与演示](#运行与验收) · [续接会话](#跨重启续接-agent-会话) · [文件代理](#受控工作区文件代理)
+[支持范围](#当前接口) · [权限与取消](#权限与取消) · [配置与演示](#运行与验收) · [续接会话](#跨重启续接-agent-会话) · [文件代理](#受控工作区文件代理) · [受限终端](#受限终端)
 
 ## 当前接口
 
@@ -19,16 +19,16 @@
 | `resume_session` | Agent 声明 `sessionCapabilities.resume` 时恢复已知 ID。确认后可发送新 prompt。沿用隔离 cwd 校验，无历史回放或附加根目录与 MCP 服务 |
 | `prompt_text` | 发送单轮文本，返回官方 `PromptResponse`；流式消息、思考、工具、计划等通过 `Events` 的类型化通知返回 |
 | `respond_permission` | 按本地 permission ID 和会话 ID 响应允许一次或拒绝；不能更换原始请求 |
-| `respond_host_request` | 按本地文件请求 ID 和会话 ID 返回匹配的读/写结果、拒绝或失败；不执行 IO |
+| `respond_host_request` | 按本地请求 ID 和会话 ID 返回匹配的文件或终端结果、拒绝或失败；不执行 IO |
 | `host_request_remaining` | 复核会话活动轮次和单调时钟到期时间；执行器据此固定截止时间 |
 | `cancel` | 请求取消该会话的当前轮次，唤醒权限等待并发送 `session/cancel` |
 | `close` | 停止连接，等待自有进程和私有 profile 回收 |
 
 会话通知可以在提示轮次之外到达。`session/new` 响应之前到达的通知先有界暂存，获得并核验 session ID 后按顺序释放。未知会话、空 ID、复用 ID 和错误会话的早到通知会关闭连接。
 
-默认初始化声明 `fs.readTextFile=false`、`fs.writeTextFile=false`、`terminal=false`；未声明的能力请求返回 Method Not Found。独立客户端可显式设 `ClientOptions.filesystem=true`，此时仅将文本文件请求转为 `Event::HostRequest`，不自行打开路径。持久后端的主机配置 `workspaceAccess` 决定是否启用这一能力；虽然后台内核现在有单独的 `fliuno-terminal` 服务，该服务面向 Fliuno 自身经审批的终端工具，并未挂接到 ACP adapter。ACP terminal 始终关闭，不向 Agent 注入 MCP 配置。
+默认初始化声明 `fs.readTextFile=false`、`fs.writeTextFile=false`、`terminal=false`；未声明的能力请求返回 Method Not Found。独立客户端可分别启用 `ClientOptions.filesystem` 和 `ClientOptions.terminal`，请求会转为 `Event::HostRequest`，适配器自身不访问文件或启动进程。持久后端分别用 `workspaceAccess` 和非空 `terminalPresets` 启用这两项能力。当前不向 Agent 注入 MCP 配置。
 
-本实现锁定正式 v1；官方 v2 仍为草案，且移除了客户端文件/终端 API，建议以 MCP 提供宿主工具。文件能力实现、持久操作状态与审批位于独立模块，未来可复用到其他协议；当前没有声明 v2 兼容。
+本实现锁定正式 v1；官方 v2 已进入 Preview，移除了客户端文件和终端 API，建议以 MCP 提供宿主工具。当前没有声明 v2 兼容。
 
 ## 登录
 
@@ -61,7 +61,7 @@ Agent 在宽限期内不回应、提示超时、请求发送后丢弃 future、�
 
 - 每连接最多 64 个会话、8 个并行提示，每会话一个活动轮次；会话创建同时最多一个，容量不足直接返回 Busy。
 - 当前输入文本最大 256 KiB；可选历史文本块单独最大 257 KiB。两个块编码后的 PromptRequest 最多 1 MiB 减 1024 字节，控制字符转义也计入；超额在占用活动轮次和发送前拒绝。单条序列化会话更新/权限请求最大 256 KiB，早到更新最多 16 条。
-- 文件请求最多同时 8 个，容量在 SDK handler 中预留后才生成等待任务；编码请求最大 1 MiB，文件内容最大 256 KiB，路径最大 4096 UTF-8 字节。整个请求共用权限超时预算，单调时钟负责最终有效性检查。
+- 文件和终端请求合计最多同时 8 个，容量在 SDK handler 中预留后才生成等待任务；编码请求最大 1 MiB，文件内容最大 256 KiB，路径最大 4096 UTF-8 字节。文件操作和终端启动使用权限超时预算，单调时钟负责最终有效性检查。
 - `Events` 默认容量 128，可设为 1..1024；积压或丢弃消费者关闭连接。该队列是实时交付，不提供持久回放。
 - 请求、提示、权限等待、取消宽限都有独立上限，可配置为大于零且不超过一小时；默认分别为 30/300/120/2 秒。
 - 最后一个 `Client` 被释放时驱动停止；`Events` 持有者不会延长 Agent 进程生命。`close().await` 可等待确定的资源回收。
@@ -178,7 +178,15 @@ python examples/agent_demo.py --workspace --deny
 
 复现：`python examples/opencode_acp_interop.py --opencode PATH --app-server PATH`。该证据覆盖真实 ACP 进程，模型端点是夹具；不涉及云账号登录、原生隔离 OpenCode 或 Linux。
 
-尚未提供内置终端登录、隔离模式下的持久会话恢复、模式和模型切换、多模态输入、终端或网络代理、ACP 服务端或 v2 Preview。文件代理只覆盖 UTF-8 文本，不支持二进制、自动创建父目录或附加 session roots。适配范围以对端声明和已验证场景为准。
+## 受限终端
+
+宿主可在 `native_scratch` Agent 注册中加入 `terminalPresets`。每项填写 `id` 和 `command`（可执行文件的绝对路径，Windows 上为 `.exe`），可选 `args`、`resources`、`timeoutMs`。最多注册 16 项；超时默认 30 秒，可设为 100 毫秒至 5 分钟。Linux 须明确配置可委派的 `linuxCgroupParent`。注册时对可执行文件取 SHA-256，启动时再次核对。
+
+`terminal/create` 的 `command` 填预设 ID，`args` 和 `env` 必须为空；若指定 `cwd`，必须等于当前 ACP 会话目录。每次创建都会提交一次性审批，审阅内容包含程序、摘要、固定参数、输出上限、超时和资源设置。批准前不启动进程。子进程使用私有工作目录、禁止网络、关闭标准输入，最多为同一轮保留 4 个终端或创建作业。
+
+`terminal/output` 返回最近的标准输出和错误输出，上限为 64 KiB，也可由请求设得更小；截断会标记，返回内容保持有效 UTF-8。`terminal/wait_for_exit` 等待退出，`terminal/kill` 停止进程，`terminal/release` 停止进程并释放句柄。句柄只在所属会话的当前运行中有效，取消和运行结束时清理，重启不恢复终端或重放创建。Windows AppContainer 和 Debian cgroup v2 已用 SDK 夹具验证批准、输出、隔离句柄及终止。
+
+尚未提供交互终端登录、网络代理、模式和模型切换、多模态输入、ACP 服务端或 v2 Preview。文件代理只覆盖 UTF-8 文本，不支持二进制、自动创建父目录或附加 session roots。适配范围以对端声明和已验证场景为准。
 
 官方来源：
 

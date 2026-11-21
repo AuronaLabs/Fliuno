@@ -22,6 +22,8 @@ mod catalog;
 mod context;
 #[path = "acp_process/persistence.rs"]
 mod persistence;
+#[path = "acp_process/terminal.rs"]
+mod terminal;
 
 struct Directory(PathBuf);
 impl Directory {

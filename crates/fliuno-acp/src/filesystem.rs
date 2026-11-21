@@ -1,5 +1,6 @@
 //! Host filesystem requests are session-bound one-shot messages. This module
 //! never opens paths; an external broker owns policy, consent and actual IO.
+use crate::terminal::{TerminalKind, TerminalRequest, TerminalResponse};
 use crate::{Error, Event, Result, schema::*, state::Shared};
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -12,6 +13,7 @@ const MAX_TEXT_BYTES: usize = 256 * 1024;
 pub enum HostRequest {
     Read(Box<ReadTextFileRequest>),
     Write(Box<WriteTextFileRequest>),
+    Terminal(Box<TerminalRequest>),
 }
 
 impl HostRequest {
@@ -19,6 +21,7 @@ impl HostRequest {
         match self {
             Self::Read(r) => &r.session_id,
             Self::Write(r) => &r.session_id,
+            Self::Terminal(r) => r.session_id(),
         }
     }
     fn valid(&self) -> bool {
@@ -35,6 +38,7 @@ impl HostRequest {
                 }
                 (&r.path, crate::json_size::json_size(r))
             }
+            Self::Terminal(r) => return r.valid(),
         };
         path.is_absolute()
             && path
@@ -48,15 +52,23 @@ impl HostRequest {
 pub enum HostResponse {
     Read(String),
     Written,
+    Terminal(TerminalResponse),
     Denied,
     Failed,
 }
 
 pub(crate) struct PendingHostRequest {
     pub session_id: SessionId,
-    is_read: bool,
+    kind: Kind,
     response: oneshot::Sender<HostResponse>,
     expires_at: tokio::time::Instant,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Read,
+    Write,
+    Terminal(TerminalKind),
 }
 
 pub(crate) struct Waiter {
@@ -69,18 +81,30 @@ pub(crate) struct Waiter {
 }
 
 pub(crate) fn prepare(shared: Arc<Shared>, request: HostRequest) -> Option<Waiter> {
-    if !shared.options.filesystem || shared.check().is_err() || !request.valid() {
+    let kind = match &request {
+        HostRequest::Read(_) if shared.options.filesystem => Kind::Read,
+        HostRequest::Write(_) if shared.options.filesystem => Kind::Write,
+        HostRequest::Terminal(r) if shared.options.terminal => Kind::Terminal(r.kind()),
+        _ => return None,
+    };
+    if shared.check().is_err() || !request.valid() {
         return None;
     }
     let id = format!("host_{}", uuid::Uuid::new_v4());
     let session_id = request.session_id().clone();
-    let is_read = matches!(&request, HostRequest::Read(_));
     let (response, receiver) = oneshot::channel();
-    let expires_at = tokio::time::Instant::now() + shared.options.permission_timeout;
+    let budget = match kind {
+        Kind::Terminal(TerminalKind::Wait) => shared.options.prompt_timeout,
+        Kind::Terminal(TerminalKind::Create) | Kind::Read | Kind::Write => {
+            shared.options.permission_timeout
+        }
+        Kind::Terminal(_) => shared.options.request_timeout,
+    };
+    let expires_at = tokio::time::Instant::now() + budget;
     let expires_at_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .saturating_add(shared.options.permission_timeout)
+        .saturating_add(budget)
         .as_millis() as u64;
     let cancel = {
         let mut state = shared.state.lock().unwrap();
@@ -96,7 +120,7 @@ pub(crate) fn prepare(shared: Arc<Shared>, request: HostRequest) -> Option<Waite
             id.clone(),
             PendingHostRequest {
                 session_id: session_id.clone(),
-                is_read,
+                kind,
                 response,
                 expires_at,
             },
@@ -169,14 +193,15 @@ impl Shared {
             state.host_pending.remove(id);
             return Err(Error::NotFound);
         }
-        match &response {
-            HostResponse::Read(text) if !pending.is_read || text.len() > MAX_TEXT_BYTES => {
-                return Err(Error::InvalidInput("invalid host read result"));
-            }
-            HostResponse::Written if pending.is_read => {
-                return Err(Error::InvalidInput("invalid host write result"));
-            }
-            _ => {}
+        let valid = match (&response, pending.kind) {
+            (HostResponse::Read(text), Kind::Read) => text.len() <= MAX_TEXT_BYTES,
+            (HostResponse::Written, Kind::Write) => true,
+            (HostResponse::Terminal(r), Kind::Terminal(kind)) => r.matches(kind),
+            (HostResponse::Failed | HostResponse::Denied, _) => true,
+            _ => false,
+        };
+        if !valid {
+            return Err(Error::InvalidInput("invalid host request result"));
         }
         state
             .host_pending

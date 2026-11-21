@@ -1,7 +1,7 @@
 //! ACP v1 client boundary. Independent of Fliuno task storage and UI protocols.
 //!
 //! Sessions and permissions here are connection-local, not durable kernel tasks.
-//! The client advertises no filesystem or terminal capabilities. Protocol consent
+//! Filesystem and terminal capabilities are disabled by default. Protocol consent
 //! does not isolate an agent's own tools; use `connect_isolated` for a native
 //! Windows agent, or supply a transport with host-managed authority and lifetime.
 mod client;
@@ -10,6 +10,7 @@ mod filesystem;
 mod json_size;
 mod permissions;
 mod state;
+mod terminal;
 mod transport;
 
 #[cfg(feature = "test-fixtures")]
@@ -21,6 +22,9 @@ pub use client::{Client, Events};
 pub use config::ClientOptions;
 pub use filesystem::{HostRequest, HostResponse};
 pub use state::{Event, PermissionDecision};
+pub use terminal::{
+    OUTPUT_MAX_BYTES as MAX_TERMINAL_OUTPUT_BYTES, TerminalRequest, TerminalResponse,
+};
 pub use tokio_util::sync::CancellationToken;
 
 /// Errors intentionally omit peer error messages/data, which may contain secrets.

@@ -16,6 +16,8 @@ use tokio::sync::mpsc;
 mod catalog;
 #[path = "acp/state.rs"]
 mod state;
+#[path = "acp/terminal.rs"]
+mod terminal;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -39,6 +41,8 @@ pub struct AcpAgentConfig {
     /// Existing host directory for opt-in, isolated ACP checkpoints.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_state_directory: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_presets: Vec<terminal::PresetConfig>,
     /// Permit the local RPC client to launch this trusted ACP catalog reader.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub session_catalog: bool,
@@ -97,6 +101,7 @@ struct AcpBackend {
     launch: fliuno_sandbox::LaunchSpec,
     trusted_cwd: Option<PathBuf>,
     session_state_directory: Option<PathBuf>,
+    terminal_presets: BTreeMap<String, terminal::Preset>,
     session_catalog: bool,
     authentication_method: Option<String>,
     options: ClientOptions,
@@ -197,6 +202,7 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             return Err("ACP sessionCatalog requires trusted_host".into());
         }
         let session_state_directory = state::resolve_root(&config)?;
+        let terminal_presets = terminal::resolve(&config)?;
         let executable_digest = if trusted_cwd.is_some() {
             fliuno_sandbox::trusted_program_digest(&config.command)
         } else {
@@ -211,6 +217,15 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
         }
         if let Some(directory) = &session_state_directory {
             identity["resolvedSessionStateDirectory"] = serde_json::json!(directory);
+        }
+        if !terminal_presets.is_empty() {
+            identity["terminalPresets"] = serde_json::to_value(
+                terminal_presets
+                    .iter()
+                    .map(|(id, preset)| (id, &preset.spec.program_sha256))
+                    .collect::<BTreeMap<_, _>>(),
+            )
+            .map_err(|_| "cannot encode ACP terminal identity")?;
         }
         let authority = fliuno_core::authority_digest("acp.registration.v1", &identity);
         let launch = fliuno_sandbox::LaunchSpec {
@@ -238,8 +253,10 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
                 prompt_timeout: Duration::from_millis(config.prompt_timeout_ms),
                 permission_timeout: Duration::from_millis(config.permission_timeout_ms),
                 filesystem: config.workspace_access,
+                terminal: !terminal_presets.is_empty(),
                 ..ClientOptions::default()
             },
+            terminal_presets,
         });
     }
     for backend in backends {
@@ -415,6 +432,7 @@ impl AcpBackend {
         };
         let operations_cancel = cancellation.child_token();
         let _operations_guard = operations_cancel.clone().drop_guard();
+        let mut terminals = None;
         let result = async {
             if let Some(outcome) = self.authenticate(&client, observer, cancellation).await? {
                 return Ok(outcome);
@@ -460,6 +478,7 @@ impl AcpBackend {
                     }
                 },
             };
+            let terminal = terminals.insert(terminal::Broker::new(&self.terminal_presets, cwd.clone(), operations_cancel.clone()));
             let mut broker = crate::filesystem::WorkspaceBroker::new(self.options.filesystem, request.workspace.root.clone().into(), cwd, operations_cancel.clone());
             observer.observe(AgentObservation::SessionOpened(session.to_string())).map_err(|_| ())?;
             let history = fliuno_core::context_prompt(request.context.as_ref()).map_err(|_| ())?;
@@ -474,6 +493,9 @@ impl AcpBackend {
                         let command = command.ok_or(())?;
                         if cancellation.is_cancelled() { continue; }
                         match command {
+                            AgentCommand::Permission {permission_id, decision} if permission_id.starts_with("host_") => {
+                                terminal.approve(permission_id, decision, &client, &session)?;
+                            }
                             AgentCommand::Permission {permission_id, decision} => {
                                 let decision = match decision {
                                     ApprovalDecision::AllowOnce => PermissionDecision::AllowOnce,
@@ -487,7 +509,13 @@ impl AcpBackend {
                     job = broker.jobs.join_next(), if !broker.jobs.is_empty() => {
                         broker.completed(job.ok_or(())?.map_err(|_| ())?, observer, &client, &session)?;
                     }
+                    job = terminal.jobs.join_next(), if !terminal.jobs.is_empty() => {
+                        terminal.completed(job.ok_or(())?.map_err(|_| ())?, &client, &session)?;
+                    }
                     event = events.recv() => match event.ok_or(())? {
+                        Event::HostRequest {id, request: fliuno_acp::HostRequest::Terminal(request), expires_at_unix_ms} => {
+                            terminal.request(id, *request, expires_at_unix_ms, observer, &client, &session)?;
+                        }
                         Event::HostRequest {id, request, expires_at_unix_ms} => {
                             if request.session_id() != &session { return Err(()); }
                             let request_id = id.clone();
@@ -499,7 +527,7 @@ impl AcpBackend {
                         }
                         Event::HostRequestClosed {id, session_id} => {
                             if session_id != session { return Err(()); }
-                            broker.closed(id, observer)?;
+                            if !terminal.closed(&id, observer)? { broker.closed(id, observer)?; }
                         }
                         // This runner accepts live updates only. Resume does not replay history.
                         Event::SessionHistory(_) => return Err(()),
@@ -534,6 +562,9 @@ impl AcpBackend {
             }
         }.await;
         operations_cancel.cancel();
+        if let Some(terminal) = terminals {
+            terminal.shutdown().await;
+        }
         // Always wait for Job/profile cleanup, including observer and wire errors.
         if client.private_state_directory().is_some()
             && !cancellation.is_cancelled()

@@ -14,6 +14,7 @@ fn options() -> ClientOptions {
         cancellation_grace: Duration::from_millis(100),
         event_capacity: 64,
         filesystem: false,
+        terminal: false,
     }
 }
 

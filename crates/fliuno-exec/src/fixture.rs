@@ -50,6 +50,17 @@ pub fn main() -> io::Result<()> {
             io::stdout().flush()?;
             std::thread::sleep(Duration::from_secs(60));
         }
+        Some("acp-terminal") => {
+            assert!(fliuno_sandbox::current_process_is_isolated()?);
+            if args.get(1).is_some_and(|arg| arg == "hold") {
+                println!("pid:{}", std::process::id());
+                io::stdout().flush()?;
+                std::thread::sleep(Duration::from_secs(60));
+            } else {
+                print!("{}last", "\u{754c}".repeat(128));
+                io::stdout().flush()?;
+            }
+        }
         Some("hang-file") => {
             println!("ready");
             io::stdout().flush()?;

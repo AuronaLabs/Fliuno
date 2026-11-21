@@ -11,6 +11,8 @@ pub struct ClientOptions {
     pub event_capacity: usize,
     /// Requires an active event consumer to authorize and execute each request.
     pub filesystem: bool,
+    /// Requires an active host broker for bounded terminal requests.
+    pub terminal: bool,
 }
 
 impl Default for ClientOptions {
@@ -22,6 +24,7 @@ impl Default for ClientOptions {
             cancellation_grace: Duration::from_secs(2),
             event_capacity: 128,
             filesystem: false,
+            terminal: false,
         }
     }
 }

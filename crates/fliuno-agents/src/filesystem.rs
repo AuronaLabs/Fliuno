@@ -96,6 +96,7 @@ impl WorkspaceBroker {
             return Err(RequestError::Rejected);
         }
         match request {
+            HostRequest::Terminal(_) => return Err(RequestError::Rejected),
             HostRequest::Read(request) => {
                 let path = self
                     .relative(&request.path)
