@@ -1,7 +1,8 @@
 use super::*;
 use http_wire::{Fixture, Response};
+use std::path::Path;
 
-fn launch(db: &PathBuf, config: &PathBuf) -> Peer {
+fn launch(db: &Path, config: &Path) -> Peer {
     let child = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
         .args(["--db", db.to_str().unwrap(), "--memory-embedding-config"])
         .arg(config)

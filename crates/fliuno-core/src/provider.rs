@@ -45,6 +45,34 @@ pub struct InputBudgetError {
     pub report: Option<Box<ModelBudgetRejection>>,
 }
 
+impl InputBudgetError {
+    pub(crate) fn terminal_message(&self) -> String {
+        let mut message = format!(
+            "model input exceeds its budget before generation: {}",
+            self.message
+        );
+        if let Some(report) = &self.report {
+            message.push_str(". See model_budget_rejected for measured size and limit.");
+            if let Some(sizes) = &report.normalized_input_bytes {
+                if sizes.current_media > 0 {
+                    message.push_str(" Try smaller or fewer image/PDF attachments.");
+                }
+                if sizes.tool_definitions > 0 {
+                    message.push_str(
+                        " The host can reduce the number or schema size of registered tools.",
+                    );
+                }
+                if sizes.history > 0 {
+                    message.push_str(
+                        " Start a new task with fewer history records or isolated context.",
+                    );
+                }
+            }
+        }
+        message
+    }
+}
+
 impl ModelError {
     /// Add bounded diagnostics outside the kernel lock, only on known rejection.
     pub fn with_input_attribution(mut self, task: &Task, tools: &[ToolSpec]) -> Self {

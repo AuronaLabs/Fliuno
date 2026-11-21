@@ -53,7 +53,10 @@ fn replace(output: &mut Value, task_id: &str, call_id: &str) -> Result<()> {
         return Ok(());
     }
     let original = serde_json::to_string(output)?;
-    let end = original.floor_char_boundary(EXCERPT_BYTES);
+    let mut end = EXCERPT_BYTES;
+    while !original.is_char_boundary(end) {
+        end -= 1;
+    }
     let reduced = serde_json::json!({
         "$fliuno": "historical_tool_output_excerpt",
         "taskId": task_id,

@@ -221,6 +221,8 @@ $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 
 `observedIsLowerBound` 表示序列化器在超额时提前停止。`serializedGenerationBytes` 仅在已完成生成请求序列化时记录；`transportLimitBytes` 独立于 `budget` 的窗口与输出预留。`normalizedInputBytes` 是历史、记忆、当前文字、媒体、工具定义、工具结果与供应商续接数据各自的紧凑 JSON 估算。它不计入供应商包装或消息分隔，也无法拆分供应商 Token 计数。事件不含输入正文。只有最终失败的摘要请求会落一条摘要预算拒绝事件；在记录边界成功缩小并继续的中间尝试不单独落盘。SQLite v66 标记这类事件。
 
+预算调整用尽时，任务输出指向 `model_budget_rejected`，并按请求包含的内容给出下一步：减少或缩小图片与 PDF、请宿主精简工具 Schema，或以更少历史启动新任务。这些提示依据本地输入分类，不代表已定位供应商 Token 的具体来源。
+
 `initialize.capabilities.modelCapabilities` 提供统一快照：`provider`、`model`、`modelSource`、`supportedInputTypes`、`inputTypesSource`、同一份可选 `budget`、`automaticContextCompaction` 和 `refreshedAtMs`。`modelSource` 当前区分宿主配置与供应商元数据；Anthropic 别名会在启动时解析，OpenAI/Gemini 使用配置的模型 ID。三个适配器目前都能编码文本、图片和 PDF，因此 `inputTypesSource` 为 `provider_adapter`；这说明请求格式可表达这些输入，不保证所选的每一个模型都支持所有模态。只有提供模型身份、请求预算且实现摘要调用的 Provider 才报告自动压缩能力。
 
 预算预检明确拒绝输入超限、且确认尚未发送生成请求时，内核先在剩余额度内省略可选的工作区记忆，再对完整请求预检一次。任务通过 `contextMemoryOmittedForBudget` 和 `context_memory_omitted_for_budget` 事件报告这个决定，原始 `context.memories` 仍可审阅。

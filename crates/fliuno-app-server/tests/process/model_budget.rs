@@ -66,7 +66,8 @@ fn model_discovery_pins_alias_for_count_and_generation_and_reports_the_budget() 
                 assert_eq!(request.method, "POST");
                 assert_eq!(request.body["model"], "fixture-pinned-20261118");
                 assert!(request.body.get("max_tokens").is_none());
-                let over = request.body["messages"].to_string().contains("over budget");
+                let messages = request.body["messages"].to_string();
+                let over = messages.contains("over budget") || messages.contains("application/pdf");
                 Response::json(200, json!({"input_tokens":if over {30721} else {30720}}))
             }
             "/mock/v1/messages" => {
@@ -129,6 +130,10 @@ fn model_discovery_pins_alias_for_count_and_generation_and_reports_the_budget() 
     );
     let rejected = peer.wait_for_status(over["id"].as_str().unwrap(), "failed");
     assert_eq!(rejected["modelOutcomeUnknown"], false);
+    let guidance = rejected["output"].as_str().unwrap();
+    assert!(guidance.contains("model_budget_rejected"));
+    assert!(guidance.contains("schema size of registered tools"));
+    assert!(!guidance.contains("image/PDF attachments"));
     assert_eq!(init["capabilities"]["modelBudgetRejectionEvents"], true);
     let events = peer.call("events/list", json!({"taskId":over["id"]}));
     let data = &events["events"]
@@ -147,9 +152,31 @@ fn model_discovery_pins_alias_for_count_and_generation_and_reports_the_budget() 
     assert_eq!(report["transportLimitBytes"], 8 * 1024 * 1024);
     assert!(report["serializedGenerationBytes"].as_u64().unwrap() > 0);
     assert_eq!(report["budget"], init["capabilities"]["modelBudget"]);
+
+    let attachment = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"context":{"mode":"isolated"},"input":[
+            {"type":"text","text":"Read"},
+            {"type":"pdf","data":"JVBERi0xLjQK"}
+        ]}),
+    );
+    let failed = peer.wait_for_status(attachment["id"].as_str().unwrap(), "failed");
+    assert_eq!(failed["modelOutcomeUnknown"], false);
+    assert!(
+        failed["output"]
+            .as_str()
+            .unwrap()
+            .contains("Try smaller or fewer image/PDF attachments")
+    );
     let requests = wire.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), 5);
     assert_eq!(requests[3].path, "/mock/v1/messages/count_tokens");
+    assert_eq!(requests[4].path, "/mock/v1/messages/count_tokens");
+    assert!(
+        requests[4].body["messages"]
+            .to_string()
+            .contains("application/pdf")
+    );
 }
 
 #[test]
@@ -354,7 +381,24 @@ fn budget_retry_reduces_historical_tool_outputs_without_rewriting_live_replay() 
         if later {
             assert!(!data.contains(OLD_TAIL));
             assert!(data.contains("historical_tool_output_excerpt"));
-            assert!(data.contains("tool_archive"));
+            let (_, context) = messages[0]["content"]
+                .as_str()
+                .unwrap()
+                .split_once('\n')
+                .unwrap();
+            let context: Value = serde_json::from_str(context).unwrap();
+            let turn = &context["turns"][0];
+            let excerpt = &turn["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|message| message["role"] == "tool_result")
+                .expect("historical tool result")["output"];
+            assert_eq!(excerpt["taskId"], turn["taskId"]);
+            assert_eq!(excerpt["callId"], "tool_archive");
+            assert!(excerpt["originalJsonBytes"].as_u64().unwrap() > 4096);
+            let prefix = excerpt["jsonPrefix"].as_str().unwrap();
+            assert!(prefix.len() <= 512 && prefix.contains('\u{754c}'));
             assert!(
                 messages
                     .iter()

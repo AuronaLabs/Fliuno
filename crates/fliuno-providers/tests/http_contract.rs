@@ -1002,4 +1002,71 @@ fn inline_media_is_dispatched_in_order_to_each_model_api() {
             ]
         })
     );
+
+    // Measure the same multibyte input with each adapter's real envelope. The
+    // reserve is fixed in all three calls so only the input limit changes.
+    if let Message::UserParts { parts } = &mut task.messages[0] {
+        parts[0] = UserContentPart::Text {
+            text: "\u{8bf7}\u{9605}\u{8bfb}".into(),
+        };
+    }
+    let peer = wire::Fixture::start(|request| {
+        let response = match request.path.as_str() {
+            "/v1/responses" => openai_done(),
+            "/v1/messages" => anthropic_done(),
+            "/v1/interactions" => {
+                json!({"status":"completed","steps":[{"type":"model_output","content":[{"type":"text","text":"Done"}]}]})
+            }
+            path => panic!("unexpected route: {path}"),
+        };
+        wire::Response::json(200, response)
+    });
+    let base = peer.url("/v1/");
+    let key = "fixture-key";
+    let model = "fixture-model";
+    for name in ["openai", "anthropic", "gemini"] {
+        let make = |allowance| -> Box<dyn ModelProvider> {
+            let budget = ModelContextBudget::new(allowance + 512, 512).unwrap();
+            match name {
+                "openai" => Box::new(
+                    OpenAiProvider::new(&base, key, model)
+                        .unwrap()
+                        .with_context_budget(budget),
+                ),
+                "anthropic" => Box::new(
+                    AnthropicProvider::new(&base, key, model)
+                        .unwrap()
+                        .with_context_budget(budget),
+                ),
+                _ => Box::new(
+                    GeminiProvider::new(&base, key, model)
+                        .unwrap()
+                        .with_context_budget(budget)
+                        .unwrap(),
+                ),
+            }
+        };
+        let before = peer.requests().len();
+        make(65536)
+            .next_classified(&task, &tools, &cancellation)
+            .unwrap();
+        let wire = peer.requests();
+        let exact: u32 = wire[before].headers["content-length"].parse().unwrap();
+        make(exact)
+            .next_classified(&task, &tools, &cancellation)
+            .unwrap();
+        let result = make(exact - 1).next_classified(&task, &tools, &cancellation);
+        assert!(
+            matches!(result, Err(ModelError::InputBudgetExceeded(error)) if error.report.as_ref().is_some_and(|report|
+                report.kind == fliuno_protocol::ModelBudgetLimit::LocalJsonBytes
+                    && report.limit == u64::from(exact - 1)
+                    && report.observed == u64::from(exact)
+                    && report.observed_is_lower_bound
+            )),
+            "unexpected rejection for {name}"
+        );
+        let wire = peer.requests();
+        assert_eq!(wire.len(), before + 2);
+        assert_eq!(wire[before].body, wire[before + 1].body);
+    }
 }

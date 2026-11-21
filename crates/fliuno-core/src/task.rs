@@ -141,6 +141,7 @@ impl Kernel {
         let turn = match response {
             Err(ModelError::InputBudgetExceeded(error)) => {
                 task.model_outcome_unknown = false;
+                let final_message = error.terminal_message();
                 let mut events: Vec<_> = error
                     .report
                     .map(|report| EventKind::ModelBudgetRejected {
@@ -187,14 +188,7 @@ impl Kernel {
                     self.commit(&task, &events, &[])?;
                     return Ok(task);
                 }
-                return self.fail_with_events(
-                    task,
-                    format!(
-                        "model input exceeds its budget and cannot be compacted: {}",
-                        error.message
-                    ),
-                    events,
-                );
+                return self.fail_with_events(task, final_message, events);
             }
             Ok(turn) => turn,
             Err(ModelError::NotDispatched(message)) => {

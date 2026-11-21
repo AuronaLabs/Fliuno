@@ -82,7 +82,7 @@ fn headless_workflow_recovers_lost_progress_and_delivers_one_approved_artifact()
     assert!(
         recovered
             .iter()
-            .any(|event| matches!(&event.data, EventKind::TaskStarted { .. }))
+            .any(|event| matches!(&event.data, EventKind::TaskStarted))
     );
     assert!(recovered.iter().any(|event| matches!(&event.data, EventKind::ApprovalRequested { approval: pending } if pending.id == approval.id)));
     assert!(feed.cursor() > checkpoint);
