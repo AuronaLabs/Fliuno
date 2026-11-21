@@ -29,6 +29,8 @@ mod artifact_digest;
 mod artifact_download;
 #[path = "client/feed.rs"]
 mod feed;
+#[path = "client/headless_workflow.rs"]
+mod headless_workflow;
 #[path = "client/session_catalog.rs"]
 mod session_catalog;
 #[path = "client/task_cancel.rs"]
