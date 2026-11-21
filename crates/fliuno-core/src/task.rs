@@ -54,6 +54,7 @@ impl Kernel {
             let turn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 self.provider
                     .next_classified(&task, &specs, &CancellationToken::new())
+                    .map_err(|error| error.with_input_attribution(&task, &specs))
             }))
             .unwrap_or_else(|_| Err(ModelError::OutcomeUnknown("model provider panicked".into())));
             let memory_was_omitted = task.context_memory_omitted_for_budget;
@@ -133,8 +134,17 @@ impl Kernel {
             ));
         }
         let turn = match response {
-            Err(ModelError::InputBudgetExceeded(message)) => {
+            Err(ModelError::InputBudgetExceeded(error)) => {
                 task.model_outcome_unknown = false;
+                let mut events: Vec<_> = error
+                    .report
+                    .map(|report| EventKind::ModelBudgetRejected {
+                        step: task.model_steps,
+                        summarization: false,
+                        report: *report,
+                    })
+                    .into_iter()
+                    .collect();
                 if !model_step_budget_spent(&task)
                     && !task.context_memory_omitted_for_budget
                     && let Some(context) = &task.context
@@ -142,27 +152,28 @@ impl Kernel {
                 {
                     let memory_count = context.memories.len() as u32;
                     task.context_memory_omitted_for_budget = true;
-                    self.commit(
-                        &task,
-                        &[EventKind::ContextMemoryOmittedForBudget {
-                            rejected_step: task.model_steps,
-                            memory_count,
-                        }],
-                        &[],
-                    )?;
+                    events.push(EventKind::ContextMemoryOmittedForBudget {
+                        rejected_step: task.model_steps,
+                        memory_count,
+                    });
+                    self.commit(&task, &events, &[])?;
                     return Ok(task);
                 }
                 if compaction::schedule(&mut task, self.provider.as_ref()) {
-                    self.commit(
-                        &task,
-                        &[EventKind::ContextCompactionScheduled {
-                            rejected_step: task.model_steps,
-                        }],
-                        &[],
-                    )?;
+                    events.push(EventKind::ContextCompactionScheduled {
+                        rejected_step: task.model_steps,
+                    });
+                    self.commit(&task, &events, &[])?;
                     return Ok(task);
                 }
-                return self.fail(task, format!("model input exceeds its configured budget and cannot be compacted: {message}"));
+                return self.fail_with_events(
+                    task,
+                    format!(
+                        "model input exceeds its budget and cannot be compacted: {}",
+                        error.message
+                    ),
+                    events,
+                );
             }
             Ok(turn) => turn,
             Err(ModelError::NotDispatched(message)) => {

@@ -46,8 +46,8 @@ pub use events::{
 };
 pub use policy::{AskForWrites, PolicyDecision, PolicyEngine};
 pub use provider::{
-    CancellationToken, DemoProvider, ModelDecision, ModelError, ModelProvider, ModelStreamEvent,
-    ModelTurn, ProviderReplay,
+    CancellationToken, DemoProvider, InputBudgetError, ModelDecision, ModelError, ModelProvider,
+    ModelStreamEvent, ModelTurn, ProviderReplay,
 };
 pub use storage::MAX_EVENT_TARGET_BYTES;
 pub use storage::TaskMemoryQuery;

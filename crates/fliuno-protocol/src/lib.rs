@@ -572,6 +572,46 @@ pub struct ModelBudget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+pub enum ModelBudgetLimit {
+    LocalJsonBytes,
+    ProviderInputTokens,
+    GenerationRequestBytes,
+    CountRequestBytes,
+}
+
+/// Numeric evidence for a request rejected before dispatching generation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelBudgetRejection {
+    pub kind: ModelBudgetLimit,
+    pub limit: u64,
+    pub observed: u64,
+    pub observed_is_lower_bound: bool,
+    pub transport_limit_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serialized_generation_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<ModelBudget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_input_bytes: Option<ModelBudgetInputBytes>,
+}
+
+/// Compact JSON sizes of independent input fragments before adapter encoding.
+/// They are useful for attribution but do not sum to the wire byte or token count.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelBudgetInputBytes {
+    pub history: u64,
+    pub memory: u64,
+    pub current_text: u64,
+    pub current_media: u64,
+    pub tool_definitions: u64,
+    pub tool_results: u64,
+    pub provider_replay: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ModelInputType {
     Text,
     Image,
@@ -722,6 +762,11 @@ pub enum EventKind {
     ModelUsageReported {
         step: u32,
         usage: ModelUsage,
+    },
+    ModelBudgetRejected {
+        step: u32,
+        summarization: bool,
+        report: ModelBudgetRejection,
     },
     ModelPreflightObserved {
         step: u32,

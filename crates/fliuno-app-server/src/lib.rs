@@ -520,6 +520,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["modelBudgetRejectionEvents"] = json!(true);
             capabilities["durableTaskRuns"] = json!(self.kernel()?.durable_runs_supported());
             capabilities["maxRunNodes"] = json!(MAX_RUN_NODES);
             capabilities["maxRunConcurrency"] = json!(MAX_RUN_CONCURRENCY);

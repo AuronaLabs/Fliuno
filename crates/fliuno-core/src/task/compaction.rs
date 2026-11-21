@@ -89,7 +89,7 @@ pub fn execute(
         input.messages = vec![Message::User { text }];
         match provider.next_classified(&input, &[], cancellation) {
             Err(ModelError::InputBudgetExceeded(_)) if take > 1 => take = take.div_ceil(2),
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.with_input_attribution(&input, &[])),
             Ok(turn) => {
                 return Ok(ContextCompaction {
                     take,
@@ -155,10 +155,20 @@ impl Kernel {
                     .as_mut()
                     .expect("pending context checked")
                     .compaction_pending = false;
-                return self.fail(
-                    task,
-                    format!("context summary failed before dispatch: {error}"),
-                );
+                let message = format!("context summary failed before dispatch: {error}");
+                let events = match error {
+                    ModelError::InputBudgetExceeded(error) => error
+                        .report
+                        .map(|report| EventKind::ModelBudgetRejected {
+                            step: task.model_steps,
+                            summarization: true,
+                            report: *report,
+                        })
+                        .into_iter()
+                        .collect(),
+                    _ => vec![],
+                };
+                return self.fail_with_events(task, message, events);
             }
         };
         task.model_outcome_unknown = false;

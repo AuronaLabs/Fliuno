@@ -186,7 +186,11 @@ fn configured_budget_counts_the_complete_request_before_opening_a_connection() {
         effect: fliuno_core::ToolEffect::ArtifactWrite,
         input_schema: json!({"type":"object","description":"\u{754c}".repeat(1600)}),
     }];
-    for provider in [&openai as &dyn ModelProvider, &anthropic] {
+    let gemini = GeminiProvider::new(&base, "fixture-key", "model")
+        .unwrap()
+        .with_context_budget(budget)
+        .unwrap();
+    for provider in [&openai as &dyn ModelProvider, &anthropic, &gemini] {
         for streaming in [false, true] {
             let cancellation = CancellationToken::new();
             let result = if streaming {
@@ -194,10 +198,9 @@ fn configured_budget_counts_the_complete_request_before_opening_a_connection() {
             } else {
                 provider.next_classified(&task, &tools, &cancellation)
             };
-            assert!(
-                matches!(result, Err(ModelError::InputBudgetExceeded(message))
-                if message.contains("configured local context estimate"))
-            );
+            assert!(matches!(result, Err(ModelError::InputBudgetExceeded(error))
+                if error.report.as_ref().is_some_and(|report| report.kind == fliuno_protocol::ModelBudgetLimit::LocalJsonBytes
+                    && report.limit == 3584 && report.observed > report.limit && report.observed_is_lower_bound)));
         }
     }
     assert!(
@@ -445,10 +448,11 @@ fn gemini_projection_count_plus_margin_rejects_before_generation() {
         )
         .unwrap();
     let result = provider.next_classified(&task, &tools, &CancellationToken::new());
-    assert!(
-        matches!(result, Err(ModelError::InputBudgetExceeded(message))
-        if message.contains("safety margin"))
-    );
+    assert!(matches!(result, Err(ModelError::InputBudgetExceeded(error))
+        if error.report.as_ref().is_some_and(|report| report.kind == fliuno_protocol::ModelBudgetLimit::ProviderInputTokens
+            && report.observed == 121 && !report.observed_is_lower_bound
+            && report.budget.is_some_and(|budget| budget.count_coverage == fliuno_protocol::ModelInputCountCoverage::ProviderProjection
+                && report.limit == 128 - u64::from(budget.safety_margin_tokens)))));
     assert_eq!(peer.requests().len(), 1);
 }
 

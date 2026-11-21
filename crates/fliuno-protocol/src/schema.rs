@@ -208,6 +208,7 @@ pub fn schema_bundle() -> Value {
         "ModelUsageRangePage" => schema::<ModelUsageRangePage>(),
         "ModelProgress" => schema::<ModelProgress>(),
         "ModelBudget" => schema::<ModelBudget>(),
+        "ModelBudgetRejection" => schema::<ModelBudgetRejection>(),
         "ModelCapabilities" => schema::<ModelCapabilities>(),
         "ModelCapabilitiesSource" => schema::<ModelCapabilitiesSource>(),
         "ModelInputType" => schema::<ModelInputType>(),

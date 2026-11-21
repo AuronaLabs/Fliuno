@@ -1,6 +1,6 @@
 use crate::ModelContextBudget;
-use fliuno_core::{CancellationToken, ModelError};
-use fliuno_protocol::ModelInputPreflight;
+use fliuno_core::{CancellationToken, InputBudgetError, ModelError};
+use fliuno_protocol::{ModelBudget, ModelBudgetLimit, ModelBudgetRejection, ModelInputPreflight};
 use reqwest::{
     Client, Url,
     header::{CONTENT_TYPE, HeaderMap},
@@ -22,13 +22,13 @@ const COUNT_RESPONSE_LIMIT: u64 = 16 * 1024;
 struct BoundedRequestBody {
     bytes: Vec<u8>,
     limit: usize,
-    exceeded: bool,
+    exceeded_at: Option<usize>,
 }
 
 impl std::io::Write for BoundedRequestBody {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
         if buffer.len() > self.limit.saturating_sub(self.bytes.len()) {
-            self.exceeded = true;
+            self.exceeded_at = Some(self.bytes.len().saturating_add(buffer.len()));
             return Err(std::io::Error::other(
                 "provider request body limit exceeded",
             ));
@@ -44,31 +44,56 @@ impl std::io::Write for BoundedRequestBody {
 
 fn encode_request(
     body: &impl serde::Serialize,
-    budget: Option<ModelContextBudget>,
+    budget: Option<ModelBudget>,
+    count_for_generation_bytes: Option<usize>,
 ) -> Result<Vec<u8>, ModelError> {
-    let limit = budget
-        .filter(|budget| !budget.provider_count)
-        .map_or(REQUEST_LIMIT, |budget| {
-            REQUEST_LIMIT.min(budget.input_allowance as usize)
-        });
+    let limit = if count_for_generation_bytes.is_some() {
+        REQUEST_LIMIT
+    } else {
+        budget
+            .and_then(|budget| budget.max_input_bytes)
+            .map_or(REQUEST_LIMIT, |limit| REQUEST_LIMIT.min(limit as usize))
+    };
     let mut writer = BoundedRequestBody {
         bytes: Vec::new(),
         limit,
-        exceeded: false,
+        exceeded_at: None,
     };
     if serde_json::to_writer(&mut writer, body).is_err() {
-        let message = match (writer.exceeded, limit < REQUEST_LIMIT) {
-            (true, true) => {
-                "provider input exceeds the configured local context estimate (JSON bytes plus output reserve)"
-            }
-            (true, false) => "provider request exceeds 8 MiB",
-            (false, _) => "cannot serialize provider request",
+        let Some(observed) = writer.exceeded_at else {
+            return Err(ModelError::NotDispatched(
+                "cannot serialize provider request".into(),
+            ));
         };
-        return Err(if writer.exceeded && limit < REQUEST_LIMIT {
-            ModelError::InputBudgetExceeded(message.into())
+        let (kind, message) = if count_for_generation_bytes.is_some() {
+            (
+                ModelBudgetLimit::CountRequestBytes,
+                "provider count request exceeds 8 MiB",
+            )
+        } else if limit < REQUEST_LIMIT {
+            (
+                ModelBudgetLimit::LocalJsonBytes,
+                "provider input exceeds the configured local context estimate (JSON bytes plus output reserve)",
+            )
         } else {
-            ModelError::NotDispatched(message.into())
-        });
+            (
+                ModelBudgetLimit::GenerationRequestBytes,
+                "provider request exceeds 8 MiB",
+            )
+        };
+        return Err(ModelError::InputBudgetExceeded(InputBudgetError {
+            message: message.into(),
+            report: Some(Box::new(ModelBudgetRejection {
+                kind,
+                limit: limit as u64,
+                observed: observed as u64,
+                observed_is_lower_bound: true,
+                transport_limit_bytes: REQUEST_LIMIT as u64,
+                serialized_generation_bytes: count_for_generation_bytes.map(|bytes| bytes as u64),
+                budget,
+                normalized_input_bytes: None,
+            })),
+        }));
     }
     Ok(writer.bytes)
 }
@@ -254,11 +279,12 @@ impl Http {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        let encoded = encode_request(body, self.context_budget)?;
+        let configured = self.configured_budget();
+        let encoded = encode_request(body, configured, None)?;
         let mut observed_count = None;
-        if let Some(budget) = self.context_budget.filter(|budget| budget.provider_count) {
+        if let Some(mut budget) = configured.filter(|budget| budget.max_input_tokens.is_some()) {
             let count_body = if let Some(count_body) = provider_count_body {
-                encode_request(count_body, None)?
+                encode_request(count_body, configured, Some(encoded.len()))?
             } else {
                 let count_body: BTreeMap<_, _> = self
                     .count_fields
@@ -266,7 +292,7 @@ impl Http {
                     .copied()
                     .filter_map(|key| body.get(key).map(|value| (key, value)))
                     .collect();
-                encode_request(&count_body, None)?
+                encode_request(&count_body, configured, Some(encoded.len()))?
             };
             let count = self.runtime.block_on(async {
                 tokio::select! {
@@ -285,14 +311,27 @@ impl Http {
             }
             let count = count?;
             observed_count = Some(count);
-            let safety_margin_tokens = budget
+            budget.safety_margin_tokens = budget
                 .safety_margin_tokens
                 .max(self.calibrated_safety_margin_tokens.load(Ordering::Relaxed));
-            let available = budget.input_allowance.saturating_sub(safety_margin_tokens);
+            let available = budget
+                .max_input_tokens
+                .unwrap()
+                .saturating_sub(budget.safety_margin_tokens);
             if count > u64::from(available) {
-                return Err(ModelError::InputBudgetExceeded(
-                    "provider input token count plus its safety margin exceeds the configured context budget".into(),
-                ));
+                return Err(ModelError::InputBudgetExceeded(InputBudgetError {
+                    message: "provider input token count plus its safety margin exceeds the configured context budget".into(),
+                    report: Some(Box::new(ModelBudgetRejection {
+                        kind: ModelBudgetLimit::ProviderInputTokens,
+                        limit: u64::from(available),
+                        observed: count,
+                        observed_is_lower_bound: false,
+                        transport_limit_bytes: REQUEST_LIMIT as u64,
+                        serialized_generation_bytes: Some(encoded.len() as u64),
+                        budget: Some(budget),
+                        normalized_input_bytes: None,
+                    })),
+                }));
             }
         }
         if cancellation.is_cancelled() {
@@ -593,13 +632,16 @@ mod tests {
     #[test]
     fn serialized_provider_request_accepts_the_exact_limit_and_rejects_one_more_byte() {
         let exact = Value::String("x".repeat(REQUEST_LIMIT - 2));
-        let encoded = encode_request(&exact, None).unwrap();
+        let encoded = encode_request(&exact, None, None).unwrap();
         assert_eq!(encoded.len(), REQUEST_LIMIT);
 
         let over = Value::String("x".repeat(REQUEST_LIMIT - 1));
         assert!(matches!(
-            encode_request(&over, None),
-            Err(ModelError::NotDispatched(message)) if message == "provider request exceeds 8 MiB"
+            encode_request(&over, None, None),
+            Err(ModelError::InputBudgetExceeded(error)) if error.report.as_ref().is_some_and(|report| {
+                report.kind == ModelBudgetLimit::GenerationRequestBytes
+                    && report.observed_is_lower_bound && report.observed == report.limit + 1
+            })
         ));
     }
 

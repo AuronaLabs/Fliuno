@@ -210,6 +210,17 @@ $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 
 `initialize.capabilities.modelBudget` 返回当前的 `windowTokens`、`maxInputTokens`、`maxInputBytes`、`maxOutputTokens`、`countMode`、`countCoverage`、`safetyMarginTokens` 和 `source`。Token 模式设置 `maxInputTokens` 并将 `maxInputBytes` 置空；本地字节预算则反过来。`countMode` 为 `json_bytes_estimate` 或 `provider`；`countCoverage` 为 `serialized_json_bytes`、`provider_request` 或 `provider_projection`。来源为 `configured` 或 `provider_metadata`。未配置预检时返回 `null`。
 
+`modelBudgetRejectionEvents` 表示内核会持久化 HTTP 模型适配器提供的 `model_budget_rejected`。事件包含 `step`、是否属于摘要调用的 `summarization` 和 `report`：
+
+| `report.kind` | `limit` / `observed` 的单位与来源 |
+| --- | --- |
+| `local_json_bytes` | 当前本地字节预算 / 序列化器已观测的请求字节下界 |
+| `provider_input_tokens` | 扣除安全余量后的 Token 额度 / 供应商返回的总 Token 计数；覆盖范围见 `budget.countCoverage` |
+| `generation_request_bytes` | HTTP 生成请求体硬上限 / 已观测的请求字节下界 |
+| `count_request_bytes` | HTTP 计数请求体硬上限 / 已观测的计数请求字节下界 |
+
+`observedIsLowerBound` 表示序列化器在超额时提前停止。`serializedGenerationBytes` 仅在已完成生成请求序列化时记录；`transportLimitBytes` 独立于 `budget` 的窗口与输出预留。`normalizedInputBytes` 是历史、记忆、当前文字、媒体、工具定义、工具结果与供应商续接数据各自的紧凑 JSON 估算。它不计入供应商包装或消息分隔，也无法拆分供应商 Token 计数。事件不含输入正文。只有最终失败的摘要请求会落一条摘要预算拒绝事件；在记录边界成功缩小并继续的中间尝试不单独落盘。SQLite v66 标记这类事件。
+
 `initialize.capabilities.modelCapabilities` 提供统一快照：`provider`、`model`、`modelSource`、`supportedInputTypes`、`inputTypesSource`、同一份可选 `budget`、`automaticContextCompaction` 和 `refreshedAtMs`。`modelSource` 当前区分宿主配置与供应商元数据；Anthropic 别名会在启动时解析，OpenAI/Gemini 使用配置的模型 ID。三个适配器目前都能编码文本、图片和 PDF，因此 `inputTypesSource` 为 `provider_adapter`；这说明请求格式可表达这些输入，不保证所选的每一个模型都支持所有模态。只有提供模型身份、请求预算且实现摘要调用的 Provider 才报告自动压缩能力。
 
 预算预检明确拒绝输入超限、且确认尚未发送生成请求时，内核先在剩余额度内省略可选的工作区记忆，再对完整请求预检一次。任务通过 `contextMemoryOmittedForBudget` 和 `context_memory_omitted_for_budget` 事件报告这个决定，原始 `context.memories` 仍可审阅。

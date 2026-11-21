@@ -542,7 +542,9 @@ fn run_model_step(
     };
     let mut span = scope.and_then(|scope| scope.begin(Operation::Model));
     let response = catch_unwind(AssertUnwindSafe(|| {
-        provider.next_with_progress_classified(&task, &tools, cancellation, &mut emit_progress)
+        provider
+            .next_with_progress_classified(&task, &tools, cancellation, &mut emit_progress)
+            .map_err(|error| error.with_input_attribution(&task, &tools))
     }));
     drop(emit_progress);
     let response = match response {

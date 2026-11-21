@@ -13828,6 +13828,32 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "model_budget_rejected"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "summarization": {
+                  "type": "boolean"
+                },
+                "report": {
+                  "$ref": "#/$defs/ModelBudgetRejection"
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "summarization",
+                "report"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "model_preflight_observed"
                 },
                 "step": {
@@ -14432,12 +14458,204 @@
             "outputTokens"
           ]
         },
+        "ModelBudgetRejection": {
+          "description": "Numeric evidence for a request rejected before dispatching generation.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ModelBudgetLimit"
+            },
+            "limit": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "observed": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "observedIsLowerBound": {
+              "type": "boolean"
+            },
+            "transportLimitBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "serializedGenerationBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "budget": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelBudget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "normalizedInputBytes": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelBudgetInputBytes"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "limit",
+            "observed",
+            "observedIsLowerBound",
+            "transportLimitBytes"
+          ]
+        },
+        "ModelBudgetLimit": {
+          "type": "string",
+          "enum": [
+            "local_json_bytes",
+            "provider_input_tokens",
+            "generation_request_bytes",
+            "count_request_bytes"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
         "ModelInputCountCoverage": {
           "type": "string",
           "enum": [
             "serialized_json_bytes",
             "provider_request",
             "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        },
+        "ModelBudgetInputBytes": {
+          "description": "Compact JSON sizes of independent input fragments before adapter encoding.\nThey are useful for attribution but do not sum to the wire byte or token count.",
+          "type": "object",
+          "properties": {
+            "history": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memory": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentText": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentMedia": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolDefinitions": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolResults": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "providerReplay": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "history",
+            "memory",
+            "currentText",
+            "currentMedia",
+            "toolDefinitions",
+            "toolResults",
+            "providerReplay"
           ]
         },
         "ModelPreflightUsageStatus": {
@@ -14890,6 +15108,210 @@
           "enum": [
             "configured",
             "provider_metadata"
+          ]
+        }
+      }
+    },
+    "ModelBudgetRejection": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelBudgetRejection",
+      "description": "Numeric evidence for a request rejected before dispatching generation.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ModelBudgetLimit"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "observed": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "observedIsLowerBound": {
+          "type": "boolean"
+        },
+        "transportLimitBytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "serializedGenerationBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelBudget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "normalizedInputBytes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelBudgetInputBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "limit",
+        "observed",
+        "observedIsLowerBound",
+        "transportLimitBytes"
+      ],
+      "$defs": {
+        "ModelBudgetLimit": {
+          "type": "string",
+          "enum": [
+            "local_json_bytes",
+            "provider_input_tokens",
+            "generation_request_bytes",
+            "count_request_bytes"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        },
+        "ModelBudgetInputBytes": {
+          "description": "Compact JSON sizes of independent input fragments before adapter encoding.\nThey are useful for attribution but do not sum to the wire byte or token count.",
+          "type": "object",
+          "properties": {
+            "history": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memory": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentText": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentMedia": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolDefinitions": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolResults": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "providerReplay": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "history",
+            "memory",
+            "currentText",
+            "currentMedia",
+            "toolDefinitions",
+            "toolResults",
+            "providerReplay"
           ]
         }
       }
@@ -15539,6 +15961,32 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "model_budget_rejected"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "summarization": {
+                  "type": "boolean"
+                },
+                "report": {
+                  "$ref": "#/$defs/ModelBudgetRejection"
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "summarization",
+                "report"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "model_preflight_observed"
                 },
                 "step": {
@@ -16143,12 +16591,204 @@
             "outputTokens"
           ]
         },
+        "ModelBudgetRejection": {
+          "description": "Numeric evidence for a request rejected before dispatching generation.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ModelBudgetLimit"
+            },
+            "limit": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "observed": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "observedIsLowerBound": {
+              "type": "boolean"
+            },
+            "transportLimitBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "serializedGenerationBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "budget": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelBudget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "normalizedInputBytes": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelBudgetInputBytes"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "limit",
+            "observed",
+            "observedIsLowerBound",
+            "transportLimitBytes"
+          ]
+        },
+        "ModelBudgetLimit": {
+          "type": "string",
+          "enum": [
+            "local_json_bytes",
+            "provider_input_tokens",
+            "generation_request_bytes",
+            "count_request_bytes"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
         "ModelInputCountCoverage": {
           "type": "string",
           "enum": [
             "serialized_json_bytes",
             "provider_request",
             "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        },
+        "ModelBudgetInputBytes": {
+          "description": "Compact JSON sizes of independent input fragments before adapter encoding.\nThey are useful for attribution but do not sum to the wire byte or token count.",
+          "type": "object",
+          "properties": {
+            "history": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memory": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentText": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentMedia": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolDefinitions": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolResults": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "providerReplay": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "history",
+            "memory",
+            "currentText",
+            "currentMedia",
+            "toolDefinitions",
+            "toolResults",
+            "providerReplay"
           ]
         },
         "ModelPreflightUsageStatus": {

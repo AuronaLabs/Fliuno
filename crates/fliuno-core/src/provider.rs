@@ -1,7 +1,8 @@
 use crate::{ToolSpec, new_id};
 use fliuno_protocol::{
-    Message, ModelBudget, ModelCapabilitiesSource, ModelInputPreflight, ModelInputType, ModelUsage,
-    Task, ToolCall,
+    ContextMode, Message, ModelBudget, ModelBudgetInputBytes, ModelBudgetRejection,
+    ModelCapabilitiesSource, ModelInputPreflight, ModelInputType, ModelUsage, Task, ToolCall,
+    UserContentPart,
 };
 use serde_json::json;
 
@@ -31,11 +32,88 @@ pub enum ModelError {
     /// Local validation or request construction failed before dispatch.
     NotDispatched(String),
     /// Input exceeded the configured budget before generation was dispatched.
-    InputBudgetExceeded(String),
+    InputBudgetExceeded(InputBudgetError),
     /// Cancellation was observed before any request could be sent.
     CancelledBeforeDispatch,
     /// The request may have reached the provider, so retry needs explicit consent.
     OutcomeUnknown(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputBudgetError {
+    pub message: String,
+    pub report: Option<Box<ModelBudgetRejection>>,
+}
+
+impl ModelError {
+    /// Add bounded diagnostics outside the kernel lock, only on known rejection.
+    pub fn with_input_attribution(mut self, task: &Task, tools: &[ToolSpec]) -> Self {
+        if let Self::InputBudgetExceeded(error) = &mut self
+            && let Some(report) = &mut error.report
+        {
+            report.normalized_input_bytes = input_attribution(task, tools).ok();
+        }
+        self
+    }
+}
+
+fn input_attribution(task: &Task, tools: &[ToolSpec]) -> crate::Result<ModelBudgetInputBytes> {
+    fn size(value: &impl serde::Serialize) -> crate::Result<u64> {
+        Ok(crate::json_size(value)? as u64)
+    }
+
+    let mut bytes = ModelBudgetInputBytes::default();
+    if let Some(context) = &task.context
+        && context.options.mode != ContextMode::Isolated
+    {
+        for turn in &context.turns {
+            bytes.history += size(turn)?;
+        }
+        for summary in &context.summaries {
+            bytes.history += size(&(&summary.text, &summary.sources))?;
+        }
+        if !task.context_memory_omitted_for_budget {
+            for memory in &context.memories {
+                bytes.memory += size(memory)?;
+            }
+        }
+    }
+    for message in &task.messages {
+        match message {
+            Message::User { text } => bytes.current_text += size(text)?,
+            Message::UserParts { parts } => {
+                for part in parts {
+                    match part {
+                        UserContentPart::Text { text } => bytes.current_text += size(text)?,
+                        _ => bytes.current_media += size(part)?,
+                    }
+                }
+            }
+            Message::ToolResult { .. } => bytes.tool_results += size(message)?,
+            Message::ProviderReplay { data, .. } => bytes.provider_replay += size(data)?,
+            // The adapters already derive these from provider replay items.
+            Message::Assistant { .. } | Message::ToolCall { .. } => {}
+        }
+    }
+    for tool in tools {
+        bytes.tool_definitions += size(&(&tool.name, &tool.description, &tool.input_schema))?;
+    }
+    Ok(bytes)
+}
+
+impl From<String> for InputBudgetError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            report: None,
+        }
+    }
+}
+
+impl From<&str> for InputBudgetError {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
 }
 
 impl From<String> for ModelError {
@@ -53,9 +131,10 @@ impl From<&str> for ModelError {
 impl std::fmt::Display for ModelError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotDispatched(message)
-            | Self::InputBudgetExceeded(message)
-            | Self::OutcomeUnknown(message) => formatter.write_str(message),
+            Self::NotDispatched(message) | Self::OutcomeUnknown(message) => {
+                formatter.write_str(message)
+            }
+            Self::InputBudgetExceeded(error) => formatter.write_str(&error.message),
             Self::CancelledBeforeDispatch => {
                 formatter.write_str("provider request cancelled before dispatch")
             }

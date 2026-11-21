@@ -129,6 +129,24 @@ fn model_discovery_pins_alias_for_count_and_generation_and_reports_the_budget() 
     );
     let rejected = peer.wait_for_status(over["id"].as_str().unwrap(), "failed");
     assert_eq!(rejected["modelOutcomeUnknown"], false);
+    assert_eq!(init["capabilities"]["modelBudgetRejectionEvents"], true);
+    let events = peer.call("events/list", json!({"taskId":over["id"]}));
+    let data = &events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["data"]["type"] == "model_budget_rejected")
+        .unwrap()["data"];
+    assert_eq!(data["step"], 1);
+    assert_eq!(data["summarization"], false);
+    let report = &data["report"];
+    assert_eq!(report["kind"], "provider_input_tokens");
+    assert_eq!(report["limit"], 30720);
+    assert_eq!(report["observed"], 30721);
+    assert_eq!(report["observedIsLowerBound"], false);
+    assert_eq!(report["transportLimitBytes"], 8 * 1024 * 1024);
+    assert!(report["serializedGenerationBytes"].as_u64().unwrap() > 0);
+    assert_eq!(report["budget"], init["capabilities"]["modelBudget"]);
     let requests = wire.requests();
     assert_eq!(requests.len(), 4);
     assert_eq!(requests[3].path, "/mock/v1/messages/count_tokens");
@@ -264,6 +282,24 @@ fn preflight_budget_retry_omits_memory_before_generation_and_keeps_snapshot() {
     assert_eq!(stored["context"]["memories"][0]["id"], memory["id"]);
     assert_eq!(stored["context"]["memories"][0]["content"], MARKER);
     let events = peer.call("events/list", json!({"taskId":id}));
+    let report = &events["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["data"]["type"] == "model_budget_rejected")
+        .unwrap()["data"]["report"];
+    let sizes = &report["normalizedInputBytes"];
+    assert_eq!(
+        sizes["currentText"],
+        serde_json::to_vec("Explain the sentinel").unwrap().len()
+    );
+    assert!(sizes["memory"].as_u64().unwrap() >= MARKER.len() as u64);
+    assert!(sizes["toolDefinitions"].as_u64().unwrap() > 0);
+    assert_eq!(sizes["currentMedia"], 0);
+    assert_eq!(sizes["history"], 0);
+    assert_eq!(sizes["toolResults"], 0);
+    assert_eq!(sizes["providerReplay"], 0);
+    assert!(!report.to_string().contains(MARKER));
     assert!(
         events["events"]
             .as_array()
@@ -526,7 +562,7 @@ fn model_step_limit_preserves_default_receipts_and_rejects_invalid_settings() {
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
             .unwrap(),
-        65
+        66
     );
     let mut default = request.clone();
     default["maxModelSteps"] = json!(8);
