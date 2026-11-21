@@ -2,7 +2,7 @@
 
 [文档中心](README.md) › [本机执行与隔离](README.md#本机执行与隔离) · [宿主配置](host-configuration.md) · [原生执行验收](execution-evidence.md)
 
-当前实现与本机验证日期：2026-11-18。`fliuno-sandbox` 不依赖任务内核、模型或外部 Agent 协议；`fliuno-mcp/launch.rs` 和 `fliuno-acp/transport.rs` 分别接到官方 SDK 的 stdio 传输。MCP 主机配置必须明确选择 `trusted_host`、`windows_app_container` 或 `linux_landlock`；ACP 的 `connect_isolated` 使用当前平台后端，通用 transport 由调用方管理权限和生命周期。隔离启动不存在失败后转宿主运行的路径。
+`fliuno-sandbox` 不依赖任务内核、模型或外部 Agent 协议；`fliuno-mcp/launch.rs` 和 `fliuno-acp/transport.rs` 分别接到官方 SDK 的 stdio 传输。MCP 主机配置必须明确选择 `trusted_host`、`windows_app_container` 或 `linux_landlock`；ACP 的 `connect_isolated` 使用当前平台后端，通用 transport 由调用方管理权限和生命周期。隔离启动不存在失败后转宿主运行的路径。
 
 [Windows](#windows-私有目录模式) · [Linux](#linux-landlock-模式) · [测试证据](#测试证据) · [持久终端](#持久终端)
 
@@ -74,6 +74,26 @@ Linux 集成测试覆盖同样的原生对照与隔离探针：宿主临时文�
 
 文件/TCP 探针不等于穷尽 Windows 的所有 IPC、网络协议和内核攻击面。Linux Landlock/seccomp 和 delegated cgroup 探针已加入 CI；当前尚未在本机 Linux 内核执行，实际通过情况以 Ubuntu runner 为准。macOS 后端与任意敌对二进制认证均未实现。
 
+## 0.0.5 启动和回收测量
+
+`cargo test -p fliuno-sandbox --locked --test latency -- --ignored --nocapture` 启动同一原生夹具及其子进程。每组预热 3 次，测 24 次。启动计至子进程已创建、宿主收到就绪信号；回收计至取消后原生回收返回且输出管道 EOF；清理计至私有目录消失。以下单位为毫秒，单元格为 p50 / p95。
+
+| 环境 | 启动 | 回收 | 回收并清理 |
+| --- | ---: | ---: | ---: |
+| Windows AppContainer 和 Job，基线 | 205.02 / 304.28 | 2.44 / 4.91 | 13.63 / 22.72 |
+| Debian 13 来宾，无委派，基线 | 190.22 / 213.49 | 2.85 / 5.66 | 5.05 / 7.73 |
+| 同一 Debian 来宾，无委派，修改后 | 180.19 / 203.37 | 2.49 / 4.23 | 4.76 / 7.13 |
+| 同一 Debian 来宾，有委派，基线 | 223.51 / 262.17 | 12.78 / 13.87 | 16.25 / 17.46 |
+| 同一 Debian 来宾，有委派，修改后 | 256.76 / 316.58 | 3.87 / 5.13 | 7.96 / 12.02 |
+
+Linux 有委派时，正常回收保留 `cgroup.kill`，改为等待预先打开的 `cgroup.events`，收到通知后复读 `populated`。另一次同负载复测的回收 p95 是 7.38 ms。此次证据支持缩短有委派的回收等待；来宾启动时间有波动，未证明启动更快。配置 `FLIUNO_TEST_CGROUP_V2_PARENT` 复测委派组；无委派组需要在确实无法创建 cgroup 的环境中运行。
+
+硬退出单独验证。Debian 有委派时，guardian 在该轮约 18 ms 移除专属 cgroup，测试中已调用 `setsid` 的后代未继续运行；无委派时，确认宿主结束后测试根进程仍存活，直至它按自身时限结束。两种 Linux 情况都留下私有目录。Windows 通过受监督命令的硬退出测试验证 Job 回收，内核保存结果未知且不重发；该用例不证明 AppContainer profile 会在宿主硬退出后自动删除。
+
+限额验证包含 Windows Job 读回默认的 512 MiB 和 16 个活动进程，以及内核拒绝超额分配和创建子进程。Debian 委派探针写入并复核 256 MiB、每 100 ms 的 100,000 微秒 CPU quota 和 1 个进程或线程名额，并验证新进程被拒绝；未委派的强制限额请求直接失败。
+
+进程工具结果中的 `isolation` 描述文件和网络模式，`containment.treeBackend` 描述已使用的进程树后端。`containment.limits` 报告 Fliuno 实际施加的限额，不包括上级 cgroup 或 Job 的额外限制；整个对象的 `null` 表示读回失败，单个限额的 `null` 表示本次未施加该项。强制隔离或限额未能启动时，任务记录失败原因，不降级到无预算运行。
+
 ## unsafe 审查范围
 
 其他 Fliuno crate 继承 workspace 的 `unsafe_code = forbid`。该 crate 默认 `deny`，仅 `windows` 和 `linux` 模块允许平台 FFI，并启用 `clippy::undocumented_unsafe_blocks = deny`：
@@ -88,6 +108,7 @@ Linux 集成测试覆盖同样的原生对照与隔离探针：宿主临时文�
 - `windows/host.rs`：受信任宿主策略，只选择显式 cwd/环境、未设资源预算的 Job 和 reactor 管道。
 - `windows/mod.rs`：对齐的属性列表存储、隔离策略与令牌查询；只有初始化成功的属性列表才会进入 Drop。
 - `linux.rs`：Landlock 规则集在父进程构造；`pre_exec` 只执行 close-range、cgroup/guardian 交接、prctl 与 Landlock syscalls，seccomp BPF 在 fork 前预先构造；进程组信号使用仍由 waitid 保留的根 PID。
+- `linux/cgroup.rs`：用已打开的 events 描述符执行有期限的 `poll`，唤醒后复读内核状态。
 - `linux/guardian.rs`：fork 期间屏蔽信号，子分支不调用分配器、日志或析构；pidfd/SCM_RIGHTS 固定身份，close_range 关闭继承句柄；poll、预开 kill/events 文件、rmdir 与 `_exit` 完成独立回收。
 
 后续应在保持这一边界的前提下增加 macOS 后端与资源代理，不把 OS 细节放入任务状态机。

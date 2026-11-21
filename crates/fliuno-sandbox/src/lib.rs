@@ -213,6 +213,25 @@ pub struct ResourceLimits {
     pub cpu_quota_micros: Option<u64>,
 }
 
+/// How the launcher owns the process tree. Filesystem and network isolation
+/// are selected separately; a trusted host process can also run in a Job.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TreeBackend {
+    WindowsJob,
+    LinuxCgroupV2,
+    ProcessGroup,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessContainment {
+    pub tree_backend: TreeBackend,
+    /// Limits applied by Fliuno to this launch. Null means that the OS
+    /// readback was unavailable. Ancestor or machine-wide limits can be tighter.
+    pub limits: Option<ResourceLimits>,
+}
+
 impl ResourceLimits {
     pub fn is_empty(&self) -> bool {
         self.memory_max_bytes.is_none()
@@ -376,6 +395,13 @@ fn spawn_inner(spec: &LaunchSpec, state: Option<PrivateState>) -> io::Result<Chi
 }
 
 impl Child {
+    pub fn containment(&self) -> Option<ProcessContainment> {
+        #[cfg(any(windows, target_os = "linux"))]
+        return Some(self.inner.containment());
+        #[cfg(not(any(windows, target_os = "linux")))]
+        None
+    }
+
     pub fn state_directory(&self) -> Option<PathBuf> {
         self.state.as_ref().map(|state| state.home.clone())
     }

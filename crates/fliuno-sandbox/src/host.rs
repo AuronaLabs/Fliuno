@@ -54,6 +54,10 @@ pub struct HostChild {
     inner: crate::linux::OwnedProcess,
 }
 impl HostChild {
+    pub fn containment(&self) -> crate::ProcessContainment {
+        self.inner.containment()
+    }
+
     pub fn usage(&self) -> crate::ProcessUsage {
         self.inner.usage()
     }

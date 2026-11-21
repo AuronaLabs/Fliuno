@@ -5,11 +5,10 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Write},
     os::{
-        fd::{OwnedFd, RawFd},
+        fd::{AsRawFd, OwnedFd, RawFd},
         unix::fs::FileExt,
     },
     path::{Component, Path, PathBuf},
-    thread,
     time::{Duration, Instant},
 };
 
@@ -17,8 +16,10 @@ pub(super) struct CgroupV2 {
     path: PathBuf,
     join: Option<File>,
     kill_access: Option<File>,
+    events: Option<File>,
     guardian: Option<Guardian>,
     cleanup: bool,
+    pub(super) limits: ResourceLimits,
 }
 
 impl CgroupV2 {
@@ -61,8 +62,10 @@ impl CgroupV2 {
             path,
             join: None,
             kill_access: None,
+            events: None,
             guardian: None,
             cleanup: true,
+            limits: *limits,
         };
         let opened = (|| {
             group.join = Some(
@@ -81,7 +84,9 @@ impl CgroupV2 {
                     "delegated cgroup is not a domain cgroup",
                 ));
             }
-            read_populated(&group.path)?;
+            let events = File::open(group.path.join("cgroup.events"))?;
+            read_populated(&events)?;
+            group.events = Some(events);
             Ok::<_, io::Error>(())
         })();
 
@@ -200,27 +205,15 @@ impl CgroupV2 {
             return Err(error);
         }
 
-        let deadline = Instant::now() + timeout;
-        loop {
-            match read_populated(&self.path) {
-                Ok(false) => return Ok(()),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-                Ok(true) if Instant::now() < deadline => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Ok(true) => {
-                    self.cleanup = false;
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "cgroup remained populated after cgroup.kill",
-                    ));
-                }
-                Err(error) => {
-                    self.cleanup = false;
-                    return Err(error);
-                }
-            }
+        let result = self
+            .events
+            .as_ref()
+            .ok_or_else(|| io::Error::other("cgroup events handle is closed"))
+            .and_then(|events| wait_for_empty(events, Instant::now() + timeout));
+        if result.is_err() {
+            self.cleanup = false;
         }
+        result
     }
 }
 
@@ -242,7 +235,10 @@ fn delegation_required() -> io::Error {
 impl Drop for CgroupV2 {
     fn drop(&mut self) {
         if self.cleanup
-            && matches!(read_populated(&self.path), Ok(true))
+            && self
+                .events
+                .as_ref()
+                .is_some_and(|file| matches!(read_populated(file), Ok(true)))
             && let Err(error) = self.kill_and_wait(Duration::from_secs(5))
         {
             eprintln!("fliuno: Linux cgroup process cleanup failed: {error}");
@@ -396,9 +392,54 @@ fn safe_absolute(path: &Path) -> bool {
             .all(|component| !matches!(component, Component::ParentDir))
 }
 
-fn read_populated(path: &Path) -> io::Result<bool> {
-    let events = fs::read_to_string(path.join("cgroup.events"))?;
-    parse_populated(&events)
+fn read_populated(file: &File) -> io::Result<bool> {
+    let mut events = [0u8; 256];
+    let bytes = loop {
+        match file.read_at(&mut events, 0) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Ok(bytes) => break bytes,
+            Err(error) => return Err(error),
+        }
+    };
+    let text = std::str::from_utf8(&events[..bytes]).map_err(io::Error::other)?;
+    parse_populated(text)
+}
+
+fn wait_for_empty(events: &File, deadline: Instant) -> io::Result<()> {
+    let mut watch = libc::pollfd {
+        fd: events.as_raw_fd(),
+        events: libc::POLLPRI,
+        revents: 0,
+    };
+    loop {
+        match read_populated(events) {
+            Ok(false) => return Ok(()),
+            // The service guardian can remove a group after draining it.
+            Err(error) if matches!(error.raw_os_error(), Some(libc::ENODEV | libc::ENOENT)) => {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+            Ok(true) => {}
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "cgroup remained populated after cgroup.kill",
+            ));
+        }
+        let milliseconds = remaining
+            .as_micros()
+            .div_ceil(1000)
+            .clamp(1, i32::MAX as u128) as i32;
+        // SAFETY: watch is a writable pollfd for the live, borrowed events file.
+        if unsafe { libc::poll(&mut watch, 1, milliseconds) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
 }
 
 fn unavailable(error: &io::Error) -> bool {

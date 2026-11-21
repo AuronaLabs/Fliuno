@@ -111,6 +111,10 @@ pub(super) struct Process {
 }
 
 impl Process {
+    pub(super) fn containment(&self) -> crate::ProcessContainment {
+        self.owner.containment()
+    }
+
     pub(super) fn usage(&self) -> crate::ProcessUsage {
         self.owner.usage()
     }
@@ -153,6 +157,18 @@ pub(super) struct OwnedProcess {
 }
 
 impl OwnedProcess {
+    pub(super) fn containment(&self) -> crate::ProcessContainment {
+        use crate::TreeBackend::{LinuxCgroupV2, ProcessGroup};
+        let (tree_backend, limits) = self.cgroup.as_ref().map_or_else(
+            || (ProcessGroup, crate::ResourceLimits::default()),
+            |group| (LinuxCgroupV2, group.limits),
+        );
+        crate::ProcessContainment {
+            tree_backend,
+            limits: Some(limits),
+        }
+    }
+
     pub(super) fn usage(&self) -> crate::ProcessUsage {
         self.cgroup
             .as_ref()

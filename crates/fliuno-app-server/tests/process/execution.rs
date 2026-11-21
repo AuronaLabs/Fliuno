@@ -162,6 +162,19 @@ fn process_timeout_evidence_survives_restart_and_running_process_can_be_cancelle
         .find(|event| event["data"]["type"] == "tool_outcome_unknown")
         .unwrap()["data"]["output"];
     assert_eq!(report["termination"], "timed_out");
+    assert_eq!(report["isolation"], "trusted_host");
+    #[cfg(windows)]
+    assert_eq!(report["containment"]["treeBackend"], "windows_job");
+    #[cfg(target_os = "linux")]
+    assert!(matches!(
+        report["containment"]["treeBackend"].as_str(),
+        Some("process_group" | "linux_cgroup_v2")
+    ));
+    #[cfg(any(windows, target_os = "linux"))]
+    assert_eq!(
+        report["containment"]["limits"],
+        json!({"memoryMaxBytes":null,"pidsMax":null,"cpuQuotaMicros":null})
+    );
     assert_eq!(report["evidence"]["stopCause"], "deadline");
     assert!(report["evidence"]["launchMs"].is_u64());
     assert_eq!(report["evidence"]["rootReaped"], true);

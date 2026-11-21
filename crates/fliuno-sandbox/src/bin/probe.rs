@@ -24,6 +24,33 @@ fn main() -> io::Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     match args.first().map(String::as_str) {
         #[cfg(target_os = "linux")]
+        Some("plain-owner") => {
+            let child = fliuno_sandbox::spawn(&fliuno_sandbox::LaunchSpec {
+                program_sha256: None,
+                assets: vec![],
+                program: std::env::current_exe()?,
+                args: vec!["bounded-wait".into()],
+                env: Default::default(),
+                resources: Default::default(),
+                linux_cgroup_parent: None,
+            })?;
+            if child.uses_cgroup_v2() {
+                return Err(io::Error::other(
+                    "plain-owner requires no cgroup delegation",
+                ));
+            }
+            println!("{}", child.private_directory().display());
+            println!("{}", child.id());
+            io::stdout().flush()?;
+            io::copy(&mut child.stdout.as_ref().unwrap(), &mut io::stdout())?;
+        }
+        #[cfg(target_os = "linux")]
+        Some("bounded-wait") => {
+            println!("ready");
+            io::stdout().flush()?;
+            std::thread::sleep(Duration::from_secs(3));
+        }
+        #[cfg(target_os = "linux")]
         Some("guarded-owner") => {
             let spec = fliuno_sandbox::LaunchSpec {
                 program_sha256: None,

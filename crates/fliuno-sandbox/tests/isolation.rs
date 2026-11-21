@@ -397,6 +397,7 @@ mod linux {
             child.uses_cgroup_v2(),
             "resource-limited process escaped cgroup"
         );
+        assert_eq!(child.containment().unwrap().limits, Some(limited.resources));
         let report = finish(child);
         assert!(
             report.contains("spawn-blocked"),

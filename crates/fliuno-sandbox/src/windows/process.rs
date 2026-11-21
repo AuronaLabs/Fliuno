@@ -12,6 +12,7 @@ use windows_sys::Win32::{
     Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT},
     System::{
         JobObjects::{
+            JOB_OBJECT_LIMIT_ACTIVE_PROCESS, JOB_OBJECT_LIMIT_JOB_MEMORY,
             JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
             QueryInformationJobObject, TerminateJobObject,
@@ -26,28 +27,49 @@ pub(crate) struct JobProcess {
     pub(super) pid: u32,
 }
 impl JobProcess {
+    pub(crate) fn containment(&self) -> crate::ProcessContainment {
+        let limits = self.read_limits().map(|limits| {
+            let basic = limits.BasicLimitInformation;
+            crate::ResourceLimits {
+                memory_max_bytes: (basic.LimitFlags & JOB_OBJECT_LIMIT_JOB_MEMORY != 0)
+                    .then_some(limits.JobMemoryLimit as u64),
+                pids_max: (basic.LimitFlags & JOB_OBJECT_LIMIT_ACTIVE_PROCESS != 0)
+                    .then_some(basic.ActiveProcessLimit),
+                cpu_quota_micros: None,
+            }
+        });
+        crate::ProcessContainment {
+            tree_backend: crate::TreeBackend::WindowsJob,
+            limits,
+        }
+    }
+
+    fn read_limits(&self) -> Option<JOBOBJECT_EXTENDED_LIMIT_INFORMATION> {
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        // SAFETY: the live Job's information class matches the initialized output buffer.
+        let ok = unsafe {
+            QueryInformationJobObject(
+                self.job.as_raw_handle(),
+                JobObjectExtendedLimitInformation,
+                (&mut limits as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            )
+        };
+        (ok != 0).then_some(limits)
+    }
+
     pub(crate) fn usage(&self) -> crate::ProcessUsage {
         let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
-        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        // SAFETY: Each information class has the matching initialized output
-        // buffer, the length is its exact size, and the Job handle is owned.
-        let (has_accounting, has_limits) = unsafe {
-            (
-                QueryInformationJobObject(
-                    self.job.as_raw_handle(),
-                    JobObjectBasicAccountingInformation,
-                    (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
-                    size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
-                    std::ptr::null_mut(),
-                ) != 0,
-                QueryInformationJobObject(
-                    self.job.as_raw_handle(),
-                    JobObjectExtendedLimitInformation,
-                    (&mut limits as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                    std::ptr::null_mut(),
-                ) != 0,
-            )
+        // SAFETY: the live Job's information class matches the initialized output buffer.
+        let has_accounting = unsafe {
+            QueryInformationJobObject(
+                self.job.as_raw_handle(),
+                JobObjectBasicAccountingInformation,
+                (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            ) != 0
         };
         let cpu_ms = has_accounting
             .then(|| {
@@ -59,7 +81,9 @@ impl JobProcess {
             .flatten();
         crate::ProcessUsage {
             cpu_ms,
-            peak_memory_bytes: has_limits.then_some(limits.PeakJobMemoryUsed as u64),
+            peak_memory_bytes: self
+                .read_limits()
+                .map(|limits| limits.PeakJobMemoryUsed as u64),
         }
     }
 

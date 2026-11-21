@@ -113,6 +113,10 @@ pub(super) struct Process {
     profile: Profile,
 }
 impl Process {
+    pub(super) fn containment(&self) -> crate::ProcessContainment {
+        self.state.containment()
+    }
+
     pub(super) fn usage(&self) -> crate::ProcessUsage {
         self.state.usage()
     }

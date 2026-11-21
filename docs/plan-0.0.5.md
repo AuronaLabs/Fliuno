@@ -41,7 +41,7 @@ ACP v2 于 **2026-11-20** 从 Draft 进入 Preview。单独试验 prompt 接收�
 
 ## Sandbox 与 Skills：从注册到交付
 
-- [ ] Windows AppContainer/Job 和 Linux Landlock/seccomp/cgroup v2 分别记录启动 p50/p95、取消到回收、硬退出残留和实际限额。Linux 区分有无 cgroup 委派。用同环境同负载证明改进，保留现有权限边界；把实际隔离与无法满足的限制报告给客户端。[执行边界](sandbox.md)
+- [x] Windows AppContainer/Job 和 Linux Landlock/seccomp/cgroup v2 分别记录启动 p50/p95、取消到回收、硬退出残留和实际限额。Debian 来宾分有无委派实测，有委派时回收 p95 从 13.87 ms 降到 5.13 ms。Windows 硬退出覆盖受监督 Job。进程工具报告实际后端和限额。[测量和复现](sandbox.md#005-启动和回收测量)
 - [ ] 首版选一个离线文档或数据处理 Skill，只执行宿主登记的脚本。审阅计划包含脚本摘要、解释器、参数、输入输出范围、网络策略和预算。脚本或权限变更需重新审批；读取 `SKILL.md` 不触发执行，Skill 声明不授予权限。[当前 Skills](skills.md)
 - [ ] 验收发现 → 审阅计划 → 批准一次 → 隔离执行 → 读取有界输出与收取产物。覆盖拒绝、脚本变更、超时、取消和重启；未知结果保留证据，不自动重试。
 

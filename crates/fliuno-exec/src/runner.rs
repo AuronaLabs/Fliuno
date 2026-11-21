@@ -30,6 +30,8 @@ pub enum Termination {
 pub struct ProcessReport {
     pub program_id: String,
     pub isolation: ProcessIsolation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub containment: Option<fliuno_sandbox::ProcessContainment>,
     pub termination: Termination,
     pub exit_code: Option<i32>,
     pub success: bool,
@@ -63,7 +65,13 @@ pub(crate) async fn run(
             return Err(error);
         }
     };
-    let result = drive(program, args, cancellation, &mut process, started, deadline).await;
+    let containment = process.containment();
+    let result = drive(program, args, cancellation, &mut process, started, deadline)
+        .await
+        .map(|mut report| {
+            report.containment = containment;
+            report
+        });
     if let Some(span) = &mut span {
         let usage = process.usage();
         span.resources(usage.cpu_ms, usage.peak_memory_bytes);
@@ -195,6 +203,7 @@ async fn drive(
     Ok(ProcessReport {
         program_id: program.config.id.clone(),
         isolation: program.config.isolation,
+        containment: None,
         termination,
         exit_code: status.and_then(|status| status.code()),
         success: termination == Termination::Exited

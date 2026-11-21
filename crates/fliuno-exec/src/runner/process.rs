@@ -123,6 +123,31 @@ fn take_native_pipes(
 }
 
 impl Process {
+    pub(super) fn containment(&self) -> Option<fliuno_sandbox::ProcessContainment> {
+        match self {
+            #[cfg(all(unix, not(target_os = "linux")))]
+            Self::Host(_) => Some(fliuno_sandbox::ProcessContainment {
+                tree_backend: fliuno_sandbox::TreeBackend::ProcessGroup,
+                limits: Some(fliuno_sandbox::ResourceLimits::default()),
+            }),
+            #[cfg(any(windows, target_os = "linux"))]
+            Self::NativeHost(child, _) => Some(child.containment()),
+            Self::Scratch(child, _) => child.containment(),
+        }
+    }
+
+    fn launch_rejected(program: &Program, isolated: bool) -> ToolError {
+        let scope = if isolated { "isolated" } else { "host" };
+        let requirement = if !program.config.resources.is_empty()
+            || program.config.linux_cgroup_parent.is_some()
+        {
+            " with the required process containment and resource limits"
+        } else {
+            ""
+        };
+        ToolError::Failed(format!("cannot launch {scope} program{requirement}"))
+    }
+
     pub(super) async fn spawn(
         program: &Program,
         context: &ToolContext<'_>,
@@ -150,7 +175,7 @@ impl Process {
                     .await
                     .map(|(child, pipes)| Self::Scratch(Box::new(child), Some(pipes)))
                     .map_err(|error| match error.stage {
-                        fliuno_sandbox::AsyncSpawnStage::NativeLaunch => ToolError::Failed("cannot launch isolated program".into()),
+                        fliuno_sandbox::AsyncSpawnStage::NativeLaunch => Self::launch_rejected(program, true),
                         _ => ToolError::OutcomeUnknown("isolated launcher worker or pipe registration failed after native launch may have run; inspect effects before retrying".into()),
                     })
             }
@@ -164,7 +189,7 @@ impl Process {
                         linux_cgroup_parent: program.config.linux_cgroup_parent.clone(),
                     }).await.map(|(child, pipes)| Self::NativeHost(Box::new(child), Some(pipes)))
                         .map_err(|error| match error.stage {
-                            fliuno_sandbox::AsyncSpawnStage::NativeLaunch => ToolError::Failed("cannot launch host program".into()),
+                            fliuno_sandbox::AsyncSpawnStage::NativeLaunch => Self::launch_rejected(program, false),
                             _ => ToolError::OutcomeUnknown("host launcher worker or pipe registration failed after native launch may have run; inspect effects before retrying".into()),
                         })
                 }
