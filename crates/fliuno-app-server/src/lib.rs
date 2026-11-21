@@ -13,7 +13,10 @@ use fliuno_protocol::*;
 use scheduler::TaskScheduler;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex, MutexGuard},
+};
 
 const MAX_BATCH_ITEMS: usize = 128;
 
@@ -87,7 +90,7 @@ impl RpcServer {
     }
 
     pub fn with_terminals(
-        kernel: Kernel,
+        mut kernel: Kernel,
         provider_name: String,
         terminals: Option<fliuno_terminal::Service>,
     ) -> Self {
@@ -100,9 +103,16 @@ impl RpcServer {
         let progress_receiver = kernel
             .subscribe_model_progress()
             .expect("cannot subscribe app-server to model progress");
+        let startup_run_tasks = match kernel.advance_recoverable_runs() {
+            Ok(tasks) => tasks,
+            Err(error) => {
+                eprintln!("fliuno: cannot recover task runs: {error}");
+                Vec::new()
+            }
+        };
         let kernel = Arc::new(Mutex::new(kernel));
         let scheduler = TaskScheduler::new(Arc::clone(&kernel));
-        Self {
+        let server = Self {
             kernel,
             scheduler,
             agent_catalog,
@@ -117,7 +127,11 @@ impl RpcServer {
             provider_name,
             terminals,
             terminal_subscriptions: terminal_subscriptions::Subscriptions::new(),
+        };
+        if let Err(error) = server.schedule_run_tasks(startup_run_tasks) {
+            eprintln!("fliuno: cannot schedule recovered task runs: {error:?}");
         }
+        server
     }
 
     pub fn take_event_receiver(&mut self) -> EventReceiver {
@@ -315,6 +329,28 @@ impl RpcServer {
         }
     }
 
+    fn advance_run_with_deadline(&self, run_id: &str) -> Result<(Run, Vec<Task>), RpcError> {
+        let mut kernel = self.kernel()?;
+        if let Some(ids) = kernel.expire_run(run_id)? {
+            self.signal_committed_cancellations(ids.iter().map(String::as_str));
+        }
+        Ok(kernel.advance_run(run_id)?)
+    }
+
+    fn schedule_run_tasks(&self, tasks: Vec<Task>) -> Result<(), RpcError> {
+        let mut pending = tasks;
+        let mut scheduled = HashSet::new();
+        while let Some(task) = pending.pop() {
+            let task_id = task.id.clone();
+            if !scheduled.insert(task_id.clone()) {
+                continue;
+            }
+            self.schedule_or_fail(task)?;
+            pending.extend(self.kernel()?.advance_runs_for_task(&task_id)?);
+        }
+        Ok(())
+    }
+
     /// One JSON value per line; a JSON-RPC batch is a single value.
     /// Notifications are processed without generating a response.
     pub fn handle_line(&mut self, line: &str) -> Option<Value> {
@@ -453,6 +489,12 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["durableTaskRuns"] = json!(self.kernel()?.durable_runs_supported());
+            capabilities["maxRunNodes"] = json!(MAX_RUN_NODES);
+            capabilities["maxRunConcurrency"] = json!(MAX_RUN_CONCURRENCY);
+            capabilities["maxRunTimeoutMs"] = json!(MAX_RUN_TIMEOUT_MS);
+            capabilities["modelCapabilities"] =
+                json!(self.kernel()?.configured_model_capabilities());
             capabilities["taskStartSummary"] = json!(true);
             capabilities["taskRespondToolInput"] = json!(true);
             capabilities["taskImageInput"] = json!(true);
@@ -525,6 +567,12 @@ impl RpcServer {
             capabilities["sessionTaskSummaryOrdering"] = json!(true);
             capabilities["workspaceById"] = json!(true);
             capabilities["workspaceProfiles"] = json!(true);
+            capabilities["workspaceMemory"] = json!(true);
+            capabilities["workspaceMemoryAudit"] = json!(true);
+            capabilities["workspaceMemorySemanticIndex"] = json!(true);
+            capabilities["maxWorkspaceMemories"] = json!(4096);
+            capabilities["maxWorkspaceMemoryContentBytes"] =
+                json!(MAX_WORKSPACE_MEMORY_CONTENT_BYTES);
             capabilities["modelUsageEvents"] = json!(true);
             capabilities["modelUsageEventReplay"] = json!(true);
             capabilities["modelUsageScopedReplay"] = json!(true);
@@ -708,6 +756,38 @@ impl RpcServer {
                         .set_workspace_title(&p.workspace_id, &p.title)?
                 )
             }
+            "workspace/memory/put" => {
+                let p: WorkspaceMemoryPutParams = decode(params)?;
+                json!(self.kernel()?.put_workspace_memory(&p)?)
+            }
+            "workspace/memory/get" => {
+                let p: WorkspaceMemoryGetParams = decode(params)?;
+                json!(self.kernel()?.get_workspace_memory(&p)?)
+            }
+            "workspace/memory/list" => {
+                let p: WorkspaceMemoryListParams = decode(params)?;
+                json!(self.kernel()?.list_workspace_memories(&p)?)
+            }
+            "workspace/memory/search" => {
+                let p: WorkspaceMemorySearchParams = decode(params)?;
+                json!(self.kernel()?.search_workspace_memories(&p)?)
+            }
+            "workspace/memory/indexVectors" => {
+                let p: WorkspaceMemoryIndexParams = decode(params)?;
+                json!({"indexed":self.kernel()?.index_workspace_memory_vectors(&p)?})
+            }
+            "workspace/memory/semanticSearch" => {
+                let p: WorkspaceMemorySemanticSearchParams = decode(params)?;
+                json!(self.kernel()?.semantic_search_workspace_memories(&p)?)
+            }
+            "workspace/memory/delete" => {
+                let p: WorkspaceMemoryDeleteParams = decode(params)?;
+                json!(self.kernel()?.delete_workspace_memory(&p)?)
+            }
+            "workspace/memory/listAudit" => {
+                let p: WorkspaceMemoryAuditListParams = decode(params)?;
+                json!(self.kernel()?.list_workspace_memory_audit(&p)?)
+            }
             "workspace/list" => {
                 let p: ListParams = decode(params)?;
                 json!(self.kernel()?.list_workspaces(p.after, p.limit)?)
@@ -838,6 +918,33 @@ impl RpcServer {
                 };
                 json!(task)
             }
+            "run/start" => {
+                let p: RunStartParams = decode(params)?;
+                let started = self.kernel()?.start_run(p);
+                self.scheduler.notify_run_deadline();
+                let (run, tasks, _) = started?;
+                self.schedule_run_tasks(tasks)?;
+                let (run, tasks) = self.advance_run_with_deadline(&run.id)?;
+                self.schedule_run_tasks(tasks)?;
+                json!(self.kernel()?.get_run(&run.id)?)
+            }
+            "run/get" => {
+                let p: RunIdParams = decode(params)?;
+                let (run, tasks) = self.advance_run_with_deadline(&p.run_id)?;
+                self.schedule_run_tasks(tasks)?;
+                json!(self.kernel()?.get_run(&run.id)?)
+            }
+            "run/cancel" => {
+                let p: RunCancelParams = decode(params)?;
+                let mut kernel = self.kernel()?;
+                let (run, task_ids) = kernel.cancel_run(&p.run_id)?;
+                self.signal_committed_cancellations(task_ids.iter().map(String::as_str));
+                json!(run)
+            }
+            "run/events" => {
+                let p: RunEventsParams = decode(params)?;
+                json!(self.kernel()?.list_run_events(&p)?)
+            }
             "task/getSummaryByRequest" => {
                 let p: TaskRequestLookupParams = decode(params)?;
                 json!(
@@ -912,11 +1019,15 @@ impl RpcServer {
                 let mut kernel = self.kernel()?;
                 let task = kernel.cancel_task(&p.task_id)?;
                 self.signal_committed_cancellations([task.id.as_str()]);
-                if method == "task/cancelSummary" {
+                let followups = kernel.advance_runs_for_task(&task.id)?;
+                let result = if method == "task/cancelSummary" {
                     json!(kernel.get_task_summary(&task.id)?)
                 } else {
                     json!(task)
-                }
+                };
+                drop(kernel);
+                self.schedule_run_tasks(followups)?;
+                result
             }
             "task/cancelBatch" => {
                 let p: TaskCancelBatchParams = decode(params)?;
@@ -929,6 +1040,16 @@ impl RpcServer {
                         .filter(|item| item.task.status == TaskStatus::Cancelled)
                         .map(|item| item.task.id.as_str()),
                 );
+                let followups = batch
+                    .items
+                    .iter()
+                    .filter(|item| item.task.status == TaskStatus::Cancelled)
+                    .try_fold(Vec::new(), |mut tasks, item| {
+                        tasks.extend(kernel.advance_runs_for_task(&item.task.id)?);
+                        Ok::<_, Error>(tasks)
+                    })?;
+                drop(kernel);
+                self.schedule_run_tasks(followups)?;
                 json!(batch)
             }
             "task/getResumeStatus" => {
@@ -944,7 +1065,10 @@ impl RpcServer {
                 let task = self
                     .kernel()?
                     .prepare_resume_task(&p.task_id, p.retry_uncertain_model_step)?;
-                json!(self.schedule_or_fail(task)?)
+                let task = self.schedule_or_fail(task)?;
+                let followups = self.kernel()?.advance_runs_for_task(&task.id)?;
+                self.schedule_run_tasks(followups)?;
+                json!(task)
             }
             "approval/listPending" => {
                 let p: ApprovalListParams = decode(params)?;
@@ -1432,6 +1556,10 @@ mod tests {
     struct StreamingProvider;
 
     impl fliuno_core::ModelProvider for StreamingProvider {
+        fn persistent_identity(&self) -> Option<(String, String)> {
+            Some(("test".into(), "streaming-v1".into()))
+        }
+
         fn supports_progress(&self) -> bool {
             true
         }
@@ -1587,6 +1715,10 @@ mod tests {
     }
 
     impl fliuno_core::ModelProvider for BlockingProvider {
+        fn persistent_identity(&self) -> Option<(String, String)> {
+            Some(("fixture".into(), "blocking-v1".into()))
+        }
+
         fn next(
             &self,
             _task: &Task,
@@ -1831,6 +1963,126 @@ mod tests {
             .unwrap();
         assert!(response.get("error").is_none(), "{response}");
         response["result"].clone()
+    }
+
+    #[test]
+    fn durable_run_rpc_schedules_dependencies_to_completion() {
+        let mut kernel = Kernel::in_memory(Box::new(StreamingProvider)).unwrap();
+        let workspace = kernel
+            .open_workspace(std::env::current_dir().unwrap().to_str().unwrap())
+            .unwrap();
+        let session = kernel.create_session(&workspace.id).unwrap();
+        let mut server = RpcServer::with_provider(kernel, "fixture".into());
+        let initialized = rpc(
+            &mut server,
+            "initialize",
+            json!({"protocolVersion":"0.1","clientName":"run-test"}),
+        );
+        assert_eq!(initialized["capabilities"]["durableTaskRuns"], true);
+        let run = rpc(
+            &mut server,
+            "run/start",
+            json!({
+                "sessionId":session.id,
+                "clientRequestId":"run-process-test",
+                "maxConcurrency":1,
+                "nodes":[
+                    {"nodeId":"first","input":"first"},
+                    {"nodeId":"second","input":"second","dependsOn":["first"]}
+                ]
+            }),
+        );
+        let run_id = run["id"].as_str().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        let finished = loop {
+            let run = rpc(&mut server, "run/get", json!({"runId":run_id}));
+            if run["status"] == "completed" {
+                break run;
+            }
+            assert!(std::time::Instant::now() < deadline, "run remained {run}");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert!(
+            finished["nodes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|node| { node["status"] == "completed" && node["taskId"].is_string() })
+        );
+        let events = rpc(
+            &mut server,
+            "run/events",
+            json!({"runId":run_id,"after":0,"limit":64}),
+        );
+        let started = events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|event| event["data"]["type"] == "node_started")
+            .map(|event| event["data"]["nodeId"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(started, ["first", "second"]);
+    }
+
+    #[test]
+    fn run_deadline_discards_a_late_model_result() {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let mut kernel = Kernel::in_memory(Box::new(BlockingProvider {
+            entered: entered_tx,
+            release: Arc::clone(&release),
+        }))
+        .unwrap();
+        let workspace = kernel
+            .open_workspace(std::env::current_dir().unwrap().to_str().unwrap())
+            .unwrap();
+        let session = kernel.create_session(&workspace.id).unwrap();
+        let mut server = RpcServer::new(kernel);
+        rpc(
+            &mut server,
+            "initialize",
+            json!({"protocolVersion":"0.1","clientName":"deadline"}),
+        );
+        let run = rpc(
+            &mut server,
+            "run/start",
+            json!({
+                "sessionId":session.id,"clientRequestId":"late-model","timeoutMs":1000,
+                "nodes":[{"nodeId":"model","input":"wait"}]
+            }),
+        );
+        let task_id = run["nodes"][0]["taskId"].as_str().unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+        let wait = Instant::now() + Duration::from_secs(3);
+        let cancelled = loop {
+            let task = rpc(&mut server, "task/get", json!({"taskId":task_id}));
+            if task["status"] == "cancelled" {
+                break task;
+            }
+            assert!(Instant::now() < wait, "deadline did not settle: {task}");
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(cancelled["modelOutcomeUnknown"], true);
+        let (lock, changed) = &*release;
+        *lock.lock().unwrap() = true;
+        changed.notify_all();
+        let wait = Instant::now() + Duration::from_secs(2);
+        while !server.scheduler.is_idle() {
+            assert!(
+                Instant::now() < wait,
+                "late provider result was not drained"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        let task = rpc(&mut server, "task/get", json!({"taskId":task_id}));
+        assert_eq!(task["status"], "cancelled");
+        assert_eq!(task["modelSteps"], 1);
+        assert_eq!(task["output"], Value::Null);
+        assert_eq!(
+            rpc(&mut server, "run/get", json!({"runId":run["id"]}))["status"],
+            "timed_out"
+        );
     }
 
     struct InputProvider;

@@ -7,7 +7,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [features]
-test-fixtures = ["dep:fliuno-acp", "fliuno-acp/test-fixtures", "fliuno-exec/test-fixtures", "fliuno-terminal/test-fixtures"]
+test-fixtures = ["dep:fliuno-acp", "fliuno-acp/test-fixtures", "fliuno-exec/test-fixtures", "fliuno-mcp/test-fixtures", "fliuno-terminal/test-fixtures"]
 
 [dependencies]
 fliuno-core.workspace = true
@@ -17,7 +17,9 @@ serde_json.workspace = true
 base64 = "0.22"
 crossbeam-channel.workspace = true
 uuid.workspace = true
+zeroize = "1.9"
 tokio.workspace = true
+reqwest.workspace = true
 fliuno-providers = { path = "../fliuno-providers" }
 fliuno-mcp = { path = "../fliuno-mcp" }
 fliuno-tools = { path = "../fliuno-tools" }
@@ -44,7 +46,6 @@ workspace = true
 
 [dev-dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-reqwest.workspace = true
 fliuno-ag-ui-http = { path = "../fliuno-ag-ui-http" }
 rusqlite.workspace = true
 fliuno-client = { path = "../fliuno-client" }

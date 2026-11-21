@@ -1,15 +1,99 @@
 //! Host-owned transport and lifecycle choices. No configuration is accepted
 //! from model output, and credential values never belong in this data model.
-use crate::{ProcessIsolation, TIMEOUT};
+use crate::{EgressPolicy, ProcessIsolation, TIMEOUT};
 use fliuno_sandbox::ResourceLimits;
 use rmcp::{ClientLifecycleMode, model::ProtocolVersion};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    time::Duration,
+};
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpConfig {
     pub servers: Vec<ServerConfig>,
+}
+
+/// Bootstrap policy for the trusted host. This file contains no credentials.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct McpOAuthConfig {
+    pub servers: BTreeMap<String, crate::oauth::OAuthEndpointConfig>,
+}
+
+impl McpConfig {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if self.servers.len() > 32 {
+            return Err("at most 32 MCP servers may be configured".into());
+        }
+        let mut ids = BTreeSet::new();
+        for server in &self.servers {
+            server.validate()?;
+            if !ids.insert(server.id()) {
+                return Err("duplicate MCP server ID".into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Preflight every configured MCP server before performing OAuth discovery.
+    pub fn oauth_clients(
+        &self,
+        policy: McpOAuthConfig,
+    ) -> Result<BTreeMap<String, crate::oauth::OAuthClient>, String> {
+        self.build_oauth_clients(policy, |resource, policy, timeout, egress| match egress {
+            Some(egress) => {
+                crate::oauth::OAuthClient::new_with_egress(resource, policy, timeout, egress)
+            }
+            None => crate::oauth::OAuthClient::new(resource, policy, timeout),
+        })
+    }
+
+    #[cfg(feature = "test-fixtures")]
+    pub fn oauth_fixture_clients(
+        &self,
+        policy: McpOAuthConfig,
+    ) -> Result<BTreeMap<String, crate::oauth::OAuthClient>, String> {
+        self.build_oauth_clients(policy, crate::oauth::OAuthClient::loopback_fixture)
+    }
+
+    fn build_oauth_clients(
+        &self,
+        policy: McpOAuthConfig,
+        build: impl Fn(
+            &str,
+            &crate::oauth::OAuthEndpointConfig,
+            Duration,
+            Option<&EgressPolicy>,
+        ) -> Result<crate::oauth::OAuthClient, crate::oauth::OAuthError>,
+    ) -> Result<BTreeMap<String, crate::oauth::OAuthClient>, String> {
+        self.validate()?;
+        if policy.servers.is_empty() || policy.servers.len() > self.servers.len() {
+            return Err("invalid number of MCP OAuth server policies".into());
+        }
+        policy
+            .servers
+            .into_iter()
+            .map(|(id, policy)| {
+                let server = self
+                    .servers
+                    .iter()
+                    .find(|server| server.id() == id)
+                    .ok_or("MCP OAuth policy has no configured server")?;
+                let (http, url) = crate::oauth_server(server)?;
+                let client = build(
+                    url.as_str(),
+                    &policy,
+                    Duration::from_millis(http.timeout_ms),
+                    http.egress.as_ref(),
+                )
+                .map_err(|error| error.to_string())?;
+                Ok((id, client))
+            })
+            .collect()
+    }
 }
 
 /// Untagged preserves existing stdio configuration; HTTP requires an explicit
@@ -32,6 +116,7 @@ pub enum StdioTransport {
 #[serde(rename_all = "snake_case")]
 pub enum HttpTransport {
     StreamableHttp,
+    HttpSse,
 }
 
 #[derive(Debug, Default, Clone, Copy, Deserialize, Serialize)]
@@ -91,8 +176,8 @@ pub struct StdioServerConfig {
     pub env_allow: Vec<String>,
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
-    /// Preserve the existing initialize handshake unless explicitly selected.
-    #[serde(default)]
+    /// Probe modern lifecycle first, then safely fall back to initialize.
+    #[serde(default = "auto_lifecycle")]
     pub lifecycle: Lifecycle,
 }
 
@@ -102,6 +187,8 @@ pub struct HttpServerConfig {
     pub id: String,
     pub transport: HttpTransport,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub egress: Option<EgressPolicy>,
     #[serde(default)]
     pub bearer_token_env: Option<String>,
     /// Header name -> environment variable name, including vendor API headers.

@@ -1,5 +1,7 @@
 //! stdio is reserved for protocol data; diagnostics go to stderr.
 mod configuration;
+mod diagnostics;
+mod mcp_oauth;
 use fliuno_app_server::RpcServer;
 use fliuno_core::Kernel;
 use fliuno_protocol::{Event, EventWatermark, MAX_APP_REQUEST_BYTES, ModelProgress};
@@ -12,6 +14,22 @@ use std::{
 };
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some(fliuno_exec::supervisor::WORKER_ARG) {
+        if fliuno_exec::supervisor::run(|destinations| {
+            diagnostics::start(
+                destinations.path.as_deref(),
+                destinations.endpoint.as_deref(),
+            )
+            .ok()
+            .flatten()
+        })
+        .is_err()
+        {
+            eprintln!("fliuno: process supervisor could not complete its handoff");
+            std::process::exit(1);
+        }
+        return;
+    }
     if std::env::args().nth(1).as_deref() == Some("--terminal-worker") {
         let result = fliuno_terminal::worker::run();
         if let Err(error) = &result {
@@ -31,11 +49,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let mut db = PathBuf::from(".fliuno/kernel.db");
     let mut mcp_config: Option<PathBuf> = None;
+    let mut mcp_oauth_config: Option<PathBuf> = None;
+    let mut mcp_oauth_vault: Option<PathBuf> = None;
+    #[cfg(feature = "test-fixtures")]
+    let mut mcp_oauth_loopback = false;
     let mut acp_config: Option<PathBuf> = None;
     let mut a2a_config: Option<PathBuf> = None;
     let mut exec_config: Option<PathBuf> = None;
     let mut terminal_config: Option<PathBuf> = None;
     let mut skills_dir: Option<PathBuf> = None;
+    let mut trace_log: Option<PathBuf> = None;
+    let mut otlp_endpoint = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--schema" => {
@@ -48,9 +72,35 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--skills-dir" => {
                 skills_dir = Some(args.next().ok_or("--skills-dir requires a path")?.into())
             }
+            "--trace-log" => {
+                trace_log = Some(
+                    args.next()
+                        .ok_or("--trace-log requires a file path")?
+                        .into(),
+                )
+            }
+            "--otlp-endpoint" => {
+                otlp_endpoint = Some(args.next().ok_or("--otlp-endpoint requires a URL")?)
+            }
             "--mcp-config" => {
                 mcp_config = Some(args.next().ok_or("--mcp-config requires a path")?.into())
             }
+            "--mcp-oauth-config" => {
+                mcp_oauth_config = Some(
+                    args.next()
+                        .ok_or("--mcp-oauth-config requires a path")?
+                        .into(),
+                )
+            }
+            "--mcp-oauth-vault" => {
+                mcp_oauth_vault = Some(
+                    args.next()
+                        .ok_or("--mcp-oauth-vault requires a path")?
+                        .into(),
+                )
+            }
+            #[cfg(feature = "test-fixtures")]
+            "--mcp-oauth-loopback-fixture" => mcp_oauth_loopback = true,
             "--acp-config" => {
                 acp_config = Some(args.next().ok_or("--acp-config requires a path")?.into())
             }
@@ -70,7 +120,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--db" => db = args.next().ok_or("--db requires a path")?.into(),
             "--help" | "-h" => {
                 println!(
-                    "fliuno-app-server [--db PATH] [--mcp-config PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--schema]\nLocal stdio JSON-RPC. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. FLIUNO_PROVIDER=demo|openai|anthropic|gemini; live providers require FLIUNO_MODEL and an API key."
+                    "fliuno-app-server [--db PATH] [--mcp-config PATH] [--mcp-oauth-config PATH] [--mcp-oauth-vault PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--trace-log PATH] [--otlp-endpoint URL] [--schema]\nLocal stdio JSON-RPC. --mcp-oauth-config enables host authorization before initialize. --mcp-oauth-vault persists encrypted grants separately from the kernel database. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. FLIUNO_PROVIDER=demo|openai|anthropic|gemini; live providers require FLIUNO_MODEL and an API key."
                 );
                 return Ok(());
             }
@@ -99,14 +149,51 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .as_deref()
         .map(|path| configuration::load::<fliuno_terminal::Config>(path, "terminal"))
         .transpose()?;
+    #[cfg(feature = "test-fixtures")]
+    if mcp_oauth_loopback && mcp_oauth_config.is_none() {
+        return Err("MCP OAuth fixture mode requires OAuth configuration".into());
+    }
+    let oauth_clients = if let Some(path) = mcp_oauth_config {
+        let mcp = mcp_config
+            .as_ref()
+            .ok_or("MCP OAuth requires --mcp-config")?;
+        let policy = configuration::load::<fliuno_mcp::McpOAuthConfig>(&path, "MCP OAuth")?;
+        #[cfg(feature = "test-fixtures")]
+        let clients = if mcp_oauth_loopback {
+            mcp.oauth_fixture_clients(policy)?
+        } else {
+            mcp.oauth_clients(policy)?
+        };
+        #[cfg(not(feature = "test-fixtures"))]
+        let clients = mcp.oauth_clients(policy)?;
+        clients
+    } else {
+        Default::default()
+    };
+    if let Some(vault) = &mcp_oauth_vault {
+        if oauth_clients.is_empty() {
+            return Err("MCP OAuth vault requires --mcp-oauth-config".into());
+        }
+        if std::path::absolute(vault)? == std::path::absolute(&db)? {
+            return Err("MCP OAuth vault must be separate from the kernel database".into());
+        }
+    }
     let (provider_name, provider) = fliuno_providers::from_env()?;
+    let (input_tx, input_rx) = crossbeam_channel::bounded::<InputFrame>(64);
+    thread::Builder::new()
+        .name("fliuno-stdio-reader".into())
+        .spawn(move || read_input_frames(input_tx))?;
+    // Reuse the frame reader and writer for both phases of the same stdio session.
+    let mut stdout = BufWriter::with_capacity(64 * 1024, io::stdout().lock());
+    let grants = mcp_oauth::authorize(oauth_clients, mcp_oauth_vault, &input_rx, &mut stdout)?;
+    let _diagnostics = diagnostics::start(trace_log.as_deref(), otlp_endpoint.as_deref())?;
     let mut kernel = Kernel::open(db, provider)?;
     fliuno_tools::register(&mut kernel)?;
     if let Some(path) = skills_dir {
         fliuno_skills::register(&mut kernel, fliuno_skills::SkillCatalog::open(path)?)?;
     }
     if let Some(config) = mcp_config {
-        fliuno_mcp::register_config(&mut kernel, config)?;
+        fliuno_mcp::register_config_with_oauth(&mut kernel, config, grants)?;
     }
     if let Some(config) = acp_config {
         fliuno_agents::register_config(&mut kernel, config)?;
@@ -115,7 +202,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         fliuno_agents::register_a2a_config(&mut kernel, config)?;
     }
     if let Some(config) = exec_config {
-        fliuno_exec::register_config(&mut kernel, config)?;
+        fliuno_exec::register_supervised_config(&mut kernel, config, std::env::current_exe()?)?;
     }
     let terminals = if let Some(config) = terminal_config {
         Some(fliuno_terminal::register_config(
@@ -132,12 +219,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_subscription = Some(event_subscription);
     let (progress_rx, progress_subscription) = server.take_progress_receiver().into_parts();
     let mut progress_subscription = Some(progress_subscription);
-    let (input_tx, input_rx) = crossbeam_channel::bounded::<InputFrame>(64);
-    thread::Builder::new()
-        .name("fliuno-stdio-reader".into())
-        .spawn(move || read_input_frames(input_tx))?;
-    // Coalesce serde's small writes while keeping the flush after each frame.
-    let mut stdout = BufWriter::with_capacity(64 * 1024, io::stdout().lock());
     let mut last_event_sequence = 0;
     let mut event_rx = event_rx;
     let mut watermark_rx = crossbeam_channel::never();

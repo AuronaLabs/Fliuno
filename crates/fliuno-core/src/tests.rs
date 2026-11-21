@@ -1,6 +1,57 @@
 use super::*;
 use serde_json::{Value, json};
-use std::fs;
+use std::{
+    fs,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
+};
+
+struct PreflightRecorder {
+    calibrated: Arc<AtomicU32>,
+}
+
+impl ModelProvider for PreflightRecorder {
+    fn configured_budget(&self) -> Option<ModelBudget> {
+        Some(ModelBudget {
+            window_tokens: 128,
+            max_input_tokens: Some(96),
+            max_input_bytes: None,
+            max_output_tokens: 32,
+            count_mode: ModelInputCountMode::Provider,
+            count_coverage: ModelInputCountCoverage::ProviderRequest,
+            safety_margin_tokens: 8,
+            source: ModelBudgetSource::Configured,
+        })
+    }
+
+    fn model_identity(&self) -> Option<(String, String)> {
+        Some(("openai".into(), "preflight-fixture".into()))
+    }
+
+    fn set_calibrated_safety_margin(&self, provider: &str, model: &str, tokens: u32) {
+        if provider == "openai" && model == "preflight-fixture" {
+            self.calibrated.fetch_max(tokens, Ordering::Relaxed);
+        }
+    }
+
+    fn observe_preflight(&self, preflight: &ModelInputPreflight, actual_input_tokens: u64) {
+        let undercount =
+            u32::try_from(actual_input_tokens.saturating_sub(preflight.estimated_input_tokens))
+                .unwrap_or(u32::MAX);
+        self.calibrated.fetch_max(undercount, Ordering::Relaxed);
+    }
+
+    fn next(
+        &self,
+        _task: &Task,
+        _tools: &[ToolSpec],
+        _cancellation: &CancellationToken,
+    ) -> std::result::Result<ModelTurn, String> {
+        Ok(ModelDecision::Complete("done".into()).into())
+    }
+}
 
 fn setup() -> (Kernel, Session) {
     let mut kernel = Kernel::in_memory(Box::new(DemoProvider)).unwrap();
@@ -341,6 +392,96 @@ fn uncertain_model_outcomes_need_explicit_retry_consent() {
 
 struct FixedModelError(ModelError);
 
+struct AutoCompactionProvider {
+    calls: AtomicU32,
+    fail_summary: bool,
+    summary_input_limit: usize,
+}
+
+impl ModelProvider for AutoCompactionProvider {
+    fn configured_budget(&self) -> Option<ModelBudget> {
+        Some(ModelBudget {
+            window_tokens: 1024,
+            max_input_tokens: Some(768),
+            max_input_bytes: None,
+            max_output_tokens: 256,
+            count_mode: ModelInputCountMode::Provider,
+            count_coverage: ModelInputCountCoverage::ProviderRequest,
+            safety_margin_tokens: 0,
+            source: ModelBudgetSource::Configured,
+        })
+    }
+
+    fn model_identity(&self) -> Option<(String, String)> {
+        Some(("openai".into(), "compaction-fixture".into()))
+    }
+
+    fn supports_context_compaction(&self) -> bool {
+        true
+    }
+
+    fn next(
+        &self,
+        _: &Task,
+        _: &[ToolSpec],
+        _: &CancellationToken,
+    ) -> std::result::Result<ModelTurn, String> {
+        Err("classified provider method required".into())
+    }
+
+    fn next_classified(
+        &self,
+        task: &Task,
+        _: &[ToolSpec],
+        _: &CancellationToken,
+    ) -> std::result::Result<ModelTurn, ModelError> {
+        if task.context.is_some() && self.calls.fetch_add(1, Ordering::Relaxed) == 0 {
+            return Err(ModelError::InputBudgetExceeded(
+                "fixture input exceeds budget".into(),
+            ));
+        }
+        if task.context.is_none() {
+            let summary_text = task
+                .messages
+                .iter()
+                .find_map(|message| match message {
+                    Message::User { text } => Some(text),
+                    _ => None,
+                })
+                .expect("summary request has a text message");
+            if summary_text.len() > self.summary_input_limit {
+                return Err(ModelError::InputBudgetExceeded(
+                    "fixture summary input exceeds budget".into(),
+                ));
+            }
+            if self.fail_summary {
+                return Err(ModelError::NotDispatched(
+                    "fixture summary rejection".into(),
+                ));
+            }
+            return Ok(ModelTurn {
+                decision: ModelDecision::Complete("Two earlier tasks were completed.".into()),
+                replay: None,
+                usage: Some(ModelUsage {
+                    provider: "openai".into(),
+                    input_tokens: 80,
+                    output_tokens: 12,
+                    cached_input_tokens: None,
+                    reasoning_output_tokens: None,
+                }),
+                preflight: Some(ModelInputPreflight {
+                    provider: "openai".into(),
+                    model: "compaction-fixture".into(),
+                    count_coverage: ModelInputCountCoverage::ProviderRequest,
+                    estimated_input_tokens: 80,
+                    safety_margin_tokens: 0,
+                }),
+            });
+        }
+        Ok(ModelDecision::Complete("Completed after compaction.".into()).into())
+    }
+}
+
 impl ModelProvider for FixedModelError {
     fn next(
         &self,
@@ -385,6 +526,271 @@ fn provider_rejection_before_dispatch_is_a_known_failure() {
             .iter()
             .all(|event| !matches!(event.data, EventKind::ModelOutcomeUnknown { .. }))
     );
+}
+
+#[test]
+fn automatic_context_compaction_is_audited_and_survives_restart() {
+    let (mut kernel, session) = setup();
+    for (key, input) in [
+        ("history-one", "a"),
+        ("history-two", "b"),
+        ("history-three", "c"),
+    ] {
+        let prior = kernel
+            .create_task_with_key(&session.id, input, Some(key))
+            .unwrap()
+            .0;
+        let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&prior.id).unwrap()
+        else {
+            panic!("history task was not ready")
+        };
+        kernel
+            .apply_model_response(
+                task,
+                Ok(ModelDecision::Complete("fact ".repeat(1600)).into()),
+            )
+            .unwrap();
+    }
+    kernel.set_model_provider(Box::new(AutoCompactionProvider {
+        calls: AtomicU32::new(0),
+        fail_summary: false,
+        summary_input_limit: 12_000,
+    }));
+    let (queued, _) = kernel
+        .create_task_with_key(&session.id, "use previous work", None)
+        .unwrap();
+    let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&queued.id).unwrap()
+    else {
+        panic!("task was not ready")
+    };
+    let pending = kernel
+        .apply_model_response(
+            task,
+            Err(ModelError::InputBudgetExceeded(
+                "fixture over budget".into(),
+            )),
+        )
+        .unwrap();
+    let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&pending.id).unwrap()
+    else {
+        panic!("summary was not ready")
+    };
+    let summary = execute_context_compaction(
+        &AutoCompactionProvider {
+            calls: AtomicU32::new(0),
+            fail_summary: false,
+            summary_input_limit: 12_000,
+        },
+        &task,
+        &CancellationToken::new(),
+    );
+    let summarized = kernel.apply_context_compaction(task, summary).unwrap();
+    assert_eq!(summarized.status, TaskStatus::Running);
+    assert!(!summarized.model_outcome_unknown);
+    let context = summarized.context.as_ref().unwrap();
+    assert_eq!(context.turns.len(), 2);
+    assert_eq!(context.summaries.len(), 1);
+    assert_eq!(context.summaries[0].sources.len(), 1);
+    assert_eq!(context.summaries[0].provider, "openai");
+    assert_eq!(
+        context.summaries[0].usage.as_ref().unwrap().output_tokens,
+        12
+    );
+    let events = kernel.list_events(&summarized.id, 0, 100).unwrap().events;
+    assert!(events.iter().any(|event| matches!(
+        event.data,
+        EventKind::ContextCompactionScheduled { rejected_step: 1 }
+    )));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.data, EventKind::ContextCompacted { step: 2, .. }))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.data, EventKind::ModelUsageReported { step: 2, .. }))
+    );
+    let task_id = summarized.id.clone();
+    let database = std::mem::replace(
+        &mut kernel.db,
+        rusqlite::Connection::open_in_memory().unwrap(),
+    );
+    drop(kernel);
+    let mut restored = Kernel::from_connection(database, Box::new(DemoProvider), None).unwrap();
+    let recovered = restored.get_task(&task_id).unwrap();
+    assert_eq!(
+        recovered.context.as_ref().unwrap().summaries[0]
+            .sources
+            .len(),
+        1
+    );
+    assert!(!recovered.context.as_ref().unwrap().compaction_pending);
+    assert_eq!(recovered.status, TaskStatus::Interrupted);
+    assert_eq!(
+        restored
+            .get_task_resume_status(&task_id)
+            .unwrap()
+            .disposition,
+        TaskResumeDisposition::Ready
+    );
+    let resumed = restored.prepare_resume_task(&task_id, false).unwrap();
+    let PreparedModelStep::Ready { task, .. } = restored.prepare_model_step(&resumed.id).unwrap()
+    else {
+        panic!("resumed formal request was not ready")
+    };
+    assert_eq!(task.model_steps, 3);
+    let completed = restored
+        .apply_model_response(
+            task,
+            Ok(ModelDecision::Complete("done after restart".into()).into()),
+        )
+        .unwrap();
+    assert_eq!(completed.status, TaskStatus::Completed);
+    assert_eq!(completed.output.as_deref(), Some("done after restart"));
+    let events = restored.list_events(&task_id, 0, 100).unwrap().events;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.data, EventKind::ContextCompacted { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn failed_context_summary_keeps_original_history_and_previous_summary() {
+    let (mut kernel, session) = setup();
+    for (key, input) in [("history-one", "a"), ("history-two", "b")] {
+        let prior = kernel
+            .create_task_with_key(&session.id, input, Some(key))
+            .unwrap()
+            .0;
+        let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&prior.id).unwrap()
+        else {
+            panic!("history task was not ready")
+        };
+        kernel
+            .apply_model_response(
+                task,
+                Ok(ModelDecision::Complete("fact ".repeat(1200)).into()),
+            )
+            .unwrap();
+    }
+    kernel.set_model_provider(Box::new(AutoCompactionProvider {
+        calls: AtomicU32::new(0),
+        fail_summary: true,
+        summary_input_limit: usize::MAX,
+    }));
+    let (task, _) = kernel
+        .create_task_with_key(&session.id, "retry after rejection", None)
+        .unwrap();
+    let mut original = task.context.as_ref().unwrap().clone();
+    original.summaries.push(ContextSummary {
+        text: "a previously committed summary".into(),
+        sources: vec![ContextSummarySource {
+            task_id: original.turns[0].task_id.clone(),
+            completion_sequence: original.turns[0].completion_sequence,
+        }],
+        prompt_version: 1,
+        provider: "openai".into(),
+        model: "previous-model".into(),
+        budget: ModelBudget {
+            window_tokens: 1024,
+            max_input_tokens: Some(768),
+            max_input_bytes: None,
+            max_output_tokens: 256,
+            count_mode: ModelInputCountMode::Provider,
+            count_coverage: ModelInputCountCoverage::ProviderRequest,
+            safety_margin_tokens: 0,
+            source: ModelBudgetSource::Configured,
+        },
+        preflight: None,
+        usage: None,
+    });
+    let mut task = task;
+    task.context = Some(original.clone());
+    kernel
+        .commit(
+            &task,
+            &[EventKind::ContextCompacted {
+                step: 0,
+                sources: original.summaries[0].sources.clone(),
+            }],
+            &[],
+        )
+        .unwrap();
+    let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&task.id).unwrap() else {
+        panic!("request task was not ready")
+    };
+    let pending = kernel
+        .apply_model_response(
+            task,
+            Err(ModelError::InputBudgetExceeded("over budget".into())),
+        )
+        .unwrap();
+    assert_eq!(pending.status, TaskStatus::Running);
+    let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&pending.id).unwrap()
+    else {
+        panic!("summary task was not ready")
+    };
+    let failed = kernel
+        .apply_context_compaction(
+            task,
+            Err(ModelError::NotDispatched("summary failed".into())),
+        )
+        .unwrap();
+    assert_eq!(failed.status, TaskStatus::Failed);
+    let retained = failed.context.unwrap();
+    assert_eq!(retained.turns.len(), original.turns.len());
+    assert_eq!(retained.summaries.len(), original.summaries.len());
+    assert_eq!(retained.summaries[0].text, "a previously committed summary");
+    assert!(!retained.compaction_pending);
+}
+
+#[test]
+fn cancelled_context_summary_keeps_history_and_marks_task_cancelled() {
+    let (mut kernel, session) = setup();
+    for (key, input) in [("cancel-history-one", "a"), ("cancel-history-two", "b")] {
+        let prior = kernel
+            .create_task_with_key(&session.id, input, Some(key))
+            .unwrap()
+            .0;
+        let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&prior.id).unwrap()
+        else {
+            panic!("history task was not ready")
+        };
+        kernel
+            .apply_model_response(task, Ok(ModelDecision::Complete("fact".into()).into()))
+            .unwrap();
+    }
+    kernel.set_model_provider(Box::new(AutoCompactionProvider {
+        calls: AtomicU32::new(0),
+        fail_summary: false,
+        summary_input_limit: usize::MAX,
+    }));
+    let (task, _) = kernel
+        .create_task_with_key(&session.id, "cancel the summary", None)
+        .unwrap();
+    let original_turns = task.context.as_ref().unwrap().turns.clone();
+    let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&task.id).unwrap() else {
+        panic!("request task was not ready")
+    };
+    let pending = kernel
+        .apply_model_response(
+            task,
+            Err(ModelError::InputBudgetExceeded("over budget".into())),
+        )
+        .unwrap();
+    let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&pending.id).unwrap()
+    else {
+        panic!("summary task was not ready")
+    };
+    let cancelled = kernel
+        .apply_context_compaction(task, Err(ModelError::CancelledBeforeDispatch))
+        .unwrap();
+    assert_eq!(cancelled.status, TaskStatus::Cancelled);
+    assert_eq!(cancelled.context.unwrap().turns.len(), original_turns.len());
 }
 
 #[test]
@@ -1053,4 +1459,73 @@ fn resume_facts_migrate_without_backfill_and_update_with_the_task_transaction() 
     );
     drop(restored);
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn provider_preflight_usage_is_audited_and_calibration_survives_restart() {
+    let root = std::env::temp_dir().join(format!("fliuno-preflight-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let database = root.join("kernel.db");
+    let calibrated = Arc::new(AtomicU32::new(0));
+    let provider = || {
+        Box::new(PreflightRecorder {
+            calibrated: Arc::clone(&calibrated),
+        }) as Box<dyn ModelProvider>
+    };
+
+    let mut kernel = Kernel::open(&database, provider()).unwrap();
+    let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let (task, created) = kernel
+        .create_task_with_key(&session.id, "calibrate count", None)
+        .unwrap();
+    assert!(created);
+    let PreparedModelStep::Ready { task, .. } = kernel.prepare_model_step(&task.id).unwrap() else {
+        panic!("new task was not ready")
+    };
+    let task_id = task.id.clone();
+    let preflight = ModelInputPreflight {
+        provider: "openai".into(),
+        model: "preflight-fixture".into(),
+        count_coverage: ModelInputCountCoverage::ProviderRequest,
+        estimated_input_tokens: 10,
+        safety_margin_tokens: 8,
+    };
+    kernel
+        .apply_model_response(
+            task,
+            Ok(ModelTurn {
+                decision: ModelDecision::Complete("done".into()),
+                replay: None,
+                usage: Some(ModelUsage {
+                    provider: "openai".into(),
+                    input_tokens: 27,
+                    output_tokens: 4,
+                    cached_input_tokens: None,
+                    reasoning_output_tokens: None,
+                }),
+                preflight: Some(preflight),
+            }),
+        )
+        .unwrap();
+    assert_eq!(calibrated.load(Ordering::Relaxed), 17);
+    let events = kernel.list_events(&task_id, 0, 100).unwrap().events;
+    assert!(events.iter().any(|event| matches!(
+        &event.data,
+        EventKind::ModelPreflightObserved {
+            usage_status: ModelPreflightUsageStatus::Matched,
+            estimated_input_tokens: 10,
+            observed_input_tokens: Some(27),
+            undercount_tokens: Some(17),
+            margin_exceeded: Some(true),
+            ..
+        }
+    )));
+    drop(kernel);
+
+    calibrated.store(0, Ordering::Relaxed);
+    let restored = Kernel::open(&database, provider()).unwrap();
+    assert_eq!(calibrated.load(Ordering::Relaxed), 17);
+    drop(restored);
+    fs::remove_dir_all(root).unwrap();
 }

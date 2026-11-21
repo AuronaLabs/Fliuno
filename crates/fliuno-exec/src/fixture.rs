@@ -66,6 +66,25 @@ pub fn main() -> io::Result<()> {
             std::fs::write(&args[1], "executed")?;
             println!("touched");
         }
+        Some("run-handoff") => {
+            let mut starts = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("handoff.starts")?;
+            writeln!(starts, "started")?;
+            let deadline = std::time::Instant::now() + Duration::from_secs(20);
+            while !std::path::Path::new("handoff.release").exists() {
+                if std::time::Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "fixture release missing",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            std::fs::write("handoff.completed", "completed")?;
+            println!("exactly once");
+        }
         Some("tree") | Some("orphan") | Some("tree-hold") => {
             let mut child = std::process::Command::new(std::env::current_exe()?)
                 .arg(if args[0] == "tree-hold" {

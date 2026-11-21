@@ -5,6 +5,7 @@ mod config;
 #[cfg(feature = "test-fixtures")]
 pub mod fixture;
 mod runner;
+pub mod supervisor;
 pub use capture::CapturedOutput;
 pub use config::{Config, ProcessIsolation, ProgramConfig};
 pub use runner::{
@@ -59,6 +60,14 @@ impl Program {
 }
 
 impl Tool for Program {
+    fn supports_supervision(&self) -> bool {
+        cfg!(any(windows, target_os = "linux")) && self.supervisor.is_some()
+    }
+
+    fn launch_supervisor(&self, ticket: &fliuno_core::SupervisorTicket) -> fliuno_core::Result<()> {
+        supervisor::launch(self, ticket)
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: self.tool_name.clone(),
@@ -95,6 +104,9 @@ impl Tool for Program {
                 "configured executable changed; restart and obtain new approval".into(),
             ));
         }
+        if cancellation.is_cancelled() {
+            return Err(ToolError::Failed("process cancelled before launch".into()));
+        }
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -117,6 +129,22 @@ impl Tool for Program {
 /// Validate all presets before mutating the tool registry. Credentials remain
 /// inside each immutable runtime, never in RPC arguments or persistent history.
 pub fn register_config(kernel: &mut Kernel, config: Config) -> Result<(), String> {
+    register(kernel, config, None)
+}
+
+pub fn register_supervised_config(
+    kernel: &mut Kernel,
+    config: Config,
+    worker: std::path::PathBuf,
+) -> Result<(), String> {
+    register(kernel, config, Some(worker))
+}
+
+fn register(
+    kernel: &mut Kernel,
+    config: Config,
+    supervisor: Option<std::path::PathBuf>,
+) -> Result<(), String> {
     if config.programs.is_empty() || config.programs.len() > 32 {
         return Err("execution config must contain 1..32 programs".into());
     }
@@ -127,7 +155,8 @@ pub fn register_config(kernel: &mut Kernel, config: Config) -> Result<(), String
         if !ids.insert(config.id.clone()) {
             return Err("duplicate process program id".into());
         }
-        let program = Program::resolve(config)?;
+        let mut program = Program::resolve(config)?;
+        program.supervisor = supervisor.clone();
         if existing.iter().any(|spec| spec.name == program.tool_name) {
             return Err("process tool is already registered".into());
         }

@@ -6,6 +6,7 @@ mod wire;
 use fliuno_core::{CancellationToken, Tool, ToolContext, ToolError, ToolOutput};
 use fliuno_protocol::{ToolCall, Workspace};
 use serde_json::{Value, json};
+use std::time::Duration;
 use wire::{Fixture, Response};
 #[path = "content/completion.rs"]
 mod completion;
@@ -186,7 +187,7 @@ fn argument_overrides_budgets_and_predispatch_cancellation_send_nothing() {
 }
 
 #[test]
-fn content_cache_hints_never_hide_a_second_request_or_fallback_after_failure() {
+fn expired_content_is_not_served_when_refresh_fails() {
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -207,11 +208,12 @@ fn content_cache_hints_never_hide_a_second_request_or_fallback_after_failure() {
             if request.body["method"] == method && observed.fetch_add(1, Ordering::SeqCst) == 1 {
                 return Response::json(500, json!({"secret":"REMOTE_ERROR_MUST_NOT_LEAK"}));
             }
-            content::reply(request)
+            content::reply_with_ttl(request, 1)
         });
         let tools = connect(&fixture, 2000);
         let target = tool(&tools, label);
         invoke(target, args.clone(), &CancellationToken::new()).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
         let error = invoke(target, args.clone(), &CancellationToken::new())
             .err()
             .unwrap();

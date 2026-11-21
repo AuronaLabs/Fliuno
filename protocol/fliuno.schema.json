@@ -331,6 +331,333 @@
         "title"
       ]
     },
+    "workspace/memory/put": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemoryPutParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        },
+        "sourceTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedRevision": {
+          "description": "Required to update or restore an existing record; omit for creation.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "key",
+        "content"
+      ]
+    },
+    "workspace/memory/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemoryGetParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "actorTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "key"
+      ]
+    },
+    "workspace/memory/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemoryListParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        },
+        "includeDeleted": {
+          "type": "boolean",
+          "default": false
+        },
+        "actorTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "workspace/memory/search": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemorySearchParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        },
+        "actorTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "query"
+      ]
+    },
+    "workspace/memory/indexVectors": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemoryIndexParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "modelIdentity": {
+          "description": "Identifies the model and its embedding recipe. Changing either requires a new identity.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "vectors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceMemoryVector"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "modelIdentity",
+        "vectors"
+      ],
+      "$defs": {
+        "WorkspaceMemoryVector": {
+          "type": "object",
+          "properties": {
+            "memoryId": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 1,
+              "maxItems": 2048
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "memoryId",
+            "revision",
+            "values"
+          ]
+        }
+      }
+    },
+    "workspace/memory/semanticSearch": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemorySemanticSearchParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "embedding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceMemoryQueryEmbedding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "actorTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "query",
+        "limit"
+      ],
+      "$defs": {
+        "WorkspaceMemoryQueryEmbedding": {
+          "type": "object",
+          "properties": {
+            "modelIdentity": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 1,
+              "maxItems": 2048
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "modelIdentity",
+            "values"
+          ]
+        }
+      }
+    },
+    "workspace/memory/delete": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemoryDeleteParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "actorTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "key",
+        "expectedRevision"
+      ]
+    },
+    "workspace/memory/listAudit": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemoryAuditListParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
     "session/create": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "SessionCreateParams",
@@ -1439,6 +1766,327 @@
         }
       }
     },
+    "run/start": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunStartParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[!-~]+$"
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 8,
+          "default": 2
+        },
+        "maxModelSteps": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "timeoutMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 86400000
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContextOptions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunNodeInput"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clientRequestId",
+        "nodes"
+      ],
+      "$defs": {
+        "ContextOptions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/ContextMode",
+              "default": "session"
+            },
+            "maxTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 16
+            },
+            "maxBytes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 131072
+            },
+            "selection": {
+              "description": "FitRecent may skip whole records within a bounded recent window.",
+              "$ref": "#/$defs/ContextSelection"
+            },
+            "detail": {
+              "$ref": "#/$defs/ContextDetail"
+            },
+            "taskIds": {
+              "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "historyQuery": {
+              "description": "Required in match_recent mode; searches only user and assistant text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextHistoryQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scanLimit": {
+              "description": "Maximum completed records examined by fit_recent or match_recent.\nOmit to examine at most 128 records, including any skipped records.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 512
+            },
+            "afterSequence": {
+              "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "throughSequence": {
+              "description": "Pin the inclusive completion watermark for preview and task creation.\nOmit to use the current watermark. Zero selects an empty history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContextMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "isolated"
+          ]
+        },
+        "ContextSelection": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "recent",
+                "fit_recent"
+              ]
+            },
+            {
+              "description": "Fit recent records whose conversation matches an explicit query.",
+              "type": "string",
+              "const": "match_recent"
+            }
+          ]
+        },
+        "ContextDetail": {
+          "description": "Controls which parts of a completed record count toward the context budget.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            },
+            {
+              "description": "Keep user and assistant messages and artifact references.",
+              "type": "string",
+              "const": "conversation"
+            }
+          ]
+        },
+        "ContextHistoryQuery": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionHistoryRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "RunNodeInput": {
+          "type": "object",
+          "properties": {
+            "nodeId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "input": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 262144
+            },
+            "dependsOn": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 32
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "nodeId",
+            "input"
+          ]
+        }
+      }
+    },
+    "run/get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunIdParams",
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "runId"
+      ]
+    },
+    "run/cancel": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunCancelParams",
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "runId"
+      ]
+    },
+    "run/events": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunEventsParams",
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 256,
+          "default": 64
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "runId"
+      ]
+    },
+    "task/respondToolInput": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ToolInputRespondParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "requestId": {
+          "description": "Idempotency key for retrying this exact user response.",
+          "type": "string"
+        },
+        "responses": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "callId",
+        "requestId",
+        "responses"
+      ]
+    },
     "task/startSummary": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskStartParams",
@@ -1973,6 +2621,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -2051,6 +2700,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -4270,6 +4920,468 @@
         }
       }
     },
+    "WorkspaceMemory": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemory",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "sourceTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "createdAtMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "updatedAtMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "deletedAtMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "id",
+        "key",
+        "content",
+        "revision",
+        "createdAtMs",
+        "updatedAtMs"
+      ]
+    },
+    "WorkspaceMemoryPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ObjectPage",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceMemory"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextAfter",
+        "hasMore"
+      ],
+      "$defs": {
+        "WorkspaceMemory": {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "sourceTaskId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "createdAtMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "updatedAtMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "deletedAtMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "workspaceId",
+            "id",
+            "key",
+            "content",
+            "revision",
+            "createdAtMs",
+            "updatedAtMs"
+          ]
+        }
+      }
+    },
+    "WorkspaceMemoryAuditEntry": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemoryAuditEntry",
+      "type": "object",
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "memoryId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "action": {
+          "$ref": "#/$defs/WorkspaceMemoryAction"
+        },
+        "revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sourceTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actorTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "contentSha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "occurredAtMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "workspaceId",
+        "action",
+        "occurredAtMs"
+      ],
+      "$defs": {
+        "WorkspaceMemoryAction": {
+          "type": "string",
+          "enum": [
+            "created",
+            "updated",
+            "restored",
+            "deleted",
+            "read",
+            "listed",
+            "searched",
+            "context_searched",
+            "context_injected",
+            "indexed"
+          ]
+        }
+      }
+    },
+    "WorkspaceMemoryAuditPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ObjectPage",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceMemoryAuditEntry"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "hasMore": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "items",
+        "nextAfter",
+        "hasMore"
+      ],
+      "$defs": {
+        "WorkspaceMemoryAuditEntry": {
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "memoryId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "key": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "action": {
+              "$ref": "#/$defs/WorkspaceMemoryAction"
+            },
+            "revision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sourceTaskId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "actorTaskId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "contentSha256": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "occurredAtMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sequence",
+            "workspaceId",
+            "action",
+            "occurredAtMs"
+          ]
+        },
+        "WorkspaceMemoryAction": {
+          "type": "string",
+          "enum": [
+            "created",
+            "updated",
+            "restored",
+            "deleted",
+            "read",
+            "listed",
+            "searched",
+            "context_searched",
+            "context_injected",
+            "indexed"
+          ]
+        }
+      }
+    },
+    "WorkspaceMemorySemanticResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceMemorySemanticResult",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/WorkspaceMemorySearchMode"
+        },
+        "fallbackReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceMemoryFallback"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceMemorySemanticMatch"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "items"
+      ],
+      "$defs": {
+        "WorkspaceMemorySearchMode": {
+          "type": "string",
+          "enum": [
+            "semantic",
+            "keyword"
+          ]
+        },
+        "WorkspaceMemoryFallback": {
+          "type": "string",
+          "enum": [
+            "embedding_unavailable",
+            "no_compatible_index",
+            "corrupt_index",
+            "no_positive_match"
+          ]
+        },
+        "WorkspaceMemorySemanticMatch": {
+          "type": "object",
+          "properties": {
+            "memory": {
+              "$ref": "#/$defs/WorkspaceMemory"
+            },
+            "similarity": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "memory"
+          ]
+        },
+        "WorkspaceMemory": {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "sourceTaskId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "createdAtMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "updatedAtMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "deletedAtMs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "workspaceId",
+            "id",
+            "key",
+            "content",
+            "revision",
+            "createdAtMs",
+            "updatedAtMs"
+          ]
+        }
+      }
+    },
     "Session": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "Session",
@@ -4351,6 +5463,16 @@
             }
           ],
           "default": null
+        },
+        "pendingToolInput": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolInputRequest"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "modelOutcomeUnknown": {
           "description": "A restart/timeout can leave the model request result and billing unknown.",
@@ -4438,6 +5560,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -4659,6 +5782,23 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
+            },
+            "memories": {
+              "description": "Bounded workspace memories selected at task creation.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextMemory"
+              }
+            },
+            "summaries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextSummary"
+              }
+            },
+            "compactionPending": {
+              "description": "A confirmed input-budget rejection scheduled a separate model attempt.",
+              "type": "boolean"
             }
           },
           "additionalProperties": false,
@@ -5027,6 +6167,266 @@
             "closed"
           ]
         },
+        "ContextMemory": {
+          "description": "Workspace knowledge frozen into a task as untrusted reference data.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sourceTaskId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "key",
+            "content",
+            "revision"
+          ]
+        },
+        "ContextSummary": {
+          "description": "An untrusted projection of completed task records, not executable history.",
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextSummarySource"
+              }
+            },
+            "promptVersion": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "budget": {
+              "$ref": "#/$defs/ModelBudget"
+            },
+            "preflight": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelInputPreflight"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "usage": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelUsage"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "sources",
+            "promptVersion",
+            "provider",
+            "model",
+            "budget"
+          ]
+        },
+        "ContextSummarySource": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        },
+        "ModelInputPreflight": {
+          "description": "Token count performed immediately before dispatching one model request.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "estimatedInputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model",
+            "countCoverage",
+            "estimatedInputTokens",
+            "safetyMarginTokens"
+          ]
+        },
+        "ModelUsage": {
+          "description": "Token counts reported by the provider for one model step.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "inputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "cachedInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "reasoningOutputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "inputTokens",
+            "outputTokens"
+          ]
+        },
         "Approval": {
           "type": "object",
           "properties": {
@@ -5053,6 +6453,28 @@
             "id",
             "taskId",
             "call"
+          ]
+        },
+        "ToolInputRequest": {
+          "description": "Public, resumable input requested by an in-flight approved tool call.\nOpaque continuation state is stored by the kernel and is never exposed here.",
+          "type": "object",
+          "properties": {
+            "callId": {
+              "type": "string"
+            },
+            "requests": true,
+            "round": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "callId",
+            "requests",
+            "round"
           ]
         },
         "AgentRun": {
@@ -5311,6 +6733,806 @@
         }
       }
     },
+    "Run": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Run",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "deadlineAtUnixMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "nodes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunNode"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sessionId",
+        "status",
+        "maxConcurrency",
+        "revision",
+        "nodes"
+      ],
+      "$defs": {
+        "RunStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "partially_completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "interrupted"
+          ]
+        },
+        "RunNode": {
+          "type": "object",
+          "properties": {
+            "nodeId": {
+              "type": "string"
+            },
+            "dependsOn": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "status": {
+              "$ref": "#/$defs/RunNodeStatus"
+            },
+            "taskId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "nodeId",
+            "dependsOn",
+            "status"
+          ]
+        },
+        "RunNodeStatus": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "running",
+            "waiting_approval",
+            "waiting_input",
+            "interrupted",
+            "completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "skipped"
+          ]
+        }
+      }
+    },
+    "RunIdParams": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunIdParams",
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "runId"
+      ]
+    },
+    "RunNode": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunNode",
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "$ref": "#/$defs/RunNodeStatus"
+        },
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "nodeId",
+        "dependsOn",
+        "status"
+      ],
+      "$defs": {
+        "RunNodeStatus": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "running",
+            "waiting_approval",
+            "waiting_input",
+            "interrupted",
+            "completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "skipped"
+          ]
+        }
+      }
+    },
+    "RunStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunStatus",
+      "type": "string",
+      "enum": [
+        "running",
+        "completed",
+        "partially_completed",
+        "failed",
+        "cancelled",
+        "timed_out",
+        "interrupted"
+      ]
+    },
+    "RunNodeStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunNodeStatus",
+      "type": "string",
+      "enum": [
+        "waiting",
+        "running",
+        "waiting_approval",
+        "waiting_input",
+        "interrupted",
+        "completed",
+        "failed",
+        "cancelled",
+        "timed_out",
+        "skipped"
+      ]
+    },
+    "RunEvent": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunEvent",
+      "type": "object",
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "runId": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/RunEventKind"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "runId",
+        "data"
+      ],
+      "$defs": {
+        "RunEventKind": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "created"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "node_started"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "taskId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "nodeId",
+                "taskId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "node_status_changed"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "status": {
+                  "$ref": "#/$defs/RunNodeStatus"
+                }
+              },
+              "required": [
+                "type",
+                "nodeId",
+                "status"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "node_skipped"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "failedDependencies": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "nodeId",
+                "failedDependencies"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "completed"
+                },
+                "status": {
+                  "$ref": "#/$defs/RunStatus"
+                }
+              },
+              "required": [
+                "type",
+                "status"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "cancelled"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "timed_out"
+                },
+                "deadlineAtUnixMs": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "deadlineAtUnixMs"
+              ]
+            }
+          ]
+        },
+        "RunNodeStatus": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "running",
+            "waiting_approval",
+            "waiting_input",
+            "interrupted",
+            "completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "skipped"
+          ]
+        },
+        "RunStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "partially_completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "interrupted"
+          ]
+        }
+      }
+    },
+    "RunEventKind": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunEventKind",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "created"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "node_started"
+            },
+            "nodeId": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "nodeId",
+            "taskId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "node_status_changed"
+            },
+            "nodeId": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/RunNodeStatus"
+            }
+          },
+          "required": [
+            "type",
+            "nodeId",
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "node_skipped"
+            },
+            "nodeId": {
+              "type": "string"
+            },
+            "failedDependencies": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "nodeId",
+            "failedDependencies"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "completed"
+            },
+            "status": {
+              "$ref": "#/$defs/RunStatus"
+            }
+          },
+          "required": [
+            "type",
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "cancelled"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "timed_out"
+            },
+            "deadlineAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "type",
+            "deadlineAtUnixMs"
+          ]
+        }
+      ],
+      "$defs": {
+        "RunNodeStatus": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "running",
+            "waiting_approval",
+            "waiting_input",
+            "interrupted",
+            "completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "skipped"
+          ]
+        },
+        "RunStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "partially_completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "interrupted"
+          ]
+        }
+      }
+    },
+    "RunEventsPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RunEventsPage",
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunEvent"
+          }
+        },
+        "nextAfter": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "events",
+        "nextAfter",
+        "throughSequence"
+      ],
+      "$defs": {
+        "RunEvent": {
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "runId": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/RunEventKind"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sequence",
+            "runId",
+            "data"
+          ]
+        },
+        "RunEventKind": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "created"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "node_started"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "taskId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "nodeId",
+                "taskId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "node_status_changed"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "status": {
+                  "$ref": "#/$defs/RunNodeStatus"
+                }
+              },
+              "required": [
+                "type",
+                "nodeId",
+                "status"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "node_skipped"
+                },
+                "nodeId": {
+                  "type": "string"
+                },
+                "failedDependencies": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "nodeId",
+                "failedDependencies"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "completed"
+                },
+                "status": {
+                  "$ref": "#/$defs/RunStatus"
+                }
+              },
+              "required": [
+                "type",
+                "status"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "cancelled"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "timed_out"
+                },
+                "deadlineAtUnixMs": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "deadlineAtUnixMs"
+              ]
+            }
+          ]
+        },
+        "RunNodeStatus": {
+          "type": "string",
+          "enum": [
+            "waiting",
+            "running",
+            "waiting_approval",
+            "waiting_input",
+            "interrupted",
+            "completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "skipped"
+          ]
+        },
+        "RunStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "completed",
+            "partially_completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+            "interrupted"
+          ]
+        }
+      }
+    },
+    "ToolInputRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ToolInputRequest",
+      "description": "Public, resumable input requested by an in-flight approved tool call.\nOpaque continuation state is stored by the kernel and is never exposed here.",
+      "type": "object",
+      "properties": {
+        "callId": {
+          "type": "string"
+        },
+        "requests": true,
+        "round": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "callId",
+        "requests",
+        "round"
+      ]
+    },
+    "ToolInputRespondParams": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ToolInputRespondParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "requestId": {
+          "description": "Idempotency key for retrying this exact user response.",
+          "type": "string"
+        },
+        "responses": true
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "callId",
+        "requestId",
+        "responses"
+      ]
+    },
     "TaskSummary": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "TaskSummary",
@@ -5361,6 +7583,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -5440,6 +7663,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -5529,6 +7753,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -5632,6 +7857,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -5765,6 +7991,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -5972,6 +8199,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -6090,6 +8318,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -6175,6 +8404,12 @@
               "type": "integer",
               "format": "uint64",
               "minimum": 0
+            },
+            "waitingInput": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 0
             },
             "interrupted": {
               "type": "integer",
@@ -6361,6 +8596,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -6467,6 +8703,12 @@
               "format": "uint64",
               "minimum": 0
             },
+            "waitingInput": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 0
+            },
             "interrupted": {
               "type": "integer",
               "format": "uint64",
@@ -6524,6 +8766,23 @@
           "type": "integer",
           "format": "uint64",
           "minimum": 0
+        },
+        "memories": {
+          "description": "Bounded workspace memories selected at task creation.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextMemory"
+          }
+        },
+        "summaries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextSummary"
+          }
+        },
+        "compactionPending": {
+          "description": "A confirmed input-budget rejection scheduled a separate model attempt.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -6909,8 +9168,554 @@
             "outcome_unknown",
             "closed"
           ]
+        },
+        "ContextMemory": {
+          "description": "Workspace knowledge frozen into a task as untrusted reference data.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "key": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sourceTaskId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "key",
+            "content",
+            "revision"
+          ]
+        },
+        "ContextSummary": {
+          "description": "An untrusted projection of completed task records, not executable history.",
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContextSummarySource"
+              }
+            },
+            "promptVersion": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "budget": {
+              "$ref": "#/$defs/ModelBudget"
+            },
+            "preflight": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelInputPreflight"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "usage": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelUsage"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "sources",
+            "promptVersion",
+            "provider",
+            "model",
+            "budget"
+          ]
+        },
+        "ContextSummarySource": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        },
+        "ModelInputPreflight": {
+          "description": "Token count performed immediately before dispatching one model request.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "estimatedInputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model",
+            "countCoverage",
+            "estimatedInputTokens",
+            "safetyMarginTokens"
+          ]
+        },
+        "ModelUsage": {
+          "description": "Token counts reported by the provider for one model step.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "inputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "cachedInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "reasoningOutputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "inputTokens",
+            "outputTokens"
+          ]
         }
       }
+    },
+    "ContextMemory": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ContextMemory",
+      "description": "Workspace knowledge frozen into a task as untrusted reference data.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "sourceTaskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "key",
+        "content",
+        "revision"
+      ]
+    },
+    "ContextSummary": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ContextSummary",
+      "description": "An untrusted projection of completed task records, not executable history.",
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextSummarySource"
+          }
+        },
+        "promptVersion": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "budget": {
+          "$ref": "#/$defs/ModelBudget"
+        },
+        "preflight": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelInputPreflight"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelUsage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "sources",
+        "promptVersion",
+        "provider",
+        "model",
+        "budget"
+      ],
+      "$defs": {
+        "ContextSummarySource": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        },
+        "ModelInputPreflight": {
+          "description": "Token count performed immediately before dispatching one model request.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "estimatedInputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model",
+            "countCoverage",
+            "estimatedInputTokens",
+            "safetyMarginTokens"
+          ]
+        },
+        "ModelUsage": {
+          "description": "Token counts reported by the provider for one model step.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "inputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "cachedInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "reasoningOutputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "inputTokens",
+            "outputTokens"
+          ]
+        }
+      }
+    },
+    "ContextSummarySource": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ContextSummarySource",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "completionSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "completionSequence"
+      ]
     },
     "SessionHistoryListPage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9559,6 +12364,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -9726,6 +12532,7 @@
           "enum": [
             "running",
             "waiting_approval",
+            "waiting_input",
             "interrupted",
             "completed",
             "cancelled",
@@ -10761,6 +13568,49 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "context_compaction_scheduled"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_compacted"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ContextSummarySource"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "sources"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "model_usage_reported"
                 },
                 "step": {
@@ -10776,6 +13626,80 @@
                 "type",
                 "step",
                 "usage"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_preflight_observed"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "countCoverage": {
+                  "$ref": "#/$defs/ModelInputCountCoverage"
+                },
+                "estimatedInputTokens": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "safetyMarginTokens": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "usageStatus": {
+                  "$ref": "#/$defs/ModelPreflightUsageStatus"
+                },
+                "observedInputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "usageProvider": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "undercountTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "marginExceeded": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "provider",
+                "model",
+                "countCoverage",
+                "estimatedInputTokens",
+                "safetyMarginTokens",
+                "usageStatus"
               ]
             },
             {
@@ -10846,6 +13770,51 @@
               "required": [
                 "type",
                 "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_input_required"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "requests": true,
+                "round": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              },
+              "required": [
+                "type",
+                "callId",
+                "requests",
+                "round"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_input_resolved"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "callId",
+                "requestId"
               ]
             },
             {
@@ -11195,6 +14164,24 @@
             "closed"
           ]
         },
+        "ContextSummarySource": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence"
+          ]
+        },
         "ModelUsage": {
           "description": "Token counts reported by the provider for one model step.",
           "type": "object",
@@ -11234,6 +14221,22 @@
             "provider",
             "inputTokens",
             "outputTokens"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelPreflightUsageStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "missing",
+            "provider_mismatch"
           ]
         },
         "Approval": {
@@ -11613,7 +14616,18 @@
           "minimum": 0
         },
         "maxInputTokens": {
-          "type": "integer",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "maxInputBytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint32",
           "minimum": 0
         },
@@ -11625,6 +14639,14 @@
         "countMode": {
           "$ref": "#/$defs/ModelInputCountMode"
         },
+        "countCoverage": {
+          "$ref": "#/$defs/ModelInputCountCoverage"
+        },
+        "safetyMarginTokens": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
         "source": {
           "$ref": "#/$defs/ModelBudgetSource"
         }
@@ -11632,9 +14654,10 @@
       "additionalProperties": false,
       "required": [
         "windowTokens",
-        "maxInputTokens",
         "maxOutputTokens",
         "countMode",
+        "countCoverage",
+        "safetyMarginTokens",
         "source"
       ],
       "$defs": {
@@ -11645,6 +14668,14 @@
             "provider"
           ]
         },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
         "ModelBudgetSource": {
           "type": "string",
           "enum": [
@@ -11653,6 +14684,176 @@
           ]
         }
       }
+    },
+    "ModelCapabilities": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelCapabilities",
+      "description": "Unified provider capabilities reported to the host at initialization.",
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "modelSource": {
+          "$ref": "#/$defs/ModelCapabilitiesSource"
+        },
+        "supportedInputTypes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelInputType"
+          }
+        },
+        "inputTypesSource": {
+          "$ref": "#/$defs/ModelCapabilitiesSource"
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelBudget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "automaticContextCompaction": {
+          "description": "The kernel can summarize completed history after an input-budget rejection.",
+          "type": "boolean"
+        },
+        "refreshedAtMs": {
+          "description": "Time this capability snapshot was assembled by the running kernel.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "modelSource",
+        "supportedInputTypes",
+        "inputTypesSource",
+        "refreshedAtMs"
+      ],
+      "$defs": {
+        "ModelCapabilitiesSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata",
+            "provider_adapter"
+          ]
+        },
+        "ModelInputType": {
+          "type": "string",
+          "enum": [
+            "text",
+            "image",
+            "pdf"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        }
+      }
+    },
+    "ModelCapabilitiesSource": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelCapabilitiesSource",
+      "type": "string",
+      "enum": [
+        "configured",
+        "provider_metadata",
+        "provider_adapter"
+      ]
+    },
+    "ModelInputType": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelInputType",
+      "type": "string",
+      "enum": [
+        "text",
+        "image",
+        "pdf"
+      ]
     },
     "EventsPage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -12020,6 +15221,49 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "context_compaction_scheduled"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_compacted"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ContextSummarySource"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "sources"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "model_usage_reported"
                 },
                 "step": {
@@ -12035,6 +15279,80 @@
                 "type",
                 "step",
                 "usage"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_preflight_observed"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "countCoverage": {
+                  "$ref": "#/$defs/ModelInputCountCoverage"
+                },
+                "estimatedInputTokens": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "safetyMarginTokens": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "usageStatus": {
+                  "$ref": "#/$defs/ModelPreflightUsageStatus"
+                },
+                "observedInputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "usageProvider": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "undercountTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "marginExceeded": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "provider",
+                "model",
+                "countCoverage",
+                "estimatedInputTokens",
+                "safetyMarginTokens",
+                "usageStatus"
               ]
             },
             {
@@ -12105,6 +15423,51 @@
               "required": [
                 "type",
                 "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_input_required"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "requests": true,
+                "round": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              },
+              "required": [
+                "type",
+                "callId",
+                "requests",
+                "round"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_input_resolved"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "callId",
+                "requestId"
               ]
             },
             {
@@ -12454,6 +15817,24 @@
             "closed"
           ]
         },
+        "ContextSummarySource": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence"
+          ]
+        },
         "ModelUsage": {
           "description": "Token counts reported by the provider for one model step.",
           "type": "object",
@@ -12493,6 +15874,22 @@
             "provider",
             "inputTokens",
             "outputTokens"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelPreflightUsageStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "missing",
+            "provider_mismatch"
           ]
         },
         "Approval": {

@@ -2,6 +2,10 @@
 use super::*;
 use http_wire::{Fixture, Response};
 
+#[cfg(any(windows, target_os = "linux"))]
+#[path = "execution/supervision.rs"]
+mod supervision;
+
 struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {

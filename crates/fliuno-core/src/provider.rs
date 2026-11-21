@@ -1,5 +1,8 @@
 use crate::{ToolSpec, new_id};
-use fliuno_protocol::{Message, ModelBudget, ModelUsage, Task, ToolCall};
+use fliuno_protocol::{
+    Message, ModelBudget, ModelCapabilitiesSource, ModelInputPreflight, ModelInputType, ModelUsage,
+    Task, ToolCall,
+};
 use serde_json::json;
 
 pub use tokio_util::sync::CancellationToken;
@@ -19,6 +22,7 @@ pub struct ModelTurn {
     pub decision: ModelDecision,
     pub replay: Option<ProviderReplay>,
     pub usage: Option<ModelUsage>,
+    pub preflight: Option<ModelInputPreflight>,
 }
 
 /// Whether a failed provider step could have reached the remote model service.
@@ -26,6 +30,8 @@ pub struct ModelTurn {
 pub enum ModelError {
     /// Local validation or request construction failed before dispatch.
     NotDispatched(String),
+    /// Input exceeded the configured budget before generation was dispatched.
+    InputBudgetExceeded(String),
     /// Cancellation was observed before any request could be sent.
     CancelledBeforeDispatch,
     /// The request may have reached the provider, so retry needs explicit consent.
@@ -47,9 +53,9 @@ impl From<&str> for ModelError {
 impl std::fmt::Display for ModelError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotDispatched(message) | Self::OutcomeUnknown(message) => {
-                formatter.write_str(message)
-            }
+            Self::NotDispatched(message)
+            | Self::InputBudgetExceeded(message)
+            | Self::OutcomeUnknown(message) => formatter.write_str(message),
             Self::CancelledBeforeDispatch => {
                 formatter.write_str("provider request cancelled before dispatch")
             }
@@ -71,12 +77,19 @@ impl From<ModelDecision> for ModelTurn {
             decision,
             replay: None,
             usage: None,
+            preflight: None,
         }
     }
 }
 
 /// Providers receive normalized messages; provider wire formats stay in adapters.
 pub trait ModelProvider: Send + Sync {
+    /// Stable, non-secret identity used to keep persisted run plans bound to
+    /// the same model implementation after process restart.
+    fn persistent_identity(&self) -> Option<(String, String)> {
+        self.model_identity()
+    }
+
     fn configured_budget(&self) -> Option<ModelBudget> {
         None
     }
@@ -84,6 +97,32 @@ pub trait ModelProvider: Send + Sync {
     fn supports_progress(&self) -> bool {
         false
     }
+
+    fn supports_context_compaction(&self) -> bool {
+        false
+    }
+
+    fn model_identity(&self) -> Option<(String, String)> {
+        None
+    }
+
+    fn model_identity_source(&self) -> ModelCapabilitiesSource {
+        ModelCapabilitiesSource::Configured
+    }
+
+    fn supported_input_types(&self) -> Vec<ModelInputType> {
+        vec![ModelInputType::Text]
+    }
+
+    fn supported_input_types_source(&self) -> ModelCapabilitiesSource {
+        ModelCapabilitiesSource::ProviderAdapter
+    }
+
+    /// Apply a persisted maximum undercount without reducing configured margins.
+    fn set_calibrated_safety_margin(&self, _provider: &str, _model: &str, _tokens: u32) {}
+
+    /// Observe a committed count-versus-usage sample.
+    fn observe_preflight(&self, _preflight: &ModelInputPreflight, _actual_input_tokens: u64) {}
 
     fn next(
         &self,
@@ -134,6 +173,10 @@ pub trait ModelProvider: Send + Sync {
 pub struct DemoProvider;
 
 impl ModelProvider for DemoProvider {
+    fn persistent_identity(&self) -> Option<(String, String)> {
+        Some(("demo".into(), "deterministic-v1".into()))
+    }
+
     fn next(
         &self,
         task: &Task,

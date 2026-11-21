@@ -1,20 +1,31 @@
 //! Streamable HTTP uses the SDK wire implementation. Endpoint, credentials and
 //! replay policy remain host-owned; transport failures never expose peer text.
-use crate::HttpServerConfig;
+use crate::{HttpServerConfig, host::McpService, legacy_wire::Negotiation, oauth::OAuthGrant};
 use reqwest::{
-    Url,
+    Method, StatusCode, Url,
     header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue},
 };
 use rmcp::{
     ClientLifecycleMode, ClientServiceExt,
-    model::ProtocolVersion,
+    model::{ErrorCode, ProtocolVersion},
     service::ClientInitializeError,
     transport::{
         StreamableHttpClientTransport, common::client_side_sse::NeverRetry,
         streamable_http_client::StreamableHttpClientTransportConfig,
     },
 };
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet,
+    sync::{
+        Arc,
+        atomic::{AtomicU16, Ordering},
+    },
+    time::Duration,
+};
+
+mod legacy_sse;
+mod legacy_tasks;
+pub(crate) mod task_watch;
 
 fn env_name(name: &str) -> bool {
     !name.is_empty()
@@ -49,6 +60,11 @@ fn header_name(name: &str) -> Result<HeaderName, String> {
 }
 
 pub(crate) fn validate(config: &HttpServerConfig) -> Result<Url, String> {
+    if matches!(config.transport, crate::HttpTransport::HttpSse)
+        && matches!(config.lifecycle, crate::Lifecycle::Discover)
+    {
+        return Err("legacy MCP HTTP+SSE requires the initialize lifecycle".into());
+    }
     let url = Url::parse(&config.url).map_err(|_| "invalid MCP HTTP endpoint")?;
     let loopback = url.host_str().is_some_and(|host| {
         host.trim_matches(['[', ']'])
@@ -84,6 +100,10 @@ pub(crate) fn validate(config: &HttpServerConfig) -> Result<Url, String> {
         if !env_name(env) || !names.insert(header_name(name)?.as_str().to_owned()) {
             return Err("invalid or duplicate MCP HTTP header configuration".into());
         }
+    }
+    if let Some(egress) = &config.egress {
+        egress.validate()?;
+        egress.require(&url)?;
     }
     Ok(url)
 }
@@ -128,18 +148,62 @@ pub(crate) async fn connect_with_headers(
     config: &HttpServerConfig,
     url: Url,
     headers: HeaderMap,
-) -> Result<super::host::McpService, String> {
+    grant: Option<Arc<OAuthGrant>>,
+) -> Result<
+    (
+        McpService,
+        Option<Negotiation>,
+        Option<task_watch::Endpoint>,
+    ),
+    String,
+> {
     let timeout = Duration::from_millis(config.timeout_ms);
-    let client = reqwest::Client::builder()
+    let streamable = matches!(config.transport, crate::HttpTransport::StreamableHttp);
+    let auto = streamable && matches!(config.lifecycle, crate::Lifecycle::Auto);
+    let status = Arc::new(AtomicU16::new(0));
+    let mut retries = reqwest::retry::never();
+    if auto {
+        // rmcp preserves the RPC error but can erase its HTTP status. Observe
+        // the status via reqwest's classifier, which never requests a retry.
+        let status = Arc::clone(&status);
+        retries = retries.classify_fn(move |exchange| {
+            if exchange.method() == Method::POST {
+                status.store(
+                    exchange.status().map_or(0, |s| s.as_u16()),
+                    Ordering::Relaxed,
+                );
+            }
+            exchange.success()
+        });
+    }
+    let builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .retry(reqwest::retry::never())
+        .retry(retries)
         .no_proxy()
         .connect_timeout(timeout.min(Duration::from_secs(10)))
         .read_timeout(timeout)
         .pool_max_idle_per_host(0)
-        .default_headers(headers)
+        .default_headers(headers);
+    let builder = match &config.egress {
+        Some(egress) => egress.apply(builder),
+        None => builder,
+    };
+    let client = builder
         .build()
         .map_err(|_| "cannot build MCP HTTP client")?;
+    if !streamable {
+        if grant.is_some() {
+            return Err("MCP OAuth requires Streamable HTTP".into());
+        }
+        return legacy_sse::connect(client, url)
+            .await
+            .map(|service| (service, None, None));
+    }
+    let client = legacy_tasks::WireClient {
+        client,
+        grant,
+        negotiation: None,
+    };
     let mut options = StreamableHttpClientTransportConfig::with_uri(url.as_str())
         .max_concurrent_requests(1)
         .control_request_timeout(timeout.min(Duration::from_secs(5)))
@@ -150,35 +214,128 @@ pub(crate) async fn connect_with_headers(
     // Neither reconnect nor session recovery may turn an uncertain effect into
     // an implicit second tools/call. Reconnection requires a new host lifecycle.
     options.retry_config = Arc::new(NeverRetry::default());
+    if matches!(config.lifecycle, crate::Lifecycle::Legacy) {
+        return connect_initialize(client, options, ProtocolVersion::LATEST_WITH_INITIALIZE)
+            .await
+            .map(|(service, negotiation)| (service, negotiation, None));
+    }
+    let lifecycle = match config.lifecycle {
+        // SDK Auto can fall back after a discovery timeout. Silence over HTTP
+        // is not evidence of a legacy peer; use the host's startup budget.
+        crate::Lifecycle::Auto => crate::Lifecycle::Discover.sdk(),
+        mode => mode.sdk(),
+    };
     let result = crate::client_config()
         .serve_with_lifecycle(
             StreamableHttpClientTransport::with_client(client.clone(), options.clone()),
-            config.lifecycle.sdk(),
+            lifecycle,
         )
         .await;
-    // A server may reject the modern version before it can return Method Not
-    // Found for discover. Only an explicit advertisement of a shared legacy
-    // version permits a fresh initialize transport. No tool request was sent.
-    let shared_legacy = match &result {
-        Err(ClientInitializeError::NoCompatibleProtocolVersion {
-            server_supported, ..
-        }) => server_supported.iter().any(|version| {
-            version.has_initialize()
-                && *version >= ProtocolVersion::V_2025_03_26
-                && ProtocolVersion::KNOWN_VERSIONS.contains(version)
-        }),
-        _ => false,
-    };
-    if matches!(config.lifecycle, crate::Lifecycle::Auto) && shared_legacy {
-        return crate::client_config()
+    // A discovery POST is the only POST in flight during modern startup.
+    let status = StatusCode::from_u16(status.load(Ordering::Relaxed)).ok();
+    if auto
+        && let Some(status) = status
+        && let Some(version) = result
+            .as_ref()
+            .err()
+            .and_then(|error| legacy_discovery_version(status, error))
+    {
+        return connect_initialize(client, options, version)
+            .await
+            .map(|(service, negotiation)| (service, negotiation, None));
+    }
+    result
+        .map(|service| {
+            (
+                service,
+                None,
+                Some(task_watch::Endpoint {
+                    client: client.client,
+                    grant: client.grant,
+                    url,
+                }),
+            )
+        })
+        .map_err(|_| "MCP HTTP initialization failed".into())
+}
+
+async fn connect_initialize(
+    mut client: legacy_tasks::WireClient,
+    options: StreamableHttpClientTransportConfig,
+    version: ProtocolVersion,
+) -> Result<(McpService, Option<Negotiation>), String> {
+    let config = crate::client_config().with_protocol_version(version.clone());
+    let error = |_| "MCP HTTP legacy initialization failed".to_owned();
+    if version != ProtocolVersion::V_2025_11_25 {
+        return config
             .serve_with_lifecycle(
                 StreamableHttpClientTransport::with_client(client, options),
                 ClientLifecycleMode::Initialize,
             )
             .await
-            .map_err(|_| "MCP HTTP legacy initialization failed".into());
+            .map(|service| (service, None))
+            .map_err(error);
     }
-    result.map_err(|_| "MCP HTTP initialization failed".into())
+    let negotiation = Negotiation::default();
+    client.negotiation = Some(negotiation.clone());
+    let inner = StreamableHttpClientTransport::with_client(client, options);
+    config
+        .serve_with_lifecycle(
+            legacy_tasks::LegacyTransport {
+                inner,
+                negotiation: negotiation.clone(),
+            },
+            ClientLifecycleMode::Initialize,
+        )
+        .await
+        .map(|service| (service, Some(negotiation)))
+        .map_err(error)
+}
+
+fn legacy_discovery_version(
+    status: StatusCode,
+    error: &ClientInitializeError,
+) -> Option<ProtocolVersion> {
+    match error {
+        // rmcp normalizes an opaque HTTP rejection to Invalid Request. Do
+        // not treat arbitrary JSON-RPC server or modern errors as legacy.
+        ClientInitializeError::JsonRpcError(error) => {
+            // The official server also maps Method Not Found to HTTP 404.
+            // A bare 404 (normalized by rmcp to Invalid Request) is not
+            // evidence that this endpoint serves legacy Streamable HTTP.
+            ((status == StatusCode::NOT_FOUND && error.code == ErrorCode::METHOD_NOT_FOUND)
+                || ((status.is_success() || status == StatusCode::BAD_REQUEST)
+                    && matches!(
+                        error.code,
+                        ErrorCode::METHOD_NOT_FOUND
+                            | ErrorCode::INVALID_REQUEST
+                            | ErrorCode::INVALID_PARAMS
+                    )))
+            .then_some(ProtocolVersion::LATEST_WITH_INITIALIZE)
+        }
+        ClientInitializeError::NoCompatibleProtocolVersion {
+            server_supported, ..
+        } => {
+            // A legacy-only SDK server can return a structured 400 naming its
+            // initialize revisions. Follow that explicit version advertisement
+            // without sending discover at a revision that needs initialize.
+            if !(status.is_success() || status == StatusCode::BAD_REQUEST)
+                || server_supported.contains(&ProtocolVersion::V_2026_07_28)
+            {
+                return None;
+            }
+            server_supported
+                .iter()
+                .filter(|version| {
+                    version.has_initialize()
+                        && **version >= ProtocolVersion::V_2025_03_26
+                        && ProtocolVersion::KNOWN_VERSIONS.contains(version)
+                })
+                .max_by_key(|version| version.as_str())
+                .cloned()
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

@@ -6,6 +6,7 @@ mod approval;
 mod authority;
 pub use authority::authority_digest;
 mod context;
+pub mod diagnostics;
 mod error;
 mod events;
 mod json_size;
@@ -16,8 +17,11 @@ mod query;
 pub use query::MAX_TASK_LIST_TARGET_BYTES;
 pub const MAX_APPROVAL_LIST_TARGET_BYTES: u32 = MAX_TASK_LIST_TARGET_BYTES;
 mod registry;
+mod runs;
 mod storage;
+mod supervision;
 pub(crate) use storage::ToolInputMutation;
+pub use supervision::{SupervisorLease, SupervisorTicket};
 mod task;
 mod tool;
 
@@ -43,12 +47,24 @@ pub use provider::{
     ModelTurn, ProviderReplay,
 };
 pub use storage::MAX_EVENT_TARGET_BYTES;
-pub use task::{PreparedModelStep, start::TaskSummaryStart};
+pub use storage::{
+    BackupManifest, BackupRetention, BackupRotationResult, McpSubscriptionAttempt,
+    McpSubscriptionKey, McpTaskRecord, McpTaskStore,
+};
+pub use task::compaction::{
+    execute as execute_context_compaction, pending as context_compaction_pending,
+};
+pub use task::{PreparedModelStep, compaction::ContextCompaction, start::TaskSummaryStart};
 pub use tool::{Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec};
 
 use fliuno_protocol::*;
 use rusqlite::Connection;
-use std::{collections::BTreeMap, fs::File, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    fs::File,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tool::CreateArtifact;
 use uuid::Uuid;
 
@@ -68,7 +84,7 @@ pub struct Kernel {
     events: events::EventHub,
     progress: events::ProgressHub,
     // Keep the sidecar handle alive to prevent two daemons recovering the same DB.
-    _lock: Option<File>,
+    _lock: Option<Arc<File>>,
 }
 
 impl Kernel {
@@ -80,8 +96,31 @@ impl Kernel {
         self.provider.supports_progress()
     }
 
+    pub fn durable_runs_supported(&self) -> bool {
+        self.provider.persistent_identity().is_some() && self.policy.persistent_identity().is_some()
+    }
+
     pub fn configured_model_budget(&self) -> Option<ModelBudget> {
         self.provider.configured_budget()
+    }
+
+    pub fn configured_model_capabilities(&self) -> Option<ModelCapabilities> {
+        let (provider, model) = self.provider.model_identity()?;
+        Some(ModelCapabilities {
+            provider,
+            model,
+            model_source: self.provider.model_identity_source(),
+            supported_input_types: self.provider.supported_input_types(),
+            input_types_source: self.provider.supported_input_types_source(),
+            budget: self.provider.configured_budget(),
+            automatic_context_compaction: self.provider.supports_context_compaction()
+                && self.provider.configured_budget().is_some(),
+            refreshed_at_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                .min(u64::MAX as u128) as u64,
+        })
     }
 
     pub fn model_progress_publisher(&self) -> ProgressPublisher {

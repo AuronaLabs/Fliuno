@@ -1,5 +1,9 @@
 //! Process ownership and transport lifecycle, separate from tool registration.
 use super::StdioServerConfig;
+use crate::{
+    host::McpService,
+    legacy_wire::{Negotiation, Stdio, WireClient},
+};
 #[cfg(all(unix, not(target_os = "linux")))]
 use process_wrap::tokio::ProcessGroup;
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -7,7 +11,8 @@ use process_wrap::tokio::{CommandWrap, KillOnDrop};
 #[cfg(not(any(windows, target_os = "linux")))]
 use rmcp::transport::TokioChildProcess;
 use rmcp::{
-    ClientServiceExt, RoleClient,
+    ClientLifecycleMode, ClientServiceExt,
+    service::ClientInitializeError,
     service::{RxJsonRpcMessage, TxJsonRpcMessage},
     transport::{Transport, async_rw::AsyncRwTransport},
 };
@@ -91,7 +96,58 @@ pub(super) async fn connect(
     config: &StdioServerConfig,
     env: BTreeMap<String, String>,
     executable_digest: String,
-) -> Result<super::host::McpService, String> {
+) -> Result<(McpService, Option<Negotiation>), String> {
+    let restart_for_legacy = matches!(config.lifecycle, super::Lifecycle::Auto);
+    match connect_once(
+        config,
+        env.clone(),
+        executable_digest.clone(),
+        config.lifecycle.sdk(),
+    )
+    .await
+    {
+        Ok(service) => Ok(service),
+        Err(ConnectError::Initialize(error))
+            if restart_for_legacy && legacy_fallback_closed(&error) =>
+        {
+            connect_once(
+                config,
+                env,
+                executable_digest,
+                ClientLifecycleMode::Initialize,
+            )
+            .await
+            .map_err(|_| "MCP legacy initialization failed after restarting the server".into())
+        }
+        Err(ConnectError::Initialize(_)) => Err("MCP initialization failed".into()),
+        Err(ConnectError::Spawn(error)) => Err(error),
+    }
+}
+
+fn legacy_fallback_closed(error: &ClientInitializeError) -> bool {
+    match error {
+        ClientInitializeError::ConnectionClosed(_) => true,
+        ClientInitializeError::LegacyFallbackFailed { fallback, .. } => {
+            matches!(
+                fallback.as_ref(),
+                ClientInitializeError::ConnectionClosed(_)
+            )
+        }
+        _ => false,
+    }
+}
+
+enum ConnectError {
+    Spawn(String),
+    Initialize(Box<ClientInitializeError>),
+}
+
+async fn connect_once(
+    config: &StdioServerConfig,
+    env: BTreeMap<String, String>,
+    executable_digest: String,
+    lifecycle: ClientLifecycleMode,
+) -> Result<(McpService, Option<Negotiation>), ConnectError> {
     match config.isolation {
         ProcessIsolation::TrustedHost => {
             #[cfg(any(windows, target_os = "linux"))]
@@ -106,12 +162,12 @@ pub(super) async fn connect(
                         linux_cgroup_parent: config.linux_cgroup_parent.clone(),
                     })
                     .await
-                    .map_err(|_| "cannot spawn trusted MCP server")?;
-                let transport = ProcessTransport::new(ProcessOwner::Host(child), pipes);
-                crate::client_config()
-                    .serve_with_lifecycle(transport, config.lifecycle.sdk())
-                    .await
-                    .map_err(|_| "MCP initialization failed".into())
+                    .map_err(|_| ConnectError::Spawn("cannot spawn trusted MCP server".into()))?;
+                serve_native(
+                    ProcessTransport::new(ProcessOwner::Host(child), pipes),
+                    lifecycle,
+                )
+                .await
             }
             #[cfg(not(any(windows, target_os = "linux")))]
             {
@@ -126,11 +182,12 @@ pub(super) async fn connect(
                 #[cfg(unix)]
                 command.wrap(ProcessGroup::leader());
                 let transport = TokioChildProcess::new(command)
-                    .map_err(|_| "cannot spawn trusted MCP server")?;
+                    .map_err(|_| ConnectError::Spawn("cannot spawn trusted MCP server".into()))?;
                 crate::client_config()
-                    .serve_with_lifecycle(transport, config.lifecycle.sdk())
+                    .serve_with_lifecycle(transport, lifecycle)
                     .await
-                    .map_err(|_| "MCP initialization failed".into())
+                    .map(|service| (service, None))
+                    .map_err(|error| ConnectError::Initialize(Box::new(error)))
             }
         }
         ProcessIsolation::WindowsAppContainer | ProcessIsolation::LinuxLandlock => {
@@ -143,16 +200,32 @@ pub(super) async fn connect(
                 resources: config.resources,
                 linux_cgroup_parent: config.linux_cgroup_parent.clone(),
             };
-            let (child, pipes) = fliuno_sandbox::spawn_async(spec)
-                .await
-                .map_err(|error| format!("MCP sandbox launch failed: {error}"))?;
-            let transport = ProcessTransport::new(ProcessOwner::Sandbox(child), pipes);
-            crate::client_config()
-                .serve_with_lifecycle(transport, config.lifecycle.sdk())
-                .await
-                .map_err(|_| "isolated MCP initialization failed".into())
+            let (child, pipes) = fliuno_sandbox::spawn_async(spec).await.map_err(|error| {
+                ConnectError::Spawn(format!("MCP sandbox launch failed: {error}"))
+            })?;
+            serve_native(
+                ProcessTransport::new(ProcessOwner::Sandbox(child), pipes),
+                lifecycle,
+            )
+            .await
         }
     }
+}
+
+async fn serve_native(
+    transport: ProcessTransport,
+    lifecycle: ClientLifecycleMode,
+) -> Result<(McpService, Option<Negotiation>), ConnectError> {
+    let negotiation = Negotiation::default();
+    let transport = Stdio {
+        inner: transport,
+        negotiation: negotiation.clone(),
+    };
+    crate::client_config()
+        .serve_with_lifecycle(transport, lifecycle)
+        .await
+        .map(|service| (service, Some(negotiation)))
+        .map_err(|error| ConnectError::Initialize(Box::new(error)))
 }
 
 /// The transport owns the native process, so initialization failure, timeout, cancellation
@@ -172,7 +245,7 @@ impl ProcessOwner {
     }
 }
 struct ProcessTransport {
-    io: AsyncRwTransport<RoleClient, fliuno_sandbox::PipeReader, fliuno_sandbox::PipeWriter>,
+    io: AsyncRwTransport<WireClient, fliuno_sandbox::PipeReader, fliuno_sandbox::PipeWriter>,
     child: ProcessOwner,
     stderr: Option<JoinHandle<io::Result<u64>>>,
 }
@@ -189,15 +262,15 @@ impl ProcessTransport {
         }
     }
 }
-impl Transport<RoleClient> for ProcessTransport {
+impl Transport<WireClient> for ProcessTransport {
     type Error = io::Error;
     fn send(
         &mut self,
-        item: TxJsonRpcMessage<RoleClient>,
+        item: TxJsonRpcMessage<WireClient>,
     ) -> impl Future<Output = io::Result<()>> + Send + 'static {
         self.io.send(item)
     }
-    async fn receive(&mut self) -> Option<RxJsonRpcMessage<RoleClient>> {
+    async fn receive(&mut self) -> Option<RxJsonRpcMessage<WireClient>> {
         self.io.receive().await
     }
     async fn close(&mut self) -> io::Result<()> {

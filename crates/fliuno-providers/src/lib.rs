@@ -6,7 +6,9 @@ mod openai;
 
 pub use anthropic::AnthropicProvider;
 use fliuno_core::{DemoProvider, ModelProvider};
-use fliuno_protocol::{ModelBudget, ModelBudgetSource, ModelInputCountMode};
+use fliuno_protocol::{
+    ModelBudget, ModelBudgetSource, ModelInputCountCoverage, ModelInputCountMode,
+};
 pub use gemini::GeminiProvider;
 pub use openai::OpenAiProvider;
 
@@ -16,6 +18,8 @@ pub struct ModelContextBudget {
     input_allowance: u32,
     max_output_tokens: u32,
     provider_count: bool,
+    count_coverage: ModelInputCountCoverage,
+    safety_margin_tokens: u32,
     source: ModelBudgetSource,
 }
 
@@ -23,7 +27,8 @@ impl ModelContextBudget {
     fn describe(self) -> ModelBudget {
         ModelBudget {
             window_tokens: self.input_allowance + self.max_output_tokens,
-            max_input_tokens: self.input_allowance,
+            max_input_tokens: self.provider_count.then_some(self.input_allowance),
+            max_input_bytes: (!self.provider_count).then_some(self.input_allowance),
             max_output_tokens: self.max_output_tokens,
             source: self.source,
             count_mode: if self.provider_count {
@@ -31,6 +36,8 @@ impl ModelContextBudget {
             } else {
                 ModelInputCountMode::JsonBytesEstimate
             },
+            count_coverage: self.count_coverage,
+            safety_margin_tokens: self.safety_margin_tokens,
         }
     }
 
@@ -42,6 +49,8 @@ impl ModelContextBudget {
             input_allowance: window_tokens - max_output_tokens,
             max_output_tokens,
             provider_count: false,
+            count_coverage: ModelInputCountCoverage::SerializedJsonBytes,
+            safety_margin_tokens: 0,
             source: ModelBudgetSource::Configured,
         })
     }
@@ -49,6 +58,14 @@ impl ModelContextBudget {
     /// Ask the configured provider to count the input before generating.
     pub fn with_provider_count(mut self) -> Self {
         self.provider_count = true;
+        self.count_coverage = ModelInputCountCoverage::ProviderRequest;
+        self
+    }
+
+    fn with_provider_projection(mut self, safety_margin_tokens: u32) -> Self {
+        self.provider_count = true;
+        self.count_coverage = ModelInputCountCoverage::ProviderProjection;
+        self.safety_margin_tokens = safety_margin_tokens;
         self
     }
 }

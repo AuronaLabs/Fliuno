@@ -103,6 +103,29 @@ impl CgroupV2 {
         Ok(Some(group))
     }
 
+    pub(super) fn usage(&self) -> crate::ProcessUsage {
+        // Kernel-provided cgroup attributes. Missing controllers are normal.
+        let cpu_ms = fs::read_to_string(self.path.join("cpu.stat"))
+            .ok()
+            .and_then(|stat| {
+                let value = stat
+                    .lines()
+                    .find_map(|line| line.strip_prefix("usage_usec "))?;
+                value
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+                    .map(|micros| micros / 1_000)
+            });
+        let peak_memory_bytes = fs::read_to_string(self.path.join("memory.peak"))
+            .ok()
+            .and_then(|value| value.trim().parse().ok());
+        crate::ProcessUsage {
+            cpu_ms,
+            peak_memory_bytes,
+        }
+    }
+
     fn apply_limits(&self, limits: &ResourceLimits) -> io::Result<()> {
         if let Some(bytes) = limits.memory_max_bytes {
             self.write_limit("memory.max", &bytes.to_string())?;

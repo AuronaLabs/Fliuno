@@ -111,6 +111,10 @@ pub(super) struct Process {
 }
 
 impl Process {
+    pub(super) fn usage(&self) -> crate::ProcessUsage {
+        self.owner.usage()
+    }
+
     pub(super) fn id(&self) -> u32 {
         self.owner.id()
     }
@@ -149,6 +153,13 @@ pub(super) struct OwnedProcess {
 }
 
 impl OwnedProcess {
+    pub(super) fn usage(&self) -> crate::ProcessUsage {
+        self.cgroup
+            .as_ref()
+            .map(cgroup::CgroupV2::usage)
+            .unwrap_or_default()
+    }
+
     fn new(child: NativeChild, cgroup: Option<cgroup::CgroupV2>) -> Self {
         Self {
             child,

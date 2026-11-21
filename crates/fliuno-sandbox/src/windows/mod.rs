@@ -113,6 +113,10 @@ pub(super) struct Process {
     profile: Profile,
 }
 impl Process {
+    pub(super) fn usage(&self) -> crate::ProcessUsage {
+        self.state.usage()
+    }
+
     pub(super) fn id(&self) -> u32 {
         self.state.id()
     }

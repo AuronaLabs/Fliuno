@@ -56,6 +56,7 @@ pub(crate) struct Program {
     pub environment: BTreeMap<String, String>,
     pub executable_digest: String,
     pub tool_name: String,
+    pub supervisor: Option<PathBuf>,
 }
 
 pub(crate) fn validate_args(args: &[String]) -> Result<(), String> {
@@ -167,6 +168,14 @@ impl Program {
             return Err("program environment exceeds 256 KiB".into());
         }
         let executable_digest = executable_digest(&config.command)?;
+        Self::from_parts(config, environment, executable_digest)
+    }
+
+    pub(crate) fn from_parts(
+        config: ProgramConfig,
+        environment: BTreeMap<String, String>,
+        executable_digest: String,
+    ) -> Result<Self, String> {
         // Hash actual resolved environment as well as policy and executable
         // contents. A restart with changed authority cannot rebind an old tool.
         let identity = serde_json::to_vec(&(&config, &environment, &executable_digest))
@@ -178,6 +187,7 @@ impl Program {
             environment,
             executable_digest,
             tool_name,
+            supervisor: None,
         })
     }
 }

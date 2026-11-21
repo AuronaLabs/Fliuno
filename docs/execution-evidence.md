@@ -6,7 +6,11 @@
 
 | 要查什么 | 记录 |
 | --- | --- |
-| **发布验收** | [0.0.2 Windows 与 Linux 双平台验收](#002-windows-与-linux-双平台验收) |
+| **发布验收** | [0.0.4 发布验收](#004-发布验收2026-11-21) · [0.0.2 Windows 与 Linux 双平台验收](#002-windows-与-linux-双平台验收) |
+| **MCP 出站策略** | [0.0.4 固定路由与身份绑定](#004-mcp-出站策略验收2026-11-21) |
+| **MCP Tasks** | [0.0.4 两代 Tasks 回环与 SDK 互操作](#004-mcp-tasks-验收2026-11-21) |
+| **语义记忆** | [0.0.4 索引与迁移验收](#004-语义索引与迁移验收2026-11-21) |
+| **进程交接** | [0.0.4 Run 进程恢复验收](#004-run-进程恢复验收2026-11-21) |
 | **版本升级** | [从 v0.0.2 升级数据库](#从-v002-升级数据库) |
 | **性能数据** | [0.0.3 性能摘录](#003-性能摘录) |
 | **恢复与重连** | [任务恢复判断](#003-任务恢复判断2026-11-20) · [批量查询恢复状态](#003-批量查询恢复状态2026-11-20) · [独立保存恢复字段](#003-独立保存恢复字段2026-11-20) · [AG-UI 审批重连](#003-ag-ui-审批重连2026-11-20) |
@@ -27,6 +31,70 @@
 - **MCP**：[工具输入续接验收](#003-mcp-工具输入续接验收2026-11-20)
 
 </details>
+
+## 0.0.4 发布验收（2026-11-21）
+
+Windows 本机工作区全部功能回归通过 **638 项测试，0 失败、0 忽略**。严格 Clippy 和 rustfmt 均通过。离线演示复核了任务的审批通过与拒绝、会话快照与重启、两代 MCP 的 SSE 工具调用和 Rust 协议 Schema。`execution::supervision::supervisor_trace_links_the_process_measurements_to_its_parent_tool` 核对监督进程 span 的父追踪、CPU 时间和内存计量，并确认仅有 OTLP 环境变量时不会导出。`mcp_subscriptions::a_killed_watch_reopens_with_a_fresh_snapshot_and_never_replays` 覆盖进程硬退出和重启，在本地 JSONL 与回环 OTLP 核对关联标识、重复操作与敏感字段过滤。
+
+Linux `x86_64-unknown-linux-gnu` 的 `fliuno-sandbox` 全目标、全功能严格交叉 Clippy 通过。下文列出的 Debian 来宾数据来自该版本的分项验收。原生 macOS 沙箱暂缓。
+
+## 0.0.4 Run 进程恢复验收（2026-11-21）
+
+Windows 本机与 Debian Linux 6.12.107 来宾各通过 6 个真实进程测试：强制退出协调器后观察同一个 supervisor、强制退出 supervisor 后保留未知结果、取消挡住迟到结果、协调器离线时执行 Run 期限、工具注册变化后拒收旧结果，以及子任务已提交而父 Run 写入失败时重启补齐状态。测试同时核对原任务 ID、单次工具启动事件、外部执行次数和 Run 事件游标。
+
+复跑命令：`cargo test -p fliuno-app-server --test process --all-features --locked execution::supervision`。SQLite v63 下，Windows 全工作区测试和严格 Clippy 通过。Linux 无委托 cgroup 时不能保证强制退出 supervisor 后的进程树回收；来宾测试验证的是结果仍标记未知且不重发。
+
+## 0.0.4 MCP OAuth 与 Linux 执行验收（2026-11-21）
+
+双代 Streamable HTTP 回环通过宿主 OAuth 接口注册工具。测试验证精确资源 URL、刷新后才派发、401 后只收到一次 `tools/call`，并保留未知结果。401 响应正文和认证提示不进入返回给宿主的工具错误。复跑命令：`cargo test -p fliuno-mcp --lib --all-features --locked oauth::`。
+
+Windows 和 Debian Linux app-server 独立进程验收启动授权：尚未授权时不打开 SQLite，重复读取返回同一授权尝试，错误 state 消费尝试但不交换授权码。有效回调后在发出握手前刷新令牌，工具仍需单独审批。数据库、事件和 stderr 未发现夹具的授权码或令牌；重启拒绝旧回调。生产路径在连接前拒绝明文 HTTP issuer，端到端测试使用仅在 `test-fixtures` 中显式启用的同源回环模式。复跑命令：`cargo test -p fliuno-app-server --test process --all-features --locked mcp_oauth::`。
+
+同一 Windows 快照的 app-server 196 项测试、app-server/MCP 严格 Clippy 和 app-server 无测试 feature 构建通过。Debian 来宾共 8 项进程测试通过，另两组为现代补答硬退出与 Run supervisor。来宾输出：`D:/Fliuno-Native-Test/v004-app-linux-guest.log`。
+
+接入独立加密凭据库后，Debian 来宾复跑通过 10 项：3 项 OAuth 进程测试、1 项现代 Tasks 补答硬退出、6 项 Run supervisor。OAuth 覆盖原授权和待审批任务跨重启恢复，以及授权服务器收到刷新请求后强制终止 app-server，重启要求登录且未重发刷新。来宾输出：`D:/Fliuno-Native-Test/v004-app-vault-linux-guest.log`（`FLIUNO_RESULT=0`）。
+
+Windows 通过 8 项 OAuth 库测试和 4 项真实 app-server 进程测试。新增回环验证 CIMD 元数据 URL 同时绑定授权、令牌交换和刷新，且 DCR 请求数为零；回环只验证协议行为，生产配置仍要求 HTTPS。显式重新授权场景拒绝复用旧回调及旧授权下已挂起的审批，重新批准的任务仅执行一次。
+
+同一快照的 Windows `cargo test -p fliuno-app-server --test process --all-features --locked` 通过 159 项，0 失败、0 忽略；app-server 和 MCP 的 all-targets/all-features 严格 Clippy 通过。进程回归日志：`D:/Fliuno-Native-Test/v004-app-server-windows-process-latest.log`。
+
+在 QEMU 的 Debian Linux 6.12.107 来宾内运行 57 项测试：52 项库测试、1 项官方 Rust SDK HTTP 互操作、3 项旧版 Tasks stdio 测试和 1 项现代 Tasks stdio 测试。首次执行在全新进程编译现代 Schema 时超时；内置元 Schema 初始化移出远端 Schema 的 500 毫秒预算后，来宾测试全部通过。远端 Schema 的超时和复杂度限制未放宽。原始输出：`D:/Fliuno-Native-Test/v004-mcp-linux-warm-guest.log`。
+
+## 0.0.4 MCP 出站策略验收（2026-11-21）
+
+回环测试验证配置把 HTTP MCP 端点的主机名、IP 和端口绑定到同一条固定路由。端口不匹配或 IP 字面量不在允许范围内时，连接在发现前被拒绝。策略覆盖两代 Streamable HTTP、旧 HTTP+SSE 和 OAuth，HTTPS 继续按原主机名校验证书。更改策略后，待审批任务不能复用旧工具授权，凭据库也不向新策略恢复旧授权。隔离 stdio 的网络权限仍由系统沙箱控制。见[出站策略](mcp.md#出站策略)。
+
+Windows 通过 MCP 全套 100 项测试和 4 项 OAuth app-server 进程测试，MCP 与 app-server 严格 Clippy 通过。启用固定路由的两代官方 Rust SDK HTTP 互操作夹具单独复跑通过。Debian Linux 6.12.107 来宾通过 62 项 MCP 库测试及同一项 SDK HTTP 互操作，另通过 11 项 app-server 进程测试（OAuth 4 项、现代 Tasks 补答崩溃去重 1 项、Run supervisor 6 项）。两个来宾均返回 `FLIUNO_RESULT=0`。
+
+日志位于 `D:/Fliuno-Native-Test/`，Windows 对应 `v004-mcp-egress-current-windows.log`、`v004-mcp-egress-sdk-windows.log`、`v004-app-oauth-egress-current-windows.log` 和 `v004-mcp-egress-clippy.log`，Debian 对应 `v004-mcp-egress-linux-guest.log` 和 `v004-app-egress-linux-guest.log`。
+
+## 0.0.4 MCP 单资源订阅与对账（2026-11-21）
+
+Windows 官方 Rust SDK 验收覆盖旧版 Streamable HTTP 的 JSON、SSE 两种响应模式以及真实 stdio 子进程。stdio 夹具验证重复通知、忽略另一条 URI、等待结束、拒绝订阅以及后续订阅前已经退订。现代订阅的原有六项 SDK 合约测试一并通过。
+
+SQLite 对账验收通过真实内核走审批，确认拒绝审批时既不订阅也不读取。资源读取失败中断后重开同一数据库并重新连接，首个获批观测对比原会话快照，识别断线期间的变化。在另一会话观测同一 URI 时使用独立基线。重复通知触发有界读取，快照一致返回 `unchanged`。结果只报告状态和 URI。复跑命令为 `cargo test -p fliuno-mcp --all-features --locked --test watch_sdk a_durable_watch`。
+
+Windows 真正终止 app-server 后重启同一数据库。旧任务保持 `interrupted`，启动时没有重发 `subscriptions/listen` 或 `resources/read`。下一次独立审批只触发一次新订阅和一次新快照读取，两者总计各三次。快照返回 `changed` 和 `disconnected: true`。日志为 `D:/Fliuno-Native-Test/v004-resource-reconcile-process-windows.log`。
+
+## 0.0.4 MCP Tasks 验收（2026-11-21）
+
+Windows 本机使用真实 app-server、官方 Python SDK `mcp==1.25.0` 与本地模型夹具，通过 stdio、Streamable HTTP JSON 和 Streamable HTTP SSE 三种传输完成旧版任务创建、短时等待和取回结果。每一步均独立审批，核对任务归属和结构化结果。复跑入口为 [`examples/mcp_legacy_tasks_sdk.py`](../examples/mcp_legacy_tasks_sdk.py)。
+
+Windows 通过官方 Rust SDK `rmcp 3.11.0` 的现代 Tasks 互操作：由 SDK `TaskManager` 创建和维护真实任务，在 HTTP JSON 及 SSE 响应模式下验证创建、请求表单、提交输入、读取完成结果及协作取消。复跑命令：`cargo test -p fliuno-mcp --test http_sdk --all-features --locked`。
+
+该 SDK 默认只声明 `tasks.requests.tools: {}`；测试服务通过 SDK 的能力接口显式声明 `tools.call`。另有负例验证空 `tools` 时客户端不派发任务化调用。SDK 在序列化时省略空 TTL，Fliuno 接受省略 TTL 的报文。`--form` 另验证 stdio 和 HTTP SSE 的旧版服务端表单，包含无效答案拒绝及相同请求键重试；`--restart-form` 验证 app-server 重启后不会把旧答复派发到新连接。该 SDK 的纯 JSON 模式未传递待答表单，仍可完成不需表单的任务。
+
+Rust 回环另外覆盖了旧通知重复与错配、现代 HTTP 订阅的确认与断流、以及现代取消时远端重用 ID。Windows 原生 stdio 子进程验收覆盖七种订阅结果：匹配通知、正常结束、忽略其他订阅后超时、确认范围越界、任务创建时间错配、拒绝过滤条件及管道断开。核对停止监听只取消订阅请求 ID，重新查询时采用原输出 Schema；管道断开后不会恢复连接或重发调用。现代 Tasks 的订阅扩展仍以线协议夹具验收，未通过外部现代 Tasks SDK 验证。
+
+现代 HTTP 回环打开原 SQLite 文件并重新连接，验证服务端更改 Schema 后仍恢复原输出契约、其他会话在发出网络请求前被拒绝、服务器继续提供旧表单时同一补答 ID 不会再次发送。另用真实 app-server 在远端收到 `tasks/update` 后、响应返回前终止进程；重启后原操作保留中断记录，明确重新审批同一答案也不再派发。远端创建与更新各收到一次。现代回环及旧版原生 stdio 使用过期的非终态快照验证等待提前结束、补答或取消不派发。
+
+旧版 Streamable HTTP JSON 和 SSE 均在创建后关闭原连接，重开同一 SQLite 并建立新连接，成功恢复句柄并取回结果。每种模式均为两次握手、一次工具创建、一次 `tasks/result`。
+
+## 0.0.4 语义索引与迁移验收（2026-11-21）
+
+真实 app-server 进程覆盖按同模型向量排序、跨工作区批量写入失败时回滚、重启读取、软删除作废、损坏向量时回退到原始关键词记录，以及通过原始记录列表重建。同次验收覆盖 SQLite 历史版本升级至 v62。内核索引使用指定向量的契约夹具，不对具体嵌入模型的检索质量作保证。
+
+Windows `cargo test --workspace --all-features --locked --quiet` 通过 **609 项测试，0 失败、0 忽略**。严格 workspace Clippy、rustfmt、`git diff --check` 和导出的协议 Schema 对照均通过。Linux `x86_64-unknown-linux-gnu` 对 MCP、core、app-server 的 all-targets/all-features 严格交叉 Clippy 通过，未在本轮运行 Linux 原生测试进程。详细日志为 `target/verification/v004-mcp-memory-v62-windows.log` 与 `target/verification/v004-mcp-memory-v62-linux-clippy.log`。
 
 ## 0.0.3 MCP 工具输入续接验收（2026-11-20）
 

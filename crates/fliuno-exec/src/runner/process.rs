@@ -27,6 +27,9 @@ pub(super) enum Process {
 /// The lifecycle driver needs only owned process operations and stream IO.
 /// Platform launch stays concrete; failure scheduling can be tested separately.
 pub(super) trait ProcessControl {
+    fn usage(&self) -> fliuno_sandbox::ProcessUsage {
+        fliuno_sandbox::ProcessUsage::default()
+    }
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>>;
     fn stop(&mut self) -> io::Result<()>;
     fn pipes(&mut self) -> io::Result<(PipeWriter, PipeReader, PipeReader)>;
@@ -34,7 +37,32 @@ pub(super) trait ProcessControl {
         false
     }
 }
+impl<T: ProcessControl> ProcessControl for &mut T {
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        (**self).try_wait()
+    }
+    fn stop(&mut self) -> io::Result<()> {
+        (**self).stop()
+    }
+    fn pipes(&mut self) -> io::Result<(PipeWriter, PipeReader, PipeReader)> {
+        (**self).pipes()
+    }
+    fn stop_found_absent_group(&self, root_reaped: bool, error: &io::Error) -> bool {
+        (**self).stop_found_absent_group(root_reaped, error)
+    }
+}
+
 impl ProcessControl for Process {
+    fn usage(&self) -> fliuno_sandbox::ProcessUsage {
+        match self {
+            #[cfg(all(unix, not(target_os = "linux")))]
+            Self::Host(_) => fliuno_sandbox::ProcessUsage::default(),
+            #[cfg(any(windows, target_os = "linux"))]
+            Self::NativeHost(child, _) => child.usage(),
+            Self::Scratch(child, _) => child.usage(),
+        }
+    }
+
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
         match self {
             #[cfg(all(unix, not(target_os = "linux")))]

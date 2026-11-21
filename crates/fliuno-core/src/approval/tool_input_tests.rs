@@ -330,7 +330,7 @@ fn schema_v52_upgrade_adds_private_input_storage_and_waiting_input_counters() {
         .db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 54);
+    assert_eq!(version, crate::storage::SCHEMA_VERSION);
     let table_exists: bool = kernel
         .db
         .query_row(

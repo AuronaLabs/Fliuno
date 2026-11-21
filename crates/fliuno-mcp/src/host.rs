@@ -1,10 +1,13 @@
 //! One serialized request owner per MCP connection. Queue cancellation never
 //! affects the current owner; request/transport uncertainty closes the connection.
-use fliuno_core::{CancellationToken, ToolError};
+use fliuno_core::{
+    CancellationToken, ToolError,
+    diagnostics::{Operation, Scope},
+};
 use rmcp::{
     RoleClient, ServiceError,
-    model::{ClientConfig, ResultType},
-    service::RunningService,
+    model::{ProtocolVersion, ResultType},
+    service::{ClientCacheConfig, RunningService},
 };
 use std::{future::Future, pin::Pin, time::Duration};
 use tokio::{runtime::Runtime, sync::Mutex};
@@ -15,9 +18,23 @@ type Response<'a, T> = Pin<Box<dyn Future<Output = Result<Option<T>, ServiceErro
 enum RequestMode {
     Effectful,
     ReadOnly,
+    ResumeLegacyForm,
 }
 
-pub(crate) type McpService = RunningService<RoleClient, ClientConfig>;
+pub(crate) type McpService = RunningService<RoleClient, crate::client::Client>;
+
+pub(crate) fn cache_config(version: &ProtocolVersion, authority: &str) -> ClientCacheConfig {
+    if *version < ProtocolVersion::V_2026_07_28 {
+        return ClientCacheConfig::disabled();
+    }
+    // The SDK cache belongs to this peer alone, including public entries. A
+    // registration or credential change creates a new peer and empty cache.
+    ClientCacheConfig::default()
+        .with_private_partition(authority)
+        .with_max_entries(8)
+        .with_max_ttl(Duration::from_secs(300))
+        .with_serve_stale_on_error(false)
+}
 
 /// Untagged SDK results can have a final payload shape and a non-final marker
 /// simultaneously. Missing markers preserve pre-2026 protocol compatibility.
@@ -32,6 +49,7 @@ pub(crate) struct Host {
     pub service: Mutex<McpService>,
     pub runtime: Runtime,
     pub timeout: Duration,
+    pub task_bindings: std::sync::Arc<crate::tasks::Bindings>,
 }
 
 impl Host {
@@ -55,13 +73,22 @@ impl Host {
         self.request_with_mode(cancellation, operation, RequestMode::ReadOnly)
     }
 
+    pub fn resume_legacy_form<T: 'static>(
+        &self,
+        cancellation: &CancellationToken,
+        operation: impl for<'a> FnOnce(&'a McpService) -> Response<'a, T>,
+    ) -> Result<T, ToolError> {
+        self.request_with_mode(cancellation, operation, RequestMode::ResumeLegacyForm)
+    }
+
     fn request_with_mode<T: 'static>(
         &self,
         cancellation: &CancellationToken,
         operation: impl for<'a> FnOnce(&'a McpService) -> Response<'a, T>,
         mode: RequestMode,
     ) -> Result<T, ToolError> {
-        self.runtime.block_on(async {
+        let mut span = Scope::current().and_then(|scope| scope.begin(Operation::Mcp));
+        let outcome = self.runtime.block_on(async {
             let deadline = tokio::time::Instant::now() + self.timeout;
             let mut service = tokio::select! {
                 biased;
@@ -76,6 +103,11 @@ impl Host {
             };
             if service.is_closed() {
                 return Err(ToolError::Failed("MCP host is closed".into()));
+            }
+            if mode != RequestMode::ResumeLegacyForm && service.service().legacy_input.reserved() {
+                return Err(ToolError::Failed(
+                    "MCP connection is waiting for approved legacy task input".into(),
+                ));
             }
             if cancellation.is_cancelled() {
                 return Err(ToolError::Failed(
@@ -105,7 +137,11 @@ impl Host {
             // The SDK marks itself closed before awaiting its cleanup worker.
             let _ = service.close_with_timeout(Duration::from_secs(5)).await;
             Err(ToolError::OutcomeUnknown(message.into()))
-        })
+        });
+        if let Some(span) = &mut span {
+            span.tool(&outcome, cancellation.is_cancelled());
+        }
+        outcome
     }
 }
 

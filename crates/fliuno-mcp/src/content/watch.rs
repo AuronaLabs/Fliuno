@@ -3,14 +3,21 @@ use super::{Host, Tool, ToolContext, ToolError, ToolOutput, ToolSpec, arguments,
 use fliuno_core::{CancellationToken, ToolEffect};
 use fliuno_protocol::ToolCall;
 use rmcp::{
-    model::{ServerCapabilities, ServerNotification, SubscriptionFilter},
+    ServiceError,
+    model::{
+        ServerCapabilities, ServerNotification, SubscribeRequestParams, SubscriptionFilter,
+        UnsubscribeRequestParams,
+    },
     service::SubscriptionEnd,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 
+pub(super) mod reconcile;
+
 const METHOD: &str = "subscriptions/listen";
+const LEGACY_METHOD: &str = "resources/subscribe";
 const CAPACITY: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 const MAX_WAIT_MS: u64 = 5_000;
 const MAX_RESOURCE_URIS: usize = 8;
@@ -139,6 +146,7 @@ pub(super) fn register(
     host: Arc<Host>,
     server: &str,
     caps: &ServerCapabilities,
+    modern: bool,
 ) -> Vec<Box<dyn Tool>> {
     // Keep part of the call deadline for opening and closing the subscription.
     let max_wait_ms = MAX_WAIT_MS.min(host.timeout.as_millis() as u64 / 2);
@@ -165,13 +173,16 @@ pub(super) fn register(
         ),
     ]
     .into_iter()
-    .filter(|(_, enabled)| *enabled == Some(true))
+    .filter(|(kind, enabled)| {
+        *enabled == Some(true) && (modern || matches!(kind, Kind::ResourceUri))
+    })
     .map(|(kind, _)| {
         Box::new(Watch {
             host: Arc::clone(&host),
             kind,
             server: server.into(),
             max_wait_ms,
+            modern,
         }) as Box<dyn Tool>
     })
     .collect()
@@ -182,9 +193,14 @@ struct Watch {
     kind: Kind,
     server: String,
     max_wait_ms: u64,
+    modern: bool,
 }
 
 impl Watch {
+    fn method(&self) -> &'static str {
+        if self.modern { METHOD } else { LEGACY_METHOD }
+    }
+
     fn args(&self, value: &Value) -> Result<(Target, u64), String> {
         let invalid = || match self.kind {
             Kind::ResourceUri => "invalid MCP watch URI or waitMs".to_owned(),
@@ -224,7 +240,7 @@ impl Watch {
 
 impl Tool for Watch {
     fn authority(&self) -> String {
-        authority(&self.host, &self.spec(), METHOD)
+        authority(&self.host, &self.spec(), self.method())
     }
 
     fn spec(&self) -> ToolSpec {
@@ -265,44 +281,102 @@ impl Tool for Watch {
         cancellation: &CancellationToken,
     ) -> Result<ToolOutput, ToolError> {
         let (target, wait_ms) = self.args(&call.arguments)?;
-        let watched = target.clone();
-        let (status, updated_uri) = self.host.request(cancellation, move |service| {
-            Box::pin(async move {
-                let filter = watched.filter();
-                let mut watch = service
-                    .listen_with_capacity(filter.clone(), CAPACITY)
-                    .await?;
-                let outcome = if filter.is_subset_of(watch.acknowledged()) {
-                    match tokio::time::timeout(Duration::from_millis(wait_ms), watch.next()).await {
-                        Err(_) => ("elapsed", None),
-                        Ok(Ok(Some(notification))) if watched.matches(&notification) => {
-                            let updated_uri = match notification {
-                                ServerNotification::ResourceUpdatedNotification(update) => {
-                                    Some(update.params.uri)
-                                }
-                                _ => None,
-                            };
-                            ("updated", updated_uri)
-                        }
-                        Ok(Ok(None))
-                            if matches!(watch.end(), Some(SubscriptionEnd::Graceful(_))) =>
+        let result = if self.modern {
+            let watched = target.clone();
+            let (status, updated_uri) = self.host.request(cancellation, move |service| {
+                Box::pin(async move {
+                    let filter = watched.filter();
+                    let mut watch = service
+                        .listen_with_capacity(filter.clone(), CAPACITY)
+                        .await?;
+                    let outcome = if filter.is_subset_of(watch.acknowledged()) {
+                        match tokio::time::timeout(Duration::from_millis(wait_ms), watch.next())
+                            .await
                         {
-                            ("ended", None)
+                            Err(_) => ("elapsed", None),
+                            Ok(Ok(Some(notification))) if watched.matches(&notification) => {
+                                let updated_uri = match notification {
+                                    ServerNotification::ResourceUpdatedNotification(update) => {
+                                        Some(update.params.uri)
+                                    }
+                                    _ => None,
+                                };
+                                ("updated", updated_uri)
+                            }
+                            Ok(Ok(None))
+                                if matches!(watch.end(), Some(SubscriptionEnd::Graceful(_))) =>
+                            {
+                                ("ended", None)
+                            }
+                            Ok(Err(error)) => return Err(error),
+                            _ => return Ok(None),
                         }
-                        Ok(Err(error)) => return Err(error),
-                        _ => return Ok(None),
-                    }
-                } else {
-                    ("declined", None)
-                };
-                watch.cancel().await?;
-                Ok(Some(outcome))
-            })
-        })?;
+                    } else {
+                        ("declined", None)
+                    };
+                    watch.cancel().await?;
+                    Ok(Some(outcome))
+                })
+            })?;
+            target.result(status, updated_uri)
+        } else if let Target::ResourceUri(uri) = &target {
+            let watched_uri = uri.clone();
+            let status = self.host.request(cancellation, move |service| {
+                Box::pin(legacy_watch(
+                    service,
+                    watched_uri,
+                    Duration::from_millis(wait_ms),
+                ))
+            })?;
+            target.result(status, None)
+        } else {
+            return Err("unsupported legacy MCP watch target".to_owned().into());
+        };
         Ok(ToolOutput {
-            output: json!({"serverId":self.server,"method":METHOD,
-                "result":target.result(status, updated_uri),"grantsPermissions":false}),
+            output: json!({"serverId":self.server,"method":self.method(),
+                "result":result,"grantsPermissions":false}),
             artifacts: Vec::new(),
         })
     }
+}
+
+/// Resource notifications on legacy sessions have no subscription ID. The
+/// host serializes watches, and this observation is only a hint to read again.
+#[allow(deprecated)]
+async fn legacy_watch(
+    service: &crate::host::McpService,
+    uri: String,
+    wait: Duration,
+) -> Result<Option<&'static str>, ServiceError> {
+    let mut updates = service.service().legacy_resource_updates.subscribe();
+    match service.subscribe(SubscribeRequestParams::new(&uri)).await {
+        Ok(()) => {}
+        Err(ServiceError::McpError(_)) => return Ok(Some("declined")),
+        Err(error) => return Err(error),
+    }
+    let notification = wait_for_legacy_update(&mut updates, &uri, wait).await;
+    service
+        .unsubscribe(UnsubscribeRequestParams::new(uri))
+        .await?;
+    Ok(match notification {
+        Ok(true) => Some("updated"),
+        Ok(false) => Some("elapsed"),
+        Err(_) => None,
+    })
+}
+
+async fn wait_for_legacy_update(
+    updates: &mut tokio::sync::broadcast::Receiver<String>,
+    uri: &str,
+    wait: Duration,
+) -> Result<bool, tokio::sync::broadcast::error::RecvError> {
+    tokio::time::timeout(wait, async {
+        loop {
+            if updates.recv().await? == uri {
+                return Ok(true);
+            }
+        }
+    })
+    .await
+    .unwrap_or(Ok(false))
 }

@@ -9,6 +9,7 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, RecvTimeoutError},
     },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
@@ -28,6 +29,8 @@ pub struct Response {
     body: Vec<u8>,
     headers: Vec<(String, String)>,
     hold: bool,
+    disconnect: bool,
+    live_sse: Option<Receiver<String>>,
 }
 impl Response {
     pub fn json(status: u16, body: Value) -> Self {
@@ -37,6 +40,8 @@ impl Response {
             body: body.to_string().into_bytes(),
             headers: Vec::new(),
             hold: false,
+            disconnect: false,
+            live_sse: None,
         }
     }
     pub fn sse(body: String) -> Self {
@@ -46,6 +51,27 @@ impl Response {
             body: body.into_bytes(),
             headers: Vec::new(),
             hold: false,
+            disconnect: false,
+            live_sse: None,
+        }
+    }
+    pub fn live_sse(body: String, stream: Receiver<String>) -> Self {
+        Self {
+            live_sse: Some(stream),
+            ..Self::sse(body)
+        }
+    }
+    pub fn text(status: u16, body: &str) -> Self {
+        Self {
+            content_type: "text/plain",
+            body: body.as_bytes().to_vec(),
+            ..Self::json(status, Value::Null)
+        }
+    }
+    pub fn disconnect() -> Self {
+        Self {
+            disconnect: true,
+            ..Self::json(200, Value::Null)
         }
     }
     pub fn header(mut self, name: &str, value: &str) -> Self {
@@ -89,6 +115,9 @@ impl Fixture {
                             let request = read_request(&mut stream);
                             requests.lock().unwrap().push(request.clone());
                             let response = handler(&request);
+                            if response.disconnect {
+                                return;
+                            }
                             if response.hold {
                                 stream.set_read_timeout(Some(Duration::from_millis(20))).unwrap();
                                 let mut byte = [0];
@@ -98,6 +127,18 @@ impl Fixture {
                                         Ok(_) => {},
                                         Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {},
                                         Err(_) => break,
+                                    }
+                                }
+                                return;
+                            }
+                            if let Some(events) = response.live_sse {
+                                let _ = stream.write_all(b"HTTP/1.1 200 Fixture\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n");
+                                let _ = stream.write_all(&response.body);
+                                while !stopped.load(Ordering::SeqCst) {
+                                    match events.recv_timeout(Duration::from_millis(20)) {
+                                        Ok(event) if stream.write_all(event.as_bytes()).is_err() => break,
+                                        Ok(_) | Err(RecvTimeoutError::Timeout) => {},
+                                        Err(RecvTimeoutError::Disconnected) => break,
                                     }
                                 }
                                 return;

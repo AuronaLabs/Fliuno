@@ -4,16 +4,19 @@ use rmcp::{
     model::{
         CompleteRequestParams, CompleteResult, CompletionInfo, GetPromptRequestParams,
         GetPromptResponse, GetPromptResult, ListPromptsResult, ListResourceTemplatesResult,
-        ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
+        ListResourcesResult, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
         ReadResourceResponse, ReadResourceResult, ResourceUpdatedNotification,
         ResourceUpdatedNotificationParam, ServerCapabilities, ServerConfig, ServerNotification,
-        SubscriptionFilter,
+        SubscribeRequestParams, SubscriptionFilter, UnsubscribeRequestParams,
     },
     service::{RequestContext, SubscriptionContext},
 };
 use serde_json::json;
 
-struct Fixture;
+struct Fixture {
+    legacy: bool,
+    subscription: std::sync::Mutex<Option<String>>,
+}
 impl ServerHandler for Fixture {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(
@@ -24,6 +27,50 @@ impl ServerHandler for Fixture {
                 .enable_completions()
                 .build(),
         )
+        .with_protocol_version(if self.legacy {
+            ProtocolVersion::V_2025_11_25
+        } else {
+            ProtocolVersion::V_2026_07_28
+        })
+    }
+    async fn subscribe(
+        &self,
+        request: SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        assert!(self.legacy);
+        if request.uri == "fixture:declined" {
+            return Err(ErrorData::invalid_params("not available", None));
+        }
+        assert!(
+            self.subscription
+                .lock()
+                .unwrap()
+                .replace(request.uri.clone())
+                .is_none()
+        );
+        for uri in [
+            "fixture:unrelated",
+            "fixture:environment",
+            "fixture:environment",
+        ] {
+            if uri == "fixture:unrelated" || request.uri == uri {
+                context
+                    .peer
+                    .notify_resource_updated(ResourceUpdatedNotificationParam::new(uri))
+                    .await
+                    .map_err(|_| ErrorData::internal_error("watch delivery failed", None))?;
+            }
+        }
+        Ok(())
+    }
+    async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        assert_eq!(self.subscription.lock().unwrap().take(), Some(request.uri));
+        Ok(())
     }
     fn accepted_subscription_filter(
         &self,
@@ -117,11 +164,14 @@ impl ServerHandler for Fixture {
         ))
     }
 }
-pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    Fixture
-        .serve(rmcp::transport::stdio())
-        .await?
-        .waiting()
-        .await?;
+pub async fn run(legacy: bool) -> Result<(), Box<dyn std::error::Error>> {
+    Fixture {
+        legacy,
+        subscription: Default::default(),
+    }
+    .serve(rmcp::transport::stdio())
+    .await?
+    .waiting()
+    .await?;
     Ok(())
 }

@@ -9,10 +9,7 @@ impl TestDirectory {
         let path = std::env::temp_dir().join(format!(
             "fliuno-model-discovery-{}-{}",
             std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
+            uuid::Uuid::new_v4()
         ));
         fs::create_dir(&path).unwrap();
         Self(path)
@@ -100,10 +97,23 @@ fn model_discovery_pins_alias_for_count_and_generation_and_reports_the_budget() 
     assert_eq!(
         init["capabilities"]["modelBudget"],
         json!({
-            "windowTokens":32768,"maxInputTokens":30720,"maxOutputTokens":2048,
-            "countMode":"provider","source":"provider_metadata"
+            "windowTokens":32768,"maxInputTokens":30720,"maxInputBytes":null,"maxOutputTokens":2048,
+            "countMode":"provider","countCoverage":"provider_request",
+            "safetyMarginTokens":0,"source":"provider_metadata"
         })
     );
+    let capabilities = &init["capabilities"]["modelCapabilities"];
+    assert_eq!(capabilities["provider"], "anthropic");
+    assert_eq!(capabilities["model"], "fixture-pinned-20261118");
+    assert_eq!(capabilities["modelSource"], "provider_metadata");
+    assert_eq!(
+        capabilities["supportedInputTypes"],
+        json!(["text", "image", "pdf"])
+    );
+    assert_eq!(capabilities["inputTypesSource"], "provider_adapter");
+    assert_eq!(capabilities["budget"], init["capabilities"]["modelBudget"]);
+    assert_eq!(capabilities["automaticContextCompaction"], true);
+    assert!(capabilities["refreshedAtMs"].as_u64().unwrap() > 0);
     assert_eq!(wire.requests().len(), 1);
     let workspace = peer.call("workspace/open", json!({"root":directory.0}));
     let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
@@ -122,6 +132,86 @@ fn model_discovery_pins_alias_for_count_and_generation_and_reports_the_budget() 
     let requests = wire.requests();
     assert_eq!(requests.len(), 4);
     assert_eq!(requests[3].path, "/mock/v1/messages/count_tokens");
+}
+
+#[test]
+fn local_budget_rejection_summarizes_history_then_retries_through_scheduler() {
+    let wire = Fixture::start(|request| {
+        assert_eq!(request.path, "/mock/v1/messages");
+        let summary = request.body["messages"]
+            .to_string()
+            .contains("Summarize the completed work records below");
+        let text = if summary {
+            "Two earlier tasks were completed.".to_owned()
+        } else {
+            format!("fact {}", "x".repeat(6000))
+        };
+        Response::json(
+            200,
+            json!({"stop_reason":"end_turn","content":[{"type":"text","text":text}]}),
+        )
+    });
+    let directory = TestDirectory::new();
+    let child = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
+        .arg("--db")
+        .arg(directory.db())
+        .env("FLIUNO_PROVIDER", "anthropic")
+        .env("FLIUNO_MODEL", "fixture-model")
+        .env("ANTHROPIC_API_KEY", "test-key")
+        .env("ANTHROPIC_BASE_URL", wire.url("/mock/v1"))
+        .env("FLIUNO_CONTEXT_WINDOW_TOKENS", "16384")
+        .env("FLIUNO_MAX_OUTPUT_TOKENS", "512")
+        .env("FLIUNO_CONTEXT_COUNT_MODE", "local")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let mut peer = Peer::from_child(child);
+    peer.call(
+        "initialize",
+        json!({"protocolVersion":"0.1","clientName":"compaction-process-test"}),
+    );
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    for input in ["first history record", "second history record"] {
+        let started = peer.call(
+            "task/start",
+            json!({"sessionId":session["id"],"input":input}),
+        );
+        peer.wait_for_status(started["id"].as_str().unwrap(), "completed");
+    }
+    let started = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"continue with the earlier work"}),
+    );
+    let completed = peer.wait_for_status(started["id"].as_str().unwrap(), "completed");
+    let stored = peer.call("task/get", json!({"taskId":started["id"]}));
+    assert_eq!(completed["output"], format!("fact {}", "x".repeat(6000)));
+    assert_eq!(stored["context"]["turns"].as_array().unwrap().len(), 1);
+    assert_eq!(stored["context"]["summaries"].as_array().unwrap().len(), 1);
+    let events = peer.call("events/list", json!({"taskId":started["id"]}));
+    assert!(
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["data"]["type"] == "context_compaction_scheduled")
+    );
+    assert!(
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["data"]["type"] == "context_compacted")
+    );
+    let requests = wire.requests();
+    assert_eq!(requests.len(), 4);
+    assert!(
+        requests[2].body["messages"]
+            .to_string()
+            .contains("Summarize the completed work records below")
+    );
 }
 
 #[test]
@@ -229,10 +319,10 @@ fn gemini_interactions_is_wired_through_app_server_without_remote_storage() {
 }
 
 #[test]
-fn gemini_provider_count_mode_fails_before_database_creation() {
-    let wire = Fixture::start(|_| panic!("unsupported provider counting sent a request"));
+fn gemini_provider_count_mode_reports_projected_coverage_and_margin() {
+    let wire = Fixture::start(|_| panic!("model preflight unexpectedly contacted the provider"));
     let directory = TestDirectory::new();
-    let result = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
+    let child = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
         .arg("--db")
         .arg(directory.db())
         .env("FLIUNO_PROVIDER", "gemini")
@@ -242,14 +332,22 @@ fn gemini_provider_count_mode_fails_before_database_creation() {
         .env("FLIUNO_CONTEXT_WINDOW_TOKENS", "32768")
         .env("FLIUNO_MAX_OUTPUT_TOKENS", "2048")
         .env("FLIUNO_CONTEXT_COUNT_MODE", "provider")
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
         .unwrap();
-    assert!(!result.status.success());
-    assert!(!directory.db().exists());
-    assert!(
-        String::from_utf8(result.stderr)
-            .unwrap()
-            .contains("preflight provider token counting")
+    let mut peer = Peer::from_child(child);
+    let init = peer.call(
+        "initialize",
+        json!({"protocolVersion":"0.1","clientName":"gemini-provider-test"}),
+    );
+    assert_eq!(
+        init["capabilities"]["modelBudget"],
+        json!({
+            "windowTokens":32768,"maxInputTokens":30720,"maxInputBytes":null,"maxOutputTokens":2048,
+            "countMode":"provider","countCoverage":"provider_projection",
+            "safetyMarginTokens":256,"source":"configured"
+        })
     );
     assert!(wire.requests().is_empty());
 }
@@ -353,7 +451,7 @@ fn model_step_limit_preserves_default_receipts_and_rejects_invalid_settings() {
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
             .unwrap(),
-        54
+        64
     );
     let mut default = request.clone();
     default["maxModelSteps"] = json!(8);

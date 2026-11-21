@@ -158,6 +158,7 @@ fn parse(response: Value) -> Result<ModelTurn, String> {
     Ok(ModelTurn {
         decision,
         usage: model_usage(&response["usage"]),
+        preflight: None,
         replay: Some(ProviderReplay {
             provider: "openai".into(),
             data: Value::Array(output.clone()),
@@ -186,7 +187,37 @@ impl ModelProvider for OpenAiProvider {
         self.http.configured_budget()
     }
 
+    fn model_identity(&self) -> Option<(String, String)> {
+        Some(("openai".into(), self.model.clone()))
+    }
+
+    fn supported_input_types(&self) -> Vec<fliuno_protocol::ModelInputType> {
+        use fliuno_protocol::ModelInputType::{Image, Pdf, Text};
+        vec![Text, Image, Pdf]
+    }
+
+    fn set_calibrated_safety_margin(&self, provider: &str, model: &str, tokens: u32) {
+        if provider == "openai" && model == self.model {
+            self.http.calibrate_safety_margin(tokens);
+        }
+    }
+
+    fn observe_preflight(
+        &self,
+        preflight: &fliuno_protocol::ModelInputPreflight,
+        actual_input_tokens: u64,
+    ) {
+        if preflight.provider == "openai" && preflight.model == self.model {
+            self.http
+                .observe_preflight(preflight.estimated_input_tokens, actual_input_tokens);
+        }
+    }
+
     fn supports_progress(&self) -> bool {
+        true
+    }
+
+    fn supports_context_compaction(&self) -> bool {
         true
     }
 
@@ -213,8 +244,12 @@ impl ModelProvider for OpenAiProvider {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        let response = self.http.post(&body, cancellation)?;
-        parse(response).map_err(ModelError::OutcomeUnknown)
+        let (response, estimated_input_tokens) = self.http.post_observed(&body, cancellation)?;
+        let mut turn = parse(response).map_err(ModelError::OutcomeUnknown)?;
+        turn.preflight = self
+            .http
+            .preflight_report("openai", &self.model, estimated_input_tokens);
+        Ok(turn)
     }
 
     fn next_with_progress(
@@ -244,32 +279,39 @@ impl ModelProvider for OpenAiProvider {
                 return Err(ModelError::CancelledBeforeDispatch);
             }
             let mut response = None;
-            let json_response = self.http.post_stream(&body, cancellation, |event| {
-                match event["type"].as_str() {
-                    Some("response.output_text.delta") => {
-                        if let Some(text) = event["delta"].as_str()
-                            && !text.is_empty()
-                        {
-                            progress(ModelStreamEvent::TextDelta(text.into()));
+            let (json_response, estimated_input_tokens) =
+                self.http
+                    .post_stream_observed(&body, cancellation, |event| {
+                        match event["type"].as_str() {
+                            Some("response.output_text.delta") => {
+                                if let Some(text) = event["delta"].as_str()
+                                    && !text.is_empty()
+                                {
+                                    progress(ModelStreamEvent::TextDelta(text.into()));
+                                }
+                            }
+                            Some("response.completed") => response = event.get("response").cloned(),
+                            Some("response.failed" | "response.incomplete" | "error") => {
+                                return Err("OpenAI response did not complete".into());
+                            }
+                            _ => {}
                         }
-                    }
-                    Some("response.completed") => response = event.get("response").cloned(),
-                    Some("response.failed" | "response.incomplete" | "error") => {
-                        return Err("OpenAI response did not complete".into());
-                    }
-                    _ => {}
-                }
-                Ok(())
-            })?;
-            if let Some(response) = json_response {
-                return parse(response).map_err(ModelError::OutcomeUnknown);
-            }
-            let response = response.ok_or_else(|| {
-                ModelError::OutcomeUnknown(
-                    "OpenAI event stream ended without a completed response".into(),
-                )
-            })?;
-            parse(response).map_err(ModelError::OutcomeUnknown)
+                        Ok(())
+                    })?;
+            let response = if let Some(response) = json_response {
+                response
+            } else {
+                response.ok_or_else(|| {
+                    ModelError::OutcomeUnknown(
+                        "OpenAI event stream ended without a completed response".into(),
+                    )
+                })?
+            };
+            let mut turn = parse(response).map_err(ModelError::OutcomeUnknown)?;
+            turn.preflight =
+                self.http
+                    .preflight_report("openai", &self.model, estimated_input_tokens);
+            Ok(turn)
         })();
         match &result {
             Ok(turn) if matches!(&turn.decision, ModelDecision::Call(_)) => {

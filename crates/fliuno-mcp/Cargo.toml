@@ -10,18 +10,25 @@ test-fixtures = ["rmcp/server", "rmcp/transport-io"]
 
 [dependencies]
 base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 fliuno-core.workspace = true
 fliuno-protocol.workspace = true
 fliuno-sandbox = { path = "../fliuno-sandbox", features = ["async-io"] }
+futures-util = "0.3"
+http-auth = { version = "0.1.10", default-features = false }
 mime = "0.3"
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
+sse-stream = "0.2"
 rmcp = { version = "3.11", default-features = false, features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["form"] }
+ring = "0.17.14"
+rusqlite.workspace = true
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process", "fs", "sync"] }
 jsonschema = { version = "0.61", default-features = false }
 uuid.workspace = true
+zeroize = "1.9"
 
 
 [target.'cfg(all(unix, not(target_os = "linux")))'.dependencies]

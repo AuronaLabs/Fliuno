@@ -115,7 +115,7 @@ fn mrtr_form_input_resumes_the_same_tool_call_with_private_state() {
     let (service, tools) = runtime.block_on(async {
         let (client_io, server_io) = tokio::io::duplex(16384);
         let client = client_config();
-        let client_peer_info = client.clone();
+        let client_peer_info = client.config.clone();
         let server_peer_info = MrtrFixture {
             calls: Arc::clone(&calls),
             continuations: Arc::clone(&continuations),
@@ -151,8 +151,9 @@ fn mrtr_form_input_resumes_the_same_tool_call_with_private_state() {
         service: Mutex::new(service),
         runtime,
         timeout: TIMEOUT,
+        task_bindings: Default::default(),
     });
-    let tools = wrap_tools(host, "fixture", tools, None, false).unwrap();
+    let tools = wrap_tools(host, "fixture", tools, None, false, false, None).unwrap();
     let tool = &tools[0];
     let context = ToolContext {
         session_id: "session_test",
@@ -228,8 +229,9 @@ fn sdk_discovery_validation_and_execution_roundtrip() {
         service: Mutex::new(service),
         runtime,
         timeout: TIMEOUT,
+        task_bindings: Default::default(),
     });
-    let tools = wrap_tools(host, "fixture", tools, None, false).unwrap();
+    let tools = wrap_tools(host, "fixture", tools, None, false, false, None).unwrap();
     let tool = &tools[0];
     assert!(matches!(tool.spec().effect, ToolEffect::External));
     assert!(tool.validate(&json!({"text":123})).is_err());
@@ -315,9 +317,16 @@ impl ServerHandler for TasksFixture {
             "then-input" | "then-terminal" if reads == 0 => TaskPayload::Working,
             "then-terminal" => TaskPayload::Cancelled,
             "remote-task-1" | "then-input" | "wrong-id" | "wrong-kind" => {
-                let request: InputRequest =
-                    serde_json::from_value(json!({"method":"roots/list","params":{}})).unwrap();
-                let input_requests: InputRequests = [("roots-1".to_owned(), request)].into();
+                let request: InputRequest = serde_json::from_value(json!({
+                    "method":"elicitation/create", "params":{
+                        "mode":"form","message":"Enter code","requestedSchema":{
+                            "type":"object","required":["code"],
+                            "properties":{"code":{"type":"string"}}
+                        }
+                    }
+                }))
+                .unwrap();
+                let input_requests: InputRequests = [("form-1".to_owned(), request)].into();
                 TaskPayload::InputRequired { input_requests }
             }
             _ => return Err(ErrorData::invalid_params("unknown task", None)),
@@ -394,9 +403,19 @@ fn task_tools(fixture: &TasksFixture) -> Vec<Box<dyn Tool>> {
         service: Mutex::new(service),
         runtime,
         timeout: Duration::from_secs(6),
+        task_bindings: Default::default(),
     });
-    let mut tools = wrap_tools(Arc::clone(&host), "fixture", remote_tools, None, true).unwrap();
-    tools.extend(tasks::tools(Arc::clone(&host), "fixture", tasks_capability).unwrap());
+    let mut tools = wrap_tools(
+        Arc::clone(&host),
+        "fixture",
+        remote_tools,
+        None,
+        true,
+        true,
+        None,
+    )
+    .unwrap();
+    tools.extend(tasks::tools(Arc::clone(&host), "fixture", tasks_capability, None).unwrap());
     tools
 }
 
@@ -431,23 +450,42 @@ fn official_sdk_tasks_create_read_update_and_cancel_roundtrip() {
     let snapshot = invoke_arguments(get.as_ref(), json!({"taskId":"remote-task-1"})).unwrap();
     assert_eq!(snapshot.output["result"]["status"], "input_required");
     assert_eq!(
-        snapshot.output["result"]["inputRequests"]["roots-1"]["method"],
-        "roots/list"
+        snapshot.output["result"]["inputRequests"]["form-1"]["method"],
+        "elicitation/create"
     );
 
     let update = tools
         .iter()
         .find(|tool| tool.spec().name == "mcp_fixture_tasks_update")
         .unwrap();
-    let updated = invoke_arguments(
-        update.as_ref(),
-        json!({"taskId":"remote-task-1","inputResponses":{"roots-1":{"roots":[]}}}),
-    )
-    .unwrap();
+    for responses in [
+        json!({"old-form":{"action":"decline"}}),
+        json!({"form-1":{"action":"accept","content":{"code":123}}}),
+    ] {
+        assert!(matches!(
+            invoke_arguments(
+                update.as_ref(),
+                json!({
+                    "taskId":"remote-task-1","inputResponses":responses
+                })
+            ),
+            Err(ToolError::Failed(_))
+        ));
+    }
+    assert!(fixture.updates.lock().unwrap().is_empty());
+    let args = json!({"taskId":"remote-task-1","inputResponses":{
+        "form-1":{"action":"accept","content":{"code":"abc"}}
+    }});
+    let updated = invoke_arguments(update.as_ref(), args.clone()).unwrap();
     assert_eq!(updated.output["result"]["updateAccepted"], true);
+    assert!(
+        matches!(invoke_arguments(update.as_ref(), args), Err(ToolError::Failed(message))
+        if message.contains("already sent"))
+    );
+    assert_eq!(fixture.updates.lock().unwrap().len(), 1);
     assert_eq!(
-        fixture.updates.lock().unwrap()[0].input_responses["roots-1"]["roots"],
-        json!([])
+        fixture.updates.lock().unwrap()[0].input_responses["form-1"]["content"]["code"],
+        "abc"
     );
 
     let cancel = tools
@@ -530,7 +568,7 @@ fn invalid_created_task_handle_is_never_returned() {
 
 #[test]
 fn client_declares_tasks_without_advertising_deprecated_capabilities() {
-    let config = client_config();
+    let config = client_config().config;
     assert!(config.capabilities.supports_tasks());
     assert!(config.capabilities.roots.is_none());
     assert!(config.capabilities.sampling.is_none());
@@ -561,8 +599,9 @@ fn timed_out_tool_closes_the_mcp_host_and_marks_result_unknown() {
         service: Mutex::new(service),
         runtime,
         timeout: Duration::from_millis(10),
+        task_bindings: Default::default(),
     });
-    let tools = wrap_tools(host, "fixture", tools, None, false).unwrap();
+    let tools = wrap_tools(host, "fixture", tools, None, false, false, None).unwrap();
     let tool = &tools[0];
     let context = ToolContext {
         session_id: "session_test",
@@ -709,8 +748,9 @@ fn cancelling_queued_call_returns_without_sending_or_closing_busy_host() {
         service: Mutex::new(service),
         runtime,
         timeout: Duration::from_secs(5),
+        task_bindings: Default::default(),
     });
-    let mut tools = wrap_tools(host, "fixture", tools, None, false).unwrap();
+    let mut tools = wrap_tools(host, "fixture", tools, None, false, false, None).unwrap();
     let tool: Arc<dyn Tool> = Arc::from(tools.remove(0));
     let first = std::thread::spawn({
         let tool = Arc::clone(&tool);

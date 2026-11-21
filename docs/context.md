@@ -203,22 +203,28 @@ $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 
 上限为窗口减去输出预留，另有 8 MiB 传输上限。`FLIUNO_CONTEXT_COUNT_MODE` 可选择：
 
-- `local`（默认）：**1 个序列化 JSON 字节计 1 个预算单位**。它计入历史、当前任务消息、工具定义、工具结果和请求结构，不额外联网；多字节文本和转义可能让它提前拒绝供应商能接受的请求。
-- `provider`：OpenAI 和 Anthropic 须同时配置窗口和输出上限。每步先向同一供应商地址发送一次计数请求：OpenAI `POST /v1/responses/input_tokens`，Anthropic `POST /v1/messages/count_tokens`。计数使用生成请求中的模型、系统提示、消息及工具字段，不发送仅生成用的字段；它会额外传输这些输入并增加一次往返。兼容服务必须实现对应端点。计数响应最多 16 KiB，操作最多 10 秒；超时、坏响应或超额均不会发送生成请求，也不会自动回退。供应商返回的计数不保证等于实际用量，窗口仍由宿主填写。Gemini Interactions 暂无预检 token 计数适配，启动时拒绝 `provider` 计数模式。
+- `local`（默认）：**1 个序列化 JSON 字节计 1 个预算单位**。这是保守的字节上限，不是模型 tokenizer 给出的 token 数；它计入历史、当前任务消息、工具定义、工具结果和请求结构，不额外联网。多字节文本、转义、图像和 PDF 的 base64 表示可能让它提前拒绝供应商能接受的请求。
+- `provider`：OpenAI 和 Anthropic 须同时配置窗口和输出上限。每步先向同一供应商地址发送一次计数请求：OpenAI `POST /v1/responses/input_tokens`，Anthropic `POST /v1/messages/count_tokens`。计数使用生成请求中的模型、系统提示、消息及工具字段，不发送仅生成用的字段；它会额外传输这些输入并增加一次往返。兼容服务必须实现对应端点。Gemini Interactions 将当前支持的用户内容、工具调用/结果、系统提示和函数声明投影为 Google `models.countTokens` 接受的 `generateContentRequest`，读取 `totalTokens` 后再发送 Interaction。该计数是跨 API 的投影，不代表 Interactions 原生 tokenizer 计数；能力报告会将 `countCoverage` 标为 `provider_projection`，并加 5% 安全余量（最低 8、最高 256 tokens）。不支持投影的内容、计数超时、坏响应或超额均会在生成前拒绝，不自动退回本地模式。此余量是保守启发式，不构成窗口不溢出的保证；请结合返回用量核对差异。计数响应最多 16 KiB，操作最多 10 秒；窗口仍由宿主填写。
 
 预检适用于每轮请求及流式模式。超额时当前生成步骤以已知未发送失败；此前已完成的工具操作仍保留。可在新任务用较小的 `maxBytes`、显式 `taskIds` 或 `isolated` 缩小历史。
 
-`initialize.capabilities.modelBudget` 返回当前的 `windowTokens`、`maxInputTokens`、`maxOutputTokens`、`countMode` 和 `source`。计数模式为 `json_bytes_estimate` 或 `provider`，来源为 `configured` 或 `provider_metadata`。未配置预检时返回 `null`。
+`initialize.capabilities.modelBudget` 返回当前的 `windowTokens`、`maxInputTokens`、`maxInputBytes`、`maxOutputTokens`、`countMode`、`countCoverage`、`safetyMarginTokens` 和 `source`。Token 模式设置 `maxInputTokens` 并将 `maxInputBytes` 置空；本地字节预算则反过来。`countMode` 为 `json_bytes_estimate` 或 `provider`；`countCoverage` 为 `serialized_json_bytes`、`provider_request` 或 `provider_projection`。来源为 `configured` 或 `provider_metadata`。未配置预检时返回 `null`。
+
+`initialize.capabilities.modelCapabilities` 提供统一快照：`provider`、`model`、`modelSource`、`supportedInputTypes`、`inputTypesSource`、同一份可选 `budget`、`automaticContextCompaction` 和 `refreshedAtMs`。`modelSource` 当前区分宿主配置与供应商元数据；Anthropic 别名会在启动时解析，OpenAI/Gemini 使用配置的模型 ID。三个适配器目前都能编码文本、图片和 PDF，因此 `inputTypesSource` 为 `provider_adapter`；这说明请求格式可表达这些输入，不保证所选的每一个模型都支持所有模态。只有提供模型身份、请求预算且实现摘要调用的 Provider 才报告自动压缩能力。
+
+预算预检明确拒绝输入超限、且确认尚未发送生成请求时，内核会用同一 Provider 和模型对较早的已完成历史生成摘要，并保留最近一条记录原文。摘要请求不带工具；正式请求会重新预检完整输入，包含当前任务、摘要、保留历史、工具定义及其他请求字段。若摘要输入本身超限，内核只在历史记录边界拆分，并以有界次数缩小批次。摘要成功后，摘要、来源任务 ID、完成事件序号、提示版本、模型预算与可用 usage/preflight 一起保存；原任务、事件和未压缩的近期历史仍可核对。SQLite v58 标记此快照格式。
+
+摘要未派发、被取消、返回无效结果或未能缩小快照时，内核保留压缩前的有效上下文并终止当前任务。若 Provider 返回结果未知，任务进入 interrupted，需显式确认后才能重试摘要；内核不会把可能已计费的请求自动重放。每次原请求、摘要和重试都占用持久 `maxModelSteps` 上限；没有足够的尝试额度或没有较早历史时，内核直接报告预算拒绝。压缩只缩减已完成历史，不裁剪当前输入、工具定义或媒体；若完整正式请求在摘要后仍超限，预检会再次拒绝。
 
 Anthropic 可以设置 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider`，并继续填写 `FLIUNO_MAX_OUTPUT_TOKENS`。app-server 启动时用现有凭据向配置端点请求一次 `GET /v1/models/{model_id}`，限时 5 秒、最多 64 KiB。内核以返回的 `max_input_tokens` 为窗口，再预留宿主配置的输出 token，并核对该输出值是否超过返回的 `max_tokens`。若配置的是别名，则用返回的模型 ID 进行本次进程的计数与生成。探测失败时启动终止，SQLite 尚未打开。OpenAI 和 Gemini 使用数字窗口，不进行供应商自动窗口探测。
 
-窗口来源和输入计数可独立配置。Anthropic 的窗口探测可配合任一受支持的计数模式；OpenAI 使用数字窗口配置，Gemini 目前仅使用数字窗口和本地估算。
+窗口来源和输入计数可独立配置。Anthropic 的窗口探测可配合任一受支持的计数模式；OpenAI 和 Gemini 使用数字窗口配置，Gemini Interactions 暂无原生窗口探测。
 
 ## 持久化与迁移
 
 历史索引在数据库 v5 引入。`storage/context` 的 `session_turns` 表保存完成记录投影，以 `(session_id,sequence)` 建索引；`task_id` 唯一，sequence 外键指向真实完成事件。投影与 TaskCompleted 及任务最终状态在同一事务提交，失败一起回滚；不会发布未提交的完成通知。
 
-从 v4 及更早数据库升级时，迁移在事务中逐条回填已知完成的历史，不修改旧事件或任务输入。旧 `Task.context` 缺失时解码为 null；恢复旧任务仍没有新历史。旧幂等请求在未显式指定 context 时继续返回原任务，显式要求上下文选项则冲突。新任务可使用回填记录。
+从 v4 及更早数据库升级时，迁移在事务中逐条回填已知完成的历史，不修改旧事件或任务输入。旧 `Task.context` 缺失时解码为 null；恢复旧任务仍没有新历史。SQLite v58 保护摘要与压缩状态快照，旧内核不能打开会丢弃新摘要的数据库。旧幂等请求在未显式指定 context 时继续返回原任务，显式要求上下文选项则冲突。新任务可使用回填记录。
 
 v9 加入可选的 `ContextOptions.taskIds` 并提升版本，阻止不理解新冻结输入的旧内核打开数据库。v8 到 v9 只更新版本号，不重写表、事件或快照；未选择任务时仍省略该字段，旧快照序列化形状保持一致。更早的 v6/v7/v8 兼容字段及注册绑定规则继续适用。
 

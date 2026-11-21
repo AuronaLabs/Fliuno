@@ -1,6 +1,7 @@
 //! Task state machine and model budget. SQL and transport live elsewhere.
 use super::*;
 
+pub mod compaction;
 mod resume;
 pub(crate) mod start;
 
@@ -26,16 +27,40 @@ impl Kernel {
     }
 
     pub(crate) fn drive(&mut self, task: Task) -> Result<Task> {
-        let (task, specs) = match self.prepare_model_step(&task.id)? {
-            PreparedModelStep::Ready { task, tools } => (task, tools),
-            PreparedModelStep::Finished(task) => return Ok(task),
-        };
-        let turn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.provider
-                .next_classified(&task, &specs, &CancellationToken::new())
-        }))
-        .unwrap_or_else(|_| Err(ModelError::OutcomeUnknown("model provider panicked".into())));
-        self.apply_model_response(task, turn)
+        let task_id = task.id;
+        loop {
+            let (mut task, specs) = match self.prepare_model_step(&task_id)? {
+                PreparedModelStep::Ready { task, tools } => (task, tools),
+                PreparedModelStep::Finished(task) => return Ok(task),
+            };
+            if compaction::pending(&task) {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    compaction::execute(self.provider.as_ref(), &task, &CancellationToken::new())
+                }))
+                .unwrap_or_else(|_| {
+                    Err(ModelError::OutcomeUnknown(
+                        "context summarizer panicked".into(),
+                    ))
+                });
+                task = self.apply_context_compaction(task, result)?;
+                if compaction::pending(&task) {
+                    return Ok(task);
+                }
+                if task.status != TaskStatus::Running {
+                    return Ok(task);
+                }
+                continue;
+            }
+            let turn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.provider
+                    .next_classified(&task, &specs, &CancellationToken::new())
+            }))
+            .unwrap_or_else(|_| Err(ModelError::OutcomeUnknown("model provider panicked".into())));
+            task = self.apply_model_response(task, turn)?;
+            if !compaction::pending(&task) || task.status != TaskStatus::Running {
+                return Ok(task);
+            }
+        }
     }
 
     /// Persist a model attempt and return its immutable inputs so a scheduler
@@ -50,6 +75,7 @@ impl Kernel {
         if task.status != TaskStatus::Running {
             return Ok(PreparedModelStep::Finished(task));
         }
+        self.require_run_child_before_deadline(task_id)?;
         if task.model_outcome_unknown || task.in_flight_tool.is_some() {
             return Err(Error::Conflict(
                 "task already has an in-flight operation".into(),
@@ -102,6 +128,20 @@ impl Kernel {
             ));
         }
         let turn = match response {
+            Err(ModelError::InputBudgetExceeded(message)) => {
+                task.model_outcome_unknown = false;
+                if compaction::schedule(&mut task, self.provider.as_ref()) {
+                    self.commit(
+                        &task,
+                        &[EventKind::ContextCompactionScheduled {
+                            rejected_step: task.model_steps,
+                        }],
+                        &[],
+                    )?;
+                    return Ok(task);
+                }
+                return self.fail(task, format!("model input exceeds its configured budget and cannot be compacted: {message}"));
+            }
             Ok(turn) => turn,
             Err(ModelError::NotDispatched(message)) => {
                 task.model_outcome_unknown = false;
@@ -126,20 +166,14 @@ impl Kernel {
         };
         task.model_outcome_unknown = false;
         task.output = None;
+        let events = self.model_usage_events(task.model_steps, &turn);
         if let Some(replay) = turn.replay {
             task.messages.push(Message::ProviderReplay {
                 provider: replay.provider,
                 data: replay.data,
             });
         }
-        let mut events: Vec<_> = turn
-            .usage
-            .map(|usage| EventKind::ModelUsageReported {
-                step: task.model_steps,
-                usage,
-            })
-            .into_iter()
-            .collect();
+        let mut events = events;
         match turn.decision {
             ModelDecision::Complete(text) => {
                 task.status = TaskStatus::Completed;
@@ -190,6 +224,59 @@ impl Kernel {
                 Ok(task)
             }
         }
+    }
+
+    pub(super) fn model_usage_events(&self, step: u32, turn: &ModelTurn) -> Vec<EventKind> {
+        let mut events = turn
+            .usage
+            .as_ref()
+            .map(|usage| EventKind::ModelUsageReported {
+                step,
+                usage: usage.clone(),
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        if let Some(preflight) = &turn.preflight {
+            let (usage_status, observed_input_tokens, usage_provider, undercount_tokens) =
+                match turn.usage.as_ref() {
+                    None => (ModelPreflightUsageStatus::Missing, None, None, None),
+                    Some(usage) if usage.provider != preflight.provider => (
+                        ModelPreflightUsageStatus::ProviderMismatch,
+                        Some(usage.input_tokens),
+                        Some(usage.provider.clone()),
+                        None,
+                    ),
+                    Some(usage) => {
+                        self.provider
+                            .observe_preflight(preflight, usage.input_tokens);
+                        (
+                            ModelPreflightUsageStatus::Matched,
+                            Some(usage.input_tokens),
+                            Some(usage.provider.clone()),
+                            Some(
+                                usage
+                                    .input_tokens
+                                    .saturating_sub(preflight.estimated_input_tokens),
+                            ),
+                        )
+                    }
+                };
+            events.push(EventKind::ModelPreflightObserved {
+                step,
+                provider: preflight.provider.clone(),
+                model: preflight.model.clone(),
+                count_coverage: preflight.count_coverage,
+                estimated_input_tokens: preflight.estimated_input_tokens,
+                safety_margin_tokens: preflight.safety_margin_tokens,
+                usage_status,
+                observed_input_tokens,
+                usage_provider,
+                margin_exceeded: undercount_tokens
+                    .map(|undercount| undercount > u64::from(preflight.safety_margin_tokens)),
+                undercount_tokens,
+            });
+        }
+        events
     }
 
     pub fn cancel_task(&mut self, task_id: &str) -> Result<Task> {

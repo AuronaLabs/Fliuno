@@ -1,13 +1,14 @@
 //! Bounded workers run independent task steps without holding database locks.
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
+use fliuno_core::diagnostics::{Operation, Outcome, Span};
 use fliuno_core::{
     AgentObservation, AgentObserver, AgentOutcome, CancellationToken, CompletedRemoteTaskCheck,
-    Error, Kernel, ModelError, ModelStreamEvent, ModelTurn, PreparedModelStep,
+    ContextCompaction, Error, Kernel, ModelError, ModelStreamEvent, ModelTurn, PreparedModelStep,
     PreparedRemoteTaskCheck, PreparedToolExecution, ProgressPublisher, ToolError, ToolOutput,
 };
 use fliuno_protocol::{ModelProgress, Task};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     panic::{AssertUnwindSafe, catch_unwind},
     sync::{
         Arc, Mutex,
@@ -16,6 +17,8 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
+
+mod deadlines;
 
 pub(super) const QUEUE_CAPACITY: usize = 32;
 pub(super) const WORKER_COUNT: usize = 4;
@@ -28,7 +31,10 @@ struct Reservation {
     cancellation: Cancellation,
     remote_check: bool,
 }
-type ModelResponse = (Task, Result<ModelTurn, ModelError>);
+enum ModelResponse {
+    Generation(Task, Result<ModelTurn, ModelError>),
+    Compaction(Task, Result<ContextCompaction, ModelError>),
+}
 type ToolResponse = (PreparedToolExecution, Result<ToolOutput, ToolError>);
 type AgentResponse = (String, String, AgentOutcome);
 
@@ -56,6 +62,7 @@ struct ScheduledTask {
 pub(super) struct TaskScheduler {
     sender: Option<Sender<ScheduledTask>>,
     remote: Option<(Sender<ScheduledTask>, JoinHandle<()>)>,
+    deadlines: Option<(Sender<()>, JoinHandle<()>)>,
     active: ActiveTasks,
     stopping: Arc<AtomicBool>,
     kernel: Arc<Mutex<Kernel>>,
@@ -106,9 +113,11 @@ impl TaskScheduler {
                 let worker = spawn_worker("fliuno-remote-checks".into(), &queue, &submit);
                 (submit, worker)
             });
+        let deadlines = deadlines::start(Arc::clone(&kernel), Arc::clone(&active));
         Self {
             sender: Some(sender),
             remote,
+            deadlines: Some(deadlines),
             active,
             stopping,
             kernel,
@@ -198,19 +207,13 @@ impl TaskScheduler {
         &self,
         tasks: impl IntoIterator<Item = &'a str>,
     ) -> Result<(), &'static str> {
-        let active = self
-            .active
-            .lock()
-            .map_err(|_| "task scheduler lock is poisoned")?;
-        for task_id in tasks {
-            if let Some(reservation) = active
-                .get(task_id)
-                .filter(|reservation| !reservation.remote_check)
-            {
-                reservation.cancellation.cancel();
-            }
+        signal_cancellations(&self.active, tasks)
+    }
+
+    pub(super) fn notify_run_deadline(&self) {
+        if let Some((sender, _)) = &self.deadlines {
+            let _ = sender.try_send(());
         }
-        Ok(())
     }
 
     #[cfg(test)]
@@ -222,6 +225,12 @@ impl TaskScheduler {
 impl Drop for TaskScheduler {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
+        if let Some((sender, worker)) = self.deadlines.take() {
+            drop(sender);
+            if worker.join().is_err() {
+                eprintln!("fliuno: run deadline worker panicked");
+            }
+        }
         if let Ok(active) = self.active.lock() {
             for reservation in active.values() {
                 reservation.cancellation.cancel();
@@ -247,6 +256,21 @@ impl Drop for TaskScheduler {
             eprintln!("fliuno: cannot persist scheduler shutdown: {error}");
         }
     }
+}
+
+fn signal_cancellations<'a>(
+    active: &ActiveTasks,
+    tasks: impl IntoIterator<Item = &'a str>,
+) -> Result<(), &'static str> {
+    let reservations = active
+        .lock()
+        .map_err(|_| "task scheduler lock is poisoned")?;
+    for task_id in tasks {
+        if let Some(reservation) = reservations.get(task_id).filter(|item| !item.remote_check) {
+            reservation.cancellation.cancel();
+        }
+    }
+    Ok(())
 }
 
 fn wake_workers(sender: &Sender<ScheduledTask>, count: usize) {
@@ -282,8 +306,9 @@ fn run_worker(
             work,
         } = job;
         let response = match work {
-            ScheduledWork::Model => run_model_step(&kernel, &id, &cancellation, &stopping)
-                .map(|response| response.map(Box::new).map(ScheduledResponse::Model)),
+            ScheduledWork::Model => {
+                run_model_or_recover_tool(&kernel, &id, &cancellation, &stopping)
+            }
             ScheduledWork::Tool(execution) => {
                 run_tool_step(&kernel, *execution, &cancellation, &stopping)
                     .map(|response| response.map(Box::new).map(ScheduledResponse::Tool))
@@ -299,12 +324,24 @@ fn run_worker(
             eprintln!("fliuno: kernel lock is poisoned");
             break;
         };
+        // Resolve an elapsed deadline before accepting a late tool or model result.
+        let deadline = kernel.expire_run_for_task(&id).map(|expired| {
+            if let Some(ids) = expired
+                && let Err(error) = signal_cancellations(&active, ids.iter().map(String::as_str))
+            {
+                eprintln!("fliuno: signalling expired run: {error}");
+            }
+        });
         // Release the reservation before exposing another approval or step.
         if let Ok(mut active) = active.lock() {
             active.remove(&id);
         }
         if stopping.load(Ordering::Acquire) {
             break;
+        }
+        if let Err(error) = deadline {
+            eprintln!("fliuno: checking run deadline: {error}");
+            continue;
         }
         let result = match response {
             Ok(Some(ScheduledResponse::CheckRemote(check))) => {
@@ -316,10 +353,26 @@ fn run_worker(
                     .finish_agent_run(&task_id, &run_id, outcome)
                     .map(|_| ())
             }
-            Ok(Some(ScheduledResponse::Model(response))) => {
-                let (task, response) = *response;
-                kernel.apply_model_response(task, response).map(|_| ())
-            }
+            Ok(Some(ScheduledResponse::Model(response))) => match *response {
+                ModelResponse::Generation(task, response) => {
+                    match kernel.apply_model_response(task, response) {
+                        Ok(task) if task.status == fliuno_protocol::TaskStatus::Running => {
+                            schedule_followup_model(&sender, &active, &mut kernel, &task)
+                        }
+                        Ok(_) => Ok(()),
+                        Err(error) => Err(error),
+                    }
+                }
+                ModelResponse::Compaction(task, response) => {
+                    match kernel.apply_context_compaction(task, response) {
+                        Ok(task) if task.status == fliuno_protocol::TaskStatus::Running => {
+                            schedule_followup_model(&sender, &active, &mut kernel, &task)
+                        }
+                        Ok(_) => Ok(()),
+                        Err(error) => Err(error),
+                    }
+                }
+            },
             Ok(Some(ScheduledResponse::Tool(response))) => {
                 let (execution, response) = *response;
                 match kernel.apply_tool_response(&execution, response) {
@@ -333,8 +386,17 @@ fn run_worker(
             Ok(None) => Ok(()),
             Err(error) => Err(error),
         };
-        if let Err(error) = result {
-            eprintln!("fliuno: task scheduler: {error}");
+        match result {
+            Err(error) => eprintln!("fliuno: task scheduler: {error}"),
+            Ok(()) => match kernel.advance_runs_for_task(&id) {
+                Ok(tasks) => {
+                    if let Err(error) = schedule_run_followups(&sender, &active, &mut kernel, tasks)
+                    {
+                        eprintln!("fliuno: task run scheduler: {error}");
+                    }
+                }
+                Err(error) => eprintln!("fliuno: task run update: {error}"),
+            },
         }
     }
 }
@@ -372,10 +434,15 @@ fn run_agent_step(
     if cancellation.is_cancelled() || stopping.load(Ordering::Acquire) {
         return Ok(None);
     }
-    let prepared = kernel
-        .lock()
-        .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?
-        .prepare_agent_run(task_id, cancellation)?;
+    let (prepared, scope) = {
+        let mut kernel = kernel
+            .lock()
+            .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?;
+        (
+            kernel.prepare_agent_run(task_id, cancellation)?,
+            kernel.diagnostic_scope(task_id),
+        )
+    };
     let Some(prepared) = prepared else {
         return Ok(None);
     };
@@ -384,11 +451,21 @@ fn run_agent_step(
         task_id: task_id.into(),
         run_id: prepared.request.run_id.clone(),
     };
+    let mut span = scope.and_then(|scope| scope.begin(Operation::Agent));
     let outcome = if cancellation.is_cancelled() || stopping.load(Ordering::Acquire) {
         AgentOutcome::unknown()
     } else {
-        prepared.execute(&observer, cancellation)
+        Span::within(span.as_ref(), || prepared.execute(&observer, cancellation))
     };
+    if let Some(span) = &mut span {
+        span.finish(if cancellation.is_cancelled() {
+            Outcome::Cancelled
+        } else if outcome.outcome_unknown {
+            Outcome::Interrupted
+        } else {
+            Outcome::Completed
+        });
+    }
     Ok(Some((observer.task_id, observer.run_id, outcome)))
 }
 
@@ -401,7 +478,7 @@ fn run_model_step(
     if cancellation.is_cancelled() || stopping.load(Ordering::Acquire) {
         return Ok(None);
     }
-    let (prepared, provider, progress_publisher) = {
+    let (prepared, provider, progress_publisher, scope) = {
         let mut kernel = kernel
             .lock()
             .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?;
@@ -409,6 +486,7 @@ fn run_model_step(
             kernel.prepare_model_step(task_id)?,
             kernel.model_provider_handle(),
             kernel.model_progress_publisher(),
+            kernel.diagnostic_scope(task_id),
         )
     };
     let PreparedModelStep::Ready { task, tools } = prepared else {
@@ -416,6 +494,21 @@ fn run_model_step(
     };
     if cancellation.is_cancelled() || stopping.load(Ordering::Acquire) {
         return Ok(None);
+    }
+    if fliuno_core::context_compaction_pending(&task) {
+        let mut span = scope.and_then(|scope| scope.begin(Operation::ContextCompaction));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            fliuno_core::execute_context_compaction(provider.as_ref(), &task, cancellation)
+        }))
+        .unwrap_or_else(|_| {
+            Err(ModelError::OutcomeUnknown(
+                "context summarizer panicked".into(),
+            ))
+        });
+        if let Some(span) = &mut span {
+            span.model_error(task.model_steps, result.as_ref().err());
+        }
+        return Ok(Some(ModelResponse::Compaction(task, result)));
     }
     let task_id = task.id.clone();
     let step = task.model_steps;
@@ -447,6 +540,7 @@ fn run_model_step(
             });
         }
     };
+    let mut span = scope.and_then(|scope| scope.begin(Operation::Model));
     let response = catch_unwind(AssertUnwindSafe(|| {
         provider.next_with_progress_classified(&task, &tools, cancellation, &mut emit_progress)
     }));
@@ -465,7 +559,10 @@ fn run_model_step(
             Err(ModelError::OutcomeUnknown("model provider panicked".into()))
         }
     };
-    Ok(Some((task, response)))
+    if let Some(span) = &mut span {
+        span.model(step, &response);
+    }
+    Ok(Some(ModelResponse::Generation(task, response)))
 }
 
 fn append_text_progress(
@@ -557,15 +654,46 @@ fn run_tool_step(
     if cancellation.is_cancelled() || stopping.load(Ordering::Acquire) {
         return Ok(None);
     }
-    let started = kernel
-        .lock()
-        .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?
-        .begin_tool_execution(&execution)?;
+    let ((started, ticket), scope) = {
+        let mut kernel = kernel
+            .lock()
+            .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?;
+        (
+            kernel.begin_scheduled_tool(&execution)?,
+            kernel.diagnostic_scope(execution.task_id()),
+        )
+    };
     if !started || cancellation.is_cancelled() || stopping.load(Ordering::Acquire) {
         return Ok(None);
     }
-    let response = execution.execute(cancellation);
-    Ok(Some((execution, response)))
+    let mut span = scope.and_then(|scope| scope.begin(Operation::Tool));
+    let response = Span::within(span.as_ref(), || match ticket {
+        Some(ticket) => execution.observe_supervisor(ticket, true, stopping),
+        None => Some(execution.execute(cancellation)),
+    });
+    if let (Some(span), Some(response)) = (&mut span, &response) {
+        span.tool(response, cancellation.is_cancelled());
+    }
+    Ok(response.map(|response| (execution, response)))
+}
+
+fn run_model_or_recover_tool(
+    kernel: &Arc<Mutex<Kernel>>,
+    id: &str,
+    cancellation: &CancellationToken,
+    stopping: &AtomicBool,
+) -> fliuno_core::Result<Option<ScheduledResponse>> {
+    let recovery = kernel
+        .lock()
+        .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?
+        .prepare_supervisor_observation(id)?;
+    if let Some((execution, ticket)) = recovery {
+        return Ok(execution
+            .observe_supervisor(ticket, false, stopping)
+            .map(|response| ScheduledResponse::Tool(Box::new((execution, response)))));
+    }
+    run_model_step(kernel, id, cancellation, stopping)
+        .map(|response| response.map(Box::new).map(ScheduledResponse::Model))
 }
 
 fn schedule_followup_model(
@@ -600,6 +728,25 @@ fn schedule_followup_model(
             TrySendError::Disconnected(_) => "task scheduler is unavailable",
         };
         kernel.fail_task(&task.id, message.into())?;
+    }
+    Ok(())
+}
+
+fn schedule_run_followups(
+    sender: &Sender<ScheduledTask>,
+    active: &ActiveTasks,
+    kernel: &mut Kernel,
+    tasks: Vec<Task>,
+) -> fliuno_core::Result<()> {
+    let mut pending = tasks;
+    let mut visited = HashSet::new();
+    while let Some(task) = pending.pop() {
+        let task_id = task.id.clone();
+        if !visited.insert(task_id.clone()) {
+            continue;
+        }
+        schedule_followup_model(sender, active, kernel, &task)?;
+        pending.extend(kernel.advance_runs_for_task(&task_id)?);
     }
     Ok(())
 }

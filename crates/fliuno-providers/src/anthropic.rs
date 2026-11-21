@@ -139,6 +139,7 @@ fn parse(response: Value) -> Result<ModelTurn, String> {
     Ok(ModelTurn {
         decision,
         usage: usage.report(),
+        preflight: None,
         replay: Some(ProviderReplay {
             provider: "anthropic".into(),
             data: Value::Array(content.clone()),
@@ -151,7 +152,41 @@ impl ModelProvider for AnthropicProvider {
         self.http.configured_budget()
     }
 
+    fn model_identity(&self) -> Option<(String, String)> {
+        Some(("anthropic".into(), self.model.clone()))
+    }
+
+    fn model_identity_source(&self) -> fliuno_protocol::ModelCapabilitiesSource {
+        fliuno_protocol::ModelCapabilitiesSource::ProviderMetadata
+    }
+
+    fn supported_input_types(&self) -> Vec<fliuno_protocol::ModelInputType> {
+        use fliuno_protocol::ModelInputType::{Image, Pdf, Text};
+        vec![Text, Image, Pdf]
+    }
+
+    fn set_calibrated_safety_margin(&self, provider: &str, model: &str, tokens: u32) {
+        if provider == "anthropic" && model == self.model {
+            self.http.calibrate_safety_margin(tokens);
+        }
+    }
+
+    fn observe_preflight(
+        &self,
+        preflight: &fliuno_protocol::ModelInputPreflight,
+        actual_input_tokens: u64,
+    ) {
+        if preflight.provider == "anthropic" && preflight.model == self.model {
+            self.http
+                .observe_preflight(preflight.estimated_input_tokens, actual_input_tokens);
+        }
+    }
+
     fn supports_progress(&self) -> bool {
+        true
+    }
+
+    fn supports_context_compaction(&self) -> bool {
         true
     }
 
@@ -178,8 +213,12 @@ impl ModelProvider for AnthropicProvider {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        let response = self.http.post(&body, cancellation)?;
-        parse(response).map_err(ModelError::OutcomeUnknown)
+        let (response, estimated_input_tokens) = self.http.post_observed(&body, cancellation)?;
+        let mut turn = parse(response).map_err(ModelError::OutcomeUnknown)?;
+        turn.preflight =
+            self.http
+                .preflight_report("anthropic", &self.model, estimated_input_tokens);
+        Ok(turn)
     }
 
     fn next_with_progress(
@@ -209,15 +248,20 @@ impl ModelProvider for AnthropicProvider {
                 return Err(ModelError::CancelledBeforeDispatch);
             }
             let mut stream = stream::Stream::default();
-            let json_response = self
-                .http
-                .post_stream(&body, cancellation, |event| stream.event(event, progress))?;
+            let (json_response, estimated_input_tokens) =
+                self.http
+                    .post_stream_observed(&body, cancellation, |event| {
+                        stream.event(event, progress)
+                    })?;
             let (response, usage) = match json_response {
                 Some(response) => (response, None),
                 None => stream.finish()?,
             };
             let mut turn = parse(response).map_err(ModelError::OutcomeUnknown)?;
             turn.usage = usage.or(turn.usage);
+            turn.preflight =
+                self.http
+                    .preflight_report("anthropic", &self.model, estimated_input_tokens);
             Ok(turn)
         })();
         match &result {

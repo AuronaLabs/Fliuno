@@ -325,6 +325,13 @@ impl LaunchSpec {
     }
 }
 
+/// Measurements from a launcher-owned process tree when the OS exposes them.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ProcessUsage {
+    pub cpu_ms: Option<u64>,
+    pub peak_memory_bytes: Option<u64>,
+}
+
 /// Owns the isolated process tree. Drop kills it before removing private storage.
 pub struct Child {
     pub stdin: Option<File>,
@@ -353,6 +360,17 @@ pub fn spawn(spec: &LaunchSpec) -> io::Result<Child> {
 }
 
 impl Child {
+    pub fn usage(&self) -> ProcessUsage {
+        #[cfg(any(windows, target_os = "linux"))]
+        {
+            self.inner.usage()
+        }
+        #[cfg(not(any(windows, target_os = "linux")))]
+        {
+            ProcessUsage::default()
+        }
+    }
+
     pub fn id(&self) -> u32 {
         #[cfg(windows)]
         {

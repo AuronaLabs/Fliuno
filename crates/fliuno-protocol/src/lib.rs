@@ -9,6 +9,8 @@ mod model_usage;
 pub use model_usage::*;
 mod schema;
 pub use schema::schema_bundle;
+mod run;
+pub use run::*;
 mod session;
 pub use session::*;
 mod task_cancel;
@@ -21,6 +23,7 @@ mod task_watermarks;
 mod terminal;
 mod work;
 mod workspace;
+mod workspace_memory;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -30,6 +33,7 @@ pub use task_watermarks::*;
 pub use terminal::*;
 pub use work::*;
 pub use workspace::*;
+pub use workspace_memory::*;
 
 pub const PROTOCOL_VERSION: &str = "0.1";
 /// Includes the line delimiter on the application stdio transport.
@@ -511,14 +515,22 @@ pub struct ArtifactGetParams {
     pub artifact_id: String,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelInputCountMode {
     JsonBytesEstimate,
     Provider,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelInputCountCoverage {
+    SerializedJsonBytes,
+    ProviderRequest,
+    ProviderProjection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelBudgetSource {
     Configured,
@@ -526,14 +538,70 @@ pub enum ModelBudgetSource {
 }
 
 /// Host configuration for each model request, independent of task history caps.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelBudget {
     pub window_tokens: u32,
-    pub max_input_tokens: u32,
+    pub max_input_tokens: Option<u32>,
+    pub max_input_bytes: Option<u32>,
     pub max_output_tokens: u32,
     pub count_mode: ModelInputCountMode,
+    pub count_coverage: ModelInputCountCoverage,
+    pub safety_margin_tokens: u32,
     pub source: ModelBudgetSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelInputType {
+    Text,
+    Image,
+    Pdf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCapabilitiesSource {
+    Configured,
+    ProviderMetadata,
+    ProviderAdapter,
+}
+
+/// Unified provider capabilities reported to the host at initialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelCapabilities {
+    pub provider: String,
+    pub model: String,
+    pub model_source: ModelCapabilitiesSource,
+    pub supported_input_types: Vec<ModelInputType>,
+    pub input_types_source: ModelCapabilitiesSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<ModelBudget>,
+    /// The kernel can summarize completed history after an input-budget rejection.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub automatic_context_compaction: bool,
+    /// Time this capability snapshot was assembled by the running kernel.
+    pub refreshed_at_ms: u64,
+}
+
+/// Token count performed immediately before dispatching one model request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelInputPreflight {
+    pub provider: String,
+    pub model: String,
+    pub count_coverage: ModelInputCountCoverage,
+    pub estimated_input_tokens: u64,
+    pub safety_margin_tokens: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPreflightUsageStatus {
+    Matched,
+    Missing,
+    ProviderMismatch,
 }
 
 /// Token counts reported by the provider for one model step.
@@ -617,9 +685,29 @@ pub enum EventKind {
     ModelStarted {
         step: u32,
     },
+    ContextCompactionScheduled {
+        rejected_step: u32,
+    },
+    ContextCompacted {
+        step: u32,
+        sources: Vec<ContextSummarySource>,
+    },
     ModelUsageReported {
         step: u32,
         usage: ModelUsage,
+    },
+    ModelPreflightObserved {
+        step: u32,
+        provider: String,
+        model: String,
+        count_coverage: ModelInputCountCoverage,
+        estimated_input_tokens: u64,
+        safety_margin_tokens: u32,
+        usage_status: ModelPreflightUsageStatus,
+        observed_input_tokens: Option<u64>,
+        usage_provider: Option<String>,
+        undercount_tokens: Option<u64>,
+        margin_exceeded: Option<bool>,
     },
     ApprovalRequested {
         approval: Approval,

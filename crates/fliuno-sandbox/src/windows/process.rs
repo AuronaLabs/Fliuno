@@ -11,7 +11,11 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT},
     System::{
-        JobObjects::TerminateJobObject,
+        JobObjects::{
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JobObjectBasicAccountingInformation, JobObjectExtendedLimitInformation,
+            QueryInformationJobObject, TerminateJobObject,
+        },
         Threading::{GetExitCodeProcess, WaitForSingleObject},
     },
 };
@@ -22,6 +26,43 @@ pub(crate) struct JobProcess {
     pub(super) pid: u32,
 }
 impl JobProcess {
+    pub(crate) fn usage(&self) -> crate::ProcessUsage {
+        let mut accounting = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        // SAFETY: Each information class has the matching initialized output
+        // buffer, the length is its exact size, and the Job handle is owned.
+        let (has_accounting, has_limits) = unsafe {
+            (
+                QueryInformationJobObject(
+                    self.job.as_raw_handle(),
+                    JobObjectBasicAccountingInformation,
+                    (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                    size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                ) != 0,
+                QueryInformationJobObject(
+                    self.job.as_raw_handle(),
+                    JobObjectExtendedLimitInformation,
+                    (&mut limits as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                ) != 0,
+            )
+        };
+        let cpu_ms = has_accounting
+            .then(|| {
+                let units = accounting
+                    .TotalKernelTime
+                    .saturating_add(accounting.TotalUserTime);
+                u64::try_from(units).ok().map(|units| units / 10_000)
+            })
+            .flatten();
+        crate::ProcessUsage {
+            cpu_ms,
+            peak_memory_bytes: has_limits.then_some(limits.PeakJobMemoryUsed as u64),
+        }
+    }
+
     pub(crate) fn id(&self) -> u32 {
         self.pid
     }

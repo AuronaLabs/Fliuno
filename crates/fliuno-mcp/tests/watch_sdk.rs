@@ -28,6 +28,11 @@ struct Peer {
     started: Arc<AtomicUsize>,
     closed: Arc<AtomicUsize>,
     listed: Arc<AtomicUsize>,
+    cache_catalog: bool,
+    legacy: bool,
+    resource_version: Arc<AtomicUsize>,
+    resource_reads: Arc<AtomicUsize>,
+    fail_read: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl ServerHandler for Peer {
@@ -46,7 +51,11 @@ impl ServerHandler for Peer {
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
-        Cow::Borrowed(&[ProtocolVersion::V_2026_07_28])
+        if self.legacy {
+            Cow::Borrowed(&[ProtocolVersion::V_2025_11_25])
+        } else {
+            Cow::Borrowed(&[ProtocolVersion::V_2026_07_28])
+        }
     }
 
     async fn discover(&self, _: RequestContext<RoleServer>) -> Result<DiscoverResult, ErrorData> {
@@ -62,7 +71,7 @@ impl ServerHandler for Peer {
         _: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
         let call = self.listed.fetch_add(1, Ordering::Relaxed);
-        let result = match (call, page.and_then(|params| params.cursor)) {
+        let mut result = match (call, page.and_then(|params| params.cursor)) {
             (0, None) => json!({"tools":[]}),
             (_, None) => {
                 json!({"tools":[{"name":"added_later","inputSchema":{"type":"object"}}],"nextCursor":"next"})
@@ -70,7 +79,55 @@ impl ServerHandler for Peer {
             (_, Some(cursor)) if cursor == "next" => json!({"tools":[]}),
             _ => return Err(ErrorData::invalid_params("unexpected page", None)),
         };
+        if self.cache_catalog {
+            result["ttlMs"] = json!(60_000);
+            result["cacheScope"] = json!("private");
+        }
         Ok(serde_json::from_value(result).unwrap())
+    }
+
+    async fn read_resource(
+        &self,
+        request: rmcp::model::ReadResourceRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ReadResourceResponse, ErrorData> {
+        self.resource_reads.fetch_add(1, Ordering::Relaxed);
+        if self.fail_read.load(Ordering::Relaxed) {
+            return Err(ErrorData::internal_error("fixture unavailable", None));
+        }
+        let version = self.resource_version.load(Ordering::Relaxed);
+        Ok(
+            serde_json::from_value::<rmcp::model::ReadResourceResult>(json!({
+                "contents":[{"uri":request.uri,"text":format!("PRIVATE_FIXTURE_{version}")}],
+                "ttlMs":60000,"cacheScope":"private"
+            }))
+            .unwrap()
+            .into(),
+        )
+    }
+
+    async fn subscribe(
+        &self,
+        request: rmcp::model::SubscribeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        assert!(self.legacy);
+        self.started.fetch_add(1, Ordering::Relaxed);
+        context
+            .peer
+            .notify_resource_updated(ResourceUpdatedNotificationParam::new(request.uri))
+            .await
+            .map_err(|_| ErrorData::internal_error("watch delivery failed", None))
+    }
+
+    async fn unsubscribe(
+        &self,
+        _: rmcp::model::UnsubscribeRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        assert!(self.legacy);
+        self.closed.fetch_add(1, Ordering::Relaxed);
+        Ok(())
     }
 
     fn accepted_subscription_filter(
@@ -118,14 +175,10 @@ impl ServerHandler for Peer {
     }
 }
 
-fn connect(
+fn start_peer(
     peer: &Peer,
     stop: &CancellationToken,
-) -> (
-    tokio::runtime::Runtime,
-    tokio::task::JoinHandle<()>,
-    Vec<Box<dyn Tool>>,
-) {
+) -> (tokio::runtime::Runtime, tokio::task::JoinHandle<()>, String) {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -137,7 +190,7 @@ fn connect(
             move || Ok(fixture.clone()),
             Default::default(),
             StreamableHttpServerConfig::default()
-                .with_legacy_session_mode(false)
+                .with_legacy_session_mode(peer.legacy)
                 .with_sse_keep_alive(None)
                 .with_cancellation_token(stop.child_token()),
         );
@@ -152,6 +205,18 @@ fn connect(
         });
         (url, server)
     });
+    (runtime, server, url)
+}
+
+fn connect(
+    peer: &Peer,
+    stop: &CancellationToken,
+) -> (
+    tokio::runtime::Runtime,
+    tokio::task::JoinHandle<()>,
+    Vec<Box<dyn Tool>>,
+) {
+    let (runtime, server, url) = start_peer(peer, stop);
     let tools = fliuno_mcp::connect_server(
         serde_json::from_value(json!({
             "id":"sdk","transport":"streamable_http","url":url,"timeoutMs":3000
@@ -350,6 +415,46 @@ fn catalog_watches_observe_one_advertised_list_and_release_the_stream() {
 }
 
 #[test]
+fn tools_change_notification_invalidates_cached_catalog_without_reregistering_tools() {
+    let peer = Peer {
+        cache_catalog: true,
+        ..Peer::default()
+    };
+    let stop = CancellationToken::new();
+    let (runtime, server, tools) = connect(&peer, &stop);
+    let tool = |name| {
+        tools
+            .iter()
+            .find(|tool| tool.spec().name == name)
+            .unwrap()
+            .as_ref()
+    };
+    let cancel = CancellationToken::new();
+    let catalog = tool("mcp_sdk_tools_list");
+    let before = call_watch(catalog, json!({}), &cancel).unwrap();
+    assert_eq!(before.output["result"]["tools"], json!([]));
+    assert_eq!(peer.listed.load(Ordering::Relaxed), 1);
+    let watch = tool("mcp_sdk_tools_watch_list");
+    assert_eq!(
+        call_watch(watch, json!({"waitMs":500}), &cancel)
+            .unwrap()
+            .output["result"]["status"],
+        "updated"
+    );
+    let after = call_watch(catalog, json!({}), &cancel).unwrap();
+    assert_eq!(after.output["result"]["tools"][0]["name"], "added_later");
+    assert_eq!(peer.listed.load(Ordering::Relaxed), 2);
+    assert!(
+        tools
+            .iter()
+            .all(|tool| !tool.spec().name.contains("added_later"))
+    );
+    drop(tools);
+    stop.cancel();
+    runtime.block_on(server).unwrap();
+}
+
+#[test]
 fn remote_tool_pages_are_data_and_leave_startup_registrations_unchanged() {
     let peer = Peer::default();
     let stop = CancellationToken::new();
@@ -377,4 +482,140 @@ fn remote_tool_pages_are_data_and_leave_startup_registrations_unchanged() {
     drop(tools);
     stop.cancel();
     runtime.block_on(server).unwrap();
+}
+
+#[test]
+fn a_durable_watch_reconciles_after_disconnect_and_isolates_session_baselines() {
+    for legacy in [false, true] {
+        assert_durable_reconciliation(legacy);
+    }
+}
+
+fn assert_durable_reconciliation(legacy: bool) {
+    use fliuno_core::{Kernel, ModelDecision, ModelProvider, ModelTurn, ToolSpec};
+    use fliuno_protocol::{ApprovalDecision, Message, Task, TaskStatus};
+
+    struct Provider;
+    impl ModelProvider for Provider {
+        fn next(
+            &self,
+            task: &Task,
+            _: &[ToolSpec],
+            _: &CancellationToken,
+        ) -> Result<ModelTurn, String> {
+            Ok(if task
+                .messages
+                .iter()
+                .any(|m| matches!(m, Message::ToolResult { .. }))
+            {
+                ModelDecision::Complete("observed".into())
+            } else {
+                ModelDecision::Call(ToolCall {
+                    id: format!("watch_{}", task.id),
+                    name: "mcp_sdk_resources_watch_reconcile".into(),
+                    arguments: json!({"uri":"fixture:changed","waitMs":200}),
+                })
+            }
+            .into())
+        }
+    }
+
+    let peer = Peer {
+        legacy,
+        ..Peer::default()
+    };
+    let stop = CancellationToken::new();
+    let (runtime, server, url) = start_peer(&peer, &stop);
+    let dir = std::env::temp_dir().join(format!("fliuno-watch-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir(&dir).unwrap();
+    let db = dir.join("kernel.db");
+    let open = || {
+        let mut kernel = Kernel::open(&db, Box::new(Provider)).unwrap();
+        let config = serde_json::from_value(json!({"servers":[{
+            "id":"sdk","transport":"streamable_http","url":url,"timeoutMs":3000,
+            "lifecycle": if legacy { "legacy" } else { "discover" },
+        }]}))
+        .unwrap();
+        fliuno_mcp::register_config(&mut kernel, config).unwrap();
+        kernel
+    };
+    let approve = |kernel: &mut Kernel, session_id: &str, decision, expected_reads| {
+        let task = kernel.start_task(session_id, "observe resource").unwrap();
+        assert_eq!(peer.resource_reads.load(Ordering::Relaxed), expected_reads);
+        kernel
+            .respond_approval(
+                &task.id,
+                &task.pending_approval.as_ref().unwrap().id,
+                decision,
+            )
+            .unwrap()
+    };
+    fn result(task: &Task, status: &str, disconnected: bool) {
+        assert_eq!(task.status, TaskStatus::Completed);
+        let output = task
+            .messages
+            .iter()
+            .find_map(|m| match m {
+                Message::ToolResult { output, .. } => Some(output),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            output["result"],
+            json!({"uri":"fixture:changed","status":status,"disconnected":disconnected})
+        );
+        assert!(!output.to_string().contains("PRIVATE_FIXTURE_"));
+    }
+
+    let mut kernel = open();
+    let workspace = kernel.open_workspace(dir.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let other = kernel.create_session(&workspace.id).unwrap();
+    assert_eq!(
+        approve(&mut kernel, &session.id, ApprovalDecision::Deny, 0).status,
+        TaskStatus::Failed
+    );
+    assert_eq!(peer.started.load(Ordering::Relaxed), 0);
+    result(
+        &approve(&mut kernel, &session.id, ApprovalDecision::AllowOnce, 0),
+        "unchanged",
+        false,
+    );
+    assert_eq!(peer.resource_reads.load(Ordering::Relaxed), 2);
+    peer.fail_read.store(true, Ordering::Relaxed);
+    assert_eq!(
+        approve(&mut kernel, &session.id, ApprovalDecision::AllowOnce, 2).status,
+        TaskStatus::Interrupted
+    );
+    assert_eq!(peer.resource_reads.load(Ordering::Relaxed), 3);
+    drop(kernel);
+
+    peer.resource_version.store(1, Ordering::Relaxed);
+    peer.fail_read.store(false, Ordering::Relaxed);
+    let mut kernel = open();
+    result(
+        &approve(&mut kernel, &other.id, ApprovalDecision::AllowOnce, 3),
+        "unchanged",
+        false,
+    );
+    assert_eq!(peer.resource_reads.load(Ordering::Relaxed), 5);
+    result(
+        &approve(&mut kernel, &session.id, ApprovalDecision::AllowOnce, 5),
+        "changed",
+        true,
+    );
+    assert_eq!(peer.resource_reads.load(Ordering::Relaxed), 6);
+    result(
+        &approve(&mut kernel, &session.id, ApprovalDecision::AllowOnce, 6),
+        "unchanged",
+        false,
+    );
+    assert_eq!(peer.resource_reads.load(Ordering::Relaxed), 8);
+    wait_for(&peer.closed, 5);
+    drop(kernel);
+    stop.cancel();
+    runtime.block_on(server).unwrap();
+    std::fs::remove_file(&db).unwrap();
+    std::fs::remove_file(dir.join("kernel.db.lock")).unwrap();
+    std::fs::remove_dir(dir).unwrap();
 }

@@ -37,6 +37,25 @@ pub struct PreparedToolExecution {
 }
 
 impl PreparedToolExecution {
+    /// A launch receives the bootstrap capability exactly once. Reattachment
+    /// uses the same receipt and has no route back to the launcher.
+    pub fn observe_supervisor(
+        &self,
+        ticket: crate::SupervisorTicket,
+        launch: bool,
+        stopping: &std::sync::atomic::AtomicBool,
+    ) -> Option<std::result::Result<ToolOutput, ToolError>> {
+        if launch {
+            let started = catch_unwind(AssertUnwindSafe(|| self.tool.launch_supervisor(&ticket)));
+            if !matches!(started, Ok(Ok(()))) {
+                // The worker may have received all bootstrap bytes. The phase
+                // and expiry still decide the outcome, not the I/O error.
+                eprintln!("fliuno: supervisor bootstrap did not complete cleanly");
+            }
+        }
+        ticket.observe(stopping)
+    }
+
     pub(crate) fn for_agent(
         task_id: String,
         session_id: String,
@@ -111,12 +130,23 @@ impl Kernel {
         decision: ApprovalDecision,
     ) -> Result<ApprovalOutcome> {
         let task = self.get_task(task_id)?;
-        match task.backend {
+        let mut span = self
+            .diagnostic_scope(task_id)
+            .and_then(|scope| scope.begin(crate::diagnostics::Operation::Approval));
+        let outcome = match task.backend {
             TaskBackend::Model => self.prepare_model_approval(task, approval_id, decision, None),
             TaskBackend::ExternalAgent { .. } => self
                 .respond_agent_approval_for_task(task, approval_id, decision)
                 .map(ApprovalOutcome::Finished),
+        };
+        if let Some(span) = &mut span {
+            span.finish(match (&outcome, decision) {
+                (Ok(_), ApprovalDecision::AllowOnce) => crate::diagnostics::Outcome::Completed,
+                (Ok(_), _) => crate::diagnostics::Outcome::Rejected,
+                (Err(_), _) => crate::diagnostics::Outcome::Failed,
+            });
         }
+        outcome
     }
 
     /// Resolve a model approval and persist an execution identity before returning
@@ -138,6 +168,8 @@ impl Kernel {
         decision: ApprovalDecision,
         resume: Option<&ApprovalResumeParams>,
     ) -> Result<ApprovalOutcome> {
+        self.require_run_child_before_deadline(&task.id)?;
+        self.require_run_child_authority(&task.id)?;
         let task_id = task.id.as_str();
         if task.status != TaskStatus::WaitingApproval {
             return Err(Error::Conflict("task is not waiting for approval".into()));
@@ -197,6 +229,22 @@ impl Kernel {
 
     /// Recheck the task and policy immediately before any tool side effect.
     pub fn begin_tool_execution(&mut self, execution: &PreparedToolExecution) -> Result<bool> {
+        self.begin_tool_dispatch(execution, false)
+            .map(|(started, _)| started)
+    }
+
+    pub fn begin_scheduled_tool(
+        &mut self,
+        execution: &PreparedToolExecution,
+    ) -> Result<(bool, Option<crate::SupervisorTicket>)> {
+        self.begin_tool_dispatch(execution, true)
+    }
+
+    fn begin_tool_dispatch(
+        &mut self,
+        execution: &PreparedToolExecution,
+        allow_supervision: bool,
+    ) -> Result<(bool, Option<crate::SupervisorTicket>)> {
         let mut task = self.get_task(&execution.task_id)?;
         if task.status != TaskStatus::Running
             || !task
@@ -204,14 +252,30 @@ impl Kernel {
                 .as_ref()
                 .is_some_and(|call| same_call(call, &execution.call))
         {
-            return Ok(false);
+            return Ok((false, None));
         }
+        self.require_run_child_before_deadline(&task.id)?;
+        self.require_run_child_authority(&task.id)?;
         if let PolicyDecision::Deny(message) = self
             .policy
             .evaluate(&execution.tool.spec(), &execution.call)
         {
             self.fail(task, message)?;
-            return Ok(false);
+            return Ok((false, None));
+        }
+        if allow_supervision
+            && execution.continuation.is_none()
+            && self.db.path().is_some_and(|path| !path.is_empty())
+            && execution.tool.supports_supervision()
+            && self.owning_run(&task.id)?.is_some()
+        {
+            let ticket = self.commit_supervisor_start(
+                &task,
+                &execution.workspace,
+                &execution.call,
+                &execution.tool.authority(),
+            )?;
+            return Ok((true, Some(ticket)));
         }
         self.commit(
             &task,
@@ -221,7 +285,39 @@ impl Kernel {
             &[],
         )?;
         task.in_flight_tool = Some(execution.call.clone());
-        Ok(true)
+        Ok((true, None))
+    }
+
+    pub fn prepare_supervisor_observation(
+        &mut self,
+        task_id: &str,
+    ) -> Result<Option<(PreparedToolExecution, crate::SupervisorTicket)>> {
+        let task = self.get_task(task_id)?;
+        if !self.has_supervised_tool(&task)? {
+            return Ok(None);
+        }
+        let call = task
+            .in_flight_tool
+            .clone()
+            .expect("supervised task has a call");
+        let workspace = self.workspace_for_task(task_id)?;
+        if self.require_run_child_authority(task_id).is_ok()
+            && let Some(tool) = self.tools.get(&call.name).cloned()
+            && tool.supports_supervision()
+            && !matches!(
+                self.policy.evaluate(&tool.spec(), &call),
+                PolicyDecision::Deny(_)
+            )
+            && let Some(ticket) =
+                self.supervised_ticket(&task, &workspace, &call, &tool.authority())?
+        {
+            return Ok(Some((
+                PreparedToolExecution::for_agent(task.id, task.session_id, call, workspace, tool),
+                ticket,
+            )));
+        }
+        self.interrupt_supervised_tool(&task, "supervisor authority could not be revalidated")?;
+        Ok(None)
     }
 
     /// Validate a user response and prepare the same approved tool call for continuation.
@@ -248,6 +344,8 @@ impl Kernel {
                 "tool input request ID was already used with a different response".into(),
             ));
         }
+        self.require_run_child_before_deadline(&task.id)?;
+        self.require_run_child_authority(&task.id)?;
         if task.status != TaskStatus::WaitingInput
             || task.pending_tool_input.as_ref().is_none_or(|pending| {
                 pending.call_id != request.call_id || pending.round != saved.round

@@ -118,6 +118,8 @@ impl Kernel {
     }
 
     fn transition_to_resumed(&mut self, mut task: Task, consent: bool) -> Result<Task> {
+        self.require_run_child_before_deadline(&task.id)?;
+        self.require_run_child_authority(&task.id)?;
         let reason = match self.resume_disposition(&ResumeFacts::from(&task)) {
             Disposition::Ready => None,
             Disposition::RetryUncertainModelStep if consent => None,

@@ -28,15 +28,28 @@ impl GeminiProvider {
             "api-revision",
             reqwest::header::HeaderValue::from_static("2026-05-20"),
         );
+        let http = Http::new(base, "interactions", "interactions", &[], headers)?
+            .with_count_model_route(model)?
+            .with_count_tokens_field("totalTokens");
         Ok(Self {
-            http: Http::new(base, "interactions", "interactions", &[], headers)?,
+            http,
             model: model.into(),
         })
     }
 
-    pub fn with_context_budget(mut self, budget: ModelContextBudget) -> Result<Self, String> {
+    pub fn with_context_budget(mut self, mut budget: ModelContextBudget) -> Result<Self, String> {
         if budget.provider_count {
-            return Err("Gemini Interactions does not support preflight provider token counting; use local context estimation".into());
+            if budget.input_allowance < 2 {
+                return Err(
+                    "Gemini provider token counting needs at least two input tokens for its safety margin".into(),
+                );
+            }
+            let margin = budget
+                .input_allowance
+                .div_ceil(20)
+                .clamp(8, 256)
+                .min(budget.input_allowance / 2);
+            budget = budget.with_provider_projection(margin);
         }
         self.http = self.http.with_context_budget(budget);
         Ok(self)
@@ -71,18 +84,213 @@ impl GeminiProvider {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        let (response, usage) = if streaming {
+        let count_body = self
+            .http
+            .uses_provider_count()
+            .then(|| count_tokens_request(&self.model, &body))
+            .transpose()
+            .map_err(ModelError::NotDispatched)?;
+        let (response, usage, estimated_input_tokens) = if streaming {
             let mut stream = InteractionStream::default();
-            self.http
-                .post_stream(&body, cancellation, |event| stream.event(event, progress))?
-                .map_or_else(|| stream.finish(), |response| Ok((response, None)))?
+            let (response, estimated) = if let Some(count_body) = &count_body {
+                self.http.post_stream_with_count_observed(
+                    &body,
+                    count_body,
+                    cancellation,
+                    |event| stream.event(event, progress),
+                )?
+            } else {
+                self.http
+                    .post_stream_observed(&body, cancellation, |event| {
+                        stream.event(event, progress)
+                    })?
+            };
+            let (response, usage) = match response {
+                Some(response) => (response, None),
+                None => stream.finish()?,
+            };
+            (response, usage, estimated)
         } else {
-            (self.http.post(&body, cancellation)?, None)
+            let (response, estimated) = if let Some(count_body) = &count_body {
+                self.http
+                    .post_with_count_observed(&body, count_body, cancellation)?
+            } else {
+                self.http.post_observed(&body, cancellation)?
+            };
+            (response, None, estimated)
         };
         let mut turn = parse(response).map_err(ModelError::OutcomeUnknown)?;
         turn.usage = usage.or(turn.usage);
+        turn.preflight = self
+            .http
+            .preflight_report("gemini", &self.model, estimated_input_tokens);
         Ok(turn)
     }
+}
+
+fn count_tokens_request(model: &str, interaction: &Value) -> Result<Value, String> {
+    let model = model.strip_prefix("models/").unwrap_or(model);
+    let input = interaction["input"]
+        .as_array()
+        .ok_or("Gemini Interactions input cannot be projected for token counting")?;
+    let mut contents = Vec::new();
+    let mut model_parts = Vec::new();
+    let mut pending_signature = None;
+    for item in input {
+        match item["type"].as_str() {
+            Some("user_input") => {
+                flush_model_content(&mut contents, &mut model_parts);
+                let parts = item["content"]
+                    .as_array()
+                    .ok_or("Gemini user input cannot be projected for token counting")?
+                    .iter()
+                    .map(|part| match part["type"].as_str() {
+                        Some("text") => Ok(json!({"text":part["text"]})),
+                        Some("image" | "document") => Ok(json!({
+                            "inlineData": {
+                                "mimeType": part["mime_type"],
+                                "data": part["data"]
+                            }
+                        })),
+                        _ => Err("Gemini user content cannot be projected for token counting"),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                push_count_content(&mut contents, "user", parts);
+            }
+            Some("function_result") => {
+                flush_model_content(&mut contents, &mut model_parts);
+                let result = item["result"]
+                    .as_array()
+                    .ok_or("Gemini function result cannot be projected for token counting")?;
+                let mut text = String::new();
+                for block in result {
+                    if block["type"] != "text" {
+                        return Err(
+                            "Gemini function result content cannot be projected for token counting"
+                                .into(),
+                        );
+                    }
+                    text.push_str(
+                        block["text"]
+                            .as_str()
+                            .ok_or("Gemini function result text is invalid")?,
+                    );
+                }
+                push_count_content(
+                    &mut contents,
+                    "user",
+                    vec![json!({"functionResponse": {
+                        "id":item["call_id"],
+                        "name":item["name"],
+                        "response":{"result":text}
+                    }})],
+                );
+            }
+            Some("model_output") => {
+                for block in item["content"]
+                    .as_array()
+                    .ok_or("Gemini model output cannot be projected for token counting")?
+                {
+                    if block["type"] != "text" {
+                        return Err(
+                            "Gemini model output content cannot be projected for token counting"
+                                .into(),
+                        );
+                    }
+                    let mut part = json!({"text":block["text"]});
+                    if let Some(signature) = pending_signature.take() {
+                        part["thoughtSignature"] = signature;
+                    }
+                    model_parts.push(part);
+                }
+            }
+            Some("thought") => {
+                if let Some(summary) = item.get("summary").and_then(Value::as_array) {
+                    for block in summary {
+                        if block["type"] != "text" {
+                            return Err(
+                                "Gemini thought summary cannot be projected for token counting"
+                                    .into(),
+                            );
+                        }
+                        model_parts.push(json!({"text":block["text"]}));
+                    }
+                }
+                if let Some(signature) = item.get("signature")
+                    && pending_signature.replace(signature.clone()).is_some()
+                {
+                    return Err(
+                        "multiple Gemini thought signatures cannot be projected for token counting"
+                            .into(),
+                    );
+                }
+            }
+            Some("function_call") => {
+                let mut part = json!({"functionCall": {
+                    "id":item["id"],
+                    "name":item["name"],
+                    "args":item["arguments"]
+                }});
+                if let Some(signature) = pending_signature.take() {
+                    part["thoughtSignature"] = signature;
+                }
+                model_parts.push(part);
+                flush_model_content(&mut contents, &mut model_parts);
+            }
+            _ => {
+                return Err(
+                    "Gemini Interactions input contains an unsupported token-count projection"
+                        .into(),
+                );
+            }
+        }
+    }
+    if pending_signature.is_some() {
+        return Err("Gemini thought signature has no countable continuation".into());
+    }
+    flush_model_content(&mut contents, &mut model_parts);
+
+    let declarations = interaction["tools"]
+        .as_array()
+        .ok_or("Gemini tools cannot be projected for token counting")?
+        .iter()
+        .map(|tool| {
+            if tool["type"] != "function" {
+                return Err("Gemini tool type cannot be projected for token counting");
+            }
+            Ok(json!({
+                "name":tool["name"],
+                "description":tool["description"],
+                "parameters":tool["parameters"]
+            }))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut generate_content = json!({
+        "model":format!("models/{model}"),
+        "contents":contents,
+        "systemInstruction":{"parts":[{"text":interaction["system_instruction"]}]}
+    });
+    if !declarations.is_empty() {
+        generate_content["tools"] = json!([{"functionDeclarations":declarations}]);
+    }
+    Ok(json!({"generateContentRequest":generate_content}))
+}
+
+fn push_count_content(contents: &mut Vec<Value>, role: &str, parts: Vec<Value>) {
+    if parts.is_empty() {
+        return;
+    }
+    if let Some(last) = contents.last_mut()
+        && last["role"] == role
+    {
+        last["parts"].as_array_mut().unwrap().extend(parts);
+        return;
+    }
+    contents.push(json!({"role":role,"parts":parts}));
+}
+
+fn flush_model_content(contents: &mut Vec<Value>, parts: &mut Vec<Value>) {
+    push_count_content(contents, "model", std::mem::take(parts));
 }
 
 fn request(model: &str, task: &Task, tools: &[ToolSpec], streaming: bool) -> Result<Value, String> {
@@ -220,6 +428,7 @@ fn parse(mut response: Value) -> Result<ModelTurn, String> {
     Ok(ModelTurn {
         decision,
         usage: model_usage(&response["usage"]),
+        preflight: None,
         replay: Some(ProviderReplay {
             provider: "gemini".into(),
             data: Value::Array(steps),
@@ -390,7 +599,37 @@ impl ModelProvider for GeminiProvider {
         self.http.configured_budget()
     }
 
+    fn model_identity(&self) -> Option<(String, String)> {
+        Some(("gemini".into(), self.model.clone()))
+    }
+
+    fn supported_input_types(&self) -> Vec<fliuno_protocol::ModelInputType> {
+        use fliuno_protocol::ModelInputType::{Image, Pdf, Text};
+        vec![Text, Image, Pdf]
+    }
+
+    fn set_calibrated_safety_margin(&self, provider: &str, model: &str, tokens: u32) {
+        if provider == "gemini" && model == self.model {
+            self.http.calibrate_safety_margin(tokens);
+        }
+    }
+
+    fn observe_preflight(
+        &self,
+        preflight: &fliuno_protocol::ModelInputPreflight,
+        actual_input_tokens: u64,
+    ) {
+        if preflight.provider == "gemini" && preflight.model == self.model {
+            self.http
+                .observe_preflight(preflight.estimated_input_tokens, actual_input_tokens);
+        }
+    }
+
     fn supports_progress(&self) -> bool {
+        true
+    }
+
+    fn supports_context_compaction(&self) -> bool {
         true
     }
 
@@ -446,6 +685,62 @@ impl ModelProvider for GeminiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn token_count_projection_maps_interaction_history_and_tools() {
+        let interaction = json!({
+            "system_instruction":"Work safely",
+            "input":[
+                {"type":"user_input","content":[{"type":"text","text":"Make a report"}]},
+                {"type":"thought","signature":"signed","summary":[{"type":"text","text":"Plan"}]},
+                {"type":"function_call","id":"call-1","name":"artifact_create","arguments":{"title":"Report"}},
+                {"type":"function_result","call_id":"call-1","name":"artifact_create","result":[{"type":"text","text":"{\"ok\":true}"}]},
+                {"type":"model_output","content":[{"type":"text","text":"Done"}]}
+            ],
+            "tools":[{"type":"function","name":"artifact_create","description":"Create an artifact","parameters":{"type":"object"}}]
+        });
+        let projected = count_tokens_request("fixture-model", &interaction).unwrap();
+        let request = &projected["generateContentRequest"];
+        assert_eq!(request["model"], "models/fixture-model");
+        assert_eq!(
+            request["systemInstruction"]["parts"][0]["text"],
+            "Work safely"
+        );
+        assert_eq!(request["contents"][0]["role"], "user");
+        assert_eq!(request["contents"][1]["role"], "model");
+        assert_eq!(request["contents"][1]["parts"][0]["text"], "Plan");
+        assert_eq!(
+            request["contents"][1]["parts"][1]["thoughtSignature"],
+            "signed"
+        );
+        assert_eq!(
+            request["contents"][1]["parts"][1]["functionCall"]["id"],
+            "call-1"
+        );
+        assert_eq!(
+            request["contents"][2]["parts"][0]["functionResponse"]["name"],
+            "artifact_create"
+        );
+        assert_eq!(request["contents"][3]["parts"][0]["text"], "Done");
+        assert_eq!(
+            request["tools"][0]["functionDeclarations"][0]["name"],
+            "artifact_create"
+        );
+    }
+
+    #[test]
+    fn token_count_projection_rejects_unknown_interaction_parts() {
+        let interaction = json!({
+            "system_instruction":"Work safely",
+            "input":[{"type":"user_input","content":[{"type":"audio","data":"opaque"}]}],
+            "tools":[]
+        });
+        assert!(
+            count_tokens_request("fixture-model", &interaction)
+                .unwrap_err()
+                .contains("cannot be projected")
+        );
+    }
 
     #[test]
     fn function_call_replay_excludes_duplicate_input_and_retains_model_steps() {

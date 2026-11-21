@@ -12,15 +12,18 @@ impl RpcServer {
         params: ToolInputRespondParams,
     ) -> Result<Task, RpcError> {
         let outcome = self.kernel()?.prepare_tool_input_response(&params)?;
-        match outcome {
-            ToolInputOutcome::Duplicate(task) => Ok(task),
+        let task = match outcome {
+            ToolInputOutcome::Duplicate(task) => task,
             ToolInputOutcome::Prepared { task, execution } => {
                 match self.scheduler.schedule_tool(execution) {
-                    Ok(()) => Ok(task),
-                    Err(message) => Ok(self.kernel()?.fail_task(&task.id, message.into())?),
+                    Ok(()) => task,
+                    Err(message) => self.kernel()?.fail_task(&task.id, message.into())?,
                 }
             }
-        }
+        };
+        let followups = self.kernel()?.advance_runs_for_task(&task.id)?;
+        self.schedule_run_tasks(followups)?;
+        Ok(task)
     }
 
     pub(super) fn cancel_approval_run(
@@ -103,14 +106,17 @@ impl RpcServer {
     }
 
     fn schedule_approval(&self, outcome: ApprovalOutcome) -> Result<Task, RpcError> {
-        match outcome {
-            ApprovalOutcome::Finished(task) => Ok(task),
+        let task = match outcome {
+            ApprovalOutcome::Finished(task) => task,
             ApprovalOutcome::Prepared { task, execution } => {
                 match self.scheduler.schedule_tool(execution) {
-                    Ok(()) => Ok(task),
-                    Err(message) => Ok(self.kernel()?.fail_task(&task.id, message.into())?),
+                    Ok(()) => task,
+                    Err(message) => self.kernel()?.fail_task(&task.id, message.into())?,
                 }
             }
-        }
+        };
+        let followups = self.kernel()?.advance_runs_for_task(&task.id)?;
+        self.schedule_run_tasks(followups)?;
+        Ok(task)
     }
 }

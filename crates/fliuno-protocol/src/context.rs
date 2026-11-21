@@ -1,6 +1,6 @@
 //! Frozen, provider-neutral records of earlier completed work. These values
 //! describe past effects; they never carry permissions or executable requests.
-use crate::{AgentHostTool, TaskBackend, ToolCall};
+use crate::{AgentHostTool, ModelBudget, ModelInputPreflight, ModelUsage, TaskBackend, ToolCall};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -149,6 +149,41 @@ pub struct ContextTurn {
     pub host_tools: Vec<AgentHostTool>,
 }
 
+/// Workspace knowledge frozen into a task as untrusted reference data.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextMemory {
+    pub id: String,
+    pub key: String,
+    pub content: String,
+    pub revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_task_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextSummarySource {
+    pub task_id: String,
+    pub completion_sequence: u64,
+}
+
+/// An untrusted projection of completed task records, not executable history.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextSummary {
+    pub text: String,
+    pub sources: Vec<ContextSummarySource>,
+    pub prompt_version: u32,
+    pub provider: String,
+    pub model: String,
+    pub budget: ModelBudget,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preflight: Option<ModelInputPreflight>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<ModelUsage>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskContext {
@@ -157,6 +192,14 @@ pub struct TaskContext {
     pub through_sequence: u64,
     pub turns: Vec<ContextTurn>,
     pub omitted_turns: u64,
+    /// Bounded workspace memories selected at task creation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub memories: Vec<ContextMemory>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub summaries: Vec<ContextSummary>,
+    /// A confirmed input-budget rejection scheduled a separate model attempt.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub compaction_pending: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

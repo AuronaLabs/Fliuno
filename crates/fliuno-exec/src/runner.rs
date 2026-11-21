@@ -6,7 +6,10 @@ mod input;
 mod process;
 use crate::{Arguments, CapturedOutput, Program, capture::Capture, config::ProcessIsolation};
 pub use evidence::{ProcessEvidence, ProcessFault, ProcessOperation, ProcessStopCause};
-use fliuno_core::{CancellationToken, ToolContext, ToolError};
+use fliuno_core::{
+    CancellationToken, ToolContext, ToolError,
+    diagnostics::{Operation, Outcome, Scope},
+};
 use process::{Process, ProcessControl};
 use serde::Serialize;
 use std::{io, time::Duration};
@@ -43,11 +46,37 @@ pub(crate) async fn run(
     args: Arguments,
     cancellation: &CancellationToken,
 ) -> Result<ProcessReport, ToolError> {
+    let mut span = Scope::current().and_then(|scope| scope.begin(Operation::Process));
     let started = tokio::time::Instant::now();
     let timeout = args.timeout_ms.unwrap_or(program.config.timeout_ms);
     let deadline = started + Duration::from_millis(timeout);
-    let process = Process::spawn(program, context, &args).await?;
-    drive(program, args, cancellation, process, started, deadline).await
+    let mut process = match Process::spawn(program, context, &args).await {
+        Ok(process) => process,
+        Err(error) => {
+            if let Some(span) = &mut span {
+                span.finish(if cancellation.is_cancelled() {
+                    Outcome::Cancelled
+                } else {
+                    Outcome::Failed
+                });
+            }
+            return Err(error);
+        }
+    };
+    let result = drive(program, args, cancellation, &mut process, started, deadline).await;
+    if let Some(span) = &mut span {
+        let usage = process.usage();
+        span.resources(usage.cpu_ms, usage.peak_memory_bytes);
+        match &result {
+            Ok(report) => span.finish(match report.termination {
+                Termination::Cancelled => Outcome::Cancelled,
+                Termination::Exited if report.success => Outcome::Completed,
+                _ => Outcome::Failed,
+            }),
+            Err(_) => span.tool(&result, cancellation.is_cancelled()),
+        }
+    }
+    result
 }
 
 async fn drive(

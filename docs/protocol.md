@@ -7,7 +7,8 @@
 | 要实现什么 | 查阅 |
 | --- | --- |
 | **建立连接** | [启动服务](setup.md#再启动自己的服务) · [stdio 传输](#传输) · [Rust 调用方](#rust-调用方) · [AG-UI HTTP / SSE](ag-ui.md#http-接入) |
-| **提交并交付** | [创建任务与重试](#任务提交与重试) · [固定上下文预览范围](context.md#提交任务时固定预览范围) · [审批与决定](#审批收件箱与决定) · [读取交付物](#审批事件与产物) · [复用交付物](#将交付物用作任务输入) |
+| **提交并交付** | [创建任务与重试](#任务提交与重试) · [持久 Run DAG](#持久-run-dag) · [固定上下文预览范围](context.md#提交任务时固定预览范围) · [审批与决定](#审批收件箱与决定) · [读取交付物](#审批事件与产物) · [复用交付物](#将交付物用作任务输入) |
+| **工作区记忆** | [记忆接口与访问审计](#工作区长期记忆) · [任务上下文中的记忆](memory.md) |
 | **同步工作台** | [首屏与订阅](#工作台实时订阅) · [会话任务计数](#批量读取会话任务计数) · [合并摘要修订](#按窗口合并摘要修订) |
 | **恢复与历史** | [批量找回已提交任务](#按请求键批查任务) · [判断能否恢复](#任务恢复判断) · [批量查询恢复状态](#批量查询恢复状态) · [查找历史任务](#查找历史任务) |
 | **排查调用失败** | [错误码](#错误) · [内置工具与作用域](#内置工具与作用域) |
@@ -18,7 +19,7 @@
 - **任务与工作台**：[工作区、会话与任务](#工作区会话与任务) · [会话目录](#会话目录) · [任务目录](#任务目录) · [任务提交与重试](#任务提交与重试) · [模型尝试次数](#模型尝试次数) · [工作台快照](#工作台快照) · [实时订阅](#工作台实时订阅) · [待审批快照](#待审批快照) · [批量取消任务](#批量取消任务)
 - **恢复与查询**：[变动摘要](#任务变动摘要) · [摘要修订](#任务摘要修订回放) · [轻量回放](#任务变动回放) · [批量读取任务摘要](#批量读取任务摘要) · [搜索历史](#查找历史任务) · [模型用量](#模型用量)
 - **事件与交付物**：[审批、事件与产物](#审批事件与产物) · [交付物目录订阅](#交付物目录订阅) · [批量校验摘要](#批量读取交付物摘要)
-- **工具与宿主**：[工具、Agent 与终端](#工具agent-与终端) · [A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
+- **编排与工具**：[持久 Run DAG](#持久-run-dag) · [工具、Agent 与终端](#工具agent-与终端) · [A2A](#a2a-远程-agent-配置) · [MCP](#mcp-主机配置) · [内置工具](#内置工具与作用域)
 
 </details>
 
@@ -31,6 +32,21 @@
 `capabilities.registrationAuthority:true` 表示工具审批以 `Approval.authority`、外部 Agent 任务以 `Task.backendAuthority` 绑定具体注册摘要；配置变化或旧记录缺少摘要时拒绝执行，需要新建任务。摘要由宿主生成，客户端不得以传入摘要的方式选择或刷新授权，详见[注册身份与 v8 迁移](authority.md)。
 
 宿主命令行指定的 MCP/ACP/A2A/exec/terminal JSON 各最多 1 MiB，全部先经过有界读取与反序列化，再打开数据库和注册适配器。加载诊断只返回种类和 JSON 行列位置，不回显配置内容；语义校验仍由各适配器负责，见[启动配置边界](host-configuration.md)。
+
+## MCP 启动授权
+
+仅当宿主显式传入 `--mcp-oauth-config` 时，app-server 在普通 `initialize` 前进入此阶段。它接受同一 stdin/stdout 上的单条 JSON-RPC 2.0 请求，每行一个对象，ID 为整数或至多 128 字节的字符串。启动授权阶段不接受批次或通知，也不会打开 SQLite 或启动工具。宿主应保持这个管道私有，且不得记录授权 URL 或完整回调。
+
+| 方法 | 参数 | 结果 |
+| --- | --- | --- |
+| `mcp/oauth/pending` | `{}` | `{serverIds: string[], vaultLocked: boolean}` |
+| `mcp/oauth/unlock` | `{key, reauthorizeServerIds?}` | `{remaining}`；仅在指定独立凭据库时使用 |
+| `mcp/oauth/begin` | `{serverId, wwwAuthenticate?}` | `{attemptId, authorizationUrl}`；同一待答尝试可重复读取 |
+| `mcp/oauth/finish` | `{serverId, attemptId, callbackUrl}` | `{serverId, remaining}`；尝试匹配后只消费一次，失败后须重新 `begin` |
+
+宿主跟随 `authorizationUrl` 打开浏览器，在配置好的回调地址接收返回值，并将完整 URL 交给 `finish`。`wwwAuthenticate` 可传入宿主从该 MCP 端点获得的认证挑战；省略时按规范的 well-known 地址发现。`remaining` 为零时进入普通 `initialize`，后者成功才表示工具已注册。授权阶段总时限 10 分钟；重启或关闭管道会丢弃旧尝试。`-32060` 表示等待授权，`-32061` 表示发现或客户端注册失败，`-32062` 表示回调验证或换取令牌失败。错误只包含固定描述；授权码和令牌不出现在业务 RPC、事件和备份里。
+
+配置 `--mcp-oauth-vault PATH` 时，宿主先通过 `unlock` 提供经无填充 Base64URL 编码的 32 字节随机密钥。`-32063` 表示凭据库待解锁，`-32064` 表示无法打开或认证凭据库。丢失或已消耗的授权仍出现在解锁后的 `pending`；有效授权自动恢复。传 `reauthorizeServerIds` 可让指定服务重新登录，且不会改动其他服务。密钥只在私有启动管道传输，不写入参数文件、日志或事件。
 
 ## Rust 调用方
 
@@ -90,6 +106,12 @@ staged.sync_all()?;
 | `workspace/getProfile` | `{workspaceId}` | 当前 WorkspaceProfile，包含原工作区和可选的显示名称 |
 | `workspace/listProfiles` | `{after?:0,limit?:100}` | WorkspaceProfile ObjectPage，与 `workspace/list` 的游标相同 |
 | `workspace/setTitle` | `{workspaceId,title}` | 持久化显示名称并返回 WorkspaceProfile，`title:""` 清除名称 |
+| `workspace/memory/put` | `{workspaceId,key,content,sourceTaskId?,expectedRevision?}` | 新建或按 revision 更新/恢复一条工作区记忆 |
+| `workspace/memory/get` | `{workspaceId,key,actorTaskId?}` | 读取一条活动记忆并记录访问审计 |
+| `workspace/memory/list` | `{workspaceId,after?,limit?,includeDeleted?,actorTaskId?}` | 分页列出记忆；可显式包含软删除项 |
+| `workspace/memory/search` | `{workspaceId,query,after?,limit?,actorTaskId?}` | 对 key 和正文进行字面子串检索，已删除项不参与 |
+| `workspace/memory/delete` | `{workspaceId,key,expectedRevision,actorTaskId?}` | 按 revision 软删除并返回 tombstone |
+| `workspace/memory/listAudit` | `{workspaceId,after?,limit?}` | 分页读取该工作区记忆的写入及访问审计 |
 | `workspace/searchHistory` | `{workspaceId,query,role?,throughSequence?,beforeSequence?,limit?,scanLimit?}` | SessionHistorySearchPage，跨会话查找已完成任务，命中包含 `sessionId` |
 | `session/create` | `{workspaceId,title?,clientRequestId?}` | Session |
 | `session/get` | `{sessionId}` | 单个 Session |
@@ -103,6 +125,10 @@ staged.sync_all()?;
 | `session/searchHistory` | `{sessionId,query,role?,throughSequence?,beforeSequence?,limit?,scanLimit?}` | SessionHistorySearchPage，按完成序号查找历史任务 |
 | `task/start` | `{sessionId, input, clientRequestId?, backend?, maxModelSteps?, context?:{mode?,maxTurns?,maxBytes?,selection?,taskIds?}}` | Task；默认模型；可选 `{type:"external_agent",agentId}` |
 | `task/startSummary` | 与 `task/start` 相同 | 使用同一任务创建和调度流程，返回 `TaskSummary` |
+| `run/start` | `{sessionId,clientRequestId,maxConcurrency?,maxModelSteps?,timeoutMs?,context?,nodes:[{nodeId,input,dependsOn?}]}` | 持久 Run 与当前节点/任务状态 |
+| `run/get` | `{runId}` | 更新调度状态后读取 Run |
+| `run/cancel` | `{runId}` | 取消所有未结束节点，并返回 Run |
+| `run/events` | `{runId,after?:0,limit?:64}` | RunEventsPage，按游标续读持久 Run 事件 |
 | `task/getSummaryByRequest` | `{sessionId,clientRequestId}` | 通过会话和请求键读取当前 `TaskSummary` |
 | `task/getSummariesByRequest` | `{sessionId,clientRequestIds}` | [按请求键批查任务](#按请求键批查任务)，返回同一水位的 `TaskSummaryBatch` |
 | `task/get` | `{taskId}` | Task |
@@ -191,6 +217,14 @@ staged.sync_all()?;
 
 `initialize.capabilities.workspaceProfiles` 表示支持工作区显示名称。`title` 最多 `maxWorkspaceTitleChars` 个 Unicode 字符。服务去掉首尾空白，拒绝控制字符和只有空白的名称。明确传 `""` 可清除名称。名称保存在 SQLite v35 的独立表里。工作区 ID、规范化根目录、清单顺序以及 `workspace/open`、`workspace/get`、`workspace/list` 的响应格式沿用原协议。原目录暂时不可访问时仍可读取和修改名称。
 
+### 工作区长期记忆
+
+`initialize.capabilities.workspaceMemorySemanticIndex` 表示支持 `workspace/memory/indexVectors` 和 `workspace/memory/semanticSearch`。两者分别写入由宿主生成的修订绑定向量、查询同工作区的派生索引。参数、批量修订检查和关键词回退见[语义索引](memory.md#重建与查询语义索引)。
+
+`initialize.capabilities.workspaceMemory` 与 `workspaceMemoryAudit` 表示支持工作区范围的长期记忆和审计；`maxWorkspaceMemories` 是单工作区总记录上限（含 tombstone），`maxWorkspaceMemoryContentBytes` 是单条 UTF-8 正文上限。`key` 在同一工作区唯一，长度为 1..128 个 Unicode 字符；正文为 1..16384 字节且不能含 NUL。`workspace/memory/put` 不带 `expectedRevision` 时创建，已存在的键只有正文和来源完全相同时才作为幂等重试返回；实际更新或恢复必须提供当前 `expectedRevision`。来源任务必须属于该工作区且已完成。删除也必须提供当前 revision；删除会递增 revision 并设置 `deletedAtMs`，不会清除审计或内容，恢复通过 `put` 携带 tombstone 的 revision 完成。
+
+`workspace/memory/get`、`list` 和 `search` 的 `actorTaskId`（若提供）必须属于该工作区，并作为访问者写入审计。查询结果和正文不会写入审计；写入类动作记录正文 SHA-256。列表与搜索会记录一次聚合访问，不为每条结果写一条审计；`listAudit` 本身不再递归产生日志。`search` 是区分大小写的字面子串匹配，query 为 1..256 个非控制字符；这是稳定的关键词路径，不承诺语义相似度。游标以记录创建顺序分页，软删除记录默认不出现在 list/search 中。SQLite v55 持久化记忆与审计；v56 为模型 Token 预检观测事件建立兼容边界。新任务可冻结有界关键词检索结果作为上下文；可重建的语义索引仍未实现。
+
 `initialize.capabilities.sessionCreateIdempotency` 表示 `session/create` 接受 `clientRequestId`。键由 1 到 128 个可打印且不含空格的 ASCII 字符组成，在工作区内唯一。连接中断后用原键和原始标题重试会返回同一个会话的当前信息。复用键并更改原始标题会返回 `-32009`。创建记录和键同事务保存，重启后仍可重试。
 
 `eventBySequence` 表示支持 `events/get`。`sequence` 取自实时通知或回放，范围为 1 到 SQLite 的最大 64 位有符号整数。序号不存在时返回 `-32004`。
@@ -246,6 +280,22 @@ SQLite v44 将普通有键提交的输入 SHA-256、后端和规范化后的上�
 响应中的 `throughSequence` 与摘要来自同一次读取。查询涵盖已有的任务请求绑定，包括旧版本没有紧凑回执的绑定。请求不会创建任务或触发恢复。会话不存在返回 `-32004`，键格式或数量不合法返回 `-32602`。
 
 Rust 宿主可以调用 `Client::get_task_summaries_by_request`，并用返回水位接续事件读取。连到旧服务时，可逐项使用 `task/getSummaryByRequest`。
+
+### 持久 Run DAG
+
+`initialize.capabilities.durableTaskRuns` 为 true 时，`run/start` 可在同一会话提交 1..32 个模型子任务。`nodeId` 必须唯一且由 ASCII 字母、数字、`_` 或 `-` 组成；`dependsOn` 只能引用本次提交的节点，不能重复或形成环。`maxConcurrency` 默认为 2，范围 1..8；它限制同时处于模型执行中的子任务，等待用户审批或补答的节点不占执行槽。`maxModelSteps` 是每个子任务的模型尝试上限。上下文历史水位在 Run 创建时固定，节点依赖以外的新完成历史不会混入后续节点。
+
+`clientRequestId` 在同一会话内幂等。相同键和相同计划返回已保存的 Run 并继续安全调度；相同键对应不同计划返回 `-32009`。每个节点创建独立 Task，沿用 Run 的会话/工作区、上下文选择、模型预算、已注册工具集合和审批策略；Run 保存 Provider/模型、模型预算形状、工具注册摘要及策略身份。重启后这些授权身份变化时，不会为等待中的节点创建新 Task。每个子任务使用自己的任务 ID 和审批 ID，授权不能跨节点复用。
+
+只有 `dependsOn` 明确列出的直接依赖结果会传给节点。结果被封装为 JSON 数据并标记为不可信内容；超过单个 Task 输入上限时节点失败，不静默截断。依赖 Task 的产物仍通过原 `taskId` 访问，不复制或改绑到其他节点。失败、取消或跳过的依赖会跳过其下游节点，独立分支可以继续运行。所有节点结束后，全部成功为 `completed`，仅部分节点成功为 `partially_completed`；已完成的 Task 和产物会保留。`interrupted` 节点不会在重启后自动重放；先按 `task/getResumeStatus` 检查，再由宿主明确调用 `task/resume`。模型或外部结果未知的证据保留在原 Task 上。
+
+`run/get` 会刷新已记录的子任务状态并推进可运行节点。子 Task、节点归属与 `node_started` 事件同事务保存；该事件表示 Task 已创建，模型是否已派发须查 Task 本身。`run/events` 返回持久事件；`nextAfter` 和 `throughSequence` 可用于断线续读，游标只用于回传，不应解释为连续编号。`run/cancel` 在一个事务中标记 Run 与其未完成的子任务，提交后再向执行器发出取消信号。主动取消的 Run 为 `cancelled`，仍保留原 Task 的完成、取消与未知结果记录。能力上限另见 `maxRunNodes` 和 `maxRunConcurrency`。
+
+服务重新取得数据库写锁后，可以继续同一 Task 的首次派发，或从已提交的工具结果、上下文压缩边界发起下一次模型请求。内核同时检查持久任务状态、最后一条任务事件和 Run 的模型、工具及策略身份。未提交且没有独立执行凭证的尝试仍按未知结果处理，不会自动重发。
+
+Windows 和 Linux 上，Run 子任务通过 `--exec-config` 注册的进程工具在逐次批准后可交给独立 supervisor。一次性执行凭证绑定 Task、会话、工作区、原调用与工具注册，和 `tool_started` 同事务提交。supervisor 领取凭证后才运行命令，持续检查租约与 Run 期限，完成后保存有界结果。重启时协调器重验原授权，只从同库读取原凭证的结果，不另启动命令。取消与任务状态同事务撤销凭证，迟到结果不能覆盖终态；supervisor 硬退出或租约过期后，无法确认的副作用记为 `tool_outcome_unknown`。Windows 使用现有 Job 清理进程树。Linux 无委托 cgroup 时，强杀 supervisor 后无法保证进程树回收。普通 Task、MCP 调用及模型请求不使用此进程交接路径。
+
+`initialize.capabilities.maxRunTimeoutMs` 存在时，可以提交 `timeoutMs`（1 至 86,400,000 毫秒）。期限从首次接受计划开始，覆盖排队、等待审批、补答与执行；未指定则无 Run 级期限。返回的 `deadlineAtUnixMs` 为持久 UTC 时间戳，同键重试不会延长，改变超时会触发幂等冲突。服务会在后台收敛到期 Run，重启时也会先处理已到期的 Run。未结束节点标记为 `timed_out`；已创建的相应 Task 标记为 `cancelled`，原已完成的 Task 和产物仍可读取。如果所有节点已结束，仍按已提交结果汇总。超时事件记录原期限。执行器收到取消信号前可能已经向外部发出请求，原 Task 会保留可用的未知结果证据。
 
 ### 内嵌图片输入
 
@@ -702,6 +752,8 @@ Rust 客户端可调用 `Client::summarize_model_usage_range`。需要查看单�
 
 `modelUsageEventReplay` 声明 `events/listModelUsage` 可按任务读取。`modelUsageScopedReplay` 为真时，也可以用 `events/listSessionModelUsage` 或 `events/listWorkspaceModelUsage` 按更大的范围读取，包括已归档会话。三种接口都返回原始用量事件及全局序号，按序号正序排列。
 
+上下文压缩会额外产生 `context_compaction_scheduled` 和 `context_compacted` 持久事件。前者表示输入预算预检确认正式生成未派发并已安排无工具摘要；后者带摘要模型步骤及来源任务/完成事件序号。摘要文本、提示版本、预算、计数和用量保存在任务的 `context.summaries` 快照中。重启恢复依赖任务快照和事件，不会重复应用已提交的摘要。失败或取消不会移除原历史或已有摘要。
+
 先调用 `events/getWatermark`，再将返回的 `throughSequence` 作为每页共同的 `through`。以下示例在水位 `320` 处固定工作区视图：
 
 ```json
@@ -762,7 +814,7 @@ Rust 调用方可用 `fliuno_client::EventFeed::subscribe` 建立订阅，将其
 
 ## MCP 主机配置
 
-stdio 服务器必须配置 `isolation`；HTTP 服务器不使用该字段，使用下文的 `streamable_http` 配置。同一份 servers 列表可混合两种传输。
+stdio 服务器必须配置 `isolation`；HTTP 服务器不使用该字段，可配置 `streamable_http` 或已弃用的 `http_sse`。同一份 servers 列表可以混合这些传输，见 [MCP 传输配置](mcp.md#传输配置)。
 
 以下为结构示例，请替换成实际可执行文件与目录，且仅配置你信任的服务。
 

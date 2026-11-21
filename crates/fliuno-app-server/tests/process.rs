@@ -30,10 +30,19 @@ mod event_stream;
 #[cfg(feature = "test-fixtures")]
 #[path = "process/execution.rs"]
 mod execution;
+#[cfg(feature = "test-fixtures")]
+#[path = "process/mcp_oauth.rs"]
+mod mcp_oauth;
+#[path = "process/mcp_subscriptions.rs"]
+mod mcp_subscriptions;
+#[path = "process/mcp_tasks.rs"]
+mod mcp_tasks;
 #[path = "process/model_budget.rs"]
 mod model_budget;
 #[path = "process/model_usage.rs"]
 mod model_usage;
+#[path = "process/runs.rs"]
+mod runs;
 #[path = "process/sessions.rs"]
 mod sessions;
 #[path = "process/task_status.rs"]
@@ -45,6 +54,8 @@ mod terminal;
 mod workspace_hash;
 #[path = "process/workspace_import.rs"]
 mod workspace_import;
+#[path = "process/workspace_memory.rs"]
+mod workspace_memory;
 #[path = "process/workspace_profiles.rs"]
 mod workspace_profiles;
 #[path = "process/workspace_search.rs"]
@@ -871,9 +882,23 @@ fn event_replay_byte_target_preserves_each_event_and_cursor_across_restart() {
 
 #[test]
 fn configured_model_budget_is_reported_without_contacting_the_provider() {
-    for (provider, mode, reported) in [
-        ("openai", "provider", "provider"),
-        ("anthropic", "local", "json_bytes_estimate"),
+    for (provider, mode, reported, coverage, margin, byte_budget) in [
+        (
+            "openai",
+            "provider",
+            "provider",
+            "provider_request",
+            0,
+            false,
+        ),
+        (
+            "anthropic",
+            "local",
+            "json_bytes_estimate",
+            "serialized_json_bytes",
+            0,
+            true,
+        ),
     ] {
         let root = std::env::temp_dir().join(format!(
             "fliuno-model-budget-{}-{}-{provider}",
@@ -917,11 +942,20 @@ fn configured_model_budget_is_reported_without_contacting_the_provider() {
         fs::remove_dir(root).unwrap();
         assert!(output.status.success());
         let init: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let (max_input_tokens, max_input_bytes) = if byte_budget {
+            (Value::Null, json!(30720))
+        } else {
+            (json!(30720), Value::Null)
+        };
         assert_eq!(
             init["result"]["capabilities"]["modelBudget"],
             json!({
-                "windowTokens":32768,"maxInputTokens":30720,"maxOutputTokens":2048,
-                "countMode":reported,"source":"configured"
+                "windowTokens":32768,
+                "maxInputTokens":max_input_tokens,
+                "maxInputBytes":max_input_bytes,
+                "maxOutputTokens":2048,
+                "countMode":reported,"countCoverage":coverage,
+                "safetyMarginTokens":margin,"source":"configured"
             })
         );
     }

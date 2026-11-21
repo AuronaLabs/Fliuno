@@ -98,6 +98,18 @@ pub trait Tool: Send + Sync {
         cancellation: &CancellationToken,
     ) -> std::result::Result<ToolOutput, ToolError>;
 
+    /// Optional host adapter for an approved Run child. Recovery only observes
+    /// the ticket and never calls the launch method again.
+    fn supports_supervision(&self) -> bool {
+        false
+    }
+
+    fn launch_supervisor(&self, _ticket: &crate::SupervisorTicket) -> crate::Result<()> {
+        Err(crate::Error::Conflict(
+            "tool does not support supervision".into(),
+        ))
+    }
+
     /// Validate user responses against a request previously returned by this tool.
     fn validate_input(
         &self,

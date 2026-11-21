@@ -16,6 +16,48 @@ fn setup() -> (Kernel, Session) {
     (kernel, session)
 }
 
+#[test]
+fn task_start_failure_rolls_back_context_memory_audit() {
+    let (mut kernel, session) = setup();
+    kernel
+        .put_workspace_memory(&WorkspaceMemoryPutParams {
+            workspace_id: session.workspace_id.clone(),
+            key: "atomic-note".into(),
+            content: "Keep the task start atomic.".into(),
+            source_task_id: None,
+            expected_revision: None,
+        })
+        .unwrap();
+    kernel
+        .db
+        .execute_batch(
+            "CREATE TRIGGER reject_task_summary BEFORE INSERT ON task_summaries
+             BEGIN SELECT RAISE(ABORT,'fixture'); END;",
+        )
+        .unwrap();
+
+    assert!(
+        kernel
+            .create_task_with_key(&session.id, "Keep the task start atomic", None)
+            .is_err()
+    );
+    let task_count: i64 = kernel
+        .db
+        .query_row("SELECT COUNT(*) FROM tasks", [], |row| row.get(0))
+        .unwrap();
+    let context_audit_count: i64 = kernel
+        .db
+        .query_row(
+            "SELECT COUNT(*) FROM workspace_memory_audit
+             WHERE action IN ('context_searched','context_injected')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(task_count, 0);
+    assert_eq!(context_audit_count, 0);
+}
+
 fn complete(kernel: &mut Kernel, session: &str, input: &str, output: &str) -> Task {
     let task = kernel.create_task_with_key(session, input, None).unwrap().0;
     finish(kernel, &task.id, output)
@@ -30,6 +72,7 @@ fn finish(kernel: &mut Kernel, id: &str, output: &str) -> Task {
             task,
             Ok(ModelTurn {
                 usage: None,
+                preflight: None,
                 decision: ModelDecision::Complete(output.into()),
                 replay: Some(ProviderReplay {
                     provider: "test".into(),

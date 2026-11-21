@@ -45,13 +45,17 @@
 
 ## 单次资源监听
 
-协商版本至少为 `2026-07-28` 且服务声明 `resources.subscribe` 时，注册 `mcp_<id>_resources_watch({uri,waitMs})`。每次调用独立审批，监听一条 URI，等待时间为 1 毫秒到 5 秒且最多占配置超时的一半。排队、握手和关闭监听都计入整个调用的超时。
+服务声明 `resources.subscribe` 时注册 `mcp_<id>_resources_watch({uri,waitMs})`。每次调用独立审批，监听一条 URI，等待时间为 1 毫秒到 5 秒且最多占配置超时的一半。排队、握手和关闭监听都计入整个调用的超时。
 
-同一能力也注册 `mcp_<id>_resources_watch_many({uris,waitMs})`。一次审批列出 1～8 条互不相同的 URI，服务确认整个集合后等待第一条更新。`updated` 结果额外包含 `updatedUri`。部分确认返回 `declined`。两个工具共用等待和关闭预算。
+`2026-07-28` 使用 `subscriptions/listen`。同一能力也注册 `mcp_<id>_resources_watch_many({uris,waitMs})`。一次审批列出 1～8 条互不相同的 URI，服务确认整个集合后等待第一条更新。`updated` 结果额外包含 `updatedUri`。部分确认返回 `declined`。两个工具共用等待和关闭预算。
 
 单 URI 监听的结果包含 `uri` 和 `status`。`updated` 表示收到更新，`elapsed` 表示等待期结束，`declined` 表示服务未接受该 URI，`ended` 表示服务正常结束监听。需要资源正文时，可另行审批 `resources_read`。监听结束后释放订阅。发出请求后取消、超时或连接异常会按现有未知结果规则关闭该 MCP 连接。
 
-互操作验证覆盖官方 SDK 的 HTTP SSE、Windows 本机 stdio 与 AppContainer stdio。旧版协议即使声明了 `resources.subscribe` 也不注册这个工具。
+旧版连接使用 `resources/subscribe` 和 `resources/unsubscribe` 监听一条 URI。通知本身不带订阅标识，内核只接收匹配 URI 的更新提示。收到提示或等待结束时退订。官方 SDK 的回环验收覆盖旧版 Streamable HTTP 的 JSON 与 SSE 响应模式和实际 stdio 子进程。
+
+持久 SQLite 内核另提供 `mcp_<id>_resources_watch_reconcile({uri,waitMs})`。这项调用单独审批，因为它会订阅并读取当前资源。内核按工作区、会话、MCP 服务身份和 URI 保存本地意图及最近一次成功观测的内容摘要。新连接先订阅，再跳过 TTL 缓存读取当前快照。摘要变化时返回 `changed`。收到同一 URI 的通知后至多额外读取一次，相同摘要返回 `unchanged`。没有通知时保留 `elapsed` 或 `ended`。
+
+断线、取消或进程中断可能留下未完成的观测。该调用在下一次独立批准后返回 `disconnected: true` 并重新对账。重新订阅只检查当前快照，无法还原断线期间的通知历史。应答不包含资源正文或摘要。每个会话最多保留 32 条意图，每个 SQLite 库最多保留 4096 条。变更 MCP 端点、凭据或协议版本后使用新的意图范围。
 
 ## 预算与请求生命周期
 
@@ -61,7 +65,7 @@
 
 所有参数合计 JSON 最多 64 KiB。提示名称和参数键非空、至多 256 UTF-8 字节且无控制字符；最多 32 个参数，值只能为字符串且每个至多 8192 UTF-8 字节。JSON Schema 的长度是字符数量，运行时还核验上述字节预算。拒绝额外字段，不能通过参数指定其他端点、凭据、`_meta` 或 MRTR 续交互状态。
 
-内容操作使用官方 SDK 的单次原始请求，绕过便利方法的缓存与过期缓存回退。服务即使返回 `ttlMs`，下一次批准仍发送新请求；内容缓存和持续订阅尚未接入。工具、资源和提示共享一个连接请求锁，等待锁也计入 `timeoutMs`。等待中的取消/超时不发请求，不关闭正在执行的操作；发出后的取消、超时、协议/传输错误或不支持的 MRTR 则关闭连接并保留结果未知。关闭的优雅清理最多等待 5 秒，不承诺远程服务的实际副作用已经停止。响应集合/输出预算违规同样不能自动重放，已完成的响应预算违规不要求关闭整个连接。
+现代列表和普通资源读取采用[连接内缓存](mcp.md#生命周期和版本)，命中时仍逐次审批；过期后刷新失败会返回错误。未命中缓存时只发送一次请求，不自动处理后续 MRTR 阶段。工具、资源和提示共享一个连接请求锁，等待锁也计入 `timeoutMs`。等待中的取消/超时不发请求，不关闭正在执行的操作；发出后的取消、超时、协议/传输错误或不支持的 MRTR 则关闭连接并保留结果未知。关闭的优雅清理最多等待 5 秒，不承诺远程服务的实际副作用已经停止。响应集合/输出预算违规同样不能自动重放，已完成的响应预算违规不要求关闭整个连接。
 
 内核还显式核验响应 `resultType`，不能仅依赖 SDK 的结果枚举：同时带 `contents` / `messages` 等最终形状和 `input_required` / `task` / 扩展状态的响应也会拒绝。只有 `complete` 或旧版兼容的缺省字段可作为完成结果；工具发现和 `tools/call` 使用同一规则，不把部分内容当作完成，也不自动继续请求。
 
@@ -80,7 +84,7 @@ python examples/mcp_content_demo.py --deny
 python examples/mcp_content_demo.py --switch-source
 ```
 
-HTTP wire 测试验证无工具服务、按需分页、主机文件/HTTP URI 不解引用、编码二进制保留、输入覆盖/预算、缓存提示不隐藏请求或失败、输出预算、MRTR、取消/超时和跨方法排队取消。SQLite 测试覆盖拒绝、换端点的旧审批失效、角色保留为工具数据，以及重启不重放。官方 SDK HTTP 服务在现代 discover / 旧版 initialize 与 JSON/SSE 四种组合中验证资源、提示和补全。独立 SDK stdio fixture 在 Windows TrustedHost/AppContainer 实际运行。Linux 同类探针接入 CI，当前主机交叉检查不代替运行。
+HTTP wire 测试验证无工具服务、按需分页、主机文件/HTTP URI 不解引用、编码二进制保留、输入和输出预算、缓存分区与过期、MRTR、取消/超时和跨方法排队取消。SQLite 测试覆盖拒绝、换端点的旧审批失效、角色保留为工具数据，以及重启不重放。官方 SDK HTTP 服务在现代 discover / 旧版 initialize 与 JSON/SSE 四种组合中验证资源、提示和补全，也验证目录变更通知使缓存失效。独立 SDK stdio fixture 在 Windows TrustedHost/AppContainer 实际运行。Linux 同类探针接入 CI，当前主机交叉检查不代替运行。
 
 演示使用真实 app-server、SQLite 与确定性的本机 HTTP 模型，依次审批分页、模板、资源、提示列表和提示获取；拒绝分支不读取内容，切换来源分支拒绝旧审批且不再请求模型，新任务可完成。全部流程重启核对最终快照。
 

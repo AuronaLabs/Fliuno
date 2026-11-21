@@ -1,5 +1,5 @@
 //! Resource/prompt wire peer without tools. This catches accidental eager
-//! tools/list and provides explicit cache hints to detect hidden SDK reuse.
+//! tools/list and provides explicit cache hints for reuse and expiry tests.
 use super::wire::{Request, Response};
 use serde_json::{Value, json};
 
@@ -10,13 +10,17 @@ pub fn result(request: &Request, result: Value) -> Response {
     )
 }
 pub fn reply(request: &Request) -> Response {
+    reply_with_ttl(request, 60_000)
+}
+
+pub fn reply_with_ttl(request: &Request, ttl_ms: u64) -> Response {
     if request.method == "GET" {
         return Response::json(405, Value::Null);
     }
     if request.method == "DELETE" {
         return Response::json(200, Value::Null);
     }
-    let value = match request.body["method"].as_str().unwrap() {
+    let mut value = match request.body["method"].as_str().unwrap() {
         "server/discover" => json!({"resultType":"complete","supportedVersions":["2026-07-28"],
             "capabilities":{"resources":{},"prompts":{},"completions":{}},"ttlMs":0,"cacheScope":"private"}),
         "resources/list" => {
@@ -46,5 +50,8 @@ pub fn reply(request: &Request) -> Response {
         "notifications/cancelled" => return Response::json(202, Value::Null),
         other => panic!("unexpected MCP content request {other}"),
     };
+    if request.body["method"] != "server/discover" && value.get("ttlMs").is_some() {
+        value["ttlMs"] = json!(ttl_ms);
+    }
     result(request, value)
 }

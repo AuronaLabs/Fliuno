@@ -9,7 +9,7 @@
 | **从零启动** | [准备环境](#快速开始) → [离线演示](#先运行离线演示) → [启动服务并握手](#再启动自己的服务) |
 | **配置模型或外部服务** | [真实模型](#真实模型) · [MCP](#mcp) · [ACP 客户端](#acp-客户端) · [A2A 远程任务](#a2a-远程任务) |
 | **启用本机能力** | [文件与 Skills](#文件与-skills) · [注册命令](#主机注册的命令) · [跨轮次终端](#跨轮次终端) |
-| **验证工作区** | [工程检查和离线示例](#检查与演示) · [版本升级验证](#版本升级验证) |
+| **验证工作区** | [执行诊断](#执行诊断) · [工程检查和离线示例](#检查与演示) · [版本升级验证](#版本升级验证) |
 
 ## 快速开始
 
@@ -63,6 +63,16 @@ cargo run -p fliuno-app-server -- --schema
 
 同一会话的新任务会保存已有历史的有界快照，供重试和重启继续使用。要预览、缩小或关闭历史范围，见 [会话上下文](context.md)。
 
+## 执行诊断
+
+应用服务默认关闭追踪输出。用 `--trace-log PATH` 把诊断追加到 JSONL 文件。监督进程将自己的追踪写入同目录的 `*.worker-*.jsonl` 文件，并沿用父工具调用的 trace ID。
+
+```powershell
+cargo run -p fliuno-app-server -- --db .fliuno/kernel.db --trace-log .fliuno/trace.jsonl
+```
+
+用 `--otlp-endpoint URL` 显式开启 OTLP/HTTP JSON 导出，传入接收方的完整端点，例如本机的 `http://127.0.0.1:4318/v1/traces`。远端接收方须使用 HTTPS。只设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 不会自动启用导出。诊断记录固定的操作、关联标识、状态和数值。任务与审批事件仍通过业务协议读取。队列满或导出失败时可能丢弃诊断记录，适合定位问题和测量开销。
+
 ## ACP 离线演示
 
 Windows 可直接运行完整 ACP 离线闭环；脚本构建确定性测试 Agent，在真实 AppContainer 中运行，并展示持久审批和完成事件：
@@ -87,7 +97,7 @@ $env:OPENAI_API_KEY = '<你的 key>' # anthropic / gemini 分别使用 ANTHROPIC
 cargo run -p fliuno-app-server
 ```
 
-可同时设置 `FLIUNO_CONTEXT_WINDOW_TOKENS` 和 `FLIUNO_MAX_OUTPUT_TOKENS`，检查输入预算并给供应商设置生成上限。默认按 JSON 字节估算。OpenAI 与 Anthropic 可用 `FLIUNO_CONTEXT_COUNT_MODE=provider` 启用供应商输入计数。Anthropic 还支持用 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider` 在启动时探测模型窗口；Gemini 暂用宿主配置的数字窗口和本地估算。[模型请求预算](context.md#模型请求预算)
+可同时设置 `FLIUNO_CONTEXT_WINDOW_TOKENS` 和 `FLIUNO_MAX_OUTPUT_TOKENS`，检查输入预算并给供应商设置生成上限。默认按 JSON 字节估算。OpenAI、Anthropic 和 Gemini 可用 `FLIUNO_CONTEXT_COUNT_MODE=provider` 启用供应商输入计数。Gemini 使用 `countTokens` 对 Interactions 请求做预检投影，模型窗口由宿主配置。Anthropic 可用 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider` 在启动时探测模型窗口。[模型请求预算](context.md#模型请求预算)
 
 可用 `OPENAI_BASE_URL`、`ANTHROPIC_BASE_URL` 或 `GEMINI_BASE_URL` 指定 API 基础地址；Gemini 默认使用 `https://generativelanguage.googleapis.com/v1beta/`。仅允许 HTTPS 和本机回环 HTTP；禁止自动重定向。模型请求使用有超时的 SSE 流式响应，也接受完整 JSON 响应；不会自动重试付费请求。Gemini Interactions 使用 `store:false`，由本地持久化步骤续接函数调用；目前支持文本输出和每轮一个工具调用，已通过回环验收。四个固定 worker 最多并发执行四个独立任务步骤，另有容量 32 的有界队列；并发能力会在 `initialize` 中声明。模型与工具执行期间都可查询和取消任务。取消会通知 provider 或工具并丢弃迟到结果，但供应商可能已收到请求并计费，外部副作用也可能已经发生。
 
@@ -113,6 +123,8 @@ python examples/mcp_http_demo.py --sse
 python examples/mcp_http_demo.py --legacy --sse
 python examples/mcp_http_demo.py --deny
 ```
+
+旧版 Tasks 的 SDK 互操作验收需在独立 Python 环境安装 `mcp==1.25.0`。运行 `python examples/mcp_legacy_tasks_sdk.py`，可依次测试 stdio、Streamable HTTP JSON 和 Streamable HTTP SSE。加 `--form` 验证 stdio 和 HTTP SSE 的补答，或用 `--restart-form` 验证重启后的旧补答不会重发。应用进程与 SDK 服务只使用临时目录及回环地址，无需真实模型凭据。见 [验收记录](execution-evidence.md#004-mcp-tasks-验收2026-11-21)。
 
 ## ACP 客户端
 
@@ -180,10 +192,18 @@ python examples/ag_ui_http_demo.py
 python examples/ag_ui_http_demo.py --interrupts --inline-media
 ```
 
-`check.ps1` 运行格式、Clippy、测试、生成契约一致性检查和离线进程演示；解释器演示需要本机 Node 24，Windows 另需 CPython 3.12。GitHub Actions 配置了 Windows/Linux 两个平台；本地验证结果不代表远程 CI 已经运行。
+`check.ps1` 运行格式、Clippy、测试、生成契约一致性检查和离线进程演示；解释器演示需要本机 Node 24，Windows 另需 CPython 3.12。GitHub Actions 在 Windows、Linux 和 macOS runner 上执行工作区构建与回归检查。macOS runner 目前只验证跨平台编译和不支持隔离时的拒绝行为，不代表 macOS 沙箱已实现；本地验证结果也不代表远程 CI 已经运行。
 
 开发和测试构建保留行号堆栈、关闭增量缓存，以控制 Windows 调试产物占用；需要调试局部变量时可通过本地 Cargo 配置覆盖 `profile.dev.debug=2`。
 
+如果工作区所在磁盘空间紧张，可在当前 PowerShell 会话把编译产物放到独立目录；检查脚本也会从该目录读取二进制：
+
+```powershell
+$env:CARGO_TARGET_DIR = 'D:/BuildCache/Fliuno'
+./scripts/check.ps1
+```
+
+停止构建和测试后，可用 `cargo clean --target-dir 'D:/BuildCache/Fliuno'` 清理这个专用缓存。验收日志、数据库样本和运行数据应放在缓存目录之外，因为 `cargo clean` 会清理整个指定目录。
 
 ## 版本升级验证
 

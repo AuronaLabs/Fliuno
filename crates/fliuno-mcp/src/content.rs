@@ -135,7 +135,12 @@ impl Kind {
     }
 }
 
-pub(crate) fn tools(host: Arc<Host>, server: &str, peer: &ServerPeerInfo) -> Vec<Box<dyn Tool>> {
+pub(crate) fn tools(
+    host: Arc<Host>,
+    server: &str,
+    peer: &ServerPeerInfo,
+    store: Option<Arc<fliuno_core::McpTaskStore>>,
+) -> Vec<Box<dyn Tool>> {
     let capabilities = &peer.capabilities;
     let mut kinds = Vec::new();
     if peer.protocol_version >= ProtocolVersion::V_2026_07_28
@@ -174,9 +179,21 @@ pub(crate) fn tools(host: Arc<Host>, server: &str, peer: &ServerPeerInfo) -> Vec
     if capabilities.resources.is_some() {
         tools.push(resource_import::tool(Arc::clone(&host), server));
     }
-    if peer.protocol_version >= ProtocolVersion::V_2026_07_28 {
-        tools.extend(watch::register(host, server, capabilities));
+    let modern = peer.protocol_version >= ProtocolVersion::V_2026_07_28;
+    if let Some(store) = store
+        && capabilities
+            .resources
+            .as_ref()
+            .is_some_and(|r| r.subscribe == Some(true))
+    {
+        tools.push(watch::reconcile::register(
+            Arc::clone(&host),
+            server,
+            peer,
+            store,
+        ));
     }
+    tools.extend(watch::register(host, server, capabilities, modern));
     tools
 }
 
@@ -225,9 +242,31 @@ impl Tool for ContentTool {
         let kind = self.kind;
         let response = self.host.request_read(cancellation, move |service| {
             Box::pin(async move {
-                // Raw SDK requests bypass both automatic MRTR and the convenience
-                // helpers' stale-cache fallback. Each approval observes one request.
-                let response = service.send_request(request).await?;
+                // Use Peer methods rather than RunningService's MRTR helpers.
+                // A cache miss sends one request and never answers remote input.
+                let peer = service.peer();
+                let response = match request {
+                    ClientRequest::ListToolsRequest(request) => {
+                        ServerResult::ListToolsResult(peer.list_tools(request.params).await?)
+                    }
+                    ClientRequest::ListResourcesRequest(request) => {
+                        ServerResult::ListResourcesResult(
+                            peer.list_resources(request.params).await?,
+                        )
+                    }
+                    ClientRequest::ListResourceTemplatesRequest(request) => {
+                        ServerResult::ListResourceTemplatesResult(
+                            peer.list_resource_templates(request.params).await?,
+                        )
+                    }
+                    ClientRequest::ListPromptsRequest(request) => {
+                        ServerResult::ListPromptsResult(peer.list_prompts(request.params).await?)
+                    }
+                    ClientRequest::ReadResourceRequest(request) => {
+                        ServerResult::ReadResourceResult(peer.read_resource(request.params).await?)
+                    }
+                    request => peer.send_request(request).await?,
+                };
                 Ok(kind
                     .accepts(&response, skill_uri.as_deref())
                     .then_some(response))

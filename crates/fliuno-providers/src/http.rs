@@ -1,12 +1,17 @@
 use crate::ModelContextBudget;
 use fliuno_core::{CancellationToken, ModelError};
+use fliuno_protocol::ModelInputPreflight;
 use reqwest::{
     Client, Url,
     header::{CONTENT_TYPE, HeaderMap},
     redirect::Policy,
 };
 use serde_json::Value;
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::BTreeMap,
+    sync::atomic::{AtomicU32, Ordering},
+    time::Duration,
+};
 use tokio::runtime::Runtime;
 
 const REQUEST_LIMIT: usize = 8 * 1024 * 1024;
@@ -59,7 +64,11 @@ fn encode_request(
             (true, false) => "provider request exceeds 8 MiB",
             (false, _) => "cannot serialize provider request",
         };
-        return Err(ModelError::NotDispatched(message.into()));
+        return Err(if writer.exceeded && limit < REQUEST_LIMIT {
+            ModelError::InputBudgetExceeded(message.into())
+        } else {
+            ModelError::NotDispatched(message.into())
+        });
     }
     Ok(writer.bytes)
 }
@@ -70,8 +79,10 @@ pub(crate) struct Http {
     endpoint: Url,
     count_endpoint: Url,
     count_fields: &'static [&'static str],
+    count_tokens_field: &'static str,
     runtime: Runtime,
     context_budget: Option<ModelContextBudget>,
+    calibrated_safety_margin_tokens: AtomicU32,
 }
 
 impl Http {
@@ -119,9 +130,42 @@ impl Http {
             endpoint,
             count_endpoint,
             count_fields,
+            count_tokens_field: "input_tokens",
             runtime,
             context_budget: None,
+            calibrated_safety_margin_tokens: AtomicU32::new(0),
         })
+    }
+
+    pub fn with_count_tokens_field(mut self, field: &'static str) -> Self {
+        self.count_tokens_field = field;
+        self
+    }
+
+    pub fn with_count_model_route(mut self, model: &str) -> Result<Self, String> {
+        let model = model.strip_prefix("models/").unwrap_or(model);
+        if model.is_empty()
+            || model.len() > 256
+            || !model
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err("invalid model identifier for provider token counting".into());
+        }
+        let mut endpoint = self.base.clone();
+        endpoint
+            .path_segments_mut()
+            .map_err(|_| "invalid provider count URL")?
+            .pop_if_empty()
+            .push("models")
+            .push(&format!("{model}:countTokens"));
+        self.count_endpoint = endpoint;
+        Ok(self)
+    }
+
+    pub fn uses_provider_count(&self) -> bool {
+        self.context_budget
+            .is_some_and(|budget| budget.provider_count)
     }
 
     pub fn with_context_budget(mut self, budget: ModelContextBudget) -> Self {
@@ -134,7 +178,42 @@ impl Http {
     }
 
     pub fn configured_budget(&self) -> Option<fliuno_protocol::ModelBudget> {
-        self.context_budget.map(ModelContextBudget::describe)
+        self.context_budget.map(|budget| {
+            let mut description = budget.describe();
+            description.safety_margin_tokens = description
+                .safety_margin_tokens
+                .max(self.calibrated_safety_margin_tokens.load(Ordering::Relaxed));
+            description
+        })
+    }
+
+    pub fn calibrate_safety_margin(&self, tokens: u32) {
+        self.calibrated_safety_margin_tokens
+            .fetch_max(tokens, Ordering::Relaxed);
+    }
+
+    pub fn observe_preflight(&self, estimate: u64, actual: u64) {
+        let learned = u32::try_from(actual.saturating_sub(estimate)).unwrap_or(u32::MAX);
+        self.calibrate_safety_margin(learned);
+    }
+
+    pub fn preflight_report(
+        &self,
+        provider: &str,
+        model: &str,
+        estimated_tokens: Option<u64>,
+    ) -> Option<ModelInputPreflight> {
+        let budget = self.configured_budget()?;
+        if budget.count_mode != fliuno_protocol::ModelInputCountMode::Provider {
+            return None;
+        }
+        Some(ModelInputPreflight {
+            provider: provider.into(),
+            model: model.into(),
+            count_coverage: budget.count_coverage,
+            estimated_input_tokens: estimated_tokens?,
+            safety_margin_tokens: budget.safety_margin_tokens,
+        })
     }
 
     pub fn model_metadata(&self, model: &str) -> Result<Value, String> {
@@ -169,27 +248,33 @@ impl Http {
     fn prepare_generation(
         &self,
         body: &Value,
+        provider_count_body: Option<&Value>,
         cancellation: &CancellationToken,
-    ) -> Result<Vec<u8>, ModelError> {
+    ) -> Result<(Vec<u8>, Option<u64>), ModelError> {
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
         let encoded = encode_request(body, self.context_budget)?;
+        let mut observed_count = None;
         if let Some(budget) = self.context_budget.filter(|budget| budget.provider_count) {
-            let count_body: BTreeMap<_, _> = self
-                .count_fields
-                .iter()
-                .copied()
-                .filter_map(|key| body.get(key).map(|value| (key, value)))
-                .collect();
-            let count_body = encode_request(&count_body, None)?;
+            let count_body = if let Some(count_body) = provider_count_body {
+                encode_request(count_body, None)?
+            } else {
+                let count_body: BTreeMap<_, _> = self
+                    .count_fields
+                    .iter()
+                    .copied()
+                    .filter_map(|key| body.get(key).map(|value| (key, value)))
+                    .collect();
+                encode_request(&count_body, None)?
+            };
             let count = self.runtime.block_on(async {
                 tokio::select! {
                     biased;
                     _ = cancellation.cancelled() => Err(ModelError::CancelledBeforeDispatch),
                     result = tokio::time::timeout(Duration::from_secs(10), self.post_json(&self.count_endpoint, count_body, cancellation, COUNT_RESPONSE_LIMIT)) => {
                         let value = result.ok().and_then(Result::ok);
-                        value.as_ref().and_then(|value| value.get("input_tokens"))
+                        value.as_ref().and_then(|value| value.get(self.count_tokens_field))
                             .and_then(Value::as_u64)
                             .ok_or_else(|| ModelError::NotDispatched("provider input token count unavailable; generation not sent".into()))
                     }
@@ -198,37 +283,80 @@ impl Http {
             if cancellation.is_cancelled() {
                 return Err(ModelError::CancelledBeforeDispatch);
             }
-            if count? > u64::from(budget.input_allowance) {
-                return Err(ModelError::NotDispatched(
-                    "provider input token count exceeds the configured context budget".into(),
+            let count = count?;
+            observed_count = Some(count);
+            let safety_margin_tokens = budget
+                .safety_margin_tokens
+                .max(self.calibrated_safety_margin_tokens.load(Ordering::Relaxed));
+            let available = budget.input_allowance.saturating_sub(safety_margin_tokens);
+            if count > u64::from(available) {
+                return Err(ModelError::InputBudgetExceeded(
+                    "provider input token count plus its safety margin exceeds the configured context budget".into(),
                 ));
             }
         }
         if cancellation.is_cancelled() {
             return Err(ModelError::CancelledBeforeDispatch);
         }
-        Ok(encoded)
+        Ok((encoded, observed_count))
     }
 
-    pub fn post(
+    pub fn post_observed(
         &self,
         body: &Value,
         cancellation: &CancellationToken,
-    ) -> Result<Value, ModelError> {
-        let body = self.prepare_generation(body, cancellation)?;
-        self.runtime
-            .block_on(self.post_json(&self.endpoint, body, cancellation, RESPONSE_LIMIT))
+    ) -> Result<(Value, Option<u64>), ModelError> {
+        let (body, estimate) = self.prepare_generation(body, None, cancellation)?;
+        let response = self.runtime.block_on(self.post_json(
+            &self.endpoint,
+            body,
+            cancellation,
+            RESPONSE_LIMIT,
+        ))?;
+        Ok((response, estimate))
     }
 
-    pub fn post_stream(
+    pub fn post_with_count_observed(
+        &self,
+        body: &Value,
+        count_body: &Value,
+        cancellation: &CancellationToken,
+    ) -> Result<(Value, Option<u64>), ModelError> {
+        let (body, estimate) = self.prepare_generation(body, Some(count_body), cancellation)?;
+        let response = self.runtime.block_on(self.post_json(
+            &self.endpoint,
+            body,
+            cancellation,
+            RESPONSE_LIMIT,
+        ))?;
+        Ok((response, estimate))
+    }
+
+    pub fn post_stream_observed(
         &self,
         body: &Value,
         cancellation: &CancellationToken,
         on_event: impl FnMut(Value) -> Result<(), String>,
-    ) -> Result<Option<Value>, ModelError> {
-        let body = self.prepare_generation(body, cancellation)?;
-        self.runtime
-            .block_on(self.post_stream_async(body, cancellation, on_event))
+    ) -> Result<(Option<Value>, Option<u64>), ModelError> {
+        let (body, estimate) = self.prepare_generation(body, None, cancellation)?;
+        let response =
+            self.runtime
+                .block_on(self.post_stream_async(body, cancellation, on_event))?;
+        Ok((response, estimate))
+    }
+
+    pub fn post_stream_with_count_observed(
+        &self,
+        body: &Value,
+        count_body: &Value,
+        cancellation: &CancellationToken,
+        on_event: impl FnMut(Value) -> Result<(), String>,
+    ) -> Result<(Option<Value>, Option<u64>), ModelError> {
+        let (body, estimate) = self.prepare_generation(body, Some(count_body), cancellation)?;
+        let response =
+            self.runtime
+                .block_on(self.post_stream_async(body, cancellation, on_event))?;
+        Ok((response, estimate))
     }
 
     async fn post_json(

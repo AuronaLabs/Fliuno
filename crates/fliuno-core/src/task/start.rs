@@ -254,6 +254,28 @@ impl Kernel {
         self.create_prepared_task(request)
     }
 
+    pub(crate) fn create_run_child(
+        &mut self,
+        owner: storage::RunChild<'_>,
+        session: &str,
+        input: &str,
+        options: ContextOptions,
+        max_model_steps: Option<u32>,
+    ) -> Result<Task> {
+        let request = self.prepare_task_start(
+            session,
+            StartInput {
+                prompt: Prompt::Text(input),
+                artifacts: &[],
+            },
+            None,
+            TaskBackend::Model,
+            Some(options),
+            max_model_steps,
+        )?;
+        self.create_fresh_task(request, Some(owner))
+    }
+
     fn create_prepared_task(&mut self, request: StartRequest<'_>) -> Result<(Task, bool)> {
         match self.create_prepared_summary(request)? {
             TaskSummaryStart::Existing(summary) => Ok((self.get_task(&summary.id)?, false)),
@@ -297,7 +319,7 @@ impl Kernel {
             return Ok(TaskSummaryStart::Existing(summary));
         }
         Ok(TaskSummaryStart::Created(Box::new(
-            self.create_fresh_task(request)?,
+            self.create_fresh_task(request, None)?,
         )))
     }
 
@@ -376,7 +398,11 @@ impl Kernel {
         }
     }
 
-    fn create_fresh_task(&mut self, request: StartRequest<'_>) -> Result<Task> {
+    fn create_fresh_task(
+        &mut self,
+        request: StartRequest<'_>,
+        owner: Option<storage::RunChild<'_>>,
+    ) -> Result<Task> {
         let StartRequest {
             session,
             input,
@@ -396,9 +422,19 @@ impl Kernel {
             ),
         };
         let message = input.message(self, session)?;
-        let context = self.session_context(session, options)?;
+        let id = new_id("task");
+        let mut context = self.session_context(session, options)?;
+        let memory_query = match &message {
+            Message::User { text } => text.clone(),
+            Message::UserParts { parts } => parts
+                .iter()
+                .map(UserContentPart::text_projection)
+                .collect::<String>(),
+            _ => String::new(),
+        };
+        let memory_access = self.inject_context_memories(session, &memory_query, &mut context)?;
         let task = Task {
-            id: new_id("task"),
+            id,
             session_id: session.into(),
             status: TaskStatus::Running,
             messages: vec![message],
@@ -416,7 +452,12 @@ impl Kernel {
             remote_continuation: None,
             agent_session_continuation: None,
         };
-        self.commit_task_start(&task, key.map(|key| (key, input.digest())))?;
+        self.commit_task_start(
+            &task,
+            key.map(|key| (key, input.digest())),
+            memory_access.as_ref(),
+            owner,
+        )?;
         Ok(task)
     }
 }

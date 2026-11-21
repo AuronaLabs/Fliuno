@@ -146,3 +146,57 @@ fn content_only_stdio_process_interoperates_in_host_and_isolated_modes() {
         }
     }
 }
+
+#[test]
+fn legacy_sdk_resource_watch_unsubscribes_and_ignores_unrelated_updates() {
+    let workspace = Workspace {
+        id: "w".into(),
+        root: std::env::current_dir().unwrap().display().to_string(),
+    };
+    let tools = fliuno_mcp::connect(
+        serde_json::from_value(json!({
+            "id":"legacy", "command":env!("CARGO_BIN_EXE_fliuno-mcp-fixture"),
+            "args":["--content-legacy"], "isolation":"trusted_host",
+            "lifecycle":"legacy", "cwd":workspace.root, "timeoutMs":30000
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        tools
+            .iter()
+            .all(|tool| !tool.spec().name.ends_with("watch_many"))
+    );
+    let watch = tools
+        .iter()
+        .find(|tool| tool.spec().name == "mcp_legacy_resources_watch")
+        .unwrap();
+    for (uri, wait_ms, status) in [
+        ("fixture:environment", 1000, "updated"),
+        ("fixture:idle", 40, "elapsed"),
+        ("fixture:declined", 1000, "declined"),
+        ("fixture:environment", 1000, "updated"),
+    ] {
+        let result = watch
+            .execute(
+                &ToolContext {
+                    workspace: &workspace,
+                    session_id: "s",
+                    task_id: "t",
+                },
+                &ToolCall {
+                    id: "watch".into(),
+                    name: watch.spec().name,
+                    arguments: json!({"uri":uri,"waitMs":wait_ms}),
+                },
+                &CancellationToken::new(),
+            )
+            .unwrap();
+        assert_eq!(
+            result.output,
+            json!({"serverId":"legacy","method":"resources/subscribe",
+            "result":{"uri":uri,"status":status},"grantsPermissions":false})
+        );
+        assert!(result.artifacts.is_empty());
+    }
+}

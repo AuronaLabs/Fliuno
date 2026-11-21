@@ -2,15 +2,15 @@
 //! read; neither input nor remote cancellation is inferred from a snapshot.
 use super::{McpService, ServiceError, fetch, validate_task_id};
 use rmcp::model::{GetTaskResult, TaskStatus};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
 use tokio::time::{Instant, sleep_until};
 
-const MAX_POLLS: u8 = 8;
+pub(super) const MAX_POLLS: u8 = 8;
 const MAX_WAIT_MS: u64 = 5_000;
-const DEFAULT_INTERVAL_MS: u64 = 500;
-const MIN_INTERVAL_MS: u64 = 100;
+pub(super) const DEFAULT_INTERVAL_MS: u64 = 500;
+pub(super) const MIN_INTERVAL_MS: u64 = 100;
 
 pub(super) fn max_wait_ms(host_timeout: Duration) -> u64 {
     (host_timeout.as_millis() / 2).min(u128::from(MAX_WAIT_MS)) as u64
@@ -19,8 +19,8 @@ pub(super) fn max_wait_ms(host_timeout: Duration) -> u64 {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Args {
-    task_id: String,
-    wait_ms: u64,
+    pub(super) task_id: String,
+    pub(super) wait_ms: u64,
 }
 
 impl Args {
@@ -34,12 +34,10 @@ impl Args {
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(super) struct Observation {
-    reason: &'static str,
-    polls: u8,
-    snapshot: GetTaskResult,
+    pub(super) reason: &'static str,
+    pub(super) polls: u8,
+    pub(super) snapshot: GetTaskResult,
 }
 
 pub(super) async fn observe(
@@ -60,6 +58,9 @@ pub(super) async fn observe(
         let next = Instant::now().checked_add(Duration::from_millis(interval.max(MIN_INTERVAL_MS)));
         let reason = if status.is_terminal() {
             "terminal"
+        } else if super::expiry::elapsed(&snapshot.task.task.created_at, snapshot.task.task.ttl_ms)
+        {
+            "ttl_elapsed"
         } else if status == TaskStatus::InputRequired {
             "input_required"
         } else if polls == MAX_POLLS {

@@ -54,6 +54,10 @@ pub struct HostChild {
     inner: crate::linux::OwnedProcess,
 }
 impl HostChild {
+    pub fn usage(&self) -> crate::ProcessUsage {
+        self.inner.usage()
+    }
+
     pub fn id(&self) -> u32 {
         self.inner.id()
     }
