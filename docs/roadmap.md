@@ -378,7 +378,8 @@ MCP 兼容基线以官方 [`2025-11-25` 规范发布说明](https://blog.modelco
 5. [ ] A2A 与后续事件通道。
    - [x] 独立 A2A 1.0 JSON-RPC 客户端、主机固定端点/凭据、可选同源卡片核验、一次提交/轮询/取消、远程状态与最终产物入库、重启不重放及真实 app-server 契约测试。
    - [x] 远程任务核对、暂停补答、同一上下文新一轮、提交边界跨重启持久化。官方 Python SDK 回环覆盖 Agent Card、JSON 轮询与 SSE，包括已有任务补答时的 `statusUpdate` 首帧兼容。
-   - [ ] 真实外部 Agent 互操作、认证、扩展协商和远端租户绑定：见 [0.0.5 A2A 计划](plan-0.0.5.md#a2a先验证身份和真实任务)。AG-UI 的其他媒体、资源引用和外部 Agent 审批中断仍待接入。
+   - [x] OAuth 客户端凭据、扩展协商和远端租户绑定；固定版本的 A2A Testbed Task Runner 验证 JSON-RPC 1.0 成功、取消和重启。见 [0.0.5 A2A 计划](plan-0.0.5.md#a2a先验证身份和真实任务)。
+   - [ ] AG-UI 的其他媒体、资源引用和外部 Agent 审批中断。
 6. [x] MCP Streamable HTTP 工具通道、JSON/SSE、显式生命周期及现代/旧版官方 SDK 互操作矩阵。
    - [x] MCP 资源/模板/提示按能力注册、逐次审批的单页列举/读取/获取、原始内容封装、注册绑定和 stdio/HTTP 官方 SDK 契约。
    - [x] MCP 提示与资源模板参数补全，按能力注册并逐次审批。官方 SDK HTTP/stdio 互操作与 SQLite 恢复测试覆盖结果边界和重启不重放。

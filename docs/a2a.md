@@ -145,7 +145,7 @@ python examples/a2a_demo.py --streaming --cancel
 
 `Task.backendAuthority` 在创建时冻结 A2A 注册摘要，包括 JSON-RPC binding、端点、租户和认证配置。静态 Bearer 仍绑定实际令牌摘要；OAuth 绑定宿主指定的令牌端点、客户端身份、scope 和变量名，同一客户端更换访问令牌或密钥值无需重绑。更换身份或租户后，旧排队任务、核对和续接不能沿用原授权。幂等提交仍返回原任务，不刷新摘要。详见[注册身份](authority.md)。
 
-这些是独立契约 fixture 与本机进程验收。官方 Python SDK `a2a-sdk==1.3.1` 已通过回环验收，覆盖 Agent Card、JSON 轮询和 SSE 的暂停、补答、同一上下文的新任务、幂等与产物入库。SSE 用例在补答任务的队列仍活动时调用 `SubscribeToTask`，取得同一远端任务的 `working` 快照，并检查原本机运行和产物。该 SDK 的默认处理器要求活动队列，已结束的远端任务可用不带 `waitMs` 的 `task/checkRemote` 查询。真实外部 Agent 验收仍待执行。
+这些是独立契约 fixture 与本机进程验收。官方 Python SDK `a2a-sdk==1.3.1` 已通过回环验收，覆盖 Agent Card、JSON 轮询和 SSE 的暂停、补答、同一上下文的新任务、幂等与产物入库。SSE 用例在补答任务的队列仍活动时调用 `SubscribeToTask`，取得同一远端任务的 `working` 快照，并检查原本机运行和产物。该 SDK 的默认处理器要求活动队列，已结束的远端任务可用不带 `waitMs` 的 `task/checkRemote` 查询。
 
 A2A 1.0 规定 `SendStreamingMessage` 以 `Task` 或 `Message` 开始。Python SDK 对已有任务补答时可能直接发 `statusUpdate`。Fliuno 仅在 `GetTask` 已核对暂停状态、请求显式携带 `taskId` 和 `contextId`、且首帧两项身份均匹配时兼容这一行为。未收到合法首帧时保留提交结果未知，也不会根据预检取得的旧状态写入本轮身份或产物。新任务和同一上下文的新一轮仍要求标准首帧。
 
@@ -163,3 +163,19 @@ python -m venv target/a2a-sdk-interop
 验证中还修正了一处既有 PTY 测试竞态：跨过输出字节阈值不能证明尾部标记已入 spool，测试改为按游标等待标记并检查退出尾部字节。首次全量还出现两项原生命令执行的未知结果；增加执行模式/事件报告后，串行、相同 feature 的并行和最终全量均通过，暂未复现根因。初轮、诊断与最终日志分别保存在 `target/verification/a2a-workspace-tests.log`、`native-exec-diagnostic.log`、`a2a-workspace-tests-final.log`。
 
 同日后续增加原生启动耗时与停止原因后，复现两次 AppContainer 启动分别耗时约 8.35 秒、8.95 秒，超过成功 fixture 的 5 秒预算，停止原因均为 deadline。成功路径改用 30 秒预算，独立短超时探针保留；stdin shutdown 错误和停止后的写入边界也一并修正，详见 [执行证据](execution-evidence.md)。这解释了本轮复现的失败机制，未确定 OS 启动延迟的具体环境成因。
+
+### A2A Testbed 真实对端
+
+2026-11-21，Windows 上使用 Node.js `24.22.1` 和 Wrangler `4.149.0` 在本机运行未修改的 [A2A Testbed Task Runner](https://github.com/ravikiran438/a2a-testbed/tree/084dc2c2c3d2c19a694bb4f6d9acffcd38ae4fda/examples/hosted-agents/cloudflare-task-runner)。该 Agent 自己创建并保存远端任务、推进工作、生成产物和处理取消。Fliuno 的测试入口只校验临时 Bearer、转发 JSON-RPC、统计方法，并把 Agent Card 的接口地址改为回环入口。
+
+连续三轮均验证：错误凭据收到一次 `401` 且无请求送达 Agent；三项已授权任务各提交一次，成功任务的三个产物正文原样入库；取消只发送一次并可核对远端 `cancelled`；运行中强制结束 app-server 后，本机保留原远端 ID 和未知结果，重复原请求仍返回原任务，显式核对看到远端完成，没有再次提交。真实对端验收使用 JSON 轮询和本机 Bearer 入口。OAuth 令牌轮换、租户、扩展及 SSE 分别由独立契约或 SDK 测试覆盖。
+
+在单独目录克隆上述仓库并检出提交 `084dc2c2c3d2c19a694bb4f6d9acffcd38ae4fda`，进入 `examples/hosted-agents/cloudflare-task-runner`，启动 Worker：
+
+```powershell
+npm ci --ignore-scripts --no-audit --no-fund
+$env:WRANGLER_SEND_METRICS = 'false'
+node node_modules/wrangler/bin/wrangler.js dev --local --ip 127.0.0.1 --port 18787
+```
+
+再回到 Fliuno 仓库运行 `python examples/a2a_task_runner_interop.py --port 18787`。脚本可使用 `FLIUNO_DEMO_BIN_DIR` 指向已构建的 app-server，无需云账号或真实凭据。
