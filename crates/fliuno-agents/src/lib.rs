@@ -2,7 +2,7 @@
 mod a2a;
 mod acp;
 mod filesystem;
-pub use a2a::{A2aAgentConfig, A2aConfig, register_a2a_config};
+pub use a2a::{A2aAgentConfig, A2aConfig, A2aOAuthConfig, register_a2a_config};
 pub use acp::{AcpAgentConfig, AgentsConfig, Isolation, register_config};
 
 #[cfg(test)]

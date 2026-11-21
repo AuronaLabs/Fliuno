@@ -231,6 +231,11 @@ fn read_request(stream: &mut TcpStream) -> Request {
     reader.read_exact(&mut body).unwrap();
     let body = if body.is_empty() {
         Value::Null
+    } else if headers
+        .get("content-type")
+        .is_some_and(|value: &String| value.starts_with("application/x-www-form-urlencoded"))
+    {
+        Value::String(String::from_utf8(body).unwrap())
     } else {
         serde_json::from_slice(&body).unwrap()
     };

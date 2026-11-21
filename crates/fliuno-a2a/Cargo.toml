@@ -8,7 +8,7 @@ publish.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["form"] }
 thiserror.workspace = true
 base64 = "0.22"
 tokio = { workspace = true, features = ["sync"] }

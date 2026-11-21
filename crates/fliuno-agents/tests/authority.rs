@@ -92,3 +92,12 @@ fn a2a_endpoint_and_execution_budget_are_part_of_queued_authority() {
     transport["agents"][0]["streaming"] = json!(true);
     cannot_rebind(config, transport, false);
 }
+
+#[test]
+fn a2a_tenant_is_part_of_the_persisted_registration_binding() {
+    let first =
+        json!({"agents":[{"id":"stable","endpoint":"http://127.0.0.1:1/a2a","tenant":"team-a"}]});
+    let mut second = first.clone();
+    second["agents"][0]["tenant"] = json!("team-b");
+    cannot_rebind(first, second, false);
+}

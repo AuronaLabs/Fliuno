@@ -1,8 +1,8 @@
 //! Maps bounded remote A2A tasks to the neutral core. URLs, credentials and
 //! deadlines are host-owned; cards/messages never confer local tool authority.
 use fliuno_a2a::{
-    ArtifactPayload, Client, Message, MessageTarget, Options, SendResponse, StreamEvent, Task,
-    TaskState, decode_raw_part,
+    ArtifactPayload, Client, ClientCredentials, Message, MessageTarget, Options, SendResponse,
+    StreamEvent, Task, TaskState, decode_raw_part,
 };
 use fliuno_core::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
@@ -37,6 +37,12 @@ pub struct A2aAgentConfig {
     pub agent_card_url: Option<String>,
     #[serde(default)]
     pub bearer_token_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tenant: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub optional_extensions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<A2aOAuthConfig>,
     #[serde(default = "request_ms")]
     pub request_timeout_ms: u64,
     #[serde(default = "task_ms")]
@@ -47,6 +53,25 @@ pub struct A2aAgentConfig {
     pub max_response_bytes: usize,
     #[serde(default, skip_serializing_if = "is_false")]
     pub streaming: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct A2aOAuthConfig {
+    pub token_endpoint: String,
+    pub client_id: String,
+    pub client_secret_env: String,
+    pub scope: Option<String>,
+}
+
+fn read_credential(name: &str) -> Result<String, String> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return Err("invalid A2A credential environment name".into());
+    }
+    std::env::var(name).map_err(|_| "A2A credential environment variable is unavailable".into())
 }
 fn is_false(value: &bool) -> bool {
     !value
@@ -100,18 +125,27 @@ pub fn register_a2a_config(kernel: &mut Kernel, config: A2aConfig) -> Result<(),
                 return Err("A2A card must use the configured endpoint origin".into());
             }
         }
+        if config.bearer_token_env.is_some() && config.oauth.is_some() {
+            return Err("A2A Bearer and OAuth configurations are mutually exclusive".into());
+        }
+        if !config.optional_extensions.is_empty() && config.agent_card_url.is_none() {
+            return Err("A2A optional extensions require a pinned Agent Card URL".into());
+        }
         let bearer_token = config
             .bearer_token_env
+            .as_deref()
+            .map(read_credential)
+            .transpose()?;
+        let oauth = config
+            .oauth
             .as_ref()
-            .map(|name| {
-                if name.is_empty()
-                    || name.len() > 128
-                    || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                {
-                    return Err("invalid A2A credential environment name".to_owned());
-                }
-                std::env::var(name)
-                    .map_err(|_| "A2A credential environment variable is unavailable".to_owned())
+            .map(|config| {
+                Ok::<_, String>(ClientCredentials {
+                    token_endpoint: config.token_endpoint.clone(),
+                    client_id: config.client_id.clone(),
+                    client_secret: read_credential(&config.client_secret_env)?,
+                    scope: config.scope.clone(),
+                })
             })
             .transpose()?;
         let authority = fliuno_core::authority_digest(
@@ -122,7 +156,10 @@ pub fn register_a2a_config(kernel: &mut Kernel, config: A2aConfig) -> Result<(),
         );
         let options = Options {
             endpoint: config.endpoint,
+            tenant: config.tenant,
+            optional_extensions: config.optional_extensions,
             bearer_token,
+            oauth,
             request_timeout: Duration::from_millis(config.request_timeout_ms),
             max_response_bytes: config.max_response_bytes,
         };
@@ -523,27 +560,40 @@ impl A2aBackend {
         };
         let deadline = Instant::now() + self.task_timeout;
         let history = fliuno_core::context_prompt(request.context.as_ref()).map_err(|_| ())?;
-        if self.card.is_some() || continuation.is_some() {
+        if self.card.is_some() || continuation.is_some() || self.options.oauth.is_some() {
             tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => return Ok(known(AgentStopReason::Cancelled)),
                 _ = sleep_until(deadline) => return Ok(before_submission_failure(continuation)),
                 result = async {
+                    client.authenticate().await?;
                     if let Some(card) = &self.card {
                         if self.streaming {
-                            client.check_card_streaming(card).await.map_err(|_| ())?;
+                            client.check_card_streaming(card).await?;
                         } else {
-                            client.check_card(card).await.map_err(|_| ())?;
+                            client.check_card(card).await?;
                         }
                     }
                     if let Some(continuation) = continuation {
-                        let current = client.get_task(&continuation.expected.id).await.map_err(|_| ())?;
-                        if remote_task(&current)? != continuation.expected {
-                            return Err(());
+                        let current = client.get_task(&continuation.expected.id).await?;
+                        if remote_task(&current).ok().as_ref() != Some(&continuation.expected) {
+                            return Err(fliuno_a2a::Error::Protocol);
                         }
                     }
                     Ok(())
-                } => if result.is_err() { return Ok(before_submission_failure(continuation)); },
+                } => if let Err(error) = result {
+                    let reason = match error {
+                        fliuno_a2a::Error::Authentication => "oauth_token_failed",
+                        fliuno_a2a::Error::UnsupportedExtension => "unsupported_required_extension",
+                        fliuno_a2a::Error::Http(401 | 403) => "remote_authorization_denied",
+                        _ => "remote_preflight_failed",
+                    };
+                    observer.observe(AgentObservation::Update {
+                        update: json!({"type":"a2a_preflight_failed", "reason":reason}),
+                        text: None,
+                    }).map_err(|_| ())?;
+                    return Ok(known(AgentStopReason::RemotePreflightFailed));
+                },
             }
         }
         let target = if let Some(continuation) = continuation {

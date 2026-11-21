@@ -119,6 +119,92 @@ fn wait_checked(peer: &mut Peer, task_id: &Value, check_id: &Value) -> Value {
 }
 
 #[test]
+fn oauth_tenant_and_card_negotiation_run_through_the_app_server() {
+    const EXTENSION: &str = "https://example.invalid/extensions/optional/v1";
+    const UNADVERTISED: &str = "https://example.invalid/extensions/unadvertised/v1";
+    let card_reads = AtomicUsize::new(0);
+    let auth = Fixture::start(|request| {
+        assert_eq!(request.path, "/token");
+        assert!(
+            request
+                .body
+                .as_str()
+                .unwrap()
+                .contains("client_secret=fixture-a2a-private")
+        );
+        Response::json(
+            200,
+            json!({"access_token":"fixture-issued-token","token_type":"Bearer","expires_in":300}),
+        )
+    });
+    let agent = Fixture::start(move |request| {
+        assert_eq!(
+            request.headers["authorization"],
+            "Bearer fixture-issued-token"
+        );
+        if request.method == "GET" {
+            assert!(!request.headers.contains_key("a2a-extensions"));
+            let required = card_reads.fetch_add(1, Ordering::SeqCst) == 0;
+            return Response::json(
+                200,
+                json!({
+                    "supportedInterfaces":[{"url":format!("http://{}/rpc",request.headers["host"]),"protocolBinding":"JSONRPC","protocolVersion":"1.0","tenant":"west"}],
+                    "capabilities":{"extensions":[{"uri":EXTENSION,"required":required},{"uri":"urn:unused:ext"}]}
+                }),
+            );
+        }
+        assert_eq!(request.body["method"], "SendMessage");
+        assert_eq!(request.body["params"]["tenant"], "west");
+        assert_eq!(request.headers["a2a-version"], "1.0");
+        assert_eq!(request.headers["a2a-extensions"], EXTENSION);
+        let mut completed = task("TASK_STATE_COMPLETED");
+        completed["artifacts"] = json!([{"artifactId":"report","parts":[{"text":"ready"}]}]);
+        Response::json(
+            200,
+            json!({"jsonrpc":"2.0","id":request.body["id"],"result":{"task":completed}}),
+        )
+    });
+    let directory = Directory::new(&agent, 10_000, true);
+    fs::write(&directory.config, json!({"agents":[{
+        "id":"remote","endpoint":agent.url("/rpc"),"agentCardUrl":agent.url("/.well-known/agent-card.json"),
+        "tenant":"west","optionalExtensions":[EXTENSION,UNADVERTISED],
+        "oauth":{"tokenEndpoint":auth.url("/token"),"clientId":"app","clientSecretEnv":"FLIUNO_TEST_A2A_TOKEN"}
+    }]}).to_string()).unwrap();
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    let session = directory.session(&mut peer);
+    let rejected = start(&mut peer, &session, "required-ext");
+    let rejected = wait_finished(&mut peer, &rejected["id"]);
+    assert_eq!(
+        rejected["agentRun"]["stopReason"],
+        "remote_preflight_failed"
+    );
+    assert_eq!(rejected["agentRun"]["outcomeUnknown"], false);
+    assert_eq!(agent.requests().len(), 1);
+    let page = peer.call("events/list", json!({"taskId":rejected["id"]}));
+    let events = page.to_string();
+    assert!(events.contains("unsupported_required_extension"));
+    assert!(!events.contains("fixture-issued-token"));
+    assert!(!events.contains("fixture-a2a-private"));
+
+    let completed = start(&mut peer, &session, "optional-ext");
+    let completed = wait_finished(&mut peer, &completed["id"]);
+    assert_eq!(completed["status"], "completed");
+    assert_eq!(
+        completed["agentRun"]["artifacts"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        agent
+            .requests()
+            .iter()
+            .filter(|request| request.method == "POST")
+            .count(),
+        1
+    );
+    assert_eq!(auth.requests().len(), 2);
+}
+
+#[test]
 fn artifact_summaries_page_without_returning_bodies_and_get_is_task_scoped() {
     let wire = Fixture::start(|request| {
         assert_eq!(request.body["method"], "SendMessage");

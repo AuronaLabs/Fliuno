@@ -8,11 +8,11 @@ Fliuno 的 A2A 通道用于调用主机预先注册的远程 Agent。`fliuno-a2a
 
 ## 固定版本与支持范围
 
-本实现固定 [A2A v1.0.0 规范](https://a2a-protocol.org/v1.0.0/specification/) 的 JSON-RPC binding；请求发送 `A2A-Version: 1.0`。方法为 `SendMessage`、`GetTask`、`CancelTask`，使用 `ROLE_USER` / `ROLE_AGENT`、`TASK_STATE_*`、`text` / `data` / `raw` / `url` oneof。旧版 `message/send`、小写状态和 `kind/file` Part 不作为兼容协议接受。
+本实现对照 [A2A v1.0.1 规范](https://a2a-protocol.org/v1.0.1/specification/) 的 JSON-RPC binding；线路版本仍为 `A2A-Version: 1.0`。方法为 `SendMessage`、`GetTask`、`CancelTask`，以及流式模式使用的 `SendStreamingMessage` 和 `SubscribeToTask`。使用 `ROLE_USER` / `ROLE_AGENT`、`TASK_STATE_*`、`text` / `data` / `raw` / `url` oneof。旧版 `message/send`、小写状态和 `kind/file` Part 不作为兼容协议接受。
 
 默认使用 `returnImmediately: true` 与有界 `GetTask` 轮询，不请求历史。配置 `streaming: true` 时改用 `SendStreamingMessage` 和 SSE，不执行轮询回退；如果配置了 Agent Card，卡片还必须声明 `capabilities.streaming: true`。流按 JSON-RPC envelope 校验，每次调用最多接收配置的 `maxResponseBytes`，消费队列容量为 16，客户端变慢时网络读取随之暂停。首个 Task 固定远端任务/上下文身份，后续状态和产物更新必须匹配；状态回退、错序、超预算、非终态断流均保留未知结果，不重发提交。TaskStatusUpdateEvent 按 A2A 1.0 的状态字段判定结束，不依赖非标准的 `final` 标志。ArtifactUpdate 的 append/lastChunk 会在内存中按 artifactId 有界组装，只有完整产物随终态入库。取消在获得 Task 身份后最多发送一次 CancelTask，并要求终态响应确认。
 
-支持 Task、立即返回的 Message 和可选 SSE 实时流。gRPC、HTTP+JSON binding、push notification、扩展、tenancy、OAuth、认证卡片、签名验证尚未实现；不声明完整 A2A 一致性。卡片只是可选的主机固定接口校验，不能配置或切换 URL、凭据、tenant 和 binding。
+支持 Task、立即返回的 Message、可选 SSE 实时流、宿主指定的远端租户路由和 OAuth 客户端凭据。Agent Card 用于核对固定接口和协商可选扩展，不能修改 URL、身份、tenant 或 binding。gRPC、HTTP+JSON binding、push notification、本地多租户服务、动态扩展处理器、扩展卡片查询和签名验证尚未实现。
 
 ## 配置与调用
 
@@ -33,6 +33,30 @@ Fliuno 的 A2A 通道用于调用主机预先注册的远程 Agent。`fliuno-a2a
 ```
 
 只有 `id`、`endpoint` 必填。凭据值从主机环境读取，字段填的是变量名；配置变量但未提供值会使启动失败。整个配置先校验，之后才修改共享的 ACP/A2A Agent 注册表，合计最多 64 个，ID 不得重复。
+
+需要远端租户、OAuth 和可选扩展时，可配置为：
+
+```json
+{
+  "agents": [{
+    "id": "researcher",
+    "endpoint": "https://agent.example.com/rpc",
+    "agentCardUrl": "https://agent.example.com/.well-known/agent-card.json",
+    "tenant": "research-west",
+    "optionalExtensions": ["https://agent.example.com/ext/citations/v1"],
+    "oauth": {
+      "tokenEndpoint": "https://login.example.com/oauth2/v2.0/token",
+      "clientId": "fliuno-client",
+      "clientSecretEnv": "FLIUNO_RESEARCHER_CLIENT_SECRET",
+      "scope": "api://researcher/.default"
+    }
+  }]
+}
+```
+
+- `tenant` 写入每项 JSON-RPC 的 `params`，若配置了卡片则必须匹配所选接口声明。
+- `oauth` 与 `bearerTokenEnv` 二选一。令牌端点由宿主指定，使用表单提交 `client_credentials`，可选 `scope`。它必须返回带有效期的 Bearer 令牌。令牌仅保留在当前客户端内存中，临近到期重新获取，不因认证失败重发已提交的 RPC。
+- `optionalExtensions` 要求配置卡片。仅对宿主配置与卡片声明的交集发送 `A2A-Extensions`；这只协商是否启用，不解释扩展特定语义。Fliuno 仍会拒绝必需扩展。派发前的已知失败记录为 `a2a_preflight_failed`，其 `reason` 使用固定值，不写远端错误正文或凭据。
 
 ```powershell
 cargo run -p fliuno-app-server -- --a2a-config C:/absolute/path/to/agents.json
@@ -119,7 +143,7 @@ python examples/a2a_demo.py --streaming --cancel
 
 测试覆盖真实 loopback HTTP wire、标准头与方法、响应关联、Part oneof / ProtoJSON bytes、卡片接口与扩展拒绝、重定向隔离、响应预算、超时，以及真实 app-server 的 SQLite 重启、幂等、产物、上下文、失败/暂停、取消和显式核对。远端任务证据在 v7 引入，旧 Agent 记录的新增字段默认空；v8 增加排队任务的注册绑定，v9 增加[显式上下文选择](context.md)，v10 增加核对事件。迁移不改写原远程证据。
 
-`Task.backendAuthority` 在创建时冻结全部 A2A 配置及实际 bearer token 的摘要。相同 Agent ID 更换端点、凭据、卡片地址或执行预算，重启后旧排队任务不能启动；幂等提交仍返回原任务，不刷新摘要。该检查不认证远端代码，也不允许重发结果未知的提交，详见[注册身份](authority.md)。
+`Task.backendAuthority` 在创建时冻结 A2A 注册摘要，包括 JSON-RPC binding、端点、租户和认证配置。静态 Bearer 仍绑定实际令牌摘要；OAuth 绑定宿主指定的令牌端点、客户端身份、scope 和变量名，同一客户端更换访问令牌或密钥值无需重绑。更换身份或租户后，旧排队任务、核对和续接不能沿用原授权。幂等提交仍返回原任务，不刷新摘要。详见[注册身份](authority.md)。
 
 这些是独立契约 fixture 与本机进程验收。官方 Python SDK `a2a-sdk==1.3.1` 已通过回环验收，覆盖 Agent Card、JSON 轮询和 SSE 的暂停、补答、同一上下文的新任务、幂等与产物入库。SSE 用例在补答任务的队列仍活动时调用 `SubscribeToTask`，取得同一远端任务的 `working` 快照，并检查原本机运行和产物。该 SDK 的默认处理器要求活动队列，已结束的远端任务可用不带 `waitMs` 的 `task/checkRemote` 查询。真实外部 Agent 验收仍待执行。
 

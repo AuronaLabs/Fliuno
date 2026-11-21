@@ -2,10 +2,15 @@
 //! tests are independent fixtures, not official SDK interoperability claims.
 #[path = "../../fliuno-mcp/tests/support/http.rs"]
 mod http;
-use fliuno_a2a::{Client, Error, Options, SendResponse, StreamEvent, Task, TaskState};
+use fliuno_a2a::{
+    Client, ClientCredentials, Error, Options, SendResponse, StreamEvent, Task, TaskState,
+};
 use http::{Fixture, Request, Response};
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Duration,
+};
 
 fn client(fixture: &Fixture) -> Client {
     // Allow cold starts and scheduling delays in the emulated Linux runner.
@@ -14,7 +19,10 @@ fn client(fixture: &Fixture) -> Client {
 fn client_with_timeout(fixture: &Fixture, request_timeout: Duration) -> Client {
     Client::new(Options {
         endpoint: fixture.url("/rpc"),
+        tenant: None,
+        optional_extensions: vec![],
         bearer_token: Some("host-secret".into()),
+        oauth: None,
         request_timeout,
         max_response_bytes: 1024,
     })
@@ -28,6 +36,140 @@ fn response(request: &Request, result: Value) -> Response {
 }
 fn task(state: &str) -> Value {
     json!({"id":"remote-task","contextId":"context","status":{"state":state}})
+}
+
+fn oauth_client(agent: &Fixture, issuer: &Fixture) -> Client {
+    Client::new(Options {
+        endpoint: agent.url("/rpc"),
+        tenant: Some("team/west".into()),
+        optional_extensions: vec![],
+        bearer_token: None,
+        oauth: Some(ClientCredentials {
+            token_endpoint: issuer.url("/token"),
+            client_id: "test-application".into(),
+            client_secret: "literal+fixture&secret".into(),
+            scope: Some("api://fliuno/.default".into()),
+        }),
+        request_timeout: Duration::from_secs(3),
+        max_response_bytes: 4096,
+    })
+    .unwrap()
+}
+
+#[tokio::test]
+async fn tenant_and_oauth_bind_every_remote_operation_and_expiring_tokens_refresh() {
+    let issued = AtomicUsize::new(0);
+    let issuer = Fixture::start(move |request| {
+        assert_eq!(request.path, "/token");
+        assert!(!request.headers.contains_key("authorization"));
+        assert_eq!(
+            request.body.as_str().unwrap(),
+            "grant_type=client_credentials&client_id=test-application&client_secret=literal%2Bfixture%26secret&scope=api%3A%2F%2Ffliuno%2F.default"
+        );
+        let n = issued.fetch_add(1, Ordering::SeqCst);
+        Response::json(
+            200,
+            json!({"access_token":format!("fixture-token-{n}"),"token_type":"Bearer","expires_in":if n == 0 { 1 } else { 300 }}),
+        )
+    });
+    let agent = Fixture::start(|request| {
+        assert_eq!(request.headers["a2a-version"], "1.0");
+        if request.method == "GET" {
+            return Response::json(
+                200,
+                json!({"supportedInterfaces":[{"url":format!("http://{}/rpc",request.headers["host"]),"protocolBinding":"JSONRPC","protocolVersion":"1.0","tenant": if request.path == "/card" { "team/west" } else { "other" }}],"capabilities":{"streaming":true}}),
+            );
+        }
+        assert_eq!(request.body["params"]["tenant"], "team/west");
+        assert!(!request.body.to_string().contains("fixture-token"));
+        match request.body["method"].as_str().unwrap() {
+            "SendMessage" => response(request, json!({"task":task("TASK_STATE_SUBMITTED")})),
+            "GetTask" => response(request, task("TASK_STATE_WORKING")),
+            "CancelTask" => response(request, task("TASK_STATE_CANCELED")),
+            "SubscribeToTask" => {
+                stream_response(request, [json!({"task":task("TASK_STATE_COMPLETED")})])
+            }
+            "SendStreamingMessage" => {
+                stream_response(request, [json!({"task":task("TASK_STATE_COMPLETED")})])
+            }
+            _ => panic!("unexpected method"),
+        }
+    });
+    let client = oauth_client(&agent, &issuer);
+    client.authenticate().await.unwrap();
+    client
+        .check_card_streaming(&agent.url("/card"))
+        .await
+        .unwrap();
+    assert!(matches!(
+        client.check_card(&agent.url("/wrong-card")).await,
+        Err(Error::Protocol)
+    ));
+    // Once expired, each path must attach the replacement token without replaying a request.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    client.send_text("attempt", "text", None).await.unwrap();
+    client.get_task("remote-task").await.unwrap();
+    client.cancel_task("remote-task").await.unwrap();
+    let mut events = client
+        .send_text_streaming("attempt-stream", "text", None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        events.recv().await.unwrap().unwrap(),
+        StreamEvent::Task(_)
+    ));
+    let mut events = client
+        .subscribe_to_task("remote-task", "context")
+        .await
+        .unwrap();
+    assert!(matches!(
+        events.recv().await.unwrap().unwrap(),
+        StreamEvent::Task(_)
+    ));
+    let requests = agent.requests();
+    assert_eq!(requests.len(), 7);
+    assert_eq!(
+        requests[0].headers["authorization"],
+        "Bearer fixture-token-0"
+    );
+    assert!(
+        requests[2..]
+            .iter()
+            .all(|r| r.headers["authorization"] == "Bearer fixture-token-1")
+    );
+    assert_eq!(issuer.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn oauth_failure_stays_at_the_issuer_and_unauthorized_submission_is_not_replayed() {
+    let agent = Fixture::start(|_| Response::json(401, json!({"error":"sensitive-response"})));
+    let rejected =
+        Fixture::start(|_| Response::json(400, json!({"error_description":"sensitive-response"})));
+    let client = oauth_client(&agent, &rejected);
+    let result = client.send_text("attempt", "text", None).await;
+    assert!(matches!(result, Err(Error::Authentication)));
+    assert!(
+        !result
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("sensitive-response")
+    );
+    assert!(agent.requests().is_empty());
+    let authorized = Fixture::start(|_| {
+        Response::json(
+            200,
+            json!({"access_token":"fixture-token","token_type":"Bearer","expires_in":300}),
+        )
+    });
+    assert!(matches!(
+        oauth_client(&agent, &authorized)
+            .send_text("attempt", "text", None)
+            .await,
+        Err(Error::Http(401))
+    ));
+    assert_eq!(authorized.requests().len(), 1);
+    assert_eq!(agent.requests().len(), 1);
 }
 
 #[tokio::test]

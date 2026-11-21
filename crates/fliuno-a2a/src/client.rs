@@ -1,11 +1,18 @@
-use crate::{Error, Result, SendResponse, StreamEvent, Task, TaskState, wire::valid_id};
+use crate::{
+    ClientCredentials, Error, Result, SendResponse, StreamEvent, Task, TaskState, oauth::OAuth,
+    wire::valid_id,
+};
 use reqwest::{
     Url,
     header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue},
 };
 use serde_json::{Value, json};
 use std::{
-    sync::atomic::{AtomicU64, Ordering},
+    collections::BTreeSet,
+    sync::{
+        RwLock,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::mpsc;
@@ -17,7 +24,11 @@ const MAX_STREAM_EVENTS: usize = 4096;
 #[derive(Clone)]
 pub struct Options {
     pub endpoint: String,
+    pub tenant: Option<String>,
+    /// Optional extension URIs to request after the pinned card advertises them.
+    pub optional_extensions: Vec<String>,
     pub bearer_token: Option<String>,
+    pub oauth: Option<ClientCredentials>,
     pub request_timeout: Duration,
     pub max_response_bytes: usize,
 }
@@ -122,15 +133,33 @@ pub struct Client {
     http: reqwest::Client,
     stream_http: reqwest::Client,
     endpoint: Url,
+    tenant: Option<String>,
+    optional_extensions: BTreeSet<String>,
+    negotiated_extensions: RwLock<Option<HeaderValue>>,
+    oauth: Option<OAuth>,
     limit: usize,
     next_id: AtomicU64,
 }
 impl Client {
     pub fn new(options: Options) -> Result<Self> {
         let endpoint = validate_endpoint(&options.endpoint)?;
+        let extensions = options
+            .optional_extensions
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>();
         if !(Duration::from_millis(100)..=Duration::from_secs(3600))
             .contains(&options.request_timeout)
             || !(1024..=4 * 1024 * 1024).contains(&options.max_response_bytes)
+            || options.tenant.as_ref().is_some_and(|tenant| {
+                tenant.trim().is_empty()
+                    || tenant.len() > 256
+                    || tenant.chars().any(char::is_control)
+            })
+            || (options.bearer_token.is_some() && options.oauth.is_some())
+            || extensions.len() != options.optional_extensions.len()
+            || extensions.len() > 8
+            || extensions.iter().any(|uri| !valid_extension_uri(uri))
         {
             return Err(Error::Config);
         }
@@ -138,14 +167,12 @@ impl Client {
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert("a2a-version", HeaderValue::from_static("1.0"));
         if let Some(token) = options.bearer_token {
-            if token.is_empty() || token.len() > 8192 || token.chars().any(char::is_whitespace) {
-                return Err(Error::Config);
-            }
-            let mut value =
-                HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| Error::Config)?;
-            value.set_sensitive(true);
-            headers.insert(AUTHORIZATION, value);
+            headers.insert(AUTHORIZATION, bearer_header(&token)?);
         }
+        let oauth = options
+            .oauth
+            .map(|config| OAuth::new(config, options.request_timeout))
+            .transpose()?;
         let http = reqwest::Client::builder()
             .default_headers(headers.clone())
             .redirect(reqwest::redirect::Policy::none())
@@ -169,39 +196,50 @@ impl Client {
             http,
             stream_http,
             endpoint,
+            tenant: options.tenant,
+            optional_extensions: extensions,
+            negotiated_extensions: RwLock::new(None),
+            oauth,
             limit: options.max_response_bytes,
             next_id: AtomicU64::new(1),
         })
     }
-    async fn body(&self, mut response: reqwest::Response) -> Result<Value> {
-        if !response.status().is_success() {
-            return Err(Error::Http(response.status().as_u16()));
-        }
-        if response
-            .content_length()
-            .is_some_and(|n| n > self.limit as u64)
-        {
-            return Err(Error::Budget);
-        }
-        if response
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.split(';').next())
-            .is_none_or(|v| !v.trim().eq_ignore_ascii_case("application/json"))
-        {
-            return Err(Error::Protocol);
-        }
-        let mut bytes = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|_| Error::Transport)? {
-            if bytes.len().saturating_add(chunk.len()) > self.limit {
-                return Err(Error::Budget);
-            }
-            bytes.extend_from_slice(&chunk);
-        }
-        serde_json::from_slice(&bytes).map_err(|_| Error::Protocol)
+    async fn body(&self, response: reqwest::Response) -> Result<Value> {
+        read_json(response, self.limit).await
     }
-    fn encode_rpc(&self, method: &str, params: Value) -> Result<(String, Vec<u8>)> {
+    pub async fn authenticate(&self) -> Result<()> {
+        if let Some(oauth) = &self.oauth {
+            oauth.bearer().await?;
+        }
+        Ok(())
+    }
+    async fn authorize(&self, request: reqwest::RequestBuilder) -> Result<reqwest::RequestBuilder> {
+        match &self.oauth {
+            Some(oauth) => Ok(request.header(AUTHORIZATION, oauth.bearer().await?)),
+            None => Ok(request),
+        }
+    }
+    async fn authorize_rpc(
+        &self,
+        mut request: reqwest::RequestBuilder,
+    ) -> Result<reqwest::RequestBuilder> {
+        if !self.optional_extensions.is_empty() {
+            let header = self
+                .negotiated_extensions
+                .read()
+                .map_err(|_| Error::Config)?
+                .clone()
+                .ok_or(Error::Config)?;
+            if !header.is_empty() {
+                request = request.header("a2a-extensions", header);
+            }
+        }
+        self.authorize(request).await
+    }
+    fn encode_rpc(&self, method: &str, mut params: Value) -> Result<(String, Vec<u8>)> {
+        if let Some(tenant) = &self.tenant {
+            params["tenant"] = json!(tenant);
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let bytes =
             serde_json::to_vec(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
@@ -217,8 +255,8 @@ impl Client {
     }
     async fn post_json(&self, id: String, bytes: Vec<u8>) -> Result<Value> {
         let response = self
-            .http
-            .post(self.endpoint.clone())
+            .authorize_rpc(self.http.post(self.endpoint.clone()))
+            .await?
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(bytes)
             .send()
@@ -312,8 +350,8 @@ impl Client {
         start: StreamStart,
     ) -> Result<mpsc::Receiver<Result<StreamEvent>>> {
         let mut response = self
-            .stream_http
-            .post(self.endpoint.clone())
+            .authorize_rpc(self.stream_http.post(self.endpoint.clone()))
+            .await?
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(bytes)
             .send()
@@ -384,14 +422,18 @@ impl Client {
     }
 
     async fn check_card_mode(&self, card_url: &str, require_streaming: bool) -> Result<()> {
+        *self
+            .negotiated_extensions
+            .write()
+            .map_err(|_| Error::Config)? = None;
         let url = validate_endpoint(card_url)?;
         if url.origin() != self.endpoint.origin() {
             return Err(Error::Config);
         }
         let card = self
             .body(
-                self.http
-                    .get(url)
+                self.authorize(self.http.get(url))
+                    .await?
                     .send()
                     .await
                     .map_err(|_| Error::Transport)?,
@@ -409,14 +451,27 @@ impl Client {
                     .and_then(|s| validate_endpoint(s).ok())
                     .as_ref()
                     == Some(&self.endpoint)
-                && i.get("tenant").is_none_or(|t| t.as_str() == Some(""))
+                && match i.get("tenant") {
+                    None => self.tenant.is_none(),
+                    Some(tenant) => {
+                        tenant.as_str() == Some(self.tenant.as_deref().unwrap_or_default())
+                    }
+                }
         }) {
             return Err(Error::Protocol);
         }
+        let mut negotiated = BTreeSet::new();
         if let Some(extensions) = card.pointer("/capabilities/extensions") {
             for extension in extensions.as_array().ok_or(Error::Protocol)? {
-                if extension.get("required").is_some_and(|v| v != false) {
-                    return Err(Error::Protocol);
+                match extension.get("required").map(Value::as_bool) {
+                    Some(Some(true)) => return Err(Error::UnsupportedExtension),
+                    None | Some(Some(false)) => {}
+                    Some(None) => return Err(Error::Protocol),
+                }
+                if let Some(uri) = extension.get("uri").and_then(Value::as_str)
+                    && self.optional_extensions.contains(uri)
+                {
+                    negotiated.insert(uri);
                 }
             }
         }
@@ -428,8 +483,59 @@ impl Client {
         {
             return Err(Error::Protocol);
         }
+        let extensions = negotiated.into_iter().collect::<Vec<_>>().join(",");
+        *self
+            .negotiated_extensions
+            .write()
+            .map_err(|_| Error::Config)? =
+            Some(HeaderValue::from_str(&extensions).map_err(|_| Error::Config)?);
         Ok(())
     }
+}
+
+fn valid_extension_uri(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value.bytes().all(|b| b.is_ascii_graphic() && b != b',')
+        && Url::parse(value).is_ok_and(|uri| uri.username().is_empty() && uri.password().is_none())
+}
+
+pub(crate) fn bearer_header(token: &str) -> Result<HeaderValue> {
+    if token.is_empty() || token.len() > 8192 || token.chars().any(char::is_whitespace) {
+        return Err(Error::Config);
+    }
+    let mut value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| Error::Config)?;
+    value.set_sensitive(true);
+    Ok(value)
+}
+
+pub(crate) async fn read_json<T: serde::de::DeserializeOwned>(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<T> {
+    if !response.status().is_success() {
+        return Err(Error::Http(response.status().as_u16()));
+    }
+    if response.content_length().is_some_and(|n| n > limit as u64) {
+        return Err(Error::Budget);
+    }
+    if response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .is_none_or(|v| !v.trim().eq_ignore_ascii_case("application/json"))
+    {
+        return Err(Error::Protocol);
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| Error::Transport)? {
+        if bytes.len().saturating_add(chunk.len()) > limit {
+            return Err(Error::Budget);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).map_err(|_| Error::Protocol)
 }
 
 /// Encoded request bound to its originating client and consumed by submission.
