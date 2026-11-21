@@ -1,8 +1,11 @@
 //! JSON-RPC 2.0 dispatch. Transport and domain errors never enter model messages.
 mod agent_catalog;
 mod approvals;
+mod memory_embeddings;
 mod scheduler;
 mod terminal_subscriptions;
+
+pub use memory_embeddings::{MemoryEmbeddingConfig, MemoryEmbeddingProvider};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use fliuno_core::{
@@ -21,6 +24,7 @@ use std::{
 const MAX_BATCH_ITEMS: usize = 128;
 
 pub struct RpcServer {
+    memory_embeddings: Option<memory_embeddings::Service>,
     kernel: Arc<Mutex<Kernel>>,
     scheduler: TaskScheduler,
     agent_catalog: Option<agent_catalog::Catalog>,
@@ -113,6 +117,7 @@ impl RpcServer {
         let kernel = Arc::new(Mutex::new(kernel));
         let scheduler = TaskScheduler::new(Arc::clone(&kernel));
         let server = Self {
+            memory_embeddings: None,
             kernel,
             scheduler,
             agent_catalog,
@@ -132,6 +137,17 @@ impl RpcServer {
             eprintln!("fliuno: cannot schedule recovered task runs: {error:?}");
         }
         server
+    }
+
+    pub fn enable_memory_embeddings(
+        &mut self,
+        provider: MemoryEmbeddingProvider,
+    ) -> std::io::Result<()> {
+        self.memory_embeddings = Some(memory_embeddings::Service::start(
+            provider,
+            Arc::clone(&self.kernel),
+        )?);
+        Ok(())
     }
 
     pub fn take_event_receiver(&mut self) -> EventReceiver {
@@ -303,6 +319,21 @@ impl RpcServer {
             code: -32603,
             message: "kernel lock is poisoned".into(),
         })
+    }
+
+    fn retrieve_task_memory(
+        &self,
+        params: &TaskStartParams,
+    ) -> Result<memory_embeddings::Retrieved, RpcError> {
+        let Some(service) = &self.memory_embeddings else {
+            return Ok(memory_embeddings::Retrieved::Keyword);
+        };
+        let workspace = self.kernel()?.task_memory_workspace(params)?;
+        Ok(
+            workspace.map_or(memory_embeddings::Retrieved::Keyword, |workspace| {
+                service.query(workspace, &params.input)
+            }),
+        )
     }
 
     /// Call with the kernel lock held after commit so a worker cannot record
@@ -570,6 +601,8 @@ impl RpcServer {
             capabilities["workspaceMemory"] = json!(true);
             capabilities["workspaceMemoryAudit"] = json!(true);
             capabilities["workspaceMemorySemanticIndex"] = json!(true);
+            capabilities["taskMemoryOptOut"] = json!(true);
+            capabilities["taskMemoryHybridRetrieval"] = json!(self.memory_embeddings.is_some());
             capabilities["maxWorkspaceMemories"] = json!(4096);
             capabilities["maxWorkspaceMemoryContentBytes"] =
                 json!(MAX_WORKSPACE_MEMORY_CONTENT_BYTES);
@@ -898,7 +931,10 @@ impl RpcServer {
             }
             "task/startSummary" => {
                 let p: TaskStartParams = decode(params)?;
-                let started = self.kernel()?.create_task_for_summary(p)?;
+                let memory = self.retrieve_task_memory(&p)?;
+                let started = self
+                    .kernel()?
+                    .create_summary_with_memory(p, memory.query())?;
                 let summary = match started {
                     TaskSummaryStart::Existing(summary) => summary,
                     TaskSummaryStart::Created(task) => {
@@ -910,7 +946,8 @@ impl RpcServer {
             }
             "task/start" => {
                 let p: TaskStartParams = decode(params)?;
-                let (task, created) = self.kernel()?.create_task_from_params(p)?;
+                let memory = self.retrieve_task_memory(&p)?;
+                let (task, created) = self.kernel()?.create_task_with_memory(p, memory.query())?;
                 let task = if created {
                     self.schedule_or_fail(task)?
                 } else {

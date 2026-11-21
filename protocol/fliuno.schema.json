@@ -858,6 +858,10 @@
               "$ref": "#/$defs/ContextMode",
               "default": "session"
             },
+            "disableMemory": {
+              "description": "Disable workspace memory retrieval without discarding session history.",
+              "type": "boolean"
+            },
             "maxTurns": {
               "type": "integer",
               "format": "uint32",
@@ -1625,6 +1629,10 @@
               "$ref": "#/$defs/ContextMode",
               "default": "session"
             },
+            "disableMemory": {
+              "description": "Disable workspace memory retrieval without discarding session history.",
+              "type": "boolean"
+            },
             "maxTurns": {
               "type": "integer",
               "format": "uint32",
@@ -1837,6 +1845,10 @@
             "mode": {
               "$ref": "#/$defs/ContextMode",
               "default": "session"
+            },
+            "disableMemory": {
+              "description": "Disable workspace memory retrieval without discarding session history.",
+              "type": "boolean"
             },
             "maxTurns": {
               "type": "integer",
@@ -2284,6 +2296,10 @@
             "mode": {
               "$ref": "#/$defs/ContextMode",
               "default": "session"
+            },
+            "disableMemory": {
+              "description": "Disable workspace memory retrieval without discarding session history.",
+              "type": "boolean"
             },
             "maxTurns": {
               "type": "integer",
@@ -5302,7 +5318,8 @@
             "embedding_unavailable",
             "no_compatible_index",
             "corrupt_index",
-            "no_positive_match"
+            "no_positive_match",
+            "below_similarity_threshold"
           ]
         },
         "WorkspaceMemorySemanticMatch": {
@@ -5790,6 +5807,17 @@
                 "$ref": "#/$defs/ContextMemory"
               }
             },
+            "memoryFallback": {
+              "description": "Present when a requested semantic lookup fell back to keyword search.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceMemoryFallback"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "summaries": {
               "type": "array",
               "items": {
@@ -5815,6 +5843,10 @@
             "mode": {
               "$ref": "#/$defs/ContextMode",
               "default": "session"
+            },
+            "disableMemory": {
+              "description": "Disable workspace memory retrieval without discarding session history.",
+              "type": "boolean"
             },
             "maxTurns": {
               "type": "integer",
@@ -6190,6 +6222,16 @@
                 "string",
                 "null"
               ]
+            },
+            "matchedBy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextMemoryMatch"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false,
@@ -6198,6 +6240,24 @@
             "key",
             "content",
             "revision"
+          ]
+        },
+        "ContextMemoryMatch": {
+          "type": "string",
+          "enum": [
+            "keyword",
+            "semantic",
+            "both"
+          ]
+        },
+        "WorkspaceMemoryFallback": {
+          "type": "string",
+          "enum": [
+            "embedding_unavailable",
+            "no_compatible_index",
+            "corrupt_index",
+            "no_positive_match",
+            "below_similarity_threshold"
           ]
         },
         "ContextSummary": {
@@ -8774,6 +8834,17 @@
             "$ref": "#/$defs/ContextMemory"
           }
         },
+        "memoryFallback": {
+          "description": "Present when a requested semantic lookup fell back to keyword search.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceMemoryFallback"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "summaries": {
           "type": "array",
           "items": {
@@ -8799,6 +8870,10 @@
             "mode": {
               "$ref": "#/$defs/ContextMode",
               "default": "session"
+            },
+            "disableMemory": {
+              "description": "Disable workspace memory retrieval without discarding session history.",
+              "type": "boolean"
             },
             "maxTurns": {
               "type": "integer",
@@ -9192,6 +9267,16 @@
                 "string",
                 "null"
               ]
+            },
+            "matchedBy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextMemoryMatch"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false,
@@ -9200,6 +9285,24 @@
             "key",
             "content",
             "revision"
+          ]
+        },
+        "ContextMemoryMatch": {
+          "type": "string",
+          "enum": [
+            "keyword",
+            "semantic",
+            "both"
+          ]
+        },
+        "WorkspaceMemoryFallback": {
+          "type": "string",
+          "enum": [
+            "embedding_unavailable",
+            "no_compatible_index",
+            "corrupt_index",
+            "no_positive_match",
+            "below_similarity_threshold"
           ]
         },
         "ContextSummary": {
@@ -9456,6 +9559,16 @@
             "string",
             "null"
           ]
+        },
+        "matchedBy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContextMemoryMatch"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -9464,7 +9577,17 @@
         "key",
         "content",
         "revision"
-      ]
+      ],
+      "$defs": {
+        "ContextMemoryMatch": {
+          "type": "string",
+          "enum": [
+            "keyword",
+            "semantic",
+            "both"
+          ]
+        }
+      }
     },
     "ContextSummary": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

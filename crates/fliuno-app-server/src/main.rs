@@ -3,7 +3,7 @@ mod backup;
 mod configuration;
 mod diagnostics;
 mod mcp_oauth;
-use fliuno_app_server::RpcServer;
+use fliuno_app_server::{MemoryEmbeddingConfig, MemoryEmbeddingProvider, RpcServer};
 use fliuno_core::Kernel;
 use fliuno_protocol::{Event, EventWatermark, MAX_APP_REQUEST_BYTES, ModelProgress};
 use serde::Serialize;
@@ -69,6 +69,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut a2a_config: Option<PathBuf> = None;
     let mut exec_config: Option<PathBuf> = None;
     let mut terminal_config: Option<PathBuf> = None;
+    let mut memory_embedding_config: Option<PathBuf> = None;
     let mut skills_dir: Option<PathBuf> = None;
     let mut trace_log: Option<PathBuf> = None;
     let mut otlp_endpoint = None;
@@ -130,10 +131,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 )
             }
             "--db" => db = args.next().ok_or("--db requires a path")?.into(),
+            "--memory-embedding-config" => {
+                memory_embedding_config = Some(
+                    args.next()
+                        .ok_or("--memory-embedding-config requires a path")?
+                        .into(),
+                );
+            }
             "--help" | "-h" => {
                 println!("{}", backup::USAGE);
                 println!(
                     "fliuno-app-server [--db PATH] [--mcp-config PATH] [--mcp-oauth-config PATH] [--mcp-oauth-vault PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--trace-log PATH] [--otlp-endpoint URL] [--schema]\nLocal stdio JSON-RPC. --mcp-oauth-config enables host authorization before initialize. --mcp-oauth-vault persists encrypted grants separately from the kernel database. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. FLIUNO_PROVIDER=demo|openai|anthropic|gemini; live providers require FLIUNO_MODEL and an API key."
+                );
+                println!(
+                    "--memory-embedding-config PATH enables hybrid memory retrieval for host-selected workspaces."
                 );
                 return Ok(());
             }
@@ -161,6 +172,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let terminal_config = terminal_config
         .as_deref()
         .map(|path| configuration::load::<fliuno_terminal::Config>(path, "terminal"))
+        .transpose()?;
+    let memory_embeddings = memory_embedding_config
+        .as_deref()
+        .map(|path| configuration::load::<MemoryEmbeddingConfig>(path, "memory embedding"))
+        .transpose()?
+        .map(MemoryEmbeddingProvider::new)
         .transpose()?;
     #[cfg(feature = "test-fixtures")]
     if mcp_oauth_loopback && mcp_oauth_config.is_none() {
@@ -227,6 +244,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
     let mut server = RpcServer::with_terminals(kernel, provider_name, terminals);
+    if let Some(provider) = memory_embeddings {
+        server.enable_memory_embeddings(provider)?;
+    }
     let terminal_rx = server.take_terminal_notification_receiver();
     let (event_rx, event_subscription) = server.take_event_receiver().into_parts();
     let mut event_subscription = Some(event_subscription);

@@ -21,6 +21,7 @@ mod task_summaries;
 mod tool_inputs;
 mod work;
 mod workspace_memory;
+pub use workspace_memory::TaskMemoryQuery;
 mod workspaces;
 use super::*;
 pub use backups::{
@@ -38,7 +39,7 @@ use std::{
 pub(crate) use task_resume::ResumeFacts;
 pub(crate) use tool_inputs::Mutation as ToolInputMutation;
 
-pub(crate) const SCHEMA_VERSION: u32 = 64;
+pub(crate) const SCHEMA_VERSION: u32 = 65;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 fn read_task(db: &Connection, id: &str) -> Result<Task> {
@@ -684,6 +685,10 @@ impl Kernel {
         }
         if version < 64 {
             mcp_subscriptions::migrate(&db)?;
+        }
+        if version < 65 {
+            // Older readers reject memory metadata in newly frozen task snapshots.
+            db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         if let Some((provider_id, model)) = provider.model_identity() {
             let undercount: i64 = db.query_row(

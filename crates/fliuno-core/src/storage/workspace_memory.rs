@@ -4,7 +4,11 @@ use super::*;
 use crate::query::page_range;
 use rusqlite::{Row, Transaction};
 use sha2::{Digest, Sha256};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    cmp::Reverse,
+    collections::BTreeMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 pub(super) use vectors::migrate as migrate_vectors;
 
 const MAX_WORKSPACE_MEMORIES: i64 = 4096;
@@ -12,6 +16,19 @@ const MAX_CONTEXT_MEMORY_CANDIDATES: usize = 4096;
 const MAX_CONTEXT_MEMORY_TERMS: usize = 64;
 const MAX_CONTEXT_MEMORY_RECORDS: usize = 8;
 const MAX_CONTEXT_MEMORY_BYTES: usize = 16 * 1024;
+
+/// Host-supplied retrieval result, scoped to the same workspace as the task.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum TaskMemoryQuery<'a> {
+    #[default]
+    Keyword,
+    Unavailable,
+    Semantic {
+        workspace_id: &'a str,
+        embedding: &'a WorkspaceMemoryQueryEmbedding,
+        minimum_similarity: f64,
+    },
+}
 
 pub(crate) struct ContextMemoryAccess {
     workspace_id: String,
@@ -205,6 +222,17 @@ pub(super) fn audit_context_access(
         );
     }
     for memory in &access.memories {
+        let still_current: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workspace_memory_records
+             WHERE id=?1 AND workspace_id=?2 AND revision=?3 AND deleted_at_ms IS NULL)",
+            params![memory.id, access.workspace_id, memory.revision as i64],
+            |row| row.get(0),
+        )?;
+        if !still_current {
+            return Err(Error::Conflict(
+                "memory changed while creating the task".into(),
+            ));
+        }
         audit(
             tx,
             &access.workspace_id,
@@ -223,12 +251,16 @@ impl Kernel {
         session_id: &str,
         input: &str,
         context: &mut TaskContext,
+        query: TaskMemoryQuery<'_>,
     ) -> Result<Option<ContextMemoryAccess>> {
-        if context.options.mode == ContextMode::Isolated || context.options.max_bytes == 0 {
+        if context.options.mode == ContextMode::Isolated
+            || context.options.max_bytes == 0
+            || context.options.disable_memory
+        {
             return Ok(None);
         }
         let query_terms = lexical_terms(input, MAX_CONTEXT_MEMORY_TERMS);
-        if query_terms.is_empty() {
+        if input.trim().is_empty() && !matches!(query, TaskMemoryQuery::Semantic { .. }) {
             return Ok(None);
         }
 
@@ -241,35 +273,63 @@ impl Kernel {
             )
             .optional()?;
         let workspace_id = workspace_id.ok_or_else(|| Error::NotFound("session".into()))?;
+        let (semantic, fallback) = rank_task_vectors(connection, &workspace_id, query)?;
+        context.memory_fallback = fallback;
+        if fallback.is_some() && crate::json_size(context)? > context.options.max_bytes as usize {
+            context.memory_fallback = None;
+        }
         let mut statement = connection.prepare(&format!(
-            "SELECT {MEMORY_COLUMNS} FROM workspace_memory_records
+            "SELECT {MEMORY_COLUMNS},record_sequence FROM workspace_memory_records
              WHERE workspace_id=?1 AND deleted_at_ms IS NULL
              ORDER BY record_sequence DESC LIMIT ?2"
         ))?;
         let rows = statement.query_map(
             params![workspace_id, MAX_CONTEXT_MEMORY_CANDIDATES as i64],
-            memory_row,
+            |row| Ok((row.get::<_, i64>(9)?, memory_row(row)?)),
         )?;
         let mut candidates = Vec::new();
         for row in rows {
-            let memory = row?;
+            let (sequence, memory) = row?;
             let terms = lexical_terms(&format!("{} {}", memory.key, memory.content), 512);
-            let score = query_terms.intersection(&terms).count();
-            if score > 0 {
-                candidates.push((score, memory));
+            let score = query_terms.intersection(&terms).count()
+                + usize::from(contains_exact_key(input, &memory.key));
+            let semantic_rank = semantic.get(&sequence).copied();
+            if score > 0 || semantic_rank.is_some() {
+                candidates.push((score, semantic_rank, memory));
             }
         }
         drop(statement);
-        candidates.sort_by(|(left_score, left), (right_score, right)| {
+        candidates.sort_by(|(left_score, _, left), (right_score, _, right)| {
             right_score
                 .cmp(left_score)
                 .then_with(|| right.updated_at_ms.cmp(&left.updated_at_ms))
                 .then_with(|| left.key.cmp(&right.key))
         });
+        // Fuse ranks so cosine calibration does not overwhelm lexical matches.
+        let mut candidates: Vec<_> = candidates
+            .into_iter()
+            .enumerate()
+            .map(|(rank, (keyword, semantic, memory))| {
+                let score = if keyword > 0 {
+                    120_000 / (30 + rank)
+                } else {
+                    0
+                } + semantic.map_or(0, |rank| 100_000 / (30 + rank));
+                let matched_by = match (keyword > 0, semantic.is_some()) {
+                    (true, true) => ContextMemoryMatch::Both,
+                    (true, false) => ContextMemoryMatch::Keyword,
+                    _ => ContextMemoryMatch::Semantic,
+                };
+                (score, matched_by, memory)
+            })
+            .collect();
+        if !semantic.is_empty() {
+            candidates.sort_by_key(|entry| Reverse(entry.0));
+        }
 
         let mut selected_bytes = 0;
         let mut selected = Vec::new();
-        for (_, memory) in candidates {
+        for (_, matched_by, memory) in candidates {
             if selected.len() == MAX_CONTEXT_MEMORY_RECORDS {
                 break;
             }
@@ -282,9 +342,10 @@ impl Kernel {
                 content: memory.content.clone(),
                 revision: memory.revision,
                 source_task_id: memory.source_task_id.clone(),
+                matched_by: Some(matched_by),
             };
             context.memories.push(item);
-            if serde_json::to_vec(context)?.len() > context.options.max_bytes as usize {
+            if crate::json_size(context)? > context.options.max_bytes as usize {
                 context.memories.pop();
                 continue;
             }
@@ -622,6 +683,60 @@ impl Kernel {
         }
         Ok(page)
     }
+}
+
+fn rank_task_vectors(
+    db: &Connection,
+    workspace_id: &str,
+    query: TaskMemoryQuery<'_>,
+) -> Result<(BTreeMap<i64, usize>, Option<WorkspaceMemoryFallback>)> {
+    let mut ranks = BTreeMap::new();
+    let fallback = match query {
+        TaskMemoryQuery::Keyword => None,
+        TaskMemoryQuery::Unavailable => Some(WorkspaceMemoryFallback::EmbeddingUnavailable),
+        TaskMemoryQuery::Semantic {
+            workspace_id: scope,
+            embedding,
+            minimum_similarity,
+        } => {
+            if scope != workspace_id || !(0.0 < minimum_similarity && minimum_similarity <= 1.0) {
+                return Err(Error::Invalid(
+                    "invalid task memory query scope or similarity threshold".into(),
+                ));
+            }
+            let scores = vectors::validate_model(&embedding.model_identity)
+                .and_then(|_| vectors::normalize(&embedding.values))
+                .and_then(|normalized| {
+                    vectors::rank_scores(db, workspace_id, &embedding.model_identity, &normalized)
+                });
+            match scores {
+                Ok(Ok(scores)) => {
+                    ranks.extend(
+                        scores
+                            .into_iter()
+                            .filter(|(_, score)| *score >= minimum_similarity)
+                            .take(MAX_MEMORY_SEMANTIC_RESULTS as usize)
+                            .enumerate()
+                            .map(|(rank, (id, _))| (id, rank)),
+                    );
+                    ranks
+                        .is_empty()
+                        .then_some(WorkspaceMemoryFallback::BelowSimilarityThreshold)
+                }
+                Ok(Err(reason)) => Some(reason),
+                Err(_) => Some(WorkspaceMemoryFallback::CorruptIndex),
+            }
+        }
+    };
+    Ok((ranks, fallback))
+}
+
+fn contains_exact_key(input: &str, key: &str) -> bool {
+    let word = |ch: char| ch.is_alphanumeric() || ch == '_';
+    input.match_indices(key).any(|(start, key)| {
+        !input[..start].chars().next_back().is_some_and(word)
+            && !input[start + key.len()..].chars().next().is_some_and(word)
+    })
 }
 
 fn lexical_terms(text: &str, limit: usize) -> std::collections::BTreeSet<String> {

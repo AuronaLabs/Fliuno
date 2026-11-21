@@ -23,7 +23,7 @@ pub(in crate::storage) fn migrate(db: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn validate_model(identity: &str) -> Result<()> {
+pub(super) fn validate_model(identity: &str) -> Result<()> {
     if identity.is_empty()
         || identity.len() > 128
         || identity.trim() != identity
@@ -36,7 +36,7 @@ fn validate_model(identity: &str) -> Result<()> {
     Ok(())
 }
 
-fn normalize(values: &[f32]) -> Result<Vec<f32>> {
+pub(super) fn normalize(values: &[f32]) -> Result<Vec<f32>> {
     if !(1..=MAX_MEMORY_EMBEDDING_DIMENSIONS).contains(&values.len()) {
         return Err(Error::Invalid(
             "memory embedding has invalid dimensions".into(),
@@ -56,6 +56,33 @@ fn normalize(values: &[f32]) -> Result<Vec<f32>> {
 }
 
 impl Kernel {
+    /// Snapshot a bounded batch of active records missing a compatible vector.
+    pub fn pending_workspace_memory_vectors(
+        &self,
+        workspace_id: &str,
+        model_identity: &str,
+        dimensions: usize,
+    ) -> Result<Vec<WorkspaceMemory>> {
+        validate_model(model_identity)?;
+        if !(1..=MAX_MEMORY_EMBEDDING_DIMENSIONS).contains(&dimensions) {
+            return Err(Error::Invalid("invalid memory embedding dimensions".into()));
+        }
+        let mut stmt = self.db.prepare_cached(
+            "SELECT m.workspace_id,m.id,m.memory_key,m.content,m.source_task_id,m.revision,
+                    m.created_at_ms,m.updated_at_ms,m.deleted_at_ms
+             FROM workspace_memory_records m LEFT JOIN workspace_memory_vectors v
+             ON m.id=v.memory_id AND m.revision=v.revision AND v.model_identity=?2 AND v.dimensions=?3
+             WHERE m.workspace_id=?1 AND m.deleted_at_ms IS NULL AND v.memory_id IS NULL
+             ORDER BY m.record_sequence LIMIT 8",
+        )?;
+        Ok(stmt
+            .query_map(
+                params![workspace_id, model_identity, dimensions as i64],
+                memory_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
     pub fn index_workspace_memory_vectors(
         &mut self,
         params: &WorkspaceMemoryIndexParams,
@@ -195,13 +222,41 @@ fn rank(
     model: &str,
     query: &[f32],
 ) -> Result<std::result::Result<Vec<WorkspaceMemorySemanticMatch>, WorkspaceMemoryFallback>> {
-    let mut select = tx.prepare_cached(
+    let scores = match rank_scores(tx, &params.workspace_id, model, query)? {
+        Ok(scores) => scores,
+        Err(reason) => return Ok(Err(reason)),
+    };
+    let mut read = tx.prepare_cached(&format!(
+        "SELECT {MEMORY_COLUMNS} FROM workspace_memory_records WHERE record_sequence=?1"
+    ))?;
+    let items = scores
+        .into_iter()
+        .take(params.limit as usize)
+        .map(|(id, similarity)| {
+            Ok(WorkspaceMemorySemanticMatch {
+                memory: read.query_row([id], memory_row)?,
+                similarity: Some(similarity.min(1.0)),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Ok(items))
+}
+
+type Scores = std::result::Result<Vec<(i64, f64)>, WorkspaceMemoryFallback>;
+
+pub(super) fn rank_scores(
+    db: &Connection,
+    workspace_id: &str,
+    model: &str,
+    query: &[f32],
+) -> Result<Scores> {
+    let mut select = db.prepare_cached(
         "SELECT m.record_sequence,v.vector,v.checksum
          FROM workspace_memory_records m JOIN workspace_memory_vectors v
          ON m.id=v.memory_id AND m.revision=v.revision
          WHERE m.workspace_id=?1 AND m.deleted_at_ms IS NULL AND v.model_identity=?2 AND v.dimensions=?3",
     )?;
-    let mut rows = select.query(params![params.workspace_id, model, query.len() as i64])?;
+    let mut rows = select.query(params![workspace_id, model, query.len() as i64])?;
     let mut scores = Vec::new();
     let mut indexed = false;
     while let Some(row) = rows.next()? {
@@ -238,18 +293,5 @@ fn rank(
         }));
     }
     scores.sort_unstable_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    let mut read = tx.prepare_cached(&format!(
-        "SELECT {MEMORY_COLUMNS} FROM workspace_memory_records WHERE record_sequence=?1"
-    ))?;
-    let items = scores
-        .into_iter()
-        .take(params.limit as usize)
-        .map(|(id, similarity)| {
-            Ok(WorkspaceMemorySemanticMatch {
-                memory: read.query_row([id], memory_row)?,
-                similarity: Some(similarity.min(1.0)),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(Ok(items))
+    Ok(Ok(scores))
 }

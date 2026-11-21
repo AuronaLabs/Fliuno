@@ -138,6 +138,7 @@ impl Kernel {
             turns: Vec::new(),
             omitted_turns: 0,
             memories: Vec::new(),
+            memory_fallback: None,
             summaries: Vec::new(),
             compaction_pending: false,
         };

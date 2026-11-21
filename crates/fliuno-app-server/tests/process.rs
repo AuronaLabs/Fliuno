@@ -56,6 +56,8 @@ mod workspace_hash;
 mod workspace_import;
 #[path = "process/workspace_memory.rs"]
 mod workspace_memory;
+#[path = "process/workspace_memory_embeddings.rs"]
+mod workspace_memory_embeddings;
 #[path = "process/workspace_profiles.rs"]
 mod workspace_profiles;
 #[path = "process/workspace_search.rs"]

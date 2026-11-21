@@ -240,18 +240,39 @@ impl Kernel {
 
     /// Starts the same durable state machine as the summary variant.
     pub fn create_task_from_params(&mut self, p: TaskStartParams) -> Result<(Task, bool)> {
-        let request = self.prepare_task_start(
-            &p.session_id,
-            StartInput {
-                prompt: (&p.input).into(),
-                artifacts: &p.artifact_inputs,
-            },
-            p.client_request_id.as_deref(),
-            p.backend,
-            p.context,
-            p.max_model_steps,
-        )?;
-        self.create_prepared_task(request)
+        self.create_task_with_memory(p, TaskMemoryQuery::Keyword)
+    }
+
+    pub fn create_task_with_memory(
+        &mut self,
+        p: TaskStartParams,
+        query: TaskMemoryQuery<'_>,
+    ) -> Result<(Task, bool)> {
+        let request = self.prepare_rpc_start(&p)?;
+        match self.create_prepared_summary(request, query)? {
+            TaskSummaryStart::Existing(summary) => Ok((self.get_task(&summary.id)?, false)),
+            TaskSummaryStart::Created(task) => Ok((*task, true)),
+        }
+    }
+
+    /// Return an eligible workspace only for fresh model tasks. The host can release
+    /// its kernel lock before making a network request, then submit normally.
+    pub fn task_memory_workspace(&self, p: &TaskStartParams) -> Result<Option<String>> {
+        let request = self.prepare_rpc_start(p)?;
+        if request.backend != TaskBackend::Model
+            || request.options.disable_memory
+            || request.options.mode == ContextMode::Isolated
+            || request.options.max_bytes == 0
+        {
+            return Ok(None);
+        }
+        if let Some(key) = request.key
+            && !matches!(self.lookup_task_start(&request, key)?, StartLookup::Missing)
+        {
+            return Ok(None);
+        }
+        request.input.prompt.validate_media()?;
+        Ok(Some(self.get_session(request.session)?.workspace_id))
     }
 
     pub(crate) fn create_run_child(
@@ -273,11 +294,11 @@ impl Kernel {
             Some(options),
             max_model_steps,
         )?;
-        self.create_fresh_task(request, Some(owner))
+        self.create_fresh_task(request, Some(owner), TaskMemoryQuery::Keyword)
     }
 
     fn create_prepared_task(&mut self, request: StartRequest<'_>) -> Result<(Task, bool)> {
-        match self.create_prepared_summary(request)? {
+        match self.create_prepared_summary(request, TaskMemoryQuery::Keyword)? {
             TaskSummaryStart::Existing(summary) => Ok((self.get_task(&summary.id)?, false)),
             TaskSummaryStart::Created(task) => Ok((*task, true)),
         }
@@ -286,22 +307,37 @@ impl Kernel {
     /// Unless the binding predates the compact receipt, a duplicate summary
     /// request never reads the task snapshot. Never schedule an existing task.
     pub fn create_task_for_summary(&mut self, params: TaskStartParams) -> Result<TaskSummaryStart> {
-        let p = params;
-        let request = self.prepare_task_start(
+        self.create_summary_with_memory(params, TaskMemoryQuery::Keyword)
+    }
+
+    pub fn create_summary_with_memory(
+        &mut self,
+        p: TaskStartParams,
+        query: TaskMemoryQuery<'_>,
+    ) -> Result<TaskSummaryStart> {
+        let request = self.prepare_rpc_start(&p)?;
+        self.create_prepared_summary(request, query)
+    }
+
+    fn prepare_rpc_start<'a>(&self, p: &'a TaskStartParams) -> Result<StartRequest<'a>> {
+        self.prepare_task_start(
             &p.session_id,
             StartInput {
                 prompt: (&p.input).into(),
                 artifacts: &p.artifact_inputs,
             },
             p.client_request_id.as_deref(),
-            p.backend,
-            p.context,
+            p.backend.clone(),
+            p.context.clone(),
             p.max_model_steps,
-        )?;
-        self.create_prepared_summary(request)
+        )
     }
 
-    fn create_prepared_summary(&mut self, request: StartRequest<'_>) -> Result<TaskSummaryStart> {
+    fn create_prepared_summary(
+        &mut self,
+        request: StartRequest<'_>,
+        query: TaskMemoryQuery<'_>,
+    ) -> Result<TaskSummaryStart> {
         let lookup = request.key.map_or(Ok(StartLookup::Missing), |key| {
             self.lookup_task_start(&request, key)
         });
@@ -319,7 +355,7 @@ impl Kernel {
             return Ok(TaskSummaryStart::Existing(summary));
         }
         Ok(TaskSummaryStart::Created(Box::new(
-            self.create_fresh_task(request, None)?,
+            self.create_fresh_task(request, None, query)?,
         )))
     }
 
@@ -402,6 +438,7 @@ impl Kernel {
         &mut self,
         request: StartRequest<'_>,
         owner: Option<storage::RunChild<'_>>,
+        query: TaskMemoryQuery<'_>,
     ) -> Result<Task> {
         let StartRequest {
             session,
@@ -432,7 +469,8 @@ impl Kernel {
                 .collect::<String>(),
             _ => String::new(),
         };
-        let memory_access = self.inject_context_memories(session, &memory_query, &mut context)?;
+        let memory_access =
+            self.inject_context_memories(session, &memory_query, &mut context, query)?;
         let task = Task {
             id,
             session_id: session.into(),

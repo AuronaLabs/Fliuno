@@ -65,6 +65,7 @@ pub enum WorkspaceMemoryFallback {
     NoCompatibleIndex,
     CorruptIndex,
     NoPositiveMatch,
+    BelowSimilarityThreshold,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

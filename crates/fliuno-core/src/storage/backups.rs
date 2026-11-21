@@ -14,6 +14,7 @@ use std::{
 use uuid::Uuid;
 
 const BACKUP_FORMAT_VERSION: u32 = 1;
+const MIN_SNAPSHOT_SCHEMA: u32 = 64;
 const DATABASE_FILE: &str = "database.sqlite";
 const MANIFEST_FILE: &str = "manifest.json";
 const ARTIFACTS_FILE: &str = "artifacts.sha256";
@@ -539,9 +540,9 @@ fn inspect_database(path: &Path) -> Result<BackupManifest> {
         ));
     }
     let schema_version: u32 = db.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    if schema_version != SCHEMA_VERSION {
+    if !(MIN_SNAPSHOT_SCHEMA..=SCHEMA_VERSION).contains(&schema_version) {
         return Err(Error::Conflict(
-            "backup must use the current database schema".into(),
+            "backup uses an unsupported database schema".into(),
         ));
     }
     let event_through_sequence = scalar_u64(&db, "SELECT COALESCE(MAX(sequence),0) FROM events")?;

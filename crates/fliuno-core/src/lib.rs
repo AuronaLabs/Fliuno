@@ -47,6 +47,7 @@ pub use provider::{
     ModelTurn, ProviderReplay,
 };
 pub use storage::MAX_EVENT_TARGET_BYTES;
+pub use storage::TaskMemoryQuery;
 pub use storage::{
     BackupEntry, BackupManifest, BackupProgress, BackupRetention, BackupRotationResult,
     BackupSource, McpSubscriptionAttempt, McpSubscriptionKey, McpTaskRecord, McpTaskStore,

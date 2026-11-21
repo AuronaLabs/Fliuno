@@ -52,6 +52,9 @@ pub const MAX_CONTEXT_SCAN_LIMIT: u32 = 512;
 pub struct ContextOptions {
     #[serde(default)]
     pub mode: ContextMode,
+    /// Disable workspace memory retrieval without discarding session history.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disable_memory: bool,
     #[serde(default = "default_turns")]
     pub max_turns: u32,
     #[serde(default = "default_bytes")]
@@ -103,6 +106,7 @@ impl Default for ContextOptions {
     fn default() -> Self {
         Self {
             mode: ContextMode::Session,
+            disable_memory: false,
             max_turns: default_turns(),
             max_bytes: default_bytes(),
             selection: ContextSelection::Recent,
@@ -159,6 +163,16 @@ pub struct ContextMemory {
     pub revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_by: Option<ContextMemoryMatch>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextMemoryMatch {
+    Keyword,
+    Semantic,
+    Both,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -195,6 +209,9 @@ pub struct TaskContext {
     /// Bounded workspace memories selected at task creation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub memories: Vec<ContextMemory>,
+    /// Present when a requested semantic lookup fell back to keyword search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_fallback: Option<crate::WorkspaceMemoryFallback>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub summaries: Vec<ContextSummary>,
     /// A confirmed input-budget rejection scheduled a separate model attempt.
