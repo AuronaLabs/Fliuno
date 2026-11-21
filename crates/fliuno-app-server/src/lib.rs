@@ -1,5 +1,6 @@
 //! JSON-RPC 2.0 dispatch. Transport and domain errors never enter model messages.
 mod agent_catalog;
+mod agent_login;
 mod approvals;
 mod memory_embeddings;
 mod scheduler;
@@ -28,6 +29,7 @@ pub struct RpcServer {
     kernel: Arc<Mutex<Kernel>>,
     scheduler: TaskScheduler,
     agent_catalog: Option<agent_catalog::Catalog>,
+    agent_terminal_logins: Option<agent_login::Service>,
     event_receiver: Option<(u64, EventReceiver)>,
     watermark_receiver: Option<(u64, EventWatermarkReceiver)>,
     event_scope: EventScope,
@@ -121,6 +123,7 @@ impl RpcServer {
             kernel,
             scheduler,
             agent_catalog,
+            agent_terminal_logins: None,
             event_receiver: Some((0, event_receiver)),
             watermark_receiver: None,
             event_scope: EventScope::All,
@@ -137,6 +140,16 @@ impl RpcServer {
             eprintln!("fliuno: cannot schedule recovered task runs: {error:?}");
         }
         server
+    }
+
+    /// Opt in only for the application's direct local stdio connection.
+    pub fn enable_local_agent_terminal_login(
+        &mut self,
+        registrations: fliuno_agents::TerminalLogins,
+    ) {
+        if !registrations.is_empty() {
+            self.agent_terminal_logins = Some(agent_login::Service::new(registrations));
+        }
     }
 
     pub fn enable_memory_embeddings(
@@ -428,6 +441,9 @@ impl RpcServer {
             return Some(error(Value::Null, -32600, "invalid request"));
         }
         let notification = id.is_none();
+        if notification && method.starts_with("agents/terminalLogin/") {
+            return None;
+        }
         let id = id.unwrap_or(Value::Null);
         let params = request.remove("params").unwrap_or_else(|| json!({}));
         let result = if !params.is_object() && !params.is_array() {
@@ -620,6 +636,9 @@ impl RpcServer {
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
             capabilities["agentAuthenticationState"] = json!(true);
+            if self.agent_terminal_logins.is_some() {
+                capabilities["agentTerminalLogin"] = json!(true);
+            }
             if self.agent_catalog.is_some() {
                 capabilities["agentSessionListing"] = json!(true);
                 capabilities["maxQueuedAgentSessionLists"] = json!(agent_catalog::QUEUE_CAPACITY);
@@ -1401,6 +1420,46 @@ impl RpcServer {
                     ))
                 })?;
                 json!(catalog.start(work)?)
+            }
+            "agents/terminalLogin/start" => {
+                let p: AgentTerminalLoginStart = agent_login::decode(params)?;
+                let registration = self
+                    .agent_terminal_logins
+                    .as_ref()
+                    .and_then(|service| service.registrations.get(&p.agent_id))
+                    .ok_or_else(agent_login::unconfigured)?;
+                self.kernel()?.verify_agent_terminal_login(
+                    &p.task_id,
+                    &p.agent_id,
+                    &registration.authority,
+                )?;
+                let service = self
+                    .agent_terminal_logins
+                    .as_mut()
+                    .ok_or_else(agent_login::unconfigured)?;
+                json!(service.start(p)?)
+            }
+            "agents/terminalLogin/output" => {
+                let service = self
+                    .agent_terminal_logins
+                    .as_mut()
+                    .ok_or_else(agent_login::unconfigured)?;
+                json!(service.output(agent_login::decode(params)?)?)
+            }
+            "agents/terminalLogin/input" => {
+                let service = self
+                    .agent_terminal_logins
+                    .as_mut()
+                    .ok_or_else(agent_login::unconfigured)?;
+                json!(service.input(agent_login::decode(params)?)?)
+            }
+            "agents/terminalLogin/close" => {
+                let service = self
+                    .agent_terminal_logins
+                    .as_mut()
+                    .ok_or_else(agent_login::unconfigured)?;
+                service.close(agent_login::decode(params)?)?;
+                json!({})
             }
             "agents/getSessionList" => {
                 let p: AgentSessionListLookupParams = decode(params)?;

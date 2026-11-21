@@ -240,6 +240,35 @@ impl Kernel {
         self.agents.values().map(|a| a.spec()).collect()
     }
 
+    pub fn verify_agent_terminal_login(
+        &self,
+        task_id: &str,
+        agent_id: &str,
+        authority: &str,
+    ) -> Result<()> {
+        let task = self.get_task(task_id)?;
+        let eligible = task.status == TaskStatus::Interrupted
+            && matches!(&task.backend, TaskBackend::ExternalAgent { agent_id: id } if id == agent_id)
+            && task.backend_authority.as_deref() == Some(authority)
+            && self
+                .agents
+                .get(agent_id)
+                .is_some_and(|agent| agent.authority() == authority)
+            && task.agent_run.is_some_and(|run| {
+                run.finished
+                    && !run.outcome_unknown
+                    && run.session_id.is_none()
+                    && run.authentication == Some(AgentAuthenticationState::TerminalRequired)
+                    && run.stop_reason == Some(AgentStopReason::AuthRequired)
+            });
+        if !eligible {
+            return Err(Error::Conflict(
+                "task does not authorize terminal login for this ACP registration".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Commit the run identity before creating any process or sending a prompt.
     pub fn prepare_agent_run(
         &mut self,

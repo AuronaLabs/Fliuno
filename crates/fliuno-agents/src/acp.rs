@@ -4,6 +4,7 @@ use fliuno_core::{
     CancellationToken, Kernel,
 };
 use fliuno_protocol::{AgentAuthenticationState, AgentSpec, AgentStopReason, ApprovalDecision};
+use fliuno_terminal::login::LoginPreset;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -52,6 +53,8 @@ pub struct AcpAgentConfig {
     /// Host-selected agent-side method. Never executes terminal descriptors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authentication_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_login: Option<TerminalLoginConfig>,
     /// Optional hard OS resource ceilings for this isolated Agent process.
     #[serde(default)]
     pub resources: fliuno_sandbox::ResourceLimits,
@@ -66,6 +69,36 @@ pub struct AcpAgentConfig {
     pub permission_timeout_ms: u64,
     #[serde(default)]
     pub workspace_access: bool,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TerminalLoginConfig {
+    pub method_id: String,
+    pub command: PathBuf,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env_allow: Vec<String>,
+    pub lifetime_ms: u64,
+}
+
+#[derive(Default)]
+pub struct TerminalLogins(BTreeMap<String, TerminalLoginRegistration>);
+
+impl TerminalLogins {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn get(&self, agent_id: &str) -> Option<&TerminalLoginRegistration> {
+        self.0.get(agent_id)
+    }
+}
+
+pub struct TerminalLoginRegistration {
+    pub authority: String,
+    pub preset: LoginPreset,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -104,16 +137,25 @@ struct AcpBackend {
     terminal_presets: BTreeMap<String, terminal::Preset>,
     session_catalog: bool,
     authentication_method: Option<String>,
+    terminal_login_method: Option<String>,
     options: ClientOptions,
 }
 
 pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), String> {
+    register_config_with_logins(kernel, config).map(|_| ())
+}
+
+pub fn register_config_with_logins(
+    kernel: &mut Kernel,
+    config: AgentsConfig,
+) -> Result<TerminalLogins, String> {
     if config.agents.len() + kernel.agent_specs().len() > 64 {
         return Err("too many ACP registrations".into());
     }
     // Validate the whole configuration before mutating the registry.
     let mut ids: BTreeSet<String> = kernel.agent_specs().into_iter().map(|s| s.id).collect();
     let mut backends = Vec::new();
+    let mut logins = TerminalLogins::default();
     for config in config.agents {
         if config.id.is_empty()
             || config.id.len() > 64
@@ -201,6 +243,30 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
         if config.session_catalog && trusted_cwd.is_none() {
             return Err("ACP sessionCatalog requires trusted_host".into());
         }
+        let terminal_login = config
+            .terminal_login
+            .as_ref()
+            .map(|login| {
+                let cwd = trusted_cwd
+                    .as_ref()
+                    .ok_or("ACP terminalLogin requires trusted_host")?;
+                if login.method_id.is_empty()
+                    || login.method_id.len() > 128
+                    || login.method_id.trim() != login.method_id
+                    || login.method_id.chars().any(char::is_control)
+                    || config.authentication_method.as_ref() == Some(&login.method_id)
+                {
+                    return Err("invalid or conflicting ACP terminal login method ID".into());
+                }
+                LoginPreset::resolve(
+                    login.command.clone(),
+                    login.args.clone(),
+                    login.env_allow.clone(),
+                    cwd.clone(),
+                    login.lifetime_ms,
+                )
+            })
+            .transpose()?;
         let session_state_directory = state::resolve_root(&config)?;
         let terminal_presets = terminal::resolve(&config)?;
         let executable_digest = if trusted_cwd.is_some() {
@@ -227,7 +293,19 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             )
             .map_err(|_| "cannot encode ACP terminal identity")?;
         }
+        if let Some(preset) = &terminal_login {
+            identity["terminalLogin"] = serde_json::json!(preset.identity());
+        }
         let authority = fliuno_core::authority_digest("acp.registration.v1", &identity);
+        if let Some(preset) = terminal_login {
+            logins.0.insert(
+                config.id.clone(),
+                TerminalLoginRegistration {
+                    authority: authority.clone(),
+                    preset,
+                },
+            );
+        }
         let launch = fliuno_sandbox::LaunchSpec {
             program_sha256: Some(executable_digest),
             assets: config.assets,
@@ -248,6 +326,7 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             session_state_directory,
             session_catalog: config.session_catalog,
             authentication_method: config.authentication_method,
+            terminal_login_method: config.terminal_login.map(|login| login.method_id),
             options: ClientOptions {
                 request_timeout: Duration::from_millis(config.request_timeout_ms),
                 prompt_timeout: Duration::from_millis(config.prompt_timeout_ms),
@@ -264,7 +343,7 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             .register_agent(Box::new(backend))
             .map_err(|e| e.to_string())?;
     }
-    Ok(())
+    Ok(logins)
 }
 
 impl AgentBackend for AcpBackend {
@@ -462,7 +541,11 @@ impl AcpBackend {
                     Err(error) => {
                         eprintln!("fliuno: ACP session setup failed: {error}");
                         if error == fliuno_acp::Error::Remote(i32::from(ErrorCode::AuthRequired)) {
-                            let state = if client.initialized().auth_methods.iter().any(|method| matches!(method, AuthMethod::Terminal(_))) {
+                            let terminal_required = match &self.terminal_login_method {
+                                Some(method) => client.supports_terminal_authentication(method),
+                                None => client.initialized().auth_methods.iter().any(|method| matches!(method, AuthMethod::Terminal(_))),
+                            };
+                            let state = if terminal_required {
                                 AgentAuthenticationState::TerminalRequired
                             } else {
                                 AgentAuthenticationState::Required

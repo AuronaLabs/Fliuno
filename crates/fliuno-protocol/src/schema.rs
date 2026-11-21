@@ -128,6 +128,10 @@ pub fn schema_bundle() -> Value {
         "agents/list" => serde_json::json!({"type":"object","properties":{},"additionalProperties":false}),
         "agents/getCapabilities" => schema::<AgentIdParams>(),
         "agents/startSessionList" => schema::<AgentSessionListParams>(),
+        "agents/terminalLogin/start" => schema::<AgentTerminalLoginStart>(),
+        "agents/terminalLogin/output" => schema::<AgentTerminalLoginOutputParams>(),
+        "agents/terminalLogin/input" => schema::<AgentTerminalLoginInput>(),
+        "agents/terminalLogin/close" => schema::<AgentTerminalLoginHandle>(),
         "agents/getSessionList" => schema::<AgentSessionListLookupParams>()
     };
     let types = schemas! {
@@ -171,6 +175,10 @@ pub fn schema_bundle() -> Value {
         "AgentSpec" => schema::<AgentSpec>(),
         "AgentCapabilities" => schema::<AgentCapabilities>(),
         "AgentSessionListAccepted" => schema::<AgentSessionListAccepted>(),
+        "AgentTerminalLoginHandle" => schema::<AgentTerminalLoginHandle>(),
+        "AgentTerminalLoginOutput" => schema::<AgentTerminalLoginOutput>(),
+        "AgentTerminalLoginInputAccepted" => schema::<AgentTerminalLoginInputAccepted>(),
+        "AgentTerminalLoginStatus" => schema::<AgentTerminalLoginStatus>(),
         "AgentSessionListState" => schema::<AgentSessionListState>(),
         "RemoteTaskCheckAccepted" => schema::<RemoteTaskCheckAccepted>(),
         "TerminalSnapshot" => schema::<TerminalSnapshot>(),

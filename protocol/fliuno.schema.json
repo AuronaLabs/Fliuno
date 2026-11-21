@@ -4797,6 +4797,97 @@
         "agentId"
       ]
     },
+    "agents/terminalLogin/start": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentTerminalLoginStart",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "rows": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "cols": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "agentId",
+        "rows",
+        "cols"
+      ]
+    },
+    "agents/terminalLogin/output": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentTerminalLoginOutputParams",
+      "type": "object",
+      "properties": {
+        "loginId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "loginId",
+        "after"
+      ]
+    },
+    "agents/terminalLogin/input": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentTerminalLoginInput",
+      "type": "object",
+      "properties": {
+        "loginId": {
+          "type": "string"
+        },
+        "sequence": {
+          "description": "Starts at zero. The server accepts each sequence at most once.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "loginId",
+        "sequence",
+        "data"
+      ]
+    },
+    "agents/terminalLogin/close": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentTerminalLoginHandle",
+      "type": "object",
+      "properties": {
+        "loginId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "loginId"
+      ]
+    },
     "agents/getSessionList": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "AgentSessionListLookupParams",
@@ -10601,6 +10692,278 @@
       },
       "required": [
         "requestId"
+      ]
+    },
+    "AgentTerminalLoginHandle": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentTerminalLoginHandle",
+      "type": "object",
+      "properties": {
+        "loginId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "loginId"
+      ]
+    },
+    "AgentTerminalLoginOutput": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentTerminalLoginOutput",
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/AgentTerminalLoginStatus"
+        },
+        "next": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "dataBase64": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "next",
+        "truncated",
+        "dataBase64"
+      ],
+      "$defs": {
+        "AgentTerminalLoginStatus": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "starting"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "running"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "closing"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "closed"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "exited"
+                },
+                "exitCode": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              },
+              "required": [
+                "state",
+                "exitCode"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "expired"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "outcome_unknown"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "AgentTerminalLoginInputAccepted": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentTerminalLoginInputAccepted",
+      "type": "object",
+      "properties": {
+        "nextSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "nextSequence"
+      ]
+    },
+    "AgentTerminalLoginStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AgentTerminalLoginStatus",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "starting"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "running"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "closing"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "closed"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "exited"
+            },
+            "exitCode": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "required": [
+            "state",
+            "exitCode"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "expired"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "const": "outcome_unknown"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        }
       ]
     },
     "AgentSessionListState": {

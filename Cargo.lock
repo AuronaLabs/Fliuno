@@ -818,6 +818,7 @@ dependencies = [
  "fliuno-core",
  "fliuno-protocol",
  "fliuno-sandbox",
+ "fliuno-terminal",
  "fliuno-tools",
  "serde",
  "serde_json",

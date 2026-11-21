@@ -39,13 +39,30 @@
 | 状态 | 含义 |
 | --- | --- |
 | `required` | 会话请求收到 ACP `auth_required` |
-| `terminal_required` | 会话请求需要登录，而且对端提供了终端方法；请先由用户在宿主上完成登录 |
+| `terminal_required` | 会话请求需要终端登录；配置了 `terminalLogin` 时，该状态表示对端唯一声明了匹配的方法 |
 | `method_unavailable` | 宿主指定的方法未声明、重复或不是协议登录 |
 | `started` / `succeeded` | 已进入协议登录阶段 / 对端明确确认 |
 | `rejected` / `cancelled` | 对端返回错误 / 本机取消 |
 | `outcome_unknown` | 登录超时、传输中断或 app-server 在登录中退出 |
 
-登录未完成时不会发出 `session/prompt`。重新提交同一 `clientRequestId` 只返回原任务；完成登录后应新建任务。Fliuno 不运行对端提供的终端参数或环境变量，且当前不提供内置交互终端登录。只读会话目录不会触发登录。
+登录未完成时不会发出 `session/prompt`。重新提交同一 `clientRequestId` 只返回原任务；完成登录后应新建任务。只读会话目录不会触发登录。
+
+### 本机交互终端登录
+
+Windows 与 Linux 的 `trusted_host` 注册可选用 `terminalLogin`。宿主设置 `methodId`、绝对路径 `command`、固定 `args`、`envAllow` 与 `lifetimeMs`（1 秒至 15 分钟），工作目录沿用 Agent 的固定 `cwd`。环境变量值来自启动 app-server 时的宿主环境，Windows 还保留 `SystemRoot`。终端方法必须由对端唯一声明；程序、参数和环境全部来自宿主配置。程序摘要参与注册身份，并在启动前复核。请使用宿主控制的程序和目录：`trusted_host` 以当前用户身份运行，程序自身决定凭据如何保存。
+
+`initialize.capabilities.agentTerminalLogin` 表示本机 stdio 已配置此功能。登录一次只占用一个终端，输出保留最近 64 KiB，每次最多返回 16 KiB；终端记录不会进入任务、事件、诊断或通用终端 spool。只接受有请求 ID 的 RPC：
+
+| 方法 | 参数和结果 |
+| --- | --- |
+| `agents/terminalLogin/start` | `{taskId, agentId, rows, cols}` → `{loginId}`。任务必须已因 `terminal_required` 结束，且仍匹配当前注册身份 |
+| `agents/terminalLogin/output` | `{loginId, after}` → `{status, next, truncated, dataBase64}`。从 `after: 0` 开始，下一次使用 `next`；`truncated` 表示部分旧字节已淘汰 |
+| `agents/terminalLogin/input` | `{loginId, sequence, data}` → `{nextSequence}`。从 0 起，每次最多 4 KiB UTF-8。同一序号最多入队一次，确认入队不等于系统已送达 |
+| `agents/terminalLogin/close` | `{loginId}` → `{}`。请求关闭后轮询最终状态 |
+
+退出码只描述登录程序自身的结束状态。客户端显式创建新任务，才能确认 Agent 已接受本机的登录状态。连接正常关闭会请求清理终端；不能把这一点当作宿主被强制终止时的进程树回收保证。远程适配器不启用这些接口。
+
+验证：`cargo test -p fliuno-app-server --features test-fixtures --locked --test acp_process authentication::terminal_login`。Windows（ConPTY）和 Debian 13 来宾（原生 PTY）均通过 3 项进程测试。对端使用官方 ACP SDK 夹具，单独验证了方法拒绝、宿主环境白名单、输入序号、超时/关闭，以及登录完成后旧任务不重发。该记录不覆盖实际第三方账户登录。
 
 ## 权限与取消
 

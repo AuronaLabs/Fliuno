@@ -12,6 +12,7 @@ fliuno-acp = { path = "../fliuno-acp" }
 fliuno-a2a = { path = "../fliuno-a2a" }
 fliuno-sandbox = { path = "../fliuno-sandbox" }
 fliuno-tools = { path = "../fliuno-tools" }
+fliuno-terminal = { path = "../fliuno-terminal" }
 serde.workspace = true
 serde_json.workspace = true
 tokio = { workspace = true, features = ["sync"] }

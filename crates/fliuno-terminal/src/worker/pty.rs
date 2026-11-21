@@ -1,17 +1,20 @@
 //! Blocking native IO is isolated from the lifecycle actor. Read backpressure
 //! is bounded; blocking writes cannot prevent a separate control connection.
-use crate::protocol::Launch;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
-use std::io::{Read, Write};
+use std::{
+    collections::BTreeMap,
+    io::{Read, Write},
+    path::Path,
+};
 use tokio::sync::mpsc;
-pub(super) enum IoEvent {
+pub(crate) enum IoEvent {
     CursorQuery,
     Output(Vec<u8>),
     Closed,
     ReadError,
     Written { id: String, bytes: usize, ok: bool },
 }
-pub(super) struct Pty {
+pub(crate) struct Pty {
     child: Box<dyn Child + Send + Sync>,
     master: Option<Box<dyn MasterPty + Send>>,
     writes: std::sync::mpsc::SyncSender<(String, String)>,
@@ -85,17 +88,25 @@ impl Pty {
     }
 }
 
-pub(super) fn spawn(launch: &Launch) -> Result<(Pty, mpsc::Receiver<IoEvent>), String> {
+pub(crate) struct Process<'a> {
+    pub command: &'a Path,
+    pub args: &'a [String],
+    pub environment: &'a BTreeMap<String, String>,
+    pub cwd: &'a Path,
+    pub dimensions: (u16, u16),
+}
+
+pub(crate) fn spawn(process: Process<'_>) -> Result<(Pty, mpsc::Receiver<IoEvent>), String> {
     let pair = portable_pty::native_pty_system()
-        .openpty(size(launch.snapshot.rows, launch.snapshot.cols))
+        .openpty(size(process.dimensions.0, process.dimensions.1))
         .map_err(|_| "cannot create PTY")?;
-    let mut builder = CommandBuilder::new(&launch.command);
-    builder.args(&launch.args);
+    let mut builder = CommandBuilder::new(process.command);
+    builder.args(process.args);
     builder.env_clear();
-    for (key, value) in &launch.environment {
+    for (key, value) in process.environment {
         builder.env(key, value);
     }
-    builder.cwd(&launch.cwd);
+    builder.cwd(process.cwd);
     let child = pair
         .slave
         .spawn_command(builder)

@@ -117,7 +117,8 @@ fn agent_with_auth(auth: Auth) -> impl ConnectTo<Client> {
         )
         .on_receive_request(
             async move |request: NewSessionRequest, responder, cx| {
-                if !matches!(auth, Auth::Off | Auth::TerminalFixture) && !authenticated.load(Ordering::SeqCst) {
+                let terminal_login_complete = auth == Auth::Terminal && request.cwd.join("fixture-login-complete").is_file();
+                if !matches!(auth, Auth::Off | Auth::TerminalFixture) && !terminal_login_complete && !authenticated.load(Ordering::SeqCst) {
                     return responder.respond_with_error(acp::Error::auth_required());
                 }
                 let id = SessionId::new(format!("session_{}", next_session.fetch_add(1, Ordering::SeqCst)));

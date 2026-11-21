@@ -1,7 +1,7 @@
 //! Dedicated process bootstrap and bounded IPC accept loop. PTY IO, command
 //! state transitions and storage are separate modules with one owner each.
 mod actor;
-mod pty;
+pub(crate) mod pty;
 use crate::{config, ipc, protocol::*, spool::Spool};
 use interprocess::local_socket::{
     ListenerOptions,
@@ -97,7 +97,14 @@ async fn serve(mut launch: Launch) -> Result<(), String> {
     })?;
     // Once native PTY startup is attempted, a platform error can happen after
     // child creation. Keep that outcome uncertain rather than promising no IO.
-    let (pty, mut events) = pty::spawn(&launch).inspect_err(|message| {
+    let (pty, mut events) = pty::spawn(pty::Process {
+        command: &launch.command,
+        args: &launch.args,
+        environment: &launch.environment,
+        cwd: &launch.cwd,
+        dimensions: (launch.snapshot.rows, launch.snapshot.cols),
+    })
+    .inspect_err(|message| {
         let _ = spool.startup_failed(message, true);
     })?;
     let mut actor = actor::Actor::new(spool, pty, launch.lifetime_ms)?;

@@ -5,15 +5,30 @@ impl Client {
     /// Distinguish a host-selected protocol method from a terminal login.
     /// Duplicate IDs are ambiguous, even if both have the same method type.
     pub fn supports_protocol_authentication(&self, method: &str) -> bool {
+        matches!(
+            self.unique_authentication_method(method),
+            Some(AuthMethod::Agent(_))
+        )
+    }
+
+    pub fn supports_terminal_authentication(&self, method: &str) -> bool {
+        matches!(
+            self.unique_authentication_method(method),
+            Some(AuthMethod::Terminal(_))
+        )
+    }
+
+    fn unique_authentication_method(&self, method: &str) -> Option<&AuthMethod> {
         if method.is_empty() || method.len() > 128 || method.chars().any(char::is_control) {
-            return false;
+            return None;
         }
         let mut matching = self
             .initialized()
             .auth_methods
             .iter()
             .filter(|item| item.id().0.as_ref() == method);
-        matches!(matching.next(), Some(AuthMethod::Agent(_))) && matching.next().is_none()
+        let first = matching.next()?;
+        matching.next().is_none().then_some(first)
     }
 
     /// Send only the method ID, once on a new connection. No session may open

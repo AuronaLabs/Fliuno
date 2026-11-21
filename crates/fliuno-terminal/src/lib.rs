@@ -6,6 +6,7 @@ mod config;
 #[cfg(feature = "test-fixtures")]
 pub mod fixture;
 mod ipc;
+pub mod login;
 pub mod protocol;
 mod registry;
 mod service;

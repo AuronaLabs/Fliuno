@@ -1,4 +1,6 @@
 //! Fliuno application protocol and persisted domain values. No runtime dependencies.
+mod agent_login;
+pub use agent_login::*;
 mod approval;
 pub use approval::*;
 mod artifacts;

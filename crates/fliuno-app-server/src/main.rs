@@ -225,9 +225,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(config) = mcp_config {
         fliuno_mcp::register_config_with_oauth(&mut kernel, config, grants)?;
     }
-    if let Some(config) = acp_config {
-        fliuno_agents::register_config(&mut kernel, config)?;
-    }
+    let agent_terminal_logins = acp_config
+        .map(|config| fliuno_agents::register_config_with_logins(&mut kernel, config))
+        .transpose()?;
     if let Some(config) = a2a_config {
         fliuno_agents::register_a2a_config(&mut kernel, config)?;
     }
@@ -244,6 +244,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
     let mut server = RpcServer::with_terminals(kernel, provider_name, terminals);
+    if let Some(registrations) = agent_terminal_logins {
+        server.enable_local_agent_terminal_login(registrations);
+    }
     if let Some(provider) = memory_embeddings {
         server.enable_memory_embeddings(provider)?;
     }

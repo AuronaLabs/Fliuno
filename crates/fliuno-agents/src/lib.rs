@@ -3,7 +3,10 @@ mod a2a;
 mod acp;
 mod filesystem;
 pub use a2a::{A2aAgentConfig, A2aConfig, A2aOAuthConfig, register_a2a_config};
-pub use acp::{AcpAgentConfig, AgentsConfig, Isolation, register_config};
+pub use acp::{
+    AcpAgentConfig, AgentsConfig, Isolation, TerminalLogins, register_config,
+    register_config_with_logins,
+};
 
 #[cfg(test)]
 mod lifecycle_tests {

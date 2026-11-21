@@ -80,6 +80,8 @@ impl Peer {
             .arg("--acp-config")
             .arg(directory.0.join("agents.json"))
             .env("FLIUNO_PROVIDER", "demo")
+            .env("FLIUNO_TEST_LOGIN_ALLOWED", "explicit-host-marker")
+            .env("FLIUNO_TEST_LOGIN_BLOCKED", "unexpected-login-marker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
