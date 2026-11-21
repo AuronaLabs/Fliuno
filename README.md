@@ -15,7 +15,7 @@
 
 **[快速体验](#快速体验)** · [接入工作台](#接入工作台) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.4** · [更新记录](CHANGELOG.md#004) · [v0.0.3](CHANGELOG.md#003) · [v0.0.2](CHANGELOG.md#002)
+当前版本 **v0.0.5** · [更新记录](CHANGELOG.md#005) · [v0.0.4](CHANGELOG.md#004) · [0.0.6 TUI 计划](docs/plan-0.0.5.md#006第一版-tui)
 
 ## 快速体验
 

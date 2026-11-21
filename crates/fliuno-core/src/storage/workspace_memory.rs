@@ -27,6 +27,7 @@ pub enum TaskMemoryQuery<'a> {
         workspace_id: &'a str,
         embedding: &'a WorkspaceMemoryQueryEmbedding,
         minimum_similarity: f64,
+        result_limit: u32,
     },
 }
 
@@ -698,8 +699,12 @@ fn rank_task_vectors(
             workspace_id: scope,
             embedding,
             minimum_similarity,
+            result_limit,
         } => {
-            if scope != workspace_id || !(0.0 < minimum_similarity && minimum_similarity <= 1.0) {
+            if scope != workspace_id
+                || !(0.0 < minimum_similarity && minimum_similarity <= 1.0)
+                || !(1..=MAX_MEMORY_SEMANTIC_RESULTS).contains(&result_limit)
+            {
                 return Err(Error::Invalid(
                     "invalid task memory query scope or similarity threshold".into(),
                 ));
@@ -715,7 +720,7 @@ fn rank_task_vectors(
                         scores
                             .into_iter()
                             .filter(|(_, score)| *score >= minimum_similarity)
-                            .take(MAX_MEMORY_SEMANTIC_RESULTS as usize)
+                            .take(result_limit as usize)
                             .enumerate()
                             .map(|(rank, (id, _))| (id, rank)),
                     );

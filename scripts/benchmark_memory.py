@@ -52,8 +52,10 @@ class Embedder:
         self.inputs = {item.name for item in self.session.get_inputs()}
 
     def vectors(self, inputs):
-        # Fliuno sends indexed passages as key + newline + body; eval queries have no newlines.
-        text = [("passage: " if "\n" in item else "query: ") + item for item in inputs]
+        # The centered Rust profile sends role prefixes explicitly. Preserve the
+        # historical fixture framing for runs with the plain profile.
+        text = [item if item.startswith(("passage: ", "query: ")) else
+                ("passage: " if "\n" in item else "query: ") + item for item in inputs]
         encoded = self.tokenizer.encode_batch(text)
         ids = self.np.array([item.ids for item in encoded], dtype=self.np.int64)
         mask = self.np.array([item.attention_mask for item in encoded], dtype=self.np.int64)
@@ -107,7 +109,7 @@ def wait_for_index(db, count):
     raise TimeoutError("embedding index did not populate")
 
 
-def evaluate(executable, cases, endpoint, minimum, repetitions):
+def evaluate(executable, cases, endpoint, minimum, repetitions, profile):
     with tempfile.TemporaryDirectory(prefix="fliuno-memory-eval-") as temporary:
         root = Path(temporary)
         db = root / "eval.db"
@@ -131,6 +133,7 @@ def evaluate(executable, cases, endpoint, minimum, repetitions):
             config.write_text(json.dumps({
                 "endpoint": endpoint, "model": MODEL, "modelIdentity": MODEL_ID,
                 "dimensions": DIMENSIONS, "workspaces": [workspace], "minimumSimilarity": minimum,
+                "profile": profile,
             }), encoding="utf-8")
             arguments.extend(["--memory-embedding-config", config])
 
@@ -175,11 +178,12 @@ def evaluate(executable, cases, endpoint, minimum, repetitions):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
-    parser.add_argument("--split", choices=["calibration", "holdout"], required=True)
+    parser.add_argument("--split", choices=["calibration", "holdout", "holdout_v2"], required=True)
     parser.add_argument("--cases", type=Path, default=SCRIPTS / "memory_eval_cases.json")
     parser.add_argument("--weights", type=Path)
     parser.add_argument("--tokenizer", type=Path)
     parser.add_argument("--minimum-similarity", type=float)
+    parser.add_argument("--profile", choices=["plain", "multilingual_e5_en_zh_v1"], default="plain")
     parser.add_argument("--repetitions", type=int, default=8)
     args = parser.parse_args()
     if args.repetitions < 1:
@@ -191,8 +195,9 @@ def main():
     executable = args.executable.resolve(strict=True)
     server = embedding_server(Embedder(args.weights, args.tokenizer)) if args.weights else nullcontext()
     with server as endpoint:
-        result = evaluate(executable, cases, endpoint, args.minimum_similarity, args.repetitions)
-    print(json.dumps({"split": args.split, "minimum_similarity": args.minimum_similarity, **result}, indent=2))
+        result = evaluate(executable, cases, endpoint, args.minimum_similarity, args.repetitions, args.profile)
+    print(json.dumps({"split": args.split, "profile": args.profile if endpoint else None,
+                      "minimum_similarity": args.minimum_similarity, **result}, indent=2))
 
 
 if __name__ == "__main__":

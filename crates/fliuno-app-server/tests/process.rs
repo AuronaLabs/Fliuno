@@ -45,6 +45,9 @@ mod model_usage;
 mod runs;
 #[path = "process/sessions.rs"]
 mod sessions;
+#[cfg(all(any(windows, target_os = "linux"), feature = "test-fixtures"))]
+#[path = "process/skill_execution.rs"]
+mod skill_execution;
 #[path = "process/task_status.rs"]
 mod task_status;
 #[cfg(feature = "test-fixtures")]

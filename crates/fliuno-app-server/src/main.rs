@@ -169,6 +169,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .as_deref()
         .map(|path| configuration::load::<fliuno_exec::Config>(path, "execution"))
         .transpose()?;
+    let skill_catalog = skills_dir
+        .map(fliuno_skills::SkillCatalog::open)
+        .transpose()?;
+    if let Some(config) = &exec_config {
+        for program in &config.programs {
+            if let Some(skill) = &program.skill {
+                let catalog = skill_catalog
+                    .as_ref()
+                    .ok_or("offline Skill execution requires --skills-dir")?;
+                let script = program
+                    .assets
+                    .iter()
+                    .find(|asset| asset.path == skill.script)
+                    .ok_or("offline Skill execution requires a pinned script asset")?;
+                catalog.verify_script_pin(
+                    &program.id,
+                    &skill.script,
+                    &script.source,
+                    &script.sha256,
+                )?;
+            }
+        }
+    }
     let terminal_config = terminal_config
         .as_deref()
         .map(|path| configuration::load::<fliuno_terminal::Config>(path, "terminal"))
@@ -219,8 +242,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _diagnostics = diagnostics::start(trace_log.as_deref(), otlp_endpoint.as_deref())?;
     let mut kernel = Kernel::open(db, provider)?;
     fliuno_tools::register(&mut kernel)?;
-    if let Some(path) = skills_dir {
-        fliuno_skills::register(&mut kernel, fliuno_skills::SkillCatalog::open(path)?)?;
+    if let Some(catalog) = skill_catalog {
+        fliuno_skills::register(&mut kernel, catalog)?;
     }
     if let Some(config) = mcp_config {
         fliuno_mcp::register_config_with_oauth(&mut kernel, config, grants)?;

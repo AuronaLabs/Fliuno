@@ -79,6 +79,7 @@ impl ProcessControl for NativeObservation {
 }
 fn program() -> Program {
     Program::resolve(ProgramConfig {
+        skill: None,
         assets: vec![],
         id: "scheduling_probe".into(),
         command: std::env::current_exe().unwrap(),

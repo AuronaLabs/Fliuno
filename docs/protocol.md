@@ -630,6 +630,8 @@ Rust 调用方可用 `Client::get_pending_approval_details`。用户做出决定
 
 初始化能力 `processExecution` 表示存在注册命令。`tools/list` 只列出不含主机路径、固定参数或环境值的 `process_execution` 工具元数据。每次模型调用走现有 `ApprovalRequested` / `approval/respond`；批准绑定不可变工具名及参数。工具名包含 executable/config/解析环境策略的摘要，换配置后旧待批调用不能重新绑定新命令。执行前再次核对可执行文件内容摘要；不接受 PATH 查找或隐式 shell。
 
+宿主可为已发现的 [离线 Skill](skills.md#执行离线文本-skill) 增加 `programs[].skill` 注册。它沿用 `process_execution` 审批；工具只接受有界 `stdin`。审批的可选 `executionPlan` 由宿主生成并持久保存，完整 JSON 最多 8 KiB。客户端通过 `approval/get` 读取，批准时无须回传。成功且完整的文本输出作为任务产物交付。
+
 模型可提供额外 argv（最多 256 项、与固定前缀合计最多 32,000 UTF-8 字节）、UTF-8 stdin（最多 256 KiB）、较小的 timeout（配置 100..300000 ms）、较小的输出上限（配置 1024..65536 bytes/stream）。输入交付后关闭 stdin 写端，让等待 EOF 的程序继续运行；停止时中止未完成输入。stdout/stderr 并发排空，每条仅保留末尾有界原始字节；有效 UTF-8 返回文本，否则返回 base64，并报告总见字节、保留量和截断标记。非零退出是已知结果，报告 exitCode 和 success=false。
 
 超时、取消、输出读取/退出观察失败或清理结果不完整会记录 `tool_outcome_unknown` 及有界部分报告，任务进入 interrupted 并保留 `inFlightTool`，不能通过 task/resume 重跑。取消先提交而 worker 后完成时，任务仍为 cancelled，但匹配的部分结果作为只追加审计事件持久保存。`stdinComplete` 要求全部写入及异步 shutdown/flush 成功，且本地写端已释放；不表示子进程实际读取。stdin 失败但退出和输出完整时，仍可返回已知结果，`success=false`，并保留失败阶段。一次审批授权整条注册程序运行；`trusted_host` 具有配置宿主的完整 OS 权限，因此不能把它当作低权限沙箱。

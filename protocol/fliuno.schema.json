@@ -6605,6 +6605,9 @@
                 "null"
               ],
               "default": null
+            },
+            "executionPlan": {
+              "description": "Bounded, host-produced review data frozen alongside this call."
             }
           },
           "additionalProperties": false,
@@ -12490,6 +12493,9 @@
                 "null"
               ],
               "default": null
+            },
+            "executionPlan": {
+              "description": "Bounded, host-produced review data frozen alongside this call."
             }
           },
           "additionalProperties": false,
@@ -12665,6 +12671,9 @@
                 "null"
               ],
               "default": null
+            },
+            "executionPlan": {
+              "description": "Bounded, host-produced review data frozen alongside this call."
             }
           },
           "additionalProperties": false,
@@ -15080,6 +15089,9 @@
                 "null"
               ],
               "default": null
+            },
+            "executionPlan": {
+              "description": "Bounded, host-produced review data frozen alongside this call."
             }
           },
           "additionalProperties": false,
@@ -17237,6 +17249,9 @@
                 "null"
               ],
               "default": null
+            },
+            "executionPlan": {
+              "description": "Bounded, host-produced review data frozen alongside this call."
             }
           },
           "additionalProperties": false,

@@ -63,6 +63,10 @@
 - 查询最多等待 750 毫秒，网络调用不持有内核锁。端点不可用、无兼容索引、索引损坏或没有达到默认相似度 `0.65` 的候选时，使用本机词项检索。初始化能力 `taskMemoryHybridRetrieval` 表示已配置服务，`taskMemoryOptOut` 表示支持单次关闭。
 - 端点必须是 HTTPS，或使用环回 IP 的 HTTP。不跟随重定向。`apiKeyEnv` 只保存环境变量名称；密钥不会写入任务或内核数据库。启用前应确认端点可以收到所选工作区的记忆和当前输入文本。
 
+使用 `multilingual-e5-small` 这类 E5 模型时，可将 `profile` 设为 `multilingual_e5_en_zh_v1`，并按实际模型填写 `model` 和 `dimensions`。app-server 会添加 `query: ` 或 `passage: ` 前缀；端点不应重复添加。启动后的后台索引先用两批固定的中英文通用短句取向量，并按语言与用途缓存均值。检索和索引都从归一化后的向量减去对应均值；含汉字的文本选用中文均值，其他文本选用英文均值。后台准备不就绪时回退词法。
+
+该配置默认使用 `minimumSimilarity: 0.24`，只将余弦相似度最高且达标的一个向量候选和词法结果融合。索引身份自动加上 `e5-en-zh-v1:`，更换模型仍需填写新的 `modelIdentity`；未设置 `profile` 时继续使用原索引规则。自动索引从原记忆重建，配置切换不修改已冻结的任务快照。
+
 ## 中英检索评测
 
 `scripts/benchmark_memory.py` 在真实 app-server 上重放 `scripts/memory_eval_cases.json`。校准和验收使用不同记忆与查询；每条查询使用新会话，从 `task/start` 响应检查实际冻结的记忆，随后取消 Demo Provider 的任务。计时包括本机 RPC、检索和任务落库，不包括取消、建索引或模型生成。命中按有相关记忆的问题计数；误注入按含任一无关记忆的问题计数。
@@ -72,6 +76,15 @@ Windows 调试构建的校准结果（同一 Ryzen 5 5600H 主机，8 题各测 
 固定 E5 模型开启语义检索后的校准：余弦阈值 0.65 命中 5/5，但 8/8 有误注入；提高到 0.82 后仍有 5/8 误注入。更高的 0.84 将命中降到 3/5。
 
 另试了一个保守方案：短 key（最多两个字符）仅做词法匹配，向量最多注入第一名，要求余弦分数 ≥0.65 且领先第二名至少 0.035。校准命中 4/5、误注入 1/8；在独立样本上命中 2/7、误注入 1/12，p50/p95 为 13.85/16.57 ms。相同独立样本的 `v0.0.4` 基线是命中 1/7、误注入 3/12、p50/p95 为 3.35/4.74 ms。两组独立样本均为每题重复 20 次。该方案未达到命中门槛，未合入；该批样本已用于评估，若据此改方案，需另留一批未参与调参的样本复验。
+
+固定 E5 配置和 0.24 阈值后，用未参与调参的 `holdout_v2` 复验（各 240 次计时）：
+
+| 配置 | 命中 | 含误注入 | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `v0.0.4` 词法基线 | 1/7 | 4/12 | 4.16 ms | 7.26 ms |
+| `multilingual_e5_en_zh_v1` + 词法 | 6/7 | 0/12 | 14.55 ms | 21.75 ms |
+
+中英两种系统开发改写均找到 Rust 偏好，保留了单字符 `Z` 的精确命中；未命中的是英文值班交接问题对中文记忆。延迟增量 p95 为 14.49 ms。该结果只对应固定模型、本机端点及这批样本，其他模型或远程端点需重新测量。
 
 构建 `v0.0.4` 源码与当前 app-server 后，用同一命令分别运行。基线不需要模型或第三方 Python 库：
 
@@ -85,3 +98,5 @@ python scripts/benchmark_memory.py PATH_TO_V004_APP_SERVER --split calibration -
 python scripts/benchmark_memory.py PATH_TO_CURRENT_APP_SERVER --split calibration --repetitions 2 `
     --weights PATH_TO_ONNX --tokenizer PATH_TO_TOKENIZER_JSON --minimum-similarity 0.82
 ```
+
+验收复现使用 `--split holdout_v2 --repetitions 20 --profile multilingual_e5_en_zh_v1 --minimum-similarity 0.24` 和相同的模型文件。基线同样用 `--split holdout_v2 --repetitions 20`，省略所有模型参数。

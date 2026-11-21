@@ -6,6 +6,30 @@ use std::{
 pub fn main() -> io::Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     match args.first().map(String::as_str) {
+        Some("skill-script") => {
+            assert!(fliuno_sandbox::current_process_is_isolated()?);
+            assert!(std::env::var_os("FLIUNO_EXEC_SECRET").is_none());
+            let script = std::fs::read_to_string(&args[1])?;
+            let mut input = String::new();
+            io::stdin().read_to_string(&mut input)?;
+            match input.as_str() {
+                value if value == "hold" || value.starts_with("hold:") => {
+                    println!("skill-ready");
+                    io::stdout().flush()?;
+                    if let Some(token) = value.strip_prefix("hold:") {
+                        let token = uuid::Uuid::parse_str(token).map_err(io::Error::other)?;
+                        std::fs::write(format!("ready-{}", token.simple()), b"running")?;
+                    }
+                    std::thread::sleep(Duration::from_secs(60));
+                }
+                "flood" => io::stdout().write_all(&[b'x'; 2048])?,
+                _ if script.trim() == "upper" => print!("{}", input.to_uppercase()),
+                _ if script.trim() == "reverse" => {
+                    print!("{}", input.chars().rev().collect::<String>())
+                }
+                _ => return Err(io::Error::other("unsupported Skill fixture script")),
+            }
+        }
         Some("asset") => {
             println!(
                 "{}",

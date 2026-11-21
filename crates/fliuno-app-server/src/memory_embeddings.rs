@@ -1,9 +1,12 @@
 //! Opt-in host transport for workspace embeddings. No DB lock spans HTTP.
+mod centering;
+
+use centering::Centers;
 use crossbeam_channel::{Receiver, Sender, bounded, select_biased, tick};
 use fliuno_core::{Kernel, TaskMemoryQuery};
 use fliuno_protocol::{
-    MAX_MEMORY_EMBEDDING_DIMENSIONS, TaskInput, UserContentPart, WorkspaceMemoryIndexParams,
-    WorkspaceMemoryQueryEmbedding, WorkspaceMemoryVector,
+    MAX_MEMORY_EMBEDDING_DIMENSIONS, MAX_MEMORY_SEMANTIC_RESULTS, TaskInput, UserContentPart,
+    WorkspaceMemoryIndexParams, WorkspaceMemoryQueryEmbedding, WorkspaceMemoryVector,
 };
 use reqwest::{Url, header::HeaderValue};
 use serde::Deserialize;
@@ -18,6 +21,15 @@ const QUERY_BYTES: usize = 4096;
 const RESPONSE_BYTES: usize = 1024 * 1024;
 const INDEX_INTERVAL: Duration = Duration::from_secs(1);
 const QUERY_WAIT: Duration = Duration::from_millis(750);
+const E5_INDEX_PREFIX: &str = "e5-en-zh-v1:";
+
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum EmbeddingProfile {
+    #[default]
+    Plain,
+    MultilingualE5EnZhV1,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -28,23 +40,27 @@ pub struct MemoryEmbeddingConfig {
     dimensions: usize,
     api_key_env: Option<String>,
     workspaces: Vec<String>,
-    #[serde(default = "threshold")]
-    minimum_similarity: f64,
-}
-
-fn threshold() -> f64 {
-    0.65
+    #[serde(default)]
+    profile: EmbeddingProfile,
+    minimum_similarity: Option<f64>,
 }
 
 pub struct MemoryEmbeddingProvider {
     config: MemoryEmbeddingConfig,
     endpoint: Url,
     client: reqwest::Client,
+    minimum_similarity: f64,
+    result_limit: u32,
 }
 
 impl MemoryEmbeddingProvider {
-    pub fn new(config: MemoryEmbeddingConfig) -> Result<Self, &'static str> {
+    pub fn new(mut config: MemoryEmbeddingConfig) -> Result<Self, &'static str> {
         const INVALID: &str = "invalid workspace memory embedding configuration";
+        let centered = config.profile == EmbeddingProfile::MultilingualE5EnZhV1;
+        let minimum_similarity =
+            config
+                .minimum_similarity
+                .unwrap_or(if centered { 0.24 } else { 0.65 });
         let endpoint = Url::parse(&config.endpoint).map_err(|_| INVALID)?;
         let local = endpoint.host_str().is_some_and(|host| {
             host.trim_matches(['[', ']'])
@@ -65,7 +81,9 @@ impl MemoryEmbeddingProvider {
             || !valid(&config.model)
             || !valid(&config.model_identity)
             || !(1..=MAX_MEMORY_EMBEDDING_DIMENSIONS).contains(&config.dimensions)
-            || !(0.0 < config.minimum_similarity && config.minimum_similarity <= 1.0)
+            || config.model_identity.starts_with(E5_INDEX_PREFIX)
+            || (centered && config.model_identity.len() + E5_INDEX_PREFIX.len() > 128)
+            || !(0.0 < minimum_similarity && minimum_similarity <= 1.0)
             || !(1..=32).contains(&config.workspaces.len())
             || !config
                 .workspaces
@@ -97,10 +115,19 @@ impl MemoryEmbeddingProvider {
             .timeout(Duration::from_secs(2))
             .build()
             .map_err(|_| INVALID)?;
+        if centered {
+            config.model_identity.insert_str(0, E5_INDEX_PREFIX);
+        }
         Ok(Self {
             config,
             endpoint,
             client,
+            minimum_similarity,
+            result_limit: if centered {
+                1
+            } else {
+                MAX_MEMORY_SEMANTIC_RESULTS
+            },
         })
     }
 
@@ -153,7 +180,12 @@ impl MemoryEmbeddingProvider {
         Some(rows.into_iter().map(|row| row.embedding).collect())
     }
 
-    async fn index_batch(&self, kernel: &Mutex<Kernel>, workspace_id: &str) {
+    async fn index_batch(
+        &self,
+        kernel: &Mutex<Kernel>,
+        workspace_id: &str,
+        centers: Option<&Centers>,
+    ) {
         let Ok(rows) = kernel.lock().map_err(|_| ()).and_then(|kernel| {
             kernel
                 .pending_workspace_memory_vectors(
@@ -170,11 +202,21 @@ impl MemoryEmbeddingProvider {
         }
         let texts: Vec<_> = rows
             .iter()
-            .map(|row| format!("{}\n{}", row.key, row.content))
+            .map(|row| {
+                let prefix = if centers.is_some() { "passage: " } else { "" };
+                format!("{prefix}{}\n{}", row.key, row.content)
+            })
             .collect();
-        let Some(vectors) = self.embed(&texts).await else {
+        let Some(mut vectors) = self.embed(&texts).await else {
             return;
         };
+        if let Some(centers) = centers {
+            for (vector, row) in vectors.iter_mut().zip(&rows) {
+                if !centers.transform(vector, &row.content, centering::Role::Passage) {
+                    return;
+                }
+            }
+        }
         if let Ok(mut kernel) = kernel.lock() {
             let _ = kernel.index_workspace_memory_vectors(&WorkspaceMemoryIndexParams {
                 workspace_id: workspace_id.into(),
@@ -203,6 +245,7 @@ pub(crate) struct Service {
     workspaces: BTreeSet<String>,
     model_identity: String,
     minimum_similarity: f64,
+    result_limit: u32,
     requests: Option<Sender<Query>>,
     worker: Option<thread::JoinHandle<()>>,
 }
@@ -216,7 +259,8 @@ impl Service {
         let mut service = Self {
             workspaces: provider.config.workspaces.iter().cloned().collect(),
             model_identity: provider.config.model_identity.clone(),
-            minimum_similarity: provider.config.minimum_similarity,
+            minimum_similarity: provider.minimum_similarity,
+            result_limit: provider.result_limit,
             requests: Some(submit),
             worker: None,
         };
@@ -258,6 +302,7 @@ impl Service {
         Retrieved::Semantic {
             workspace_id,
             minimum_similarity: self.minimum_similarity,
+            result_limit: self.result_limit,
             embedding: WorkspaceMemoryQueryEmbedding {
                 model_identity: self.model_identity.clone(),
                 values,
@@ -283,19 +328,36 @@ fn serve(
 ) {
     let ticker = tick(INDEX_INTERVAL);
     let mut workspaces = provider.config.workspaces.iter().cycle();
+    let mut centers: Option<Centers> = None;
+    let centered = provider.config.profile == EmbeddingProfile::MultilingualE5EnZhV1;
     loop {
         select_biased! {
             recv(requests) -> request => {
                 let Ok(Query { text, expires, reply }) = request else { break; };
+                if centered && centers.is_none() {
+                    let _ = reply.try_send(None);
+                    continue;
+                }
                 if let Some(remaining) = expires.checked_duration_since(Instant::now()) {
                     let result = runtime.block_on(async {
-                        tokio::time::timeout(remaining, provider.embed(&[text])).await.ok().flatten().and_then(|mut batch| batch.pop())
+                        let sent = if centered { format!("query: {}", text.trim_end_matches('\n')) } else { text.clone() };
+                        let mut vector = tokio::time::timeout(remaining, provider.embed(&[sent])).await.ok().flatten()?.pop()?;
+                        if let Some(centers) = &centers
+                            && !centers.transform(&mut vector, &text, centering::Role::Query) {
+                            return None;
+                        }
+                        Some(vector)
                     });
                     let _ = reply.try_send(result);
                 }
             }
             recv(ticker) -> _ => {
-                runtime.block_on(provider.index_batch(kernel, workspaces.next().unwrap()));
+                if centered && centers.is_none() {
+                    centers = runtime.block_on(Centers::load(&provider));
+                }
+                if !centered || centers.is_some() {
+                    runtime.block_on(provider.index_batch(kernel, workspaces.next().unwrap(), centers.as_ref()));
+                }
             }
         }
     }
@@ -335,6 +397,7 @@ pub(crate) enum Retrieved {
         workspace_id: String,
         embedding: WorkspaceMemoryQueryEmbedding,
         minimum_similarity: f64,
+        result_limit: u32,
     },
 }
 
@@ -347,10 +410,12 @@ impl Retrieved {
                 workspace_id,
                 embedding,
                 minimum_similarity,
+                result_limit,
             } => TaskMemoryQuery::Semantic {
                 workspace_id,
                 embedding,
                 minimum_similarity: *minimum_similarity,
+                result_limit: *result_limit,
             },
         }
     }

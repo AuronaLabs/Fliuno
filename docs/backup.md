@@ -61,4 +61,4 @@ fliuno_core::Kernel::restore_backup("backups/latest", "recovery/kernel.db")?;
 fliuno_core::Kernel::verify_restored_database("recovery/kernel.db", &manifest)?;
 ```
 
-这些管理命令不会初始化 Provider、启动任务或迁移数据库。确认恢复结果后，只有显式以 `--db recovery/kernel.db` 启动服务才会启用副本；此时会走正常的迁移、任务恢复和调度流程。先在隔离目录演练并保留原库。当前已验收 schema 64 的还原和启动；备份命令仍要求快照使用当前 schema。备份命令不属于 app-server RPC。
+这些管理命令不会初始化 Provider、启动任务或迁移数据库。确认恢复结果后，只有显式以 `--db recovery/kernel.db` 启动服务才会启用副本；此时会走正常的迁移、任务恢复和调度流程。先在隔离目录演练并保留原库。Windows 上用 `v0.0.5` 构建恢复并校验 `v0.0.4` 快照；启动副本后从 schema 64 迁至 67，保留已完成任务、待审批项、工作区记忆和交付物正文，原库 SHA-256 不变。创建新备份要求源库已迁移到当前 schema。备份命令不属于 app-server RPC。

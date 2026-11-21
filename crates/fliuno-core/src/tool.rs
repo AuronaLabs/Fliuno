@@ -91,6 +91,10 @@ pub trait Tool: Send + Sync {
         )
     }
     fn validate(&self, arguments: &Value) -> std::result::Result<(), String>;
+    /// Optional immutable approval details; no IO or execution at this stage.
+    fn execution_plan(&self, _arguments: &Value) -> Option<Value> {
+        None
+    }
     fn execute(
         &self,
         context: &ToolContext<'_>,

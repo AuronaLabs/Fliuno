@@ -258,11 +258,23 @@ impl Kernel {
                 if let PolicyDecision::Deny(message) = self.policy.evaluate(&tool.spec(), &call) {
                     return self.fail_with_events(task, message, events);
                 }
+                let execution_plan = tool.execution_plan(&call.arguments);
+                if let Some(plan) = &execution_plan
+                    && (!plan.is_object()
+                        || crate::json_size(plan)? > MAX_APPROVAL_EXECUTION_PLAN_BYTES)
+                {
+                    return self.fail_with_events(
+                        task,
+                        "invalid tool execution plan".into(),
+                        events,
+                    );
+                }
                 let approval = Approval {
                     id: new_id("approval"),
                     task_id: task.id.clone(),
                     call: call.clone(),
                     authority: Some(tool.authority()),
+                    execution_plan,
                 };
                 task.messages.push(Message::ToolCall { call });
                 task.status = TaskStatus::WaitingApproval;

@@ -32,7 +32,58 @@
 
 这不是技能发布者认证或内容 pin。目录句柄防止本次注册后的路径替换把读取重定向到另一个目录，资源内容仍在每次获批时读取，可能已被宿主编辑。相同路径与元数据下替换资源内容不要求摘要变化；返回的 `sha256` 用于描述本次观测，不授予执行或信任权限。修改注册或重启重新发现后，元数据变化会改变摘要。通用绑定与旧记录规则见[注册身份](authority.md)。
 
+## 执行离线文本 Skill
+
+宿主同时提供 `--skills-dir` 和 `--exec-config`，在后者的 `programs` 中为一个已发现的 Skill 登记解释器和脚本。以下 Linux 示例用原生 `/usr/bin/dash` 将纯文本的每一行变成 Markdown 列表项：
+
+```text
+/srv/fliuno/skills/text-list/SKILL.md
+/srv/fliuno/skills/text-list/scripts/to-list.sh
+```
+
+`SKILL.md` 的 frontmatter 使用 `name: text-list` 和 `description: Convert text lines into a Markdown list.`。`to-list.sh` 的内容只用 shell 内建命令：
+
+```sh
+while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "- $line"
+done
+```
+
+`--exec-config` 指向以下 JSON。将 `SCRIPT_SHA256` 换成 `sha256sum /srv/fliuno/skills/text-list/scripts/to-list.sh` 输出的 64 位小写十六进制摘要，并按部署填写绝对路径：
+
+```json
+{
+  "programs": [{
+    "id": "text-list",
+    "command": "/usr/bin/dash",
+    "isolation": "linux_landlock",
+    "args": ["scripts/to-list.sh"],
+    "envAllow": [],
+    "timeoutMs": 5000,
+    "outputBytes": 16384,
+    "skill": {"script": "scripts/to-list.sh", "artifactTitle": "Markdown list"},
+    "assets": [{
+      "path": "scripts/to-list.sh",
+      "source": "/srv/fliuno/skills/text-list/scripts/to-list.sh",
+      "sha256": "SCRIPT_SHA256"
+    }]
+  }]
+}
+```
+
+宿主用 `tools/list` 查看 `skill_text-list_…` 工具名，再用真实模型或本地模型夹具发起任务。解释器和参数由宿主固定；工具只接受 `stdin`，上限为 16 KiB UTF-8。Windows 使用 `windows_app_container` 和可以在 AppContainer 中运行的原生解释器 `.exe`；依赖文件需要显式登记为带摘要的暂存文件。两种模式都没有工作区访问或网络授权，`envAllow` 必须为空。注册时核对发现的脚本路径与摘要，启动时再核对实际暂存的脚本和解释器。
+
+宿主通过 `approval/get` 的 `approval.executionPlan` 审阅解释器和脚本的摘要、固定参数、暂存文件、隔离与 IO 预算。完整计划最多 8 KiB；超限的注册在启动时拒绝。获批后，仅成功退出且未被截断的 UTF-8 stdout 会作为文本产物与工具结果一并提交。`artifacts/get` 读取正文，模型收到产物 ID。超时、取消和中断不会自动重试；有界的已捕获结果可在事件中检查，强制重启时结果可能未知。
+
 ## 离线验证
+
+Windows AppContainer 和 Debian 6.12.107 来宾分别通过下列三组进程测试。原生夹具解释器执行固定文本转换，验证脚本已启动之后再取消或终止 app-server；重启后同一提交键不会再次执行。
+
+```sh
+cargo test -p fliuno-app-server --features test-fixtures --locked --test process skill_execution
+```
+
+旧的纯读取流程可用以下示例验证：
 
 ```powershell
 python examples/skills_demo.py

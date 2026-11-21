@@ -40,5 +40,29 @@
       ["窗帘怎么拆下来清洗？", []],
       ["Describe the plot of a silent film in five sentences.", []]
     ]
+  },
+  "holdout_v2": {
+    "memories": {
+      "native-runtime": "Rust is my first choice for writing native runtimes and components that need direct memory control.",
+      "handoff-pack": "给下一任值班人员留下 Markdown 交接记录，带上待处理工单和回滚手册。",
+      "trip-rail": "When visiting different European cities, I normally travel between them by train instead of flying.",
+      "team-copy": "面对客户时，用简体中文撰写产品更新说明。",
+      "Z": "Single letter shortcut for the staging dataset.",
+      "saved-sheets": "Keep downloaded spreadsheet exports in the reports archive as CSV."
+    },
+    "queries": [
+      ["给我设计一个性能优先的操作系统内核，该选哪种编程语言？", ["native-runtime"]],
+      ["What should the incoming on-call engineer get when a shift changes?", ["handoff-pack"]],
+      ["在欧洲几个城市之间玩，我平时怎么赶路？", ["trip-rail"]],
+      ["Which language should I use for an announcement about a new customer-facing feature?", ["team-copy"]],
+      ["Choose `Z`.", ["Z"]],
+      ["从表格中下载的数据该存成什么文件？", ["saved-sheets"]],
+      ["Which programming language do I pick when implementing low-level runtime machinery?", ["native-runtime"]],
+      ["Why do some stars appear red?", []],
+      ["怎么把发糕蒸得松软？", []],
+      ["Choose three flowers for a shady balcony.", []],
+      ["怎么把椅子上的咖啡渍洗掉？", []],
+      ["Explain why some metals are magnetic.", []]
+    ]
   }
 }

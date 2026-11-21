@@ -89,6 +89,8 @@ pub struct ToolCall {
     pub arguments: Value,
 }
 
+pub const MAX_APPROVAL_EXECUTION_PLAN_BYTES: usize = 8 * 1024;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Approval {
@@ -98,6 +100,9 @@ pub struct Approval {
     /// Absent in legacy snapshots, which cannot authorize a new execution.
     #[serde(default)]
     pub authority: Option<String>,
+    /// Bounded, host-produced review data frozen alongside this call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_plan: Option<Value>,
 }
 
 /// Public, resumable input requested by an in-flight approved tool call.

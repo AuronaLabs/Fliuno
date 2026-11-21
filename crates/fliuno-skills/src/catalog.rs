@@ -2,12 +2,17 @@
 use crate::{SkillMetadata, metadata::parse};
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::{ambient_authority, fs::Dir};
-use std::{collections::BTreeMap, io::Read, path::Path};
+use std::{
+    collections::BTreeMap,
+    io::Read,
+    path::{Path, PathBuf},
+};
 const MAX_SKILL_BYTES: u64 = 128 * 1024;
 
 pub struct SkillCatalog {
     pub(crate) entries: BTreeMap<String, Entry>,
     pub(crate) authority: String,
+    root: PathBuf,
 }
 
 pub(crate) struct Entry {
@@ -33,6 +38,7 @@ impl SkillCatalog {
         let mut catalog = Self {
             entries: BTreeMap::new(),
             authority: String::new(),
+            root: canonical.clone(),
         };
         for (index, entry) in root
             .entries()
@@ -97,6 +103,27 @@ impl SkillCatalog {
         let content = read_bounded(file)?;
         parse(&content, name)?; // Detect an invalid edit since discovery.
         Ok(content)
+    }
+
+    /// Bind a separately authorized executable registration to this catalog.
+    /// The sandbox still has to verify the same bytes while staging the file.
+    pub fn verify_script_pin(
+        &self,
+        name: &str,
+        path: &str,
+        source: &Path,
+        sha256: &str,
+    ) -> Result<(), String> {
+        let script = self.read_resource(name, path)?;
+        let expected = self.root.join(name).join(path);
+        let source =
+            std::fs::canonicalize(source).map_err(|_| "cannot resolve configured Skill script")?;
+        if script.sha256 != sha256 || source != expected {
+            return Err(
+                "configured Skill script does not match its discovered source and SHA-256".into(),
+            );
+        }
+        Ok(())
     }
 }
 

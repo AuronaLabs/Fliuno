@@ -34,6 +34,8 @@ pub struct ProgramConfig {
     pub timeout_ms: u64,
     #[serde(default = "default_output")]
     pub output_bytes: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill: Option<crate::skill::SkillExecution>,
 }
 
 pub(crate) const MAX_OUTPUT: usize = 64 * 1024;
@@ -124,6 +126,7 @@ impl Program {
             return Err("linuxCgroupParent must be an existing Linux cgroup directory".into());
         }
         validate_args(&config.args)?;
+        crate::skill::validate(&config)?;
         if !(100..=300_000).contains(&config.timeout_ms)
             || !(1024..=MAX_OUTPUT).contains(&config.output_bytes)
         {
@@ -181,13 +184,22 @@ impl Program {
         let identity = serde_json::to_vec(&(&config, &environment, &executable_digest))
             .map_err(|_| "cannot encode program identity")?;
         let digest = format!("{:x}", Sha256::digest(identity));
-        let tool_name = format!("process_{}_{}", config.id, &digest[..32]);
-        Ok(Self {
+        let prefix = if config.skill.is_some() {
+            "skill"
+        } else {
+            "process"
+        };
+        let tool_name = format!("{prefix}_{}_{}", config.id, &digest[..32]);
+        let program = Self {
             config,
             environment,
             executable_digest,
             tool_name,
             supervisor: None,
-        })
+        };
+        if let Some(skill) = &program.config.skill {
+            skill.validate_approval_plan(&program)?;
+        }
+        Ok(program)
     }
 }

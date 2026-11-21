@@ -5,12 +5,14 @@ mod config;
 #[cfg(feature = "test-fixtures")]
 pub mod fixture;
 mod runner;
+mod skill;
 pub mod supervisor;
 pub use capture::CapturedOutput;
 pub use config::{Config, ProcessIsolation, ProgramConfig};
 pub use runner::{
     ProcessEvidence, ProcessFault, ProcessOperation, ProcessReport, ProcessStopCause, Termination,
 };
+pub use skill::SkillExecution;
 
 use config::{MAX_INPUT, Program, validate_args};
 use fliuno_core::{
@@ -35,6 +37,9 @@ impl Program {
     fn arguments(&self, value: &Value) -> Result<Arguments, String> {
         let args: Arguments =
             serde_json::from_value(value.clone()).map_err(|_| "invalid process arguments")?;
+        if self.config.skill.is_some() {
+            skill::validate_input(value, &args.stdin)?;
+        }
         let combined = self
             .config
             .args
@@ -69,6 +74,9 @@ impl Tool for Program {
     }
 
     fn spec(&self) -> ToolSpec {
+        if self.config.skill.is_some() {
+            return skill::spec(self);
+        }
         ToolSpec {
             name: self.tool_name.clone(),
             description: format!(
@@ -88,6 +96,12 @@ impl Tool for Program {
     }
     fn validate(&self, arguments: &Value) -> Result<(), String> {
         self.arguments(arguments).map(|_| ())
+    }
+    fn execution_plan(&self, arguments: &Value) -> Option<Value> {
+        self.config
+            .skill
+            .as_ref()
+            .map(|skill| skill.plan(self, arguments["stdin"].as_str().map_or(0, str::len)))
     }
     fn execute(
         &self,
@@ -112,6 +126,9 @@ impl Tool for Program {
             .build()
             .map_err(|_| ToolError::Failed("cannot initialize process runtime".into()))?;
         let report = runtime.block_on(runner::run(self, context, args, cancellation))?;
+        if let Some(skill) = &self.config.skill {
+            return skill.finish(context, report);
+        }
         let interrupted = report.termination != Termination::Exited;
         let output = serde_json::to_value(report)
             .map_err(|_| ToolError::OutcomeUnknown("cannot encode process result".into()))?;

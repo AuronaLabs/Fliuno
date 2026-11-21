@@ -70,6 +70,7 @@ impl ModelProvider for Provider {
 }
 fn config(isolation: ProcessIsolation) -> ProgramConfig {
     ProgramConfig {
+        skill: None,
         assets: vec![],
         id: "probe".into(),
         command: env!("CARGO_BIN_EXE_fliuno-exec-probe").into(),
