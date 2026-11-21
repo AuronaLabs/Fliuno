@@ -74,6 +74,11 @@ pub fn execute(
         let records = context.turns.get(..take).ok_or_else(|| {
             ModelError::NotDispatched("no history available for context compaction".into())
         })?;
+        let records =
+            crate::context::tool_outputs::project(records, context.reduce_historical_tool_outputs)
+                .map_err(|_| {
+                    ModelError::NotDispatched("cannot project context compaction records".into())
+                })?;
         let mut text = SUMMARY_PROMPT.to_owned();
         text.push_str(
             &serde_json::to_string(&serde_json::json!({

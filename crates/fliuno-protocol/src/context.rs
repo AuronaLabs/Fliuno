@@ -217,6 +217,9 @@ pub struct TaskContext {
     /// A confirmed input-budget rejection scheduled a separate model attempt.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub compaction_pending: bool,
+    /// Project large tool outputs as excerpts after confirmed budget rejection.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reduce_historical_tool_outputs: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

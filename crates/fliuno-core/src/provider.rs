@@ -66,7 +66,11 @@ fn input_attribution(task: &Task, tools: &[ToolSpec]) -> crate::Result<ModelBudg
     if let Some(context) = &task.context
         && context.options.mode != ContextMode::Isolated
     {
-        for turn in &context.turns {
+        let turns = crate::context::tool_outputs::project(
+            &context.turns,
+            context.reduce_historical_tool_outputs,
+        )?;
+        for turn in turns.iter() {
             bytes.history += size(turn)?;
         }
         for summary in &context.summaries {

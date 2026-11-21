@@ -5831,6 +5831,10 @@
             "compactionPending": {
               "description": "A confirmed input-budget rejection scheduled a separate model attempt.",
               "type": "boolean"
+            },
+            "reduceHistoricalToolOutputs": {
+              "description": "Project large tool outputs as excerpts after confirmed budget rejection.",
+              "type": "boolean"
             }
           },
           "additionalProperties": false,
@@ -8881,6 +8885,10 @@
         },
         "compactionPending": {
           "description": "A confirmed input-budget rejection scheduled a separate model attempt.",
+          "type": "boolean"
+        },
+        "reduceHistoricalToolOutputs": {
+          "description": "Project large tool outputs as excerpts after confirmed budget rejection.",
           "type": "boolean"
         }
       },
@@ -13763,6 +13771,30 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "context_tool_outputs_reduced"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "outputCount": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep",
+                "outputCount"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "context_compaction_scheduled"
                 },
                 "rejectedStep": {
@@ -15889,6 +15921,30 @@
                 "type",
                 "rejectedStep",
                 "memoryCount"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_tool_outputs_reduced"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "outputCount": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep",
+                "outputCount"
               ]
             },
             {

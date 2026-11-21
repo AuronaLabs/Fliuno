@@ -39,7 +39,7 @@ use std::{
 pub(crate) use task_resume::ResumeFacts;
 pub(crate) use tool_inputs::Mutation as ToolInputMutation;
 
-pub(crate) const SCHEMA_VERSION: u32 = 66;
+pub(crate) const SCHEMA_VERSION: u32 = 67;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 fn read_task(db: &Connection, id: &str) -> Result<Task> {
@@ -687,7 +687,7 @@ impl Kernel {
             mcp_subscriptions::migrate(&db)?;
         }
         if version < SCHEMA_VERSION {
-            // Older readers reject frozen memory metadata (65) or budget events (66).
+            // Older readers reject new context flags and budget events.
             db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         }
         if let Some((provider_id, model)) = provider.model_identity() {

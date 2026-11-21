@@ -752,6 +752,10 @@ pub enum EventKind {
         rejected_step: u32,
         memory_count: u32,
     },
+    ContextToolOutputsReduced {
+        rejected_step: u32,
+        output_count: u32,
+    },
     ContextCompactionScheduled {
         rejected_step: u32,
     },

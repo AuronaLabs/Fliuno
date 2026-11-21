@@ -58,11 +58,16 @@ impl Kernel {
             }))
             .unwrap_or_else(|_| Err(ModelError::OutcomeUnknown("model provider panicked".into())));
             let memory_was_omitted = task.context_memory_omitted_for_budget;
+            let outputs_were_reduced = reduce_historical_tool_outputs(&task);
             task = self.apply_model_response(task, turn)?;
             let retry_without_memory =
                 !memory_was_omitted && task.context_memory_omitted_for_budget;
+            let retry_with_reduced_outputs =
+                !outputs_were_reduced && reduce_historical_tool_outputs(&task);
             if task.status != TaskStatus::Running
-                || !(retry_without_memory || compaction::pending(&task))
+                || !(retry_without_memory
+                    || retry_with_reduced_outputs
+                    || compaction::pending(&task))
             {
                 return Ok(task);
             }
@@ -158,6 +163,22 @@ impl Kernel {
                     });
                     self.commit(&task, &events, &[])?;
                     return Ok(task);
+                }
+                if !model_step_budget_spent(&task)
+                    && let Some(context) = &mut task.context
+                    && context.options.mode != ContextMode::Isolated
+                    && !context.reduce_historical_tool_outputs
+                {
+                    let output_count = crate::context::tool_outputs::count_large(&context.turns)?;
+                    if output_count > 0 {
+                        context.reduce_historical_tool_outputs = true;
+                        events.push(EventKind::ContextToolOutputsReduced {
+                            rejected_step: task.model_steps,
+                            output_count,
+                        });
+                        self.commit(&task, &events, &[])?;
+                        return Ok(task);
+                    }
                 }
                 if compaction::schedule(&mut task, self.provider.as_ref()) {
                     events.push(EventKind::ContextCompactionScheduled {
@@ -360,6 +381,12 @@ impl Kernel {
         )?;
         Ok(task)
     }
+}
+
+fn reduce_historical_tool_outputs(task: &Task) -> bool {
+    task.context
+        .as_ref()
+        .is_some_and(|context| context.reduce_historical_tool_outputs)
 }
 
 fn model_step_budget_spent(task: &Task) -> bool {

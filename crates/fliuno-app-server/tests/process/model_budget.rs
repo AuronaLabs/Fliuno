@@ -326,6 +326,159 @@ fn preflight_budget_retry_omits_memory_before_generation_and_keeps_snapshot() {
 }
 
 #[test]
+fn budget_retry_reduces_historical_tool_outputs_without_rewriting_live_replay() {
+    const OLD_TAIL: &str = "archived-output-tail";
+    const LIVE_TAIL: &str = "active-output-tail";
+    const FIRST_INPUT: &str = "Read the archived report";
+    const NEXT_INPUT: &str = "Read a second report";
+    const SIGNATURE: &str = "signed-current-reasoning";
+
+    let wire = Fixture::start(|request| {
+        if request.path == "/mock/v1/models/fixture-alias" {
+            return Response::json(200, model_metadata(4096));
+        }
+        let messages = request.body["messages"].as_array().unwrap();
+        let later = messages
+            .iter()
+            .any(|message| message["content"] == NEXT_INPUT);
+        let data = request.body.to_string();
+        if request.path == "/mock/v1/messages/count_tokens" {
+            return Response::json(
+                200,
+                json!({"input_tokens":if later && data.contains(OLD_TAIL) {30721} else {30720}}),
+            );
+        }
+        assert_eq!(request.path, "/mock/v1/messages");
+        let name = if later { "active" } else { "archive" };
+        let call_id = format!("tool_{name}");
+        if later {
+            assert!(!data.contains(OLD_TAIL));
+            assert!(data.contains("historical_tool_output_excerpt"));
+            assert!(data.contains("tool_archive"));
+            assert!(
+                messages
+                    .iter()
+                    .any(|message| message["content"] == NEXT_INPUT)
+            );
+        }
+        if !data.contains(if later { LIVE_TAIL } else { OLD_TAIL }) {
+            return Response::json(
+                200,
+                json!({"stop_reason":"tool_use","content":[
+                    {"type":"thinking","thinking":"Preserve this block","signature":SIGNATURE},
+                    {"type":"tool_use","id":call_id,"name":"workspace_read_text","input":{"path":format!("{name}.txt")}}
+                ]}),
+            );
+        }
+        let result = &messages.last().unwrap()["content"][0];
+        assert_eq!(result["type"], "tool_result");
+        assert_eq!(result["tool_use_id"], call_id);
+        assert!(result["content"].as_str().unwrap().len() > 4096);
+        assert_eq!(
+            messages[messages.len() - 2]["content"][0]["signature"],
+            SIGNATURE
+        );
+        Response::json(
+            200,
+            json!({"stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}),
+        )
+    });
+    let directory = TestDirectory::new();
+    for (name, tail) in [("archive", OLD_TAIL), ("active", LIVE_TAIL)] {
+        fs::write(
+            directory.0.join(format!("{name}.txt")),
+            format!("{}{tail}", "\u{754c}".repeat(2500)),
+        )
+        .unwrap();
+    }
+    let start = || {
+        Peer::from_child(
+            directory
+                .command(&wire)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        )
+    };
+    let initialize = |peer: &mut Peer| {
+        peer.call(
+            "initialize",
+            json!({"protocolVersion":"0.1","clientName":"historical-output-budget"}),
+        )
+    };
+    let mut peer = start();
+    initialize(&mut peer);
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let complete = |peer: &mut Peer, id: &Value| {
+        let id = id.as_str().unwrap();
+        let pending = peer.wait_for_status(id, "waiting_approval");
+        peer.call("approval/respond", json!({"taskId":id,"approvalId":pending["pendingApproval"]["id"],"decision":"allow_once"}));
+        peer.wait_for_status(id, "completed")
+    };
+    let first = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":FIRST_INPUT}),
+    );
+    let archive = complete(&mut peer, &first["id"]);
+    assert!(archive["messages"].to_string().contains(OLD_TAIL));
+    let request = json!({"sessionId":session["id"],"input":NEXT_INPUT,"clientRequestId":"live-report","maxModelSteps":3,"context":{"taskIds":[first["id"]]}});
+    let next = peer.call("task/start", request.clone());
+    let finished = complete(&mut peer, &next["id"]);
+    assert_eq!(finished["modelSteps"], 3);
+    assert_eq!(finished["context"]["reduceHistoricalToolOutputs"], true);
+    assert!(finished["context"]["turns"].to_string().contains(OLD_TAIL));
+    assert!(finished["messages"].to_string().contains(LIVE_TAIL));
+    let page = peer.call("events/list", json!({"taskId":next["id"]}));
+    let types = page["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| &event["data"])
+        .collect::<Vec<_>>();
+    assert_eq!(
+        types
+            .iter()
+            .filter(|event| event["type"] == "context_tool_outputs_reduced")
+            .copied()
+            .collect::<Vec<_>>(),
+        [&json!({"type":"context_tool_outputs_reduced","rejectedStep":1,"outputCount":1})]
+    );
+    assert_eq!(
+        types
+            .iter()
+            .filter(|event| event["type"] == "tool_started")
+            .count(),
+        1
+    );
+    let before_restart = wire.requests();
+    assert_eq!(
+        before_restart
+            .iter()
+            .filter(|request| request.path == "/mock/v1/messages/count_tokens")
+            .count(),
+        5
+    );
+    assert_eq!(
+        before_restart
+            .iter()
+            .filter(|request| request.path == "/mock/v1/messages")
+            .count(),
+        4
+    );
+    drop(peer);
+    let mut peer = start();
+    initialize(&mut peer);
+    assert_eq!(peer.call("task/start", request), finished);
+    assert_eq!(
+        peer.call("task/get", json!({"taskId":first["id"]})),
+        archive
+    );
+    assert_eq!(wire.requests().len(), before_restart.len() + 1); // startup metadata only
+}
+
+#[test]
 fn unusable_model_metadata_stops_startup_before_database_creation() {
     let private = "fixture-secret-in-body";
     for (status, value, diagnostic) in [
@@ -562,7 +715,7 @@ fn model_step_limit_preserves_default_receipts_and_rejects_invalid_settings() {
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
             .unwrap(),
-        66
+        67
     );
     let mut default = request.clone();
     default["maxModelSteps"] = json!(8);
