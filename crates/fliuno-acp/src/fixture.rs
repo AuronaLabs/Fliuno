@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 use tokio_util::sync::CancellationToken;
@@ -25,15 +25,42 @@ pub fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
         .worker_threads(2)
         .enable_time()
         .build()?;
-    if std::env::args().nth(1).as_deref() == Some("--persistent-fixture") {
+    let mode = std::env::args().nth(1);
+    if mode.as_deref() == Some("--persistent-fixture") {
         runtime.block_on(persistent::agent().connect_to(acp::Stdio::new()))?;
     } else {
-        runtime.block_on(agent().connect_to(acp::Stdio::new()))?;
+        let auth = match mode.as_deref() {
+            Some("--auth-ok") => Auth::Accept,
+            Some("--auth-deny") => Auth::Deny,
+            Some("--auth-hold") => Auth::Hold,
+            Some("--auth-terminal") => Auth::Terminal,
+            Some("--auth-duplicate") => Auth::Duplicate,
+            _ => Auth::Off,
+        };
+        runtime.block_on(agent_with_auth(auth).connect_to(acp::Stdio::new()))?;
     }
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn agent() -> impl ConnectTo<Client> {
+    agent_with_auth(Auth::Off)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+enum Auth {
+    Off,
+    Accept,
+    Deny,
+    Hold,
+    Terminal,
+    Duplicate,
+}
+
+fn agent_with_auth(auth: Auth) -> impl ConnectTo<Client> {
+    let authenticated = Arc::new(AtomicBool::new(false));
+    let auth_success = Arc::clone(&authenticated);
     let sessions = Arc::new(Mutex::new(HashMap::<SessionId, CancellationToken>::new()));
     let prompt_sessions = Arc::clone(&sessions);
     let next_session = AtomicUsize::new(1);
@@ -45,11 +72,20 @@ pub fn agent() -> impl ConnectTo<Client> {
     let resumed_directories = Arc::clone(&directories);
     Agent.v1()
         .on_receive_request(
-            async |request: InitializeRequest, responder, _cx| {
+            async move |request: InitializeRequest, responder, _cx| {
                 // Test fixtures require the adapter to advertise its true scope.
                 assert_eq!(request.client_capabilities.fs.read_text_file, request.client_capabilities.fs.write_text_file);
                 assert!(!request.client_capabilities.terminal);
-                responder.respond(InitializeResponse::new(request.protocol_version).agent_capabilities(
+                let terminal = || AuthMethod::Terminal(AuthMethodTerminal::new("fixture-login", "private-terminal-descriptor")
+                    .args(vec!["private-terminal-argument".into()]));
+                let protocol = || AuthMethod::Agent(AuthMethodAgent::new("fixture-login", "Fixture"));
+                let methods = match auth {
+                    Auth::Off => vec![],
+                    Auth::Terminal => vec![terminal()],
+                    Auth::Duplicate => vec![protocol(), terminal()],
+                    _ => vec![protocol()],
+                };
+                responder.respond(InitializeResponse::new(request.protocol_version).auth_methods(methods).agent_capabilities(
                     AgentCapabilities::new().load_session(true).session_capabilities(
                         SessionCapabilities::new().list(SessionListCapabilities::new())
                             .close(SessionCloseCapabilities::new()).resume(SessionResumeCapabilities::new()),
@@ -59,7 +95,29 @@ pub fn agent() -> impl ConnectTo<Client> {
             acp::on_receive_request!(),
         )
         .on_receive_request(
+            async move |request: AuthenticateRequest, responder, cx| {
+                assert_eq!(request.method_id.0.as_ref(), "fixture-login");
+                assert!(request.meta.is_none());
+                match auth {
+                    Auth::Accept => {
+                        assert!(!auth_success.swap(true, Ordering::SeqCst), "authenticate repeated");
+                        responder.respond(AuthenticateResponse::new())
+                    }
+                    Auth::Deny => responder.respond_with_error(acp::Error::new(-32017, "private-auth-denial")),
+                    Auth::Hold => cx.spawn(async move {
+                        std::future::pending::<()>().await;
+                        responder.respond(AuthenticateResponse::new())
+                    }),
+                    _ => panic!("unsupported auth method reached the peer"),
+                }
+            },
+            acp::on_receive_request!(),
+        )
+        .on_receive_request(
             async move |request: NewSessionRequest, responder, cx| {
+                if auth != Auth::Off && !authenticated.load(Ordering::SeqCst) {
+                    return responder.respond_with_error(acp::Error::auth_required());
+                }
                 let id = SessionId::new(format!("session_{}", next_session.fetch_add(1, Ordering::SeqCst)));
                 directories.lock().unwrap().insert(id.clone(), request.cwd);
                 // Explicitly exercise notifications arriving before the response.

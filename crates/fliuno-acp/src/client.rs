@@ -11,6 +11,7 @@ use agent_client_protocol::{
 use std::{path::Path, path::PathBuf, sync::Arc, sync::Mutex};
 use tokio::sync::{mpsc, oneshot};
 
+mod authentication;
 mod catalog;
 mod session;
 

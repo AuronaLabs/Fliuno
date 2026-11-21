@@ -3,7 +3,7 @@ use fliuno_core::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
     CancellationToken, Kernel,
 };
-use fliuno_protocol::{AgentSpec, AgentStopReason, ApprovalDecision};
+use fliuno_protocol::{AgentAuthenticationState, AgentSpec, AgentStopReason, ApprovalDecision};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -40,6 +40,9 @@ pub struct AcpAgentConfig {
     /// Environment names only. Values come from the trusted host environment.
     #[serde(default)]
     pub env_allow: Vec<String>,
+    /// Host-selected agent-side method. Never executes terminal descriptors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authentication_method: Option<String>,
     /// Optional hard OS resource ceilings for this isolated Agent process.
     #[serde(default)]
     pub resources: fliuno_sandbox::ResourceLimits,
@@ -89,6 +92,7 @@ struct AcpBackend {
     launch: fliuno_sandbox::LaunchSpec,
     trusted_cwd: Option<PathBuf>,
     session_catalog: bool,
+    authentication_method: Option<String>,
     options: ClientOptions,
 }
 
@@ -121,6 +125,11 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
         }
         if config.env_allow.len() > 64 {
             return Err("too many ACP environment names".into());
+        }
+        if config.authentication_method.as_ref().is_some_and(|id| {
+            id.is_empty() || id.len() > 128 || id.trim() != id || id.chars().any(char::is_control)
+        }) {
+            return Err("invalid ACP authentication method ID".into());
         }
         let mut env = BTreeMap::new();
         for name in &config.env_allow {
@@ -181,8 +190,12 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
         if config.session_catalog && trusted_cwd.is_none() {
             return Err("ACP sessionCatalog requires trusted_host".into());
         }
-        let executable_digest = fliuno_sandbox::program_digest(&config.command)
-            .map_err(|_| "cannot hash ACP executable")?;
+        let executable_digest = if trusted_cwd.is_some() {
+            fliuno_sandbox::trusted_program_digest(&config.command)
+        } else {
+            fliuno_sandbox::program_digest(&config.command)
+        }
+        .map_err(|_| "cannot hash ACP executable")?;
         let mut identity = serde_json::json!({
             "configuration":config, "environment":env,"executableSha256":executable_digest,
         });
@@ -208,6 +221,7 @@ pub fn register_config(kernel: &mut Kernel, config: AgentsConfig) -> Result<(), 
             launch,
             trusted_cwd,
             session_catalog: config.session_catalog,
+            authentication_method: config.authentication_method,
             options: ClientOptions {
                 request_timeout: Duration::from_millis(config.request_timeout_ms),
                 prompt_timeout: Duration::from_millis(config.prompt_timeout_ms),
@@ -281,6 +295,41 @@ impl AgentBackend for AcpBackend {
 }
 
 impl AcpBackend {
+    async fn authenticate(
+        &self,
+        client: &Client,
+        observer: &dyn AgentObserver,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<AgentOutcome>, ()> {
+        use AgentAuthenticationState::*;
+        let Some(method) = &self.authentication_method else {
+            return Ok(None);
+        };
+        let report = |state| {
+            observer
+                .observe(AgentObservation::Authentication(state))
+                .map_err(|_| ())
+        };
+        if !client.supports_protocol_authentication(method) {
+            report(MethodUnavailable)?;
+            return Ok(Some(authentication_required()));
+        }
+        report(Started)?;
+        let state = match client.authenticate(method, cancellation).await {
+            Ok(()) => Succeeded,
+            Err(fliuno_acp::Error::Cancelled) => {
+                return Ok(Some(AgentOutcome {
+                    stop_reason: Some(AgentStopReason::Cancelled),
+                    outcome_unknown: false,
+                }));
+            }
+            Err(fliuno_acp::Error::Remote(_)) => Rejected,
+            Err(_) => OutcomeUnknown,
+        };
+        report(state)?;
+        Ok((state != Succeeded).then(authentication_required))
+    }
+
     async fn connect(&self) -> Result<(Client, Events), fliuno_acp::Error> {
         #[cfg(any(windows, target_os = "linux"))]
         if let Some(cwd) = &self.trusted_cwd {
@@ -288,7 +337,9 @@ impl AcpBackend {
             let expected = self.launch.program_sha256.clone();
             let actual = tokio::time::timeout(
                 self.options.request_timeout,
-                tokio::task::spawn_blocking(move || fliuno_sandbox::program_digest(&program)),
+                tokio::task::spawn_blocking(move || {
+                    fliuno_sandbox::trusted_program_digest(&program)
+                }),
             )
             .await
             .map_err(|_| fliuno_acp::Error::OutcomeUnknown)?
@@ -334,6 +385,9 @@ impl AcpBackend {
         let operations_cancel = cancellation.child_token();
         let _operations_guard = operations_cancel.clone().drop_guard();
         let result = async {
+            if let Some(outcome) = self.authenticate(&client, observer, cancellation).await? {
+                return Ok(outcome);
+            }
             let cwd = if let Some(cwd) = &self.trusted_cwd {
                 cwd.clone()
             } else if self.options.filesystem {
@@ -356,6 +410,15 @@ impl AcpBackend {
                     Ok(id) => id,
                     Err(error) => {
                         eprintln!("fliuno: ACP session setup failed: {error}");
+                        if error == fliuno_acp::Error::Remote(i32::from(ErrorCode::AuthRequired)) {
+                            let state = if client.initialized().auth_methods.iter().any(|method| matches!(method, AuthMethod::Terminal(_))) {
+                                AgentAuthenticationState::TerminalRequired
+                            } else {
+                                AgentAuthenticationState::Required
+                            };
+                            observer.observe(AgentObservation::Authentication(state)).map_err(|_| ())?;
+                            return Ok(authentication_required());
+                        }
                         if request.agent_session_continuation.is_some() && matches!(error,
                             fliuno_acp::Error::Unsupported(_) | fliuno_acp::Error::Remote(_) | fliuno_acp::Error::InvalidInput(_)) {
                             return Ok(AgentOutcome { stop_reason: Some(AgentStopReason::Failed), outcome_unknown: false });
@@ -441,6 +504,13 @@ impl AcpBackend {
         // Always wait for Job/profile cleanup, including observer and wire errors.
         client.close().await;
         result
+    }
+}
+
+fn authentication_required() -> AgentOutcome {
+    AgentOutcome {
+        stop_reason: Some(AgentStopReason::AuthRequired),
+        outcome_unknown: false,
     }
 }
 

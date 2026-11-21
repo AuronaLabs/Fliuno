@@ -921,6 +921,15 @@ impl Kernel {
                 if let Some(run) = &mut task.agent_run {
                     agent_tools::close_host_tools(run);
                     run.finished = true;
+                    if run.authentication == Some(AgentAuthenticationState::Started) {
+                        events.push(agent::set_authentication(
+                            run,
+                            AgentAuthenticationState::OutcomeUnknown,
+                        ));
+                        // Auth may have reached the peer, but this task has not sent a prompt.
+                        run.outcome_unknown = false;
+                        run.stop_reason = Some(AgentStopReason::AuthRequired);
+                    }
                     if task
                         .remote_continuation
                         .as_ref()

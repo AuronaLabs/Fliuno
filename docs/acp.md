@@ -14,6 +14,7 @@
 | `Client::connect_io` | 对 Tokio 读写流应用逐行 JSON-RPC；解析前限制单行 1 MiB |
 | `Client::connect_isolated` | 通过 `fliuno-sandbox` 在 Windows AppContainer 或 Linux Landlock/seccomp 中启动单个程序，驱动持有隔离进程和 stdio；不支持的平台拒绝启动 |
 | `initialized` | 查看协商结果、Agent 能力和身份；只接受协议版本 1 |
+| `authenticate` | 仅接受初始化时明确声明的、唯一的 `agent` 方法 ID，在打开会话前发送一次 |
 | `new_session` | 创建独立会话；需要绝对且存在的 cwd；隔离模式仅接受规范化后位于私有根内的现存目录 |
 | `resume_session` | Agent 声明 `sessionCapabilities.resume` 时恢复已知 ID。确认后可发送新 prompt。沿用隔离 cwd 校验，无历史回放或附加根目录与 MCP 服务 |
 | `prompt_text` | 发送单轮文本，返回官方 `PromptResponse`；流式消息、思考、工具、计划等通过 `Events` 的类型化通知返回 |
@@ -28,6 +29,23 @@
 默认初始化声明 `fs.readTextFile=false`、`fs.writeTextFile=false`、`terminal=false`；未声明的能力请求返回 Method Not Found。独立客户端可显式设 `ClientOptions.filesystem=true`，此时仅将文本文件请求转为 `Event::HostRequest`，不自行打开路径。持久后端的主机配置 `workspaceAccess` 决定是否启用这一能力；虽然后台内核现在有单独的 `fliuno-terminal` 服务，该服务面向 Fliuno 自身经审批的终端工具，并未挂接到 ACP adapter。ACP terminal 始终关闭，不向 Agent 注入 MCP 配置。
 
 本实现锁定正式 v1；官方 v2 仍为草案，且移除了客户端文件/终端 API，建议以 MCP 提供宿主工具。文件能力实现、持久操作状态与审批位于独立模块，未来可复用到其他协议；当前没有声明 v2 兼容。
+
+## 登录
+
+宿主可在 `--acp-config` 的某个 Agent 注册项中设置 `"authenticationMethod":"<method-id>"`。任务连接对应 Agent 后检查该 ID 是否唯一且类型为 `agent`，然后在 `session/new` 或 `session/resume` 之前调用一次 `authenticate`。该配置参与注册身份校验。凭据仍由 Agent 按宿主允许的环境或本机登录状态获取，请求只包含方法 ID。
+
+`initialize.capabilities.agentAuthenticationState` 表示支持以下任务状态。客户端可以通过 `Task.agentRun.authentication` 查看当前状态，通过 `agent_authentication_changed` 事件续读变化。业务事件不存储方法描述、参数、凭据或远端错误消息。
+
+| 状态 | 含义 |
+| --- | --- |
+| `required` | 会话请求收到 ACP `auth_required` |
+| `terminal_required` | 会话请求需要登录，而且对端提供了终端方法；请先由用户在宿主上完成登录 |
+| `method_unavailable` | 宿主指定的方法未声明、重复或不是协议登录 |
+| `started` / `succeeded` | 已进入协议登录阶段 / 对端明确确认 |
+| `rejected` / `cancelled` | 对端返回错误 / 本机取消 |
+| `outcome_unknown` | 登录超时、传输中断或 app-server 在登录中退出 |
+
+登录未完成时不会发出 `session/prompt`。重新提交同一 `clientRequestId` 只返回原任务；完成登录后应新建任务。Fliuno 不运行对端提供的终端参数或环境变量，且当前不提供内置交互终端登录。只读会话目录不会触发登录。
 
 ## 权限与取消
 
@@ -107,7 +125,7 @@ cargo run -p fliuno-acp --example isolated -- E:/Projects/Fliuno/target/debug/fl
 
 ## 跨重启续接 Agent 会话
 
-Windows 和 Linux 上可以在 `--acp-config` 中为可信 Agent 显式选择 `isolation: "trusted_host"`，并配置绝对且已存在的 `cwd`。Agent 以当前操作系统用户的权限运行，并在主机指定的目录内自行保管持久会话状态。`workspaceAccess` 和 `assets` 仅用于 `native_scratch`。
+Windows 和 Linux 上可以在 `--acp-config` 中为可信 Agent 显式选择 `isolation: "trusted_host"`，并配置绝对且已存在的 `cwd`。Agent 以当前操作系统用户的权限运行，并在主机指定的目录内自行保管持久会话状态。可信 ACP 可执行文件最多 256 MiB，注册及启动时都计算 SHA-256；原生隔离的暂存上限仍为 128 MiB。`workspaceAccess` 和 `assets` 仅用于 `native_scratch`。
 
 Windows Job 在启动前应用已配置的 `resources.memoryMaxBytes` 和 `resources.pidsMax`。Linux 会使用可用的 cgroup v2，并可通过 `linuxCgroupParent` 指定委派目录。显式配置限额或委派目录时，无法建立 cgroup 就拒绝启动。Linux 的 `pidsMax` 按线程计数。在无可用委派且无显式约束的环境中，Linux 使用独立进程组。跨 app-server 硬崩溃的整树回收依赖 cgroup 和独立守护进程。
 
@@ -142,7 +160,15 @@ python examples/agent_demo.py --workspace --deny
 
 排队任务的 `backendAuthority` 在创建时绑定完整 ACP 注册，包括程序内容、参数、实际环境、文件代理开关及预算。重启后相同 Agent ID 的配置变化会拒绝启动旧任务；原生程序在暂存复制时还会再次核验内容 pin。旧 v7 任务不补造注册摘要，详见[注册身份](authority.md)。
 
-尚未提供 Agent 认证流程、隔离模式下的持久会话恢复、模式和模型切换、多模态输入、终端或网络代理、ACP 服务端、draft v2 或与真实商业 Agent 的互操作验收。文件代理只覆盖 UTF-8 文本，不支持二进制、自动创建父目录或附加 session roots。不能将当前契约测试描述为完整 ACP 功能兼容认证。
+### Windows 真实对端
+
+2026-11-21 验证官方 OpenCode `v1.19.6` Windows x64 baseline（发布 ZIP SHA-256 `d4fc63f09bd14ee2308c05d34c231a8d09c3e945fd2e86ef4ea1a41b31dd1830`）的 ACP v1 `trusted_host` 路径。使用临时 OpenCode 配置及本机模型夹具，验证 `opencode-login` 的协议应答、单次读权限、在途取消、重启后同一会话的新一轮以及请求 ID 重放。夹具检查真实 Agent 的任务模型调用顺序，并单独计入 OpenCode 的会话标题生成。
+
+同一演练还用 `backup create`、`backup restore` 和 `backup verify` 将数据库切换到新路径，从恢复库续接同一个 OpenCode 会话，并确认原库的 SHA-256 不变。OpenCode 的私有会话目录继续由 OpenCode 持有，不包含在 Fliuno 数据库快照中。
+
+复现：`python examples/opencode_acp_interop.py --opencode PATH --app-server PATH`。该证据覆盖真实 ACP 进程，模型端点是夹具；不涉及云账号登录、原生隔离 OpenCode 或 Linux。
+
+尚未提供内置终端登录、隔离模式下的持久会话恢复、模式和模型切换、多模态输入、终端或网络代理、ACP 服务端或 v2 Preview。文件代理只覆盖 UTF-8 文本，不支持二进制、自动创建父目录或附加 session roots。适配范围以对端声明和已验证场景为准。
 
 官方来源：
 

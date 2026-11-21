@@ -6569,6 +6569,16 @@
                 }
               ]
             },
+            "authentication": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AgentAuthenticationState"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "text": {
               "type": "string"
             },
@@ -6644,6 +6654,20 @@
             "input_required",
             "auth_required",
             "remote_preflight_failed"
+          ]
+        },
+        "AgentAuthenticationState": {
+          "description": "Credential-free evidence from an external agent's authentication stage.",
+          "type": "string",
+          "enum": [
+            "required",
+            "terminal_required",
+            "method_unavailable",
+            "started",
+            "succeeded",
+            "rejected",
+            "cancelled",
+            "outcome_unknown"
           ]
         },
         "AgentApproval": {
@@ -13437,6 +13461,26 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "agent_authentication_changed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "state": {
+                  "$ref": "#/$defs/AgentAuthenticationState"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "agent_update"
                 },
                 "runId": {
@@ -14091,6 +14135,20 @@
                 "type"
               ]
             }
+          ]
+        },
+        "AgentAuthenticationState": {
+          "description": "Credential-free evidence from an external agent's authentication stage.",
+          "type": "string",
+          "enum": [
+            "required",
+            "terminal_required",
+            "method_unavailable",
+            "started",
+            "succeeded",
+            "rejected",
+            "cancelled",
+            "outcome_unknown"
           ]
         },
         "AgentRemoteTask": {
@@ -15114,6 +15172,26 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "agent_authentication_changed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "state": {
+                  "$ref": "#/$defs/AgentAuthenticationState"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "agent_update"
                 },
                 "runId": {
@@ -15768,6 +15846,20 @@
                 "type"
               ]
             }
+          ]
+        },
+        "AgentAuthenticationState": {
+          "description": "Credential-free evidence from an external agent's authentication stage.",
+          "type": "string",
+          "enum": [
+            "required",
+            "terminal_required",
+            "method_unavailable",
+            "started",
+            "succeeded",
+            "rejected",
+            "cancelled",
+            "outcome_unknown"
           ]
         },
         "AgentRemoteTask": {

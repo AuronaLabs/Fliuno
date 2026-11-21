@@ -62,6 +62,8 @@ pub(crate) struct PendingPermission {
 pub(crate) struct State {
     pub sessions: HashMap<SessionId, Session>,
     opening: Option<Opening>,
+    authentication_attempted: bool,
+    authenticating: bool,
     pub closing: Option<SessionId>,
     pub pending: BTreeMap<String, PendingPermission>,
     pub host_pending: BTreeMap<String, crate::filesystem::PendingHostRequest>,
@@ -224,7 +226,8 @@ impl OpenGuard {
         if shared.stop.is_cancelled() {
             return Err(state.failure.clone().unwrap_or(Error::Closed));
         }
-        if state.opening.is_some()
+        if state.authenticating
+            || state.opening.is_some()
             || state.sessions.len() >= MAX_SESSIONS
             || matches!(&opening, Opening::Load { id, .. } | Opening::Resume(id) if state.sessions.contains_key(id))
         {
@@ -281,6 +284,43 @@ impl Drop for OpenGuard {
         if !self.finished {
             let mut state = self.shared.state.lock().unwrap();
             state.opening = None;
+            self.shared.fail_locked(&mut state, Error::OutcomeUnknown);
+        }
+    }
+}
+
+pub(crate) struct AuthenticationGuard<'a> {
+    shared: &'a Shared,
+    resolved: bool,
+}
+
+impl<'a> AuthenticationGuard<'a> {
+    pub(crate) fn begin(shared: &'a Shared) -> Result<Self> {
+        let mut state = shared.state.lock().unwrap();
+        if shared.stop.is_cancelled() {
+            return Err(state.failure.clone().unwrap_or(Error::Closed));
+        }
+        if state.authentication_attempted || state.opening.is_some() || !state.sessions.is_empty() {
+            return Err(Error::Busy);
+        }
+        state.authentication_attempted = true;
+        state.authenticating = true;
+        Ok(Self {
+            shared,
+            resolved: false,
+        })
+    }
+
+    pub(crate) fn resolve(mut self) {
+        self.resolved = true;
+    }
+}
+
+impl Drop for AuthenticationGuard<'_> {
+    fn drop(&mut self) {
+        let mut state = self.shared.state.lock().unwrap();
+        state.authenticating = false;
+        if !self.resolved {
             self.shared.fail_locked(&mut state, Error::OutcomeUnknown);
         }
     }

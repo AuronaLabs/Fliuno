@@ -618,6 +618,7 @@ impl RpcServer {
             capabilities["maxWorkspaceTitleChars"] = json!(MAX_WORKSPACE_TITLE_CHARS);
             capabilities["agentSessionContinuation"] =
                 json!(self.kernel()?.agent_session_continuation_supported());
+            capabilities["agentAuthenticationState"] = json!(true);
             if self.agent_catalog.is_some() {
                 capabilities["agentSessionListing"] = json!(true);
                 capabilities["maxQueuedAgentSessionLists"] = json!(agent_catalog::QUEUE_CAPACITY);

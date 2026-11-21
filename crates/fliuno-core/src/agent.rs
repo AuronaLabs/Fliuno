@@ -19,6 +19,14 @@ const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_UPDATE_BYTES: usize = 256 * 1024;
 const MAX_UPDATES: u32 = 4096;
 const MAX_PERMISSIONS: u32 = 64;
+
+pub(crate) fn set_authentication(run: &mut AgentRun, state: AgentAuthenticationState) -> EventKind {
+    run.authentication = Some(state);
+    EventKind::AgentAuthenticationChanged {
+        run_id: run.id.clone(),
+        state,
+    }
+}
 pub(crate) const MAX_PENDING: usize = 16;
 
 pub struct AgentRequest {
@@ -47,6 +55,7 @@ pub enum AgentObservation {
     RemoteTask(AgentRemoteTask),
     Artifacts(Vec<IncomingAgentArtifact>),
     SessionOpened(String),
+    Authentication(AgentAuthenticationState),
     Update {
         update: serde_json::Value,
         text: Option<String>,
@@ -272,6 +281,7 @@ impl Kernel {
             outcome_unknown: true,
             stop_reason: None,
             text: String::new(),
+            authentication: None,
             update_count: 0,
             recorded_bytes: 0,
             permission_count: 0,
@@ -351,8 +361,32 @@ impl Kernel {
             AgentObservation::RemoteContinuationSending
             | AgentObservation::RemoteTask(_)
             | AgentObservation::Artifacts(_) => unreachable!(),
+            AgentObservation::Authentication(state) => {
+                use AgentAuthenticationState::*;
+                if run.session_id.is_some()
+                    || !matches!(
+                        (run.authentication, state),
+                        (
+                            None,
+                            Required | TerminalRequired | MethodUnavailable | Started
+                        ) | (Some(Started), Succeeded | Rejected | OutcomeUnknown)
+                            | (Some(Succeeded), Required | TerminalRequired)
+                    )
+                {
+                    return Err(Error::Conflict(
+                        "invalid agent authentication transition".into(),
+                    ));
+                }
+                set_authentication(run, state)
+            }
             AgentObservation::SessionOpened(session_id) => {
-                if run.session_id.is_some() || session_id.is_empty() || session_id.len() > 256 {
+                if run.session_id.is_some()
+                    || session_id.is_empty()
+                    || session_id.len() > 256
+                    || run
+                        .authentication
+                        .is_some_and(|state| state != AgentAuthenticationState::Succeeded)
+                {
                     return Err(Error::Conflict("invalid or duplicate agent session".into()));
                 }
                 if let Some(continuation) = &mut task.agent_session_continuation {
@@ -559,6 +593,16 @@ impl Kernel {
         run.finished = true;
         run.stop_reason = outcome.stop_reason;
         let mut events = close_approvals(run);
+        if run.authentication == Some(AgentAuthenticationState::Started) {
+            let state = if task.status == TaskStatus::Cancelled
+                || outcome.stop_reason == Some(AgentStopReason::Cancelled)
+            {
+                AgentAuthenticationState::Cancelled
+            } else {
+                AgentAuthenticationState::OutcomeUnknown
+            };
+            events.push(set_authentication(run, state));
+        }
         events.push(EventKind::AgentFinished {
             run_id: run_id.into(),
             stop_reason: outcome.stop_reason,

@@ -12,7 +12,9 @@ pub use assets::{
     MAX_ASSET_BYTES, MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES, StagedFile, staged_files_digest,
     validate_staged_files,
 };
-pub use program::{MAX_PROGRAM_BYTES, program_digest};
+pub use program::{
+    MAX_PROGRAM_BYTES, MAX_TRUSTED_PROGRAM_BYTES, program_digest, trusted_program_digest,
+};
 
 #[cfg(feature = "async-io")]
 mod async_stdio;

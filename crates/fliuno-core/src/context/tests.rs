@@ -624,6 +624,7 @@ fn projection_rejects_unfinished_agent_and_unknown_host_operations() {
     let mut task = complete(&mut kernel, &session.id, "known", "answer");
     let mut run = AgentRun {
         remote_task: None,
+        authentication: None,
         artifacts: Vec::new(),
         id: "fixture".into(),
         finished: true,

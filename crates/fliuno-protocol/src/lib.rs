@@ -278,6 +278,20 @@ pub enum AgentStopReason {
     RemotePreflightFailed,
 }
 
+/// Credential-free evidence from an external agent's authentication stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentAuthenticationState {
+    Required,
+    TerminalRequired,
+    MethodUnavailable,
+    Started,
+    Succeeded,
+    Rejected,
+    Cancelled,
+    OutcomeUnknown,
+}
+
 /// Neutral remote execution evidence, separate from the local task lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -381,6 +395,8 @@ pub struct AgentRun {
     pub session_id: Option<String>,
     pub outcome_unknown: bool,
     pub stop_reason: Option<AgentStopReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authentication: Option<AgentAuthenticationState>,
     pub text: String,
     pub update_count: u32,
     pub recorded_bytes: u64,
@@ -635,6 +651,10 @@ pub enum EventKind {
     AgentSessionOpened {
         run_id: String,
         session_id: String,
+    },
+    AgentAuthenticationChanged {
+        run_id: String,
+        state: AgentAuthenticationState,
     },
     AgentUpdate {
         run_id: String,

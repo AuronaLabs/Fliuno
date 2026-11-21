@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "acp_process/authentication.rs"]
+mod authentication;
 #[path = "acp_process/authority.rs"]
 mod authority;
 #[path = "acp_process/catalog.rs"]

@@ -369,6 +369,12 @@ pub(crate) fn transition_to_cancelled(task: &mut Task) -> Vec<EventKind> {
     task.pending_tool_input = None;
     let mut events = vec![EventKind::TaskCancelled];
     if let Some(run) = &mut task.agent_run {
+        if run.authentication == Some(AgentAuthenticationState::Started) {
+            events.push(agent::set_authentication(
+                run,
+                AgentAuthenticationState::Cancelled,
+            ));
+        }
         events.extend(agent::close_approvals(run));
     }
     events
