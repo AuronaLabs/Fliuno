@@ -29,8 +29,10 @@ pub struct BackupRetention {
 }
 
 /// Summary returned after a backup has been committed and retention applied.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackupRotationResult {
+    pub path: PathBuf,
     pub manifest: BackupManifest,
     pub retained_backups: u32,
     pub retained_bytes: u64,
@@ -55,15 +57,77 @@ pub struct BackupManifest {
     pub artifact_bytes: u64,
 }
 
-pub(super) fn create(db: &Connection, destination: &Path) -> Result<BackupManifest> {
-    let (parent, target) = resolve_target(destination)?;
-    if target.exists() {
-        return Err(Error::Conflict("backup destination already exists".into()));
+/// A host-only source for online backup. Opening it does not migrate the
+/// database, acquire kernel ownership or run task recovery.
+pub struct BackupSource(Connection);
+
+/// Progress reported before publication. Returning an error from the callback
+/// aborts creation and discards the staged snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "phase",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum BackupProgress {
+    Copying {
+        total_pages: i32,
+        remaining_pages: i32,
+    },
+    Validating,
+    Publishing,
+}
+
+impl BackupSource {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let db = Connection::open_with_flags(
+            path.as_ref(),
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        db.busy_timeout(Duration::from_millis(100))?;
+        Ok(Self(db))
     }
+
+    pub fn create(
+        &self,
+        destination: impl AsRef<Path>,
+        mut progress: impl FnMut(BackupProgress) -> Result<()>,
+    ) -> Result<BackupManifest> {
+        create(&self.0, destination.as_ref(), &mut progress)
+    }
+
+    pub fn rotate(
+        &self,
+        directory: impl AsRef<Path>,
+        policy: BackupRetention,
+        mut progress: impl FnMut(BackupProgress) -> Result<()>,
+    ) -> Result<BackupRotationResult> {
+        create_rotating(&self.0, directory.as_ref(), policy, &mut progress)
+    }
+
+    /// Enumerate verified snapshots directly inside a directory.
+    pub fn list(directory: impl AsRef<Path>) -> Result<Vec<BackupEntry>> {
+        let mut entries = list_valid_backups(directory.as_ref(), false)?;
+        sort_by_age(&mut entries);
+        entries.reverse();
+        Ok(entries)
+    }
+}
+
+pub(super) fn create(
+    db: &Connection,
+    destination: &Path,
+    progress: &mut impl FnMut(BackupProgress) -> Result<()>,
+) -> Result<BackupManifest> {
+    let (parent, target) = resolve_target(destination)?;
+    const EXISTS: &str = "backup destination already exists";
+    require_missing(&target, EXISTS)?;
     let staging = parent.join(format!(".fliuno-backup-{}.tmp", Uuid::new_v4()));
     create_private_dir(&staging)?;
-    let result = create_staged(db, &staging).and_then(|manifest| {
-        fs::rename(&staging, &target)?;
+    let result = create_staged(db, &staging, progress).and_then(|manifest| {
+        progress(BackupProgress::Publishing)?;
+        require_missing(&target, EXISTS)?;
+        publish_backup_directory(&staging, &target)?;
         sync_directory(&parent)?;
         Ok(manifest)
     });
@@ -73,10 +137,22 @@ pub(super) fn create(db: &Connection, destination: &Path) -> Result<BackupManife
     result
 }
 
+fn publish_backup_directory(staging: &Path, target: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        use rustix::fs::{CWD, RenameFlags, renameat_with};
+        renameat_with(CWD, staging, CWD, target, RenameFlags::NOREPLACE)?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    fs::rename(staging, target)
+}
+
 pub(super) fn create_rotating(
     db: &Connection,
     directory: &Path,
     policy: BackupRetention,
+    progress: &mut impl FnMut(BackupProgress) -> Result<()>,
 ) -> Result<BackupRotationResult> {
     if !(1..=256).contains(&policy.keep_count) || policy.max_total_bytes == 0 {
         return Err(Error::Invalid(
@@ -85,9 +161,18 @@ pub(super) fn create_rotating(
     }
     fs::create_dir_all(directory)?;
     let root = fs::canonicalize(directory)?;
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(root.join(".fliuno-retention.lock"))?;
+    lock.try_lock().map_err(|error| {
+        Error::Conflict(format!("cannot lock backup retention directory: {error}"))
+    })?;
     let name = format!("{ROTATING_BACKUP_PREFIX}{}-{}", now_ms(), Uuid::new_v4());
     let created_path = root.join(name);
-    let manifest = create(db, &created_path)?;
+    let manifest = create(db, &created_path, progress)?;
     let new_bytes = backup_size(&created_path, &manifest)?;
     if new_bytes > policy.max_total_bytes {
         fs::remove_dir_all(&created_path)?;
@@ -96,13 +181,8 @@ pub(super) fn create_rotating(
         ));
     }
 
-    let mut entries = list_valid_backups(&root)?;
-    entries.sort_by(|left, right| {
-        left.manifest
-            .created_at_ms
-            .cmp(&right.manifest.created_at_ms)
-            .then_with(|| left.path.cmp(&right.path))
-    });
+    let mut entries = list_valid_backups(&root, true)?;
+    sort_by_age(&mut entries);
     let mut retained = entries;
     let mut retained_bytes: u64 = retained.iter().map(|entry| entry.bytes).sum();
     let mut removed_backups = 0_u32;
@@ -137,6 +217,7 @@ pub(super) fn create_rotating(
         removed_backups += 1;
     }
     Ok(BackupRotationResult {
+        path: created_path,
         manifest,
         retained_backups: retained.len() as u32,
         retained_bytes,
@@ -144,7 +225,11 @@ pub(super) fn create_rotating(
     })
 }
 
-fn create_staged(db: &Connection, staging: &Path) -> Result<BackupManifest> {
+fn create_staged(
+    db: &Connection,
+    staging: &Path,
+    progress: &mut impl FnMut(BackupProgress) -> Result<()>,
+) -> Result<BackupManifest> {
     let database = staging.join(DATABASE_FILE);
     let mut target = Connection::open(&database)?;
     target.pragma_update(None, "journal_mode", "DELETE")?;
@@ -157,7 +242,13 @@ fn create_staged(db: &Connection, staging: &Path) -> Result<BackupManifest> {
                     "SQLite backup exceeded its time limit".into(),
                 ));
             }
-            match backup.step(256)? {
+            let result = backup.step(256)?;
+            let pages = backup.progress();
+            progress(BackupProgress::Copying {
+                total_pages: pages.pagecount,
+                remaining_pages: pages.remaining,
+            })?;
+            match result {
                 StepResult::Done => break,
                 StepResult::More => {}
                 StepResult::Busy | StepResult::Locked => {
@@ -177,11 +268,9 @@ fn create_staged(db: &Connection, staging: &Path) -> Result<BackupManifest> {
         }
     }
     target.close().map_err(|(_, error)| error)?;
+    progress(BackupProgress::Validating)?;
 
-    let snapshot = Connection::open_with_flags(
-        &database,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
+    let snapshot = open_snapshot(&database)?;
     let artifacts_path = staging.join(ARTIFACTS_FILE);
     let artifacts_file = OpenOptions::new()
         .write(true)
@@ -226,90 +315,142 @@ fn create_staged(db: &Connection, staging: &Path) -> Result<BackupManifest> {
     Ok(manifest)
 }
 
-pub(super) fn verify(directory: &Path) -> Result<BackupManifest> {
+fn read_manifest(directory: &Path) -> Result<BackupManifest> {
     let manifest_path = directory.join(MANIFEST_FILE);
     let manifest: BackupManifest = serde_json::from_slice(&fs::read(&manifest_path)?)?;
     if manifest.format_version != BACKUP_FORMAT_VERSION {
         return Err(Error::Invalid("unsupported Fliuno backup format".into()));
     }
-    let database = directory.join(DATABASE_FILE);
-    let actual_bytes = fs::metadata(&database)?.len();
-    let actual_hash = sha256_file(&database)?;
-    if actual_bytes != manifest.database_bytes || actual_hash != manifest.database_sha256 {
-        return Err(Error::Conflict(
-            "backup database does not match its manifest".into(),
-        ));
-    }
-    let actual = inspect_database(&database)?;
+    Ok(manifest)
+}
+
+fn verify_artifact_index(directory: &Path, manifest: &BackupManifest) -> Result<()> {
     let artifact_manifest_path = directory.join(ARTIFACTS_FILE);
-    let artifact_manifest_file_bytes = fs::metadata(&artifact_manifest_path)?.len();
-    let artifact_manifest_file_hash = sha256_file(&artifact_manifest_path)?;
-    if actual.schema_version != manifest.schema_version
-        || actual.event_through_sequence != manifest.event_through_sequence
-        || actual.task_count != manifest.task_count
-        || actual.artifact_count != manifest.artifact_count
-        || actual.artifact_bytes != manifest.artifact_bytes
-        || actual.artifact_manifest_bytes != manifest.artifact_manifest_bytes
-        || actual.artifact_manifest_sha256 != manifest.artifact_manifest_sha256
-        || artifact_manifest_file_bytes != manifest.artifact_manifest_bytes
-        || artifact_manifest_file_hash != manifest.artifact_manifest_sha256
+    if fs::metadata(&artifact_manifest_path)?.len() != manifest.artifact_manifest_bytes
+        || sha256_file(&artifact_manifest_path)? != manifest.artifact_manifest_sha256
     {
         return Err(Error::Conflict(
-            "backup database contents do not match its manifest".into(),
+            "backup artifact index does not match its manifest".into(),
         ));
     }
+    Ok(())
+}
+
+pub(super) fn verify(directory: &Path) -> Result<BackupManifest> {
+    let manifest = read_manifest(directory)?;
+    verify_artifact_index(directory, &manifest)?;
+    verify_restored(&directory.join(DATABASE_FILE), &manifest)?;
     Ok(manifest)
 }
 
 pub(super) fn restore(directory: &Path, destination: &Path) -> Result<BackupManifest> {
-    let manifest = verify(directory)?;
-    let (parent, target) = resolve_target(destination)?;
-    if target.exists() {
+    let manifest = read_manifest(directory)?;
+    verify_artifact_index(directory, &manifest)?;
+    let source_path = directory.join(DATABASE_FILE);
+    check_snapshot_sidecars(&source_path)?;
+    let source = File::open(&source_path)?;
+    let source_metadata = source.metadata()?;
+    if !source_metadata.is_file() || source_metadata.len() != manifest.database_bytes {
         return Err(Error::Conflict(
-            "restore destination already exists; restore to a new database path".into(),
+            "backup database size does not match its manifest".into(),
         ));
     }
-    let staging = parent.join(format!(".fliuno-restore-{}.tmp", Uuid::new_v4()));
-    let result = (|| {
-        let mut lock_path = target.as_os_str().to_os_string();
-        lock_path.push(".lock");
-        let lock_path = PathBuf::from(lock_path);
-        let _lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(lock_path)?;
-        _lock.try_lock().map_err(|error| {
-            Error::Conflict(format!("cannot lock restore destination: {error}"))
-        })?;
+    let (parent, target) = resolve_target(destination)?;
+    require_missing(&target, RESTORE_DESTINATION_EXISTS)?;
+    require_no_sidecars(&target)?;
+    let _lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(with_suffix(&target, ".lock"))?;
+    _lock
+        .try_lock()
+        .map_err(|error| Error::Conflict(format!("cannot lock restore destination: {error}")))?;
 
-        let source = directory.join(DATABASE_FILE);
-        fs::copy(source, &staging)?;
-        if fs::metadata(&staging)?.len() != manifest.database_bytes
-            || sha256_file(&staging)? != manifest.database_sha256
+    let staging_dir = parent.join(format!(".fliuno-restore-{}.tmp", Uuid::new_v4()));
+    create_private_dir(&staging_dir)?;
+    let staging = staging_dir.join(DATABASE_FILE);
+    let result = (|| {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
         {
-            return Err(Error::Conflict(
-                "restored database copy failed its digest check".into(),
-            ));
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
         }
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&staging)?
-            .sync_all()?;
-        fs::rename(&staging, &target)?;
+        let mut file = options.open(&staging)?;
+        std::io::copy(&mut source.take(manifest.database_bytes), &mut file)?;
+        verify_restored(&staging, &manifest)?;
+        file.sync_all()?;
+        drop(file);
+        require_no_sidecars(&target)?;
+        publish_restored_database(&staging, &target)?;
         sync_directory(&parent)?;
-        if let Err(error) = verify_restored(&target, &manifest) {
-            let _ = fs::remove_file(&target);
-            return Err(error);
-        }
         Ok(manifest)
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(&staging);
-    }
+    let _ = fs::remove_file(&staging);
+    let _ = fs::remove_dir(&staging_dir);
     result
+}
+
+const RESTORE_DESTINATION_EXISTS: &str =
+    "restore destination already exists; restore to a new database path";
+
+fn publish_restored_database(staging: &Path, target: &Path) -> Result<()> {
+    // The target must remain absent until publication, even for writers that ignore our lock.
+    fs::hard_link(staging, target).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            Error::Conflict(RESTORE_DESTINATION_EXISTS.into())
+        } else {
+            error.into()
+        }
+    })
+}
+
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(suffix);
+    name.into()
+}
+
+fn require_missing(path: &Path, message: &str) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Err(Error::Conflict(message.into())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn require_no_sidecars(path: &Path) -> Result<()> {
+    for suffix in ["-wal", "-shm", "-journal"] {
+        require_missing(
+            &with_suffix(path, suffix),
+            "database has SQLite sidecar files",
+        )?;
+    }
+    Ok(())
+}
+
+fn check_snapshot_sidecars(path: &Path) -> Result<()> {
+    // Older writers used a read-only WAL connection and could leave an empty
+    // WAL plus a shared-memory index. Neither contains changes to restore.
+    for suffix in ["-wal", "-shm"] {
+        match fs::symlink_metadata(with_suffix(path, suffix)) {
+            Ok(meta) if meta.is_file() && (suffix == "-shm" || meta.len() == 0) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                return Err(Error::Conflict(
+                    "backup has an unexpected or nonempty SQLite WAL sidecar".into(),
+                ));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    require_missing(
+        &with_suffix(path, "-journal"),
+        "backup has a SQLite rollback journal",
+    )
 }
 
 pub(super) fn verify_restored(path: &Path, expected: &BackupManifest) -> Result<()> {
@@ -317,7 +458,7 @@ pub(super) fn verify_restored(path: &Path, expected: &BackupManifest) -> Result<
         || sha256_file(path)? != expected.database_sha256
     {
         return Err(Error::Conflict(
-            "restored database does not match its backup manifest".into(),
+            "database does not match its backup manifest".into(),
         ));
     }
     let actual = inspect_database(path)?;
@@ -330,7 +471,7 @@ pub(super) fn verify_restored(path: &Path, expected: &BackupManifest) -> Result<
         || actual.artifact_manifest_sha256 != expected.artifact_manifest_sha256
     {
         return Err(Error::Conflict(
-            "restored database failed structural validation".into(),
+            "database failed structural validation against its backup manifest".into(),
         ));
     }
     Ok(())
@@ -352,11 +493,39 @@ fn resolve_target(path: &Path) -> Result<(PathBuf, PathBuf)> {
     Ok((parent.clone(), parent.join(name)))
 }
 
+fn open_snapshot(path: &Path) -> Result<Connection> {
+    check_snapshot_sidecars(path)?;
+    // SQLite's online backup may retain the source WAL header. Immutable opens
+    // the standalone snapshot without creating a WAL or shared memory file.
+    let absolute = std::path::absolute(path)?;
+    #[cfg(unix)]
+    let bytes = {
+        use std::os::unix::ffi::OsStrExt;
+        absolute.as_os_str().as_bytes()
+    };
+    #[cfg(not(unix))]
+    let bytes = absolute
+        .to_str()
+        .ok_or_else(|| Error::Invalid("database path is not valid UTF-8".into()))?
+        .as_bytes();
+    let mut uri = String::from("file:");
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    for &byte in bytes {
+        uri.push('%');
+        uri.push(HEX[usize::from(byte >> 4)] as char);
+        uri.push(HEX[usize::from(byte & 0x0f)] as char);
+    }
+    uri.push_str("?immutable=1");
+    Ok(Connection::open_with_flags(
+        uri,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | OpenFlags::SQLITE_OPEN_URI,
+    )?)
+}
+
 fn inspect_database(path: &Path) -> Result<BackupManifest> {
-    let db = Connection::open_with_flags(
-        path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
+    let db = open_snapshot(path)?;
     let integrity: String = db.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
     if integrity != "ok" {
         return Err(Error::Conflict(
@@ -422,25 +591,39 @@ fn sha256_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
-struct BackupEntry {
-    path: PathBuf,
-    manifest: BackupManifest,
-    bytes: u64,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupEntry {
+    pub path: PathBuf,
+    pub manifest: BackupManifest,
+    pub bytes: u64,
 }
 
-fn list_valid_backups(directory: &Path) -> Result<Vec<BackupEntry>> {
+fn sort_by_age(entries: &mut [BackupEntry]) {
+    entries.sort_by(|left, right| {
+        left.manifest
+            .created_at_ms
+            .cmp(&right.manifest.created_at_ms)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+}
+
+fn list_valid_backups(directory: &Path, managed_only: bool) -> Result<Vec<BackupEntry>> {
     let mut backups = Vec::new();
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         if !entry.file_type()?.is_dir()
-            || !entry
+            || entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with(ROTATING_BACKUP_PREFIX)
+                .starts_with(".fliuno-backup-")
         {
             continue;
         }
         let path = entry.path();
+        if managed_only && !is_managed_backup(&path)? {
+            continue;
+        }
         let Ok(manifest) = verify(&path) else {
             continue;
         };
@@ -452,6 +635,39 @@ fn list_valid_backups(directory: &Path) -> Result<Vec<BackupEntry>> {
         });
     }
     Ok(backups)
+}
+
+fn is_managed_backup(path: &Path) -> Result<bool> {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Ok(false);
+    };
+    let Some((timestamp, id)) = name
+        .strip_prefix(ROTATING_BACKUP_PREFIX)
+        .and_then(|name| name.split_once('-'))
+    else {
+        return Ok(false);
+    };
+    if timestamp.parse::<u64>().is_err() || Uuid::parse_str(id).is_err() {
+        return Ok(false);
+    }
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file()
+            || !matches!(
+                entry.file_name().to_str(),
+                Some(
+                    DATABASE_FILE
+                        | ARTIFACTS_FILE
+                        | MANIFEST_FILE
+                        | "database.sqlite-wal"
+                        | "database.sqlite-shm"
+                )
+            )
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn backup_size(directory: &Path, manifest: &BackupManifest) -> Result<u64> {
@@ -685,6 +901,60 @@ mod tests {
     }
 
     #[test]
+    fn online_source_copies_a_consistent_snapshot_during_a_write() {
+        let root = temp_dir("backup-concurrent-write");
+        let source_path = root.join("source.db");
+        let mut kernel = Kernel::open(&source_path, Box::new(DemoProvider)).unwrap();
+        let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
+        let session = kernel.create_session(&workspace.id).unwrap();
+        // Ensure the first backup step does not copy every page.
+        kernel.db.execute_batch("CREATE TABLE fixture_padding(data BLOB); INSERT INTO fixture_padding VALUES(zeroblob(2097152));").unwrap();
+        let source = BackupSource::open(&source_path).unwrap();
+        let backup = root.join("snapshot");
+        let mut written = false;
+        let manifest = source
+            .create(&backup, |progress| {
+                if !written
+                    && matches!(
+                        progress,
+                        BackupProgress::Copying {
+                            remaining_pages: 1..,
+                            ..
+                        }
+                    )
+                {
+                    kernel.create_task_with_key(&session.id, "written mid-snapshot", None)?;
+                    written = true;
+                }
+                Ok(())
+            })
+            .unwrap();
+        assert!(written);
+        assert_eq!(manifest.task_count, 1);
+        assert_eq!(manifest.event_through_sequence, 1);
+        assert_eq!(verify(&backup).unwrap(), manifest);
+        drop(source);
+        drop(kernel);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn restore_publication_preserves_a_destination_created_during_validation() {
+        let root = temp_dir("backup-publication");
+        let staging = root.join("staged.db");
+        let destination = root.join("destination.db");
+        fs::write(&staging, b"valid snapshot").unwrap();
+        require_missing(&destination, RESTORE_DESTINATION_EXISTS).unwrap();
+        fs::write(&destination, b"concurrent file").unwrap();
+        assert!(matches!(
+            publish_restored_database(&staging, &destination),
+            Err(Error::Conflict(_))
+        ));
+        assert_eq!(fs::read(&destination).unwrap(), b"concurrent file");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn backup_rotation_applies_retention_only_after_a_valid_snapshot_is_written() {
         let root = temp_dir("backup-rotation");
         let mut kernel = Kernel::open(root.join("source.db"), Box::new(DemoProvider)).unwrap();
@@ -710,7 +980,7 @@ mod tests {
             .unwrap();
         assert_eq!(latest.retained_backups, 2);
         assert_eq!(latest.removed_backups, 1);
-        assert_eq!(list_valid_backups(&backups).unwrap().len(), 2);
+        assert_eq!(list_valid_backups(&backups, true).unwrap().len(), 2);
 
         let too_small = BackupRetention {
             max_total_bytes: 1,
@@ -721,7 +991,7 @@ mod tests {
                 .create_backup_with_retention(&backups, too_small)
                 .is_err()
         );
-        assert_eq!(list_valid_backups(&backups).unwrap().len(), 2);
+        assert_eq!(list_valid_backups(&backups, true).unwrap().len(), 2);
         assert_eq!(
             kernel.get_task(&task.id).unwrap().status,
             TaskStatus::WaitingApproval

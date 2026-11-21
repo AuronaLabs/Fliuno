@@ -48,8 +48,8 @@ pub use provider::{
 };
 pub use storage::MAX_EVENT_TARGET_BYTES;
 pub use storage::{
-    BackupManifest, BackupRetention, BackupRotationResult, McpSubscriptionAttempt,
-    McpSubscriptionKey, McpTaskRecord, McpTaskStore,
+    BackupEntry, BackupManifest, BackupProgress, BackupRetention, BackupRotationResult,
+    BackupSource, McpSubscriptionAttempt, McpSubscriptionKey, McpTaskRecord, McpTaskStore,
 };
 pub use task::compaction::{
     execute as execute_context_compaction, pending as context_compaction_pending,

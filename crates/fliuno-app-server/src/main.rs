@@ -1,4 +1,5 @@
 //! stdio is reserved for protocol data; diagnostics go to stderr.
+mod backup;
 mod configuration;
 mod diagnostics;
 mod mcp_oauth;
@@ -8,13 +9,24 @@ use fliuno_protocol::{Event, EventWatermark, MAX_APP_REQUEST_BYTES, ModelProgres
 use serde::Serialize;
 use serde_json::json;
 use std::{
+    ffi::OsStr,
     io::{self, BufRead, BufWriter, Write},
     path::PathBuf,
     thread,
 };
 
 fn main() {
-    if std::env::args().nth(1).as_deref() == Some(fliuno_exec::supervisor::WORKER_ARG) {
+    let mut args = std::env::args_os().skip(1);
+    let mode = args.next();
+    let mode = mode.as_deref().and_then(OsStr::to_str);
+    if mode == Some("backup") {
+        if let Err(error) = backup::run(args) {
+            eprintln!("fliuno backup: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if mode == Some(fliuno_exec::supervisor::WORKER_ARG) {
         if fliuno_exec::supervisor::run(|destinations| {
             diagnostics::start(
                 destinations.path.as_deref(),
@@ -30,7 +42,7 @@ fn main() {
         }
         return;
     }
-    if std::env::args().nth(1).as_deref() == Some("--terminal-worker") {
+    if mode == Some("--terminal-worker") {
         let result = fliuno_terminal::worker::run();
         if let Err(error) = &result {
             eprintln!("fliuno terminal worker: {error}");
@@ -119,6 +131,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--db" => db = args.next().ok_or("--db requires a path")?.into(),
             "--help" | "-h" => {
+                println!("{}", backup::USAGE);
                 println!(
                     "fliuno-app-server [--db PATH] [--mcp-config PATH] [--mcp-oauth-config PATH] [--mcp-oauth-vault PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--trace-log PATH] [--otlp-endpoint URL] [--schema]\nLocal stdio JSON-RPC. --mcp-oauth-config enables host authorization before initialize. --mcp-oauth-vault persists encrypted grants separately from the kernel database. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. FLIUNO_PROVIDER=demo|openai|anthropic|gemini; live providers require FLIUNO_MODEL and an API key."
                 );

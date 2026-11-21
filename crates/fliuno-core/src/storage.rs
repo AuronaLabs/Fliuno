@@ -23,7 +23,10 @@ mod work;
 mod workspace_memory;
 mod workspaces;
 use super::*;
-pub use backups::{BackupManifest, BackupRetention, BackupRotationResult};
+pub use backups::{
+    BackupEntry, BackupManifest, BackupProgress, BackupRetention, BackupRotationResult,
+    BackupSource,
+};
 pub use mcp_subscriptions::{McpSubscriptionAttempt, McpSubscriptionKey};
 pub use mcp_tasks::{McpTaskRecord, McpTaskStore};
 pub use replay::MAX_EVENT_TARGET_BYTES;
@@ -259,7 +262,7 @@ impl Kernel {
 
     /// Create a consistent SQLite snapshot and an itemized artifact digest list.
     pub fn create_backup(&self, destination: impl AsRef<Path>) -> Result<BackupManifest> {
-        backups::create(&self.db, destination.as_ref())
+        backups::create(&self.db, destination.as_ref(), &mut |_| Ok(()))
     }
 
     /// Create a snapshot and apply age, count, and total-byte retention limits.
@@ -268,7 +271,7 @@ impl Kernel {
         directory: impl AsRef<Path>,
         policy: BackupRetention,
     ) -> Result<BackupRotationResult> {
-        backups::create_rotating(&self.db, directory.as_ref(), policy)
+        backups::create_rotating(&self.db, directory.as_ref(), policy, &mut |_| Ok(()))
     }
 
     pub fn verify_backup(directory: impl AsRef<Path>) -> Result<BackupManifest> {
