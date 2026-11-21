@@ -35,7 +35,10 @@ pub use agent_remote::{
 };
 pub use agent_tools::AgentToolObservation;
 pub use approval::{ApprovalOutcome, PreparedToolExecution, ToolInputOutcome};
-pub use context::{MAX_CONTEXT_BYTES, MAX_CONTEXT_CANDIDATES, MAX_CONTEXT_TURNS, context_prompt};
+pub use context::{
+    MAX_CONTEXT_BYTES, MAX_CONTEXT_CANDIDATES, MAX_CONTEXT_TURNS, context_prompt,
+    task_context_prompt,
+};
 pub use error::{Error, Result};
 pub use events::{
     EventReceiver, EventScope, EventWatermarkReceiver, PendingEventWatermark, ProgressPublisher,

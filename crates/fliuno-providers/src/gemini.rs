@@ -296,9 +296,7 @@ fn flush_model_content(contents: &mut Vec<Value>, parts: &mut Vec<Value>) {
 fn request(model: &str, task: &Task, tools: &[ToolSpec], streaming: bool) -> Result<Value, String> {
     let mut input = Vec::new();
     let mut call_names = BTreeMap::new();
-    if let Some(history) =
-        fliuno_core::context_prompt(task.context.as_ref()).map_err(|e| e.to_string())?
-    {
+    if let Some(history) = fliuno_core::task_context_prompt(task).map_err(|e| e.to_string())? {
         input.push(user_input(history));
     }
     for message in &task.messages {

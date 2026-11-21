@@ -212,7 +212,9 @@ $env:FLIUNO_MAX_OUTPUT_TOKENS = '2048'
 
 `initialize.capabilities.modelCapabilities` 提供统一快照：`provider`、`model`、`modelSource`、`supportedInputTypes`、`inputTypesSource`、同一份可选 `budget`、`automaticContextCompaction` 和 `refreshedAtMs`。`modelSource` 当前区分宿主配置与供应商元数据；Anthropic 别名会在启动时解析，OpenAI/Gemini 使用配置的模型 ID。三个适配器目前都能编码文本、图片和 PDF，因此 `inputTypesSource` 为 `provider_adapter`；这说明请求格式可表达这些输入，不保证所选的每一个模型都支持所有模态。只有提供模型身份、请求预算且实现摘要调用的 Provider 才报告自动压缩能力。
 
-预算预检明确拒绝输入超限、且确认尚未发送生成请求时，内核会用同一 Provider 和模型对较早的已完成历史生成摘要，并保留最近一条记录原文。摘要请求不带工具；正式请求会重新预检完整输入，包含当前任务、摘要、保留历史、工具定义及其他请求字段。若摘要输入本身超限，内核只在历史记录边界拆分，并以有界次数缩小批次。摘要成功后，摘要、来源任务 ID、完成事件序号、提示版本、模型预算与可用 usage/preflight 一起保存；原任务、事件和未压缩的近期历史仍可核对。SQLite v58 标记此快照格式。
+预算预检明确拒绝输入超限、且确认尚未发送生成请求时，内核先在剩余额度内省略可选的工作区记忆，再对完整请求预检一次。任务通过 `contextMemoryOmittedForBudget` 和 `context_memory_omitted_for_budget` 事件报告这个决定，原始 `context.memories` 仍可审阅。
+
+仍然超限或没有可省略记忆时，内核可以用同一 Provider 和模型对较早的已完成历史生成摘要，并保留最近一条记录原文。摘要请求不带工具；正式请求会重新预检完整输入，包含当前任务、摘要、保留历史、工具定义及其他请求字段。若摘要输入本身超限，内核只在历史记录边界拆分，并以有界次数缩小批次。摘要成功后，摘要、来源任务 ID、完成事件序号、提示版本、模型预算与可用 usage/preflight 一起保存；原任务、事件和未压缩的近期历史仍可核对。SQLite v58 标记此快照格式。
 
 摘要未派发、被取消、返回无效结果或未能缩小快照时，内核保留压缩前的有效上下文并终止当前任务。若 Provider 返回结果未知，任务进入 interrupted，需显式确认后才能重试摘要；内核不会把可能已计费的请求自动重放。每次原请求、摘要和重试都占用持久 `maxModelSteps` 上限；没有足够的尝试额度或没有较早历史时，内核直接报告预算拒绝。压缩只缩减已完成历史，不裁剪当前输入、工具定义或媒体；若完整正式请求在摘要后仍超限，预检会再次拒绝。
 

@@ -434,6 +434,9 @@ pub struct Task {
     /// None for pre-context snapshots; legacy retries retain their original input.
     #[serde(default)]
     pub context: Option<TaskContext>,
+    /// Request projection omits frozen workspace memory after a budget rejection.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub context_memory_omitted_for_budget: bool,
     pub pending_approval: Option<Approval>,
     #[serde(default)]
     pub in_flight_tool: Option<ToolCall>,
@@ -684,6 +687,10 @@ pub enum EventKind {
     },
     ModelStarted {
         step: u32,
+    },
+    ContextMemoryOmittedForBudget {
+        rejected_step: u32,
+        memory_count: u32,
     },
     ContextCompactionScheduled {
         rejected_step: u32,

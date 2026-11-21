@@ -215,6 +215,81 @@ fn local_budget_rejection_summarizes_history_then_retries_through_scheduler() {
 }
 
 #[test]
+fn preflight_budget_retry_omits_memory_before_generation_and_keeps_snapshot() {
+    const MARKER: &str = "frozen memory body";
+    let wire = Fixture::start(|request| match request.path.as_str() {
+        "/mock/v1/models/fixture-alias" => Response::json(200, model_metadata(4096)),
+        "/mock/v1/messages/count_tokens" => {
+            let body = request.body.to_string();
+            assert!(body.contains("Explain the sentinel"));
+            let tokens = if body.contains(MARKER) { 30721 } else { 30720 };
+            Response::json(200, json!({"input_tokens":tokens}))
+        }
+        "/mock/v1/messages" => {
+            let body = request.body.to_string();
+            assert!(body.contains("Explain the sentinel"));
+            assert!(!body.contains(MARKER));
+            Response::json(
+                200,
+                json!({"stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}),
+            )
+        }
+        path => panic!("unexpected endpoint {path}"),
+    });
+    let directory = TestDirectory::new();
+    let child = directory
+        .command(&wire)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut peer = Peer::from_child(child);
+    peer.call(
+        "initialize",
+        json!({"protocolVersion":"0.1","clientName":"memory-budget-test"}),
+    );
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let memory = peer.call(
+        "workspace/memory/put",
+        json!({"workspaceId":workspace["id"],"key":"sentinel","content":MARKER}),
+    );
+    let start = json!({"sessionId":session["id"],"input":"Explain the sentinel","maxModelSteps":2,"clientRequestId":"memory-budget"});
+    let task = peer.call("task/start", start.clone());
+    let id = task["id"].as_str().unwrap();
+    peer.wait_for_status(id, "completed");
+    let stored = peer.call("task/get", json!({"taskId":id}));
+    assert_eq!(stored["modelSteps"], 2);
+    assert_eq!(stored["contextMemoryOmittedForBudget"], true);
+    assert_eq!(stored["context"]["memories"][0]["id"], memory["id"]);
+    assert_eq!(stored["context"]["memories"][0]["content"], MARKER);
+    let events = peer.call("events/list", json!({"taskId":id}));
+    assert!(
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|event| event["data"]
+                == json!({
+                    "type":"context_memory_omitted_for_budget","rejectedStep":1,"memoryCount":1,
+                }))
+    );
+    assert_eq!(peer.call("task/start", start)["id"], id);
+    let requests = wire.requests();
+    assert_eq!(
+        requests.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+        [
+            "/mock/v1/models/fixture-alias",
+            "/mock/v1/messages/count_tokens",
+            "/mock/v1/messages/count_tokens",
+            "/mock/v1/messages",
+        ]
+    );
+    assert!(requests[1].body.to_string().contains(MARKER));
+    assert!(!requests[2].body.to_string().contains(MARKER));
+}
+
+#[test]
 fn unusable_model_metadata_stops_startup_before_database_creation() {
     let private = "fixture-secret-in-body";
     for (status, value, diagnostic) in [
@@ -451,7 +526,7 @@ fn model_step_limit_preserves_default_receipts_and_rejects_invalid_settings() {
     assert_eq!(
         db.pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
             .unwrap(),
-        64
+        65
     );
     let mut default = request.clone();
     default["maxModelSteps"] = json!(8);

@@ -65,9 +65,7 @@ impl OpenAiProvider {
 /// Keep them instead of reconstructing a lossy assistant message.
 fn request(model: &str, task: &Task, tools: &[ToolSpec], streaming: bool) -> Result<Value, String> {
     let mut input = Vec::new();
-    if let Some(history) =
-        fliuno_core::context_prompt(task.context.as_ref()).map_err(|e| e.to_string())?
-    {
+    if let Some(history) = fliuno_core::task_context_prompt(task).map_err(|e| e.to_string())? {
         input.push(json!({"role":"user","content":history}));
     }
     for message in &task.messages {

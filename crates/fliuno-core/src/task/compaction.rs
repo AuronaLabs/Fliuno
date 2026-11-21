@@ -53,6 +53,7 @@ pub fn execute(
         status: TaskStatus::Running,
         messages: Vec::new(),
         context: None,
+        context_memory_omitted_for_budget: false,
         pending_approval: None,
         in_flight_tool: None,
         pending_tool_input: None,
@@ -219,8 +220,15 @@ impl Kernel {
             preflight: result.turn.preflight.take(),
             usage: result.turn.usage.take(),
         });
-        let before = context_prompt(Some(original))?.map_or(0, |text| text.len());
-        let after = context_prompt(Some(&compacted))?.map_or(0, |text| text.len());
+        let prompt_size = |context| {
+            crate::context::project_context_prompt(
+                Some(context),
+                task.context_memory_omitted_for_budget,
+            )
+            .map(|text| text.map_or(0, |text| text.len()))
+        };
+        let before = prompt_size(original)?;
+        let after = prompt_size(&compacted)?;
         if after >= before || json_size(&compacted)? > compacted.options.max_bytes as usize {
             task.context
                 .as_mut()

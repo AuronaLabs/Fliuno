@@ -56,8 +56,13 @@ impl Kernel {
                     .next_classified(&task, &specs, &CancellationToken::new())
             }))
             .unwrap_or_else(|_| Err(ModelError::OutcomeUnknown("model provider panicked".into())));
+            let memory_was_omitted = task.context_memory_omitted_for_budget;
             task = self.apply_model_response(task, turn)?;
-            if !compaction::pending(&task) || task.status != TaskStatus::Running {
+            let retry_without_memory =
+                !memory_was_omitted && task.context_memory_omitted_for_budget;
+            if task.status != TaskStatus::Running
+                || !(retry_without_memory || compaction::pending(&task))
+            {
                 return Ok(task);
             }
         }
@@ -130,6 +135,23 @@ impl Kernel {
         let turn = match response {
             Err(ModelError::InputBudgetExceeded(message)) => {
                 task.model_outcome_unknown = false;
+                if !model_step_budget_spent(&task)
+                    && !task.context_memory_omitted_for_budget
+                    && let Some(context) = &task.context
+                    && !context.memories.is_empty()
+                {
+                    let memory_count = context.memories.len() as u32;
+                    task.context_memory_omitted_for_budget = true;
+                    self.commit(
+                        &task,
+                        &[EventKind::ContextMemoryOmittedForBudget {
+                            rejected_step: task.model_steps,
+                            memory_count,
+                        }],
+                        &[],
+                    )?;
+                    return Ok(task);
+                }
                 if compaction::schedule(&mut task, self.provider.as_ref()) {
                     self.commit(
                         &task,

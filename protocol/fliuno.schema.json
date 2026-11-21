@@ -5460,6 +5460,10 @@
           ],
           "default": null
         },
+        "contextMemoryOmittedForBudget": {
+          "description": "Request projection omits frozen workspace memory after a budget rejection.",
+          "type": "boolean"
+        },
         "pendingApproval": {
           "anyOf": [
             {
@@ -13691,6 +13695,30 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "context_memory_omitted_for_budget"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "memoryCount": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep",
+                "memoryCount"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "context_compaction_scheduled"
                 },
                 "rejectedStep": {
@@ -15337,6 +15365,30 @@
               "required": [
                 "type",
                 "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_memory_omitted_for_budget"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "memoryCount": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep",
+                "memoryCount"
               ]
             },
             {

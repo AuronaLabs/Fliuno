@@ -602,6 +602,7 @@ impl RpcServer {
             capabilities["workspaceMemoryAudit"] = json!(true);
             capabilities["workspaceMemorySemanticIndex"] = json!(true);
             capabilities["taskMemoryOptOut"] = json!(true);
+            capabilities["taskMemoryBudgetReduction"] = json!(true);
             capabilities["taskMemoryHybridRetrieval"] = json!(self.memory_embeddings.is_some());
             capabilities["maxWorkspaceMemories"] = json!(4096);
             capabilities["maxWorkspaceMemoryContentBytes"] =

@@ -71,6 +71,7 @@ impl Kernel {
             in_flight_tool: None,
             pending_tool_input: None,
             model_outcome_unknown: false,
+            context_memory_omitted_for_budget: false,
             output: None,
             model_steps: 0,
             max_model_steps: None,
