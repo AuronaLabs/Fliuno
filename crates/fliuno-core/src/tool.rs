@@ -90,6 +90,11 @@ pub trait Tool: Send + Sync {
             }),
         )
     }
+    /// Host opt-in for validated, confined and side-effect-free workspace reads.
+    fn supports_read_rules(&self) -> bool {
+        false
+    }
+
     fn validate(&self, arguments: &Value) -> std::result::Result<(), String>;
     /// Optional immutable approval details; no IO or execution at this stage.
     fn execution_plan(&self, _arguments: &Value) -> Option<Value> {

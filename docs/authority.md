@@ -57,3 +57,20 @@ MCP 资源和提示按握手能力注册；审批保存具体 URI/提示名称/�
 v8 在 JSON 快照增加可选的 `Approval.authority` 与 `Task.backendAuthority`，升级数据库版本以阻止旧内核忽略这些检查。旧记录仍能读取和查询；不补造历史摘要。旧待批工具可以拒绝，但不能再允许执行；旧排队 Agent 缺少绑定时不能启动。需要新配置授权的工作应新建任务。
 
 测试覆盖真实 SQLite 重启、同名不同 Schema、同别名不同 HTTP 端点、空清单 stdio 参数变化、凭据与环境变化、ACP/A2A 配置变化，以及旧版本无摘要的恢复边界。平台运行证据另见 [执行验收](execution-evidence.md)。
+
+## 可撤销的本机只读规则
+
+声明 `initialize.capabilities.workspaceReadRules` 的本机服务支持限时授权。默认每次调用仍进入审批。宿主展示工作区、工具、完整参数与到期时间，经用户确认后创建规则。
+
+| RPC | 参数 | 结果 |
+| --- | --- | --- |
+| `policy/readTools` | `{}` | 支持规则的本机工具及其注册摘要。 |
+| `policy/createReadRule` | `workspaceId`、可选 `sessionId`、`toolName`、`expectedAuthority`、`arguments`、`expiresAtMs` 和 `clientRequestId` | 持久的授权记录。 |
+| `policy/list` | `workspaceId` | 当前未撤销、未过期的规则，最多 64 条。 |
+| `policy/revoke` | `workspaceId` 和 `ruleId` | 该记录及首次撤销时间。 |
+
+`sessionId` 将规则限制在一个会话。省略时覆盖该工作区中的会话。`expiresAtMs` 是未来 30 天内的 Unix 毫秒时间。参数必须是工具可接受、序列化后最多 4096 字节的 JSON 对象，完整匹配包括路径和可选字段。对象键顺序不影响匹配。规则授权的是路径及读取参数，实际内容取执行时的文件版本。
+
+重复提交同一工作区中的 `clientRequestId` 与原参数会返回原记录，包括已经撤销的记录。只有换用新键并显式创建规则才会产生新的授权。工具注册变化时，客户端需重新审阅新摘要。先露出 `workspace_read_text` 和 `workspace_list` 两个内置工具。外部 Agent、MCP、脚本和写操作沿用原审批入口。
+
+模型提出新调用后，仍记录 `approval_requested`。命中规则时，服务同时保存 `approval_resolved` 与 `tool_authorized_by_policy`，后者带 `approvalId`、`callId` 和 `ruleId`。派发前再次检查当前策略、摘要、到期和撤销状态。规则在队列中失效时，为同一调用生成新的待审批 ID。`tool_started` 表示派发边界。已经派发、取消或结果未知的调用继续使用原有执行与恢复语义。

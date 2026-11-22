@@ -3251,6 +3251,85 @@
         }
       }
     },
+    "policy/readTools": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    },
+    "policy/createReadRule": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PolicyReadRuleCreateParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "description": "Omit for a workspace rule. A session must belong to this workspace.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "expectedAuthority": {
+          "type": "string"
+        },
+        "arguments": {
+          "description": "The exact tool argument object the user reviewed."
+        },
+        "expiresAtMs": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "clientRequestId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "toolName",
+        "expectedAuthority",
+        "arguments",
+        "expiresAtMs",
+        "clientRequestId"
+      ]
+    },
+    "policy/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceIdParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "policy/revoke": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PolicyReadRuleRevokeParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "ruleId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "ruleId"
+      ]
+    },
     "approval/respond": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ApprovalRespondParams",
@@ -7669,6 +7748,71 @@
           ]
         }
       }
+    },
+    "PolicyReadTool": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PolicyReadTool",
+      "description": "Only tools selected by the local host can participate in read rules.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "authority": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "authority"
+      ]
+    },
+    "PolicyReadRule": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PolicyReadRule",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "authority": {
+          "type": "string"
+        },
+        "arguments": true,
+        "expiresAtMs": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "revokedAtMs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "int64"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "workspaceId",
+        "toolName",
+        "authority",
+        "arguments",
+        "expiresAtMs"
+      ]
     },
     "ToolInputRequest": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -14368,6 +14512,30 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "tool_authorized_by_policy"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "ruleId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "callId",
+                "ruleId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "tool_completed"
                 },
                 "callId": {
@@ -16521,6 +16689,30 @@
                 "type",
                 "approvalId",
                 "decision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_authorized_by_policy"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "ruleId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "callId",
+                "ruleId"
               ]
             },
             {

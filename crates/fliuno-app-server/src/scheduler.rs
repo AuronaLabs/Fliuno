@@ -359,7 +359,20 @@ fn run_worker(
                         Ok(task) if task.status == fliuno_protocol::TaskStatus::Running => {
                             schedule_followup_model(&sender, &active, &mut kernel, &task)
                         }
-                        Ok(_) => Ok(()),
+                        Ok(task) => match kernel.prepare_policy_approval(&task.id) {
+                            Ok(Some(fliuno_core::ApprovalOutcome::Prepared {
+                                task,
+                                execution,
+                            })) => schedule_followup(
+                                &sender,
+                                &active,
+                                &mut kernel,
+                                &task,
+                                ScheduledWork::Tool(execution),
+                            ),
+                            Ok(_) => Ok(()),
+                            Err(error) => Err(error),
+                        },
                         Err(error) => Err(error),
                     }
                 }
@@ -704,6 +717,16 @@ fn schedule_followup_model(
     kernel: &mut Kernel,
     task: &Task,
 ) -> fliuno_core::Result<()> {
+    schedule_followup(sender, active, kernel, task, ScheduledWork::Model)
+}
+
+fn schedule_followup(
+    sender: &Sender<ScheduledTask>,
+    active: &ActiveTasks,
+    kernel: &mut Kernel,
+    task: &Task,
+    work: ScheduledWork,
+) -> fliuno_core::Result<()> {
     let mut active = active
         .lock()
         .map_err(|_| Error::Conflict("task scheduler lock is poisoned".into()))?;
@@ -721,7 +744,7 @@ fn schedule_followup_model(
     let job = ScheduledTask {
         id: task.id.clone(),
         cancellation,
-        work: ScheduledWork::Model,
+        work,
     };
     if let Err(error) = sender.try_send(job) {
         active.remove(&task.id);

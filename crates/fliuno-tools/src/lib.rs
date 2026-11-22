@@ -176,6 +176,10 @@ fn sha256(bytes: &[u8]) -> String {
 }
 
 impl Tool for WorkspaceTool {
+    fn supports_read_rules(&self) -> bool {
+        matches!(self.0, Operation::List | Operation::Read)
+    }
+
     fn spec(&self) -> ToolSpec {
         let (name, description, effect) = match self.0 {
             Operation::List => (

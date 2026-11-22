@@ -156,6 +156,10 @@ staged.sync_all()?;
 | `approval/getBatch` | `{approvals:[{taskId,approvalId},...]}` | [批量读取仍待处理的审批详情](#批量读取待审批详情) |
 | `approval/getDecision` | `{taskId,approvalId}` | 已提交决定对应的 `Event`，用于重连核对 |
 | `approval/getDecisions` | `{approvals:[{taskId,approvalId},...]}` | [按请求顺序读取持久回执](#批量读取审批决定) |
+| `policy/readTools` | `{}` | 返回支持[只读规则](authority.md#可撤销的本机只读规则)的注册项。 |
+| `policy/createReadRule` | [规则参数](authority.md#可撤销的本机只读规则) | 创建绑定工具摘要与精确参数的只读规则。 |
+| `policy/list` | `{workspaceId}` | 返回当前有效规则。 |
+| `policy/revoke` | `{workspaceId,ruleId}` | 撤销规则并返回记录。 |
 | `approval/respond` | `{taskId, approvalId, decision}` | Task；工具执行后排队继续模型步骤；decision 为 `allow_once` 或 `deny` |
 | `approval/respondDecision` | 与 `approval/respond` 相同 | 提交决定并返回已持久化的 `Event`。 |
 | `approval/resumeRun` | `{sessionId,parentRequestId,clientRequestId,approvalId,decision}` | `ApprovalRun`；提交决定并创建同一任务的子运行。 |

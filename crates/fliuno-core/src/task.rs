@@ -60,6 +60,23 @@ impl Kernel {
             let memory_was_omitted = task.context_memory_omitted_for_budget;
             let outputs_were_reduced = reduce_historical_tool_outputs(&task);
             task = self.apply_model_response(task, turn)?;
+            if task.status == TaskStatus::WaitingApproval {
+                match self.prepare_policy_approval(&task.id)? {
+                    None => return Ok(task),
+                    Some(ApprovalOutcome::Finished(task)) => return Ok(task),
+                    Some(ApprovalOutcome::Prepared { task, execution }) => {
+                        if !self.begin_tool_execution(&execution)? {
+                            return self.get_task(&task.id);
+                        }
+                        let result = execution.execute(&CancellationToken::new());
+                        let task = self.apply_tool_response(&execution, result)?;
+                        if task.status != TaskStatus::Running {
+                            return Ok(task);
+                        }
+                        continue;
+                    }
+                }
+            }
             let retry_without_memory =
                 !memory_was_omitted && task.context_memory_omitted_for_budget;
             let retry_with_reduced_outputs =

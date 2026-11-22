@@ -39,7 +39,7 @@ use std::{
 pub(crate) use task_resume::ResumeFacts;
 pub(crate) use tool_inputs::Mutation as ToolInputMutation;
 
-pub(crate) const SCHEMA_VERSION: u32 = 67;
+pub(crate) const SCHEMA_VERSION: u32 = 68;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 fn read_task(db: &Connection, id: &str) -> Result<Task> {
@@ -687,8 +687,27 @@ impl Kernel {
             mcp_subscriptions::migrate(&db)?;
         }
         if version < SCHEMA_VERSION {
-            // Older readers reject new context flags and budget events.
-            db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+            db.execute_batch(
+                "BEGIN IMMEDIATE;
+                CREATE TABLE IF NOT EXISTS policy_read_rules(
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+                    session_id TEXT REFERENCES sessions(id),
+                    tool_name TEXT NOT NULL,
+                    authority TEXT NOT NULL,
+                    arguments_digest TEXT NOT NULL,
+                    expires_at_ms INTEGER NOT NULL,
+                    request_id TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    data TEXT NOT NULL,
+                    revoked_at_ms INTEGER,
+                    UNIQUE(workspace_id, request_id)
+                );
+                CREATE INDEX IF NOT EXISTS policy_read_rules_active
+                    ON policy_read_rules(workspace_id, expires_at_ms)
+                    WHERE revoked_at_ms IS NULL;
+                PRAGMA user_version=68; COMMIT;",
+            )?;
         }
         if let Some((provider_id, model)) = provider.model_identity() {
             let undercount: i64 = db.query_row(

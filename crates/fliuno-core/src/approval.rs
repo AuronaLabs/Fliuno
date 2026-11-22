@@ -20,6 +20,11 @@ pub enum ToolInputOutcome {
     },
 }
 
+struct PolicyAuthorization {
+    rule_id: String,
+    approval: Approval,
+}
+
 struct ToolContinuation {
     request_state: Option<String>,
     responses: Value,
@@ -34,6 +39,7 @@ pub struct PreparedToolExecution {
     workspace: Workspace,
     tool: Arc<dyn Tool>,
     continuation: Option<ToolContinuation>,
+    policy_authorization: Option<PolicyAuthorization>,
 }
 
 impl PreparedToolExecution {
@@ -70,6 +76,7 @@ impl PreparedToolExecution {
             workspace,
             tool,
             continuation: None,
+            policy_authorization: None,
         }
     }
     pub fn task_id(&self) -> &str {
@@ -161,12 +168,51 @@ impl Kernel {
         self.prepare_model_approval(task, approval_id, decision, None)
     }
 
+    /// Resolve only fresh model approvals covered by a live, exact read rule.
+    /// Explicit manual approvals and external agents follow their original path.
+    pub fn prepare_policy_approval(&mut self, task_id: &str) -> Result<Option<ApprovalOutcome>> {
+        let task = self.get_task(task_id)?;
+        if task.backend != TaskBackend::Model || task.status != TaskStatus::WaitingApproval {
+            return Ok(None);
+        }
+        let Some(approval) = &task.pending_approval else {
+            return Ok(None);
+        };
+        let Some(authority) = &approval.authority else {
+            return Ok(None);
+        };
+        let Some(rule_id) = self.match_policy_read_rule(&task, &approval.call, authority, None)?
+        else {
+            return Ok(None);
+        };
+        let approval_id = approval.id.clone();
+        self.prepare_model_approval_inner(
+            task,
+            &approval_id,
+            ApprovalDecision::AllowOnce,
+            None,
+            Some(rule_id),
+        )
+        .map(Some)
+    }
+
     pub(crate) fn prepare_model_approval(
+        &mut self,
+        task: Task,
+        approval_id: &str,
+        decision: ApprovalDecision,
+        resume: Option<&ApprovalResumeParams>,
+    ) -> Result<ApprovalOutcome> {
+        self.prepare_model_approval_inner(task, approval_id, decision, resume, None)
+    }
+
+    fn prepare_model_approval_inner(
         &mut self,
         mut task: Task,
         approval_id: &str,
         decision: ApprovalDecision,
         resume: Option<&ApprovalResumeParams>,
+        rule_id: Option<String>,
     ) -> Result<ApprovalOutcome> {
         self.require_run_child_before_deadline(&task.id)?;
         self.require_run_child_authority(&task.id)?;
@@ -215,7 +261,19 @@ impl Kernel {
         let workspace = self.workspace_for_task(task_id)?;
         task.status = TaskStatus::Running;
         task.in_flight_tool = Some(approval.call.clone());
-        self.commit_with_bindings(&task, &[resolved], &[], None, resume)?;
+        let mut events = vec![resolved];
+        let policy_authorization = rule_id.map(|rule_id| {
+            events.push(EventKind::ToolAuthorizedByPolicy {
+                approval_id: approval.id.clone(),
+                call_id: approval.call.id.clone(),
+                rule_id: rule_id.clone(),
+            });
+            PolicyAuthorization {
+                rule_id,
+                approval: approval.clone(),
+            }
+        });
+        self.commit_with_bindings(&task, &events, &[], None, resume)?;
         let execution = Box::new(PreparedToolExecution {
             task_id: task.id.clone(),
             session_id: task.session_id.clone(),
@@ -223,6 +281,7 @@ impl Kernel {
             workspace,
             tool,
             continuation: None,
+            policy_authorization,
         });
         Ok(ApprovalOutcome::Prepared { task, execution })
     }
@@ -262,6 +321,32 @@ impl Kernel {
         {
             self.fail(task, message)?;
             return Ok((false, None));
+        }
+        if let Some(authorization) = &execution.policy_authorization {
+            let authority = authorization
+                .approval
+                .authority
+                .as_deref()
+                .expect("rule bound to an authority");
+            if self
+                .match_policy_read_rule(
+                    &task,
+                    &execution.call,
+                    authority,
+                    Some(&authorization.rule_id),
+                )?
+                .is_none()
+            {
+                // The reservation expired while queued. Return to human review
+                // with a fresh ID so the earlier resolution stays auditable.
+                let mut approval = authorization.approval.clone();
+                approval.id = new_id("approval");
+                task.status = TaskStatus::WaitingApproval;
+                task.in_flight_tool = None;
+                task.pending_approval = Some(approval.clone());
+                self.commit(&task, &[EventKind::ApprovalRequested { approval }], &[])?;
+                return Ok((false, None));
+            }
         }
         if allow_supervision
             && execution.continuation.is_none()
@@ -417,6 +502,7 @@ impl Kernel {
             call,
             workspace,
             tool,
+            policy_authorization: None,
             continuation: Some(ToolContinuation {
                 request_state: saved.request_state,
                 responses: request.responses.clone(),

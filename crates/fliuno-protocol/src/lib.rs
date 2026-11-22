@@ -7,6 +7,8 @@ mod artifacts;
 pub use artifacts::*;
 mod context;
 pub use context::*;
+mod policy;
+pub use policy::*;
 mod model_usage;
 pub use model_usage::*;
 mod schema;
@@ -798,6 +800,11 @@ pub enum EventKind {
     ApprovalResolved {
         approval_id: String,
         decision: ApprovalDecision,
+    },
+    ToolAuthorizedByPolicy {
+        approval_id: String,
+        call_id: String,
+        rule_id: String,
     },
     ToolCompleted {
         call_id: String,

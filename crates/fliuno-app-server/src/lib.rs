@@ -652,6 +652,7 @@ impl RpcServer {
             capabilities["pendingApprovalDetailsBatch"] = json!(true);
             capabilities["maxApprovalDetailsBatch"] = json!(MAX_APPROVAL_DETAILS_BATCH);
             capabilities["maxApprovalDetailsBatchBytes"] = json!(MAX_APPROVAL_DETAILS_BATCH_BYTES);
+            capabilities["workspaceReadRules"] = json!(true);
             capabilities["approvalDecisionLookup"] = json!(true);
             capabilities["approvalDecisionBatch"] = json!(true);
             capabilities["maxApprovalDecisionBatch"] = json!(MAX_APPROVAL_DECISION_BATCH);
@@ -1159,6 +1160,23 @@ impl RpcServer {
                 let p: ApprovalDecisionBatchParams = decode(params)?;
                 json!(self.kernel()?.get_approval_decisions(&p)?)
             }
+            "policy/readTools" => {
+                if !params.is_null() && !params.as_object().is_some_and(serde_json::Map::is_empty) {
+                    return Err(RpcError {
+                        code: -32602,
+                        message: "policy/readTools takes no params".into(),
+                    });
+                }
+                json!(self.kernel()?.policy_read_tools())
+            }
+            "policy/createReadRule" => {
+                json!(self.kernel()?.create_policy_read_rule(decode(params)?)?)
+            }
+            "policy/list" => {
+                let p: WorkspaceIdParams = decode(params)?;
+                json!(self.kernel()?.list_policy_read_rules(&p.workspace_id)?)
+            }
+            "policy/revoke" => json!(self.kernel()?.revoke_policy_read_rule(&decode(params)?)?),
             "approval/respond" => json!(self.respond_approval(decode(params)?)?),
             "approval/respondDecision" => json!(self.respond_approval_decision(decode(params)?)?),
             "approval/resumeRun" => json!(self.resume_approval_run(decode(params)?)?),
@@ -1551,6 +1569,147 @@ mod tests {
 
     fn server() -> RpcServer {
         RpcServer::new(Kernel::in_memory(Box::new(DemoProvider)).unwrap())
+    }
+
+    struct ReadRuleProvider;
+
+    impl fliuno_core::ModelProvider for ReadRuleProvider {
+        fn next(
+            &self,
+            task: &Task,
+            _: &[fliuno_core::ToolSpec],
+            _: &fliuno_core::CancellationToken,
+        ) -> Result<fliuno_core::ModelTurn, String> {
+            if let Some(output) = task.messages.iter().find_map(|item| match item {
+                Message::ToolResult { output, .. } => Some(output),
+                _ => None,
+            }) {
+                return Ok(fliuno_core::ModelDecision::Complete(output.to_string()).into());
+            }
+            let path = task
+                .messages
+                .iter()
+                .find_map(|item| match item {
+                    Message::User { text } => Some(text),
+                    _ => None,
+                })
+                .ok_or_else(|| "expected file path".to_string())?;
+            Ok(fliuno_core::ModelDecision::Call(ToolCall {
+                id: "fixture-read".into(),
+                name: "workspace_read_text".into(),
+                arguments: json!({"path":path}),
+            })
+            .into())
+        }
+    }
+
+    #[test]
+    fn persisted_session_read_rule_runs_only_the_reviewed_call() {
+        let root = std::env::temp_dir().join(format!("fliuno-policy-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("report.txt"), "policy read fixture").unwrap();
+        let db = root.join("state.sqlite");
+        let open = || {
+            let mut kernel = Kernel::open(&db, Box::new(ReadRuleProvider)).unwrap();
+            fliuno_tools::register(&mut kernel).unwrap();
+            let mut server = RpcServer::new(kernel);
+            let capabilities = rpc(
+                &mut server,
+                "initialize",
+                json!({"protocolVersion":"0.1","clientName":"policy-test"}),
+            );
+            assert_eq!(capabilities["capabilities"]["workspaceReadRules"], true);
+            server
+        };
+        let wait = |server: &mut RpcServer, session_id: &Value, path: &str, wanted: &str| {
+            let id = rpc(
+                server,
+                "task/start",
+                json!({"sessionId":session_id,"input":path}),
+            )["id"]
+                .clone();
+            let deadline = Instant::now() + Duration::from_secs(4);
+            loop {
+                let task = rpc(server, "task/get", json!({"taskId":id}));
+                let status = task["status"].as_str().unwrap();
+                if status == wanted {
+                    break task;
+                }
+                assert!(
+                    !matches!(status, "failed" | "completed" | "cancelled" | "interrupted")
+                        && Instant::now() < deadline,
+                    "unexpected task: {task}"
+                );
+                thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let mut server = open();
+        let workspace = rpc(&mut server, "workspace/open", json!({"root":root}))["id"].clone();
+        let trusted = rpc(
+            &mut server,
+            "session/create",
+            json!({"workspaceId":workspace}),
+        )["id"]
+            .clone();
+        let other = rpc(
+            &mut server,
+            "session/create",
+            json!({"workspaceId":workspace}),
+        )["id"]
+            .clone();
+        wait(&mut server, &trusted, "report.txt", "waiting_approval");
+        let tools = rpc(&mut server, "policy/readTools", json!({}));
+        let authority = &tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "workspace_read_text")
+            .unwrap()["authority"];
+        let expires = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            + 60_000;
+        let create = json!({"workspaceId":workspace,"sessionId":trusted,"toolName":"workspace_read_text","expectedAuthority":authority,"arguments":{"path":"report.txt"},"expiresAtMs":expires,"clientRequestId":"read-report"});
+        let rule = rpc(&mut server, "policy/createReadRule", create.clone());
+        drop(server);
+        let mut server = open();
+        let finished = wait(&mut server, &trusted, "report.txt", "completed");
+        assert!(
+            finished["output"]
+                .as_str()
+                .unwrap()
+                .contains("policy read fixture")
+        );
+        let events = rpc(
+            &mut server,
+            "events/list",
+            json!({"taskId":finished["id"],"limit":100}),
+        );
+        let serialized = events.to_string();
+        assert!(serialized.contains("tool_authorized_by_policy"));
+        assert!(serialized.contains(rule["id"].as_str().unwrap()));
+        wait(&mut server, &trusted, "different.txt", "waiting_approval");
+        wait(&mut server, &other, "report.txt", "waiting_approval");
+        let revoked = rpc(
+            &mut server,
+            "policy/revoke",
+            json!({"workspaceId":workspace,"ruleId":rule["id"]}),
+        );
+        assert!(revoked["revokedAtMs"].is_number());
+        assert_eq!(rpc(&mut server, "policy/createReadRule", create), revoked);
+        assert_eq!(
+            rpc(&mut server, "policy/list", json!({"workspaceId":workspace})),
+            json!([])
+        );
+        wait(&mut server, &trusted, "report.txt", "waiting_approval");
+        drop(server);
+        for path in [root.join("report.txt"), db, root.join("state.sqlite.lock")] {
+            if path.exists() {
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+        let _ = std::fs::remove_dir(root);
     }
 
     #[test]
