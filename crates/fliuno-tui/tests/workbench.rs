@@ -243,6 +243,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     );
     console.ready();
     console.resize(18, 48);
+    console.expect(&format!("┌Tasks  |  0 approvals{}┐", "─".repeat(25)));
     console.keys("\t");
     console.expect("Task detail");
     console.ready();
