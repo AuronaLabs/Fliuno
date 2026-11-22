@@ -84,7 +84,8 @@ impl Kernel {
             if task.status != TaskStatus::Running
                 || !(retry_without_memory
                     || retry_with_reduced_outputs
-                    || compaction::pending(&task))
+                    || compaction::pending(&task)
+                    || self.has_pending_steering(&task.id)?)
             {
                 return Ok(task);
             }
@@ -118,17 +119,18 @@ impl Kernel {
         task.model_outcome_unknown = true;
         // Persist the attempt before a paid network call. A crash must not reset
         // the budget and silently submit the same model request indefinitely.
-        self.commit(
-            &task,
-            &[EventKind::ModelStarted {
-                step: task.model_steps,
-            }],
-            &[],
-        )?;
-        Ok(PreparedModelStep::Ready {
-            task,
-            tools: self.tool_specs(),
-        })
+        let mut events = Vec::with_capacity(2);
+        if !compaction::pending(&task)
+            && let Some(attached) = self.attach_task_steering(&mut task)?
+        {
+            events.push(attached);
+        }
+        events.push(EventKind::ModelStarted {
+            step: task.model_steps,
+        });
+        let tools = self.bound_model_specs(&task)?;
+        self.commit(&task, &events, &[])?;
+        Ok(PreparedModelStep::Ready { task, tools })
     }
 
     /// Apply a provider response after the request ran outside the database lock.
@@ -171,6 +173,7 @@ impl Kernel {
                 if !model_step_budget_spent(&task)
                     && !task.context_memory_omitted_for_budget
                     && let Some(context) = &task.context
+                    && context.options.memory_selection.is_none()
                     && !context.memories.is_empty()
                 {
                     let memory_count = context.memories.len() as u32;
@@ -241,6 +244,14 @@ impl Kernel {
         let mut events = events;
         match turn.decision {
             ModelDecision::Complete(text) => {
+                if !model_step_budget_spent(&task) && self.has_pending_steering(&task.id)? {
+                    task.messages.push(Message::Assistant { text });
+                    events.push(EventKind::TaskDraftSaved {
+                        step: task.model_steps,
+                    });
+                    self.commit(&task, &events, &[])?;
+                    return Ok(task);
+                }
                 task.status = TaskStatus::Completed;
                 task.output = Some(text.clone());
                 task.messages
@@ -262,7 +273,16 @@ impl Kernel {
                         events,
                     );
                 }
-                let Some(tool) = self.tools.get(&call.name) else {
+                if crate::interaction::is_internal(&call.name)
+                    && !crate::interaction::enabled(&task)
+                {
+                    return self.fail_with_events(
+                        task,
+                        "task interaction tools were not enabled".into(),
+                        events,
+                    );
+                }
+                let Some(tool) = self.bound_model_tool(&task, &call.name)? else {
                     return self.fail_with_events(
                         task,
                         format!("unregistered tool: {}", call.name),

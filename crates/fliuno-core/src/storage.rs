@@ -39,7 +39,7 @@ use std::{
 pub(crate) use task_resume::ResumeFacts;
 pub(crate) use tool_inputs::Mutation as ToolInputMutation;
 
-pub(crate) const SCHEMA_VERSION: u32 = 68;
+pub(crate) const SCHEMA_VERSION: u32 = 74;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 fn read_task(db: &Connection, id: &str) -> Result<Task> {
@@ -178,6 +178,10 @@ fn write_transition(
                 context::record(tx, task, sequence as u64, true)?;
             }
             approval_decisions::record(tx, &task.id, event, sequence)?;
+            crate::steering::record(tx, &task.id, event, sequence)?;
+            crate::interaction::record(tx, &task.id, event)?;
+            crate::review::record(tx, &task.id, event)?;
+            crate::context_attribution::record(tx, &task.id, event, sequence)?;
             run_boundaries::record(tx, &task.id, event, sequence)?;
             if let (Some(resume), EventKind::ApprovalResolved { .. }) = (resume, event) {
                 approval_runs::record(tx, &task.id, resume, sequence)?;
@@ -686,7 +690,7 @@ impl Kernel {
         if version < 64 {
             mcp_subscriptions::migrate(&db)?;
         }
-        if version < SCHEMA_VERSION {
+        if version < 68 {
             db.execute_batch(
                 "BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS policy_read_rules(
@@ -709,6 +713,21 @@ impl Kernel {
                 PRAGMA user_version=68; COMMIT;",
             )?;
         }
+        if version < 70 {
+            crate::steering::migrate(&db)?;
+        }
+        if version < 71 {
+            crate::interaction::migrate(&db)?;
+        }
+        if version < 72 {
+            crate::review::migrate(&db)?;
+        }
+        if version < 73 {
+            crate::context_attribution::migrate(&db)?;
+        }
+        if version < 74 {
+            crate::model_tool_versions::migrate(&db)?;
+        }
         if let Some((provider_id, model)) = provider.model_identity() {
             let undercount: i64 = db.query_row(
                 "SELECT COALESCE(MAX(CAST(json_extract(data,'$.undercountTokens') AS INTEGER)),0)
@@ -725,14 +744,24 @@ impl Kernel {
         }
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
+        for name in [crate::interaction::PLAN, crate::interaction::ASK] {
+            tools.insert(
+                name.into(),
+                Arc::new(crate::interaction::InteractionTool(name)),
+            );
+        }
         tools.insert(
             "artifact_create_binary".into(),
             Arc::new(crate::tool::CreateBinaryArtifact),
         );
+        let revoked_model_tools = crate::model_tool_versions::load_revocations(&db)?;
         let mut kernel = Self {
             db,
             provider: std::sync::Arc::from(provider),
             tools,
+            model_tool_overrides: BTreeMap::new(),
+            retained_model_tools: BTreeMap::new(),
+            revoked_model_tools,
             agents: BTreeMap::new(),
             agent_controls: BTreeMap::new(),
             policy: Box::new(AskForWrites),
@@ -827,8 +856,14 @@ impl Kernel {
             key,
             receipt: receipt.as_ref(),
         });
+        let tool_bindings = (task.backend == TaskBackend::Model)
+            .then(|| self.current_model_bindings(task))
+            .transpose()?;
         let tx = self.db.transaction()?;
         let sequences = write_transition(&tx, task, events, &[], binding, None, None)?;
+        if let Some(bindings) = &tool_bindings {
+            crate::model_tool_versions::record(&tx, &task.id, bindings)?;
+        }
         if let Some(access) = context_memory_access {
             workspace_memory::audit_context_access(&tx, &task.id, access)?;
         }

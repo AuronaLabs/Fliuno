@@ -6,21 +6,29 @@ pub use approval::*;
 mod artifacts;
 pub use artifacts::*;
 mod context;
+mod context_attribution;
 pub use context::*;
+pub use context_attribution::*;
 mod policy;
 pub use policy::*;
 mod model_usage;
 pub use model_usage::*;
 mod schema;
 pub use schema::schema_bundle;
+mod review;
+pub use review::*;
 mod run;
 pub use run::*;
 mod session;
 pub use session::*;
 mod task_cancel;
 mod task_input;
+mod task_plan;
+mod task_steering;
 pub use task_cancel::*;
 pub use task_input::*;
+pub use task_plan::*;
+pub use task_steering::*;
 mod task_changes;
 mod task_summary;
 mod task_watermarks;
@@ -793,6 +801,31 @@ pub enum EventKind {
         usage_provider: Option<String>,
         undercount_tokens: Option<u64>,
         margin_exceeded: Option<bool>,
+    },
+    TaskSteeringAccepted {
+        client_request_id: String,
+        expected_sequence: u64,
+        instruction: String,
+    },
+    TaskSteeringAttached {
+        step: u32,
+        client_request_ids: Vec<String>,
+    },
+    TaskOutcomeReconciled {
+        reconciliation: TaskReconciliation,
+    },
+    ArtifactRevisionLinked {
+        revision: ArtifactRevision,
+    },
+    TaskPlanUpdated {
+        plan: TaskPlan,
+    },
+    ToolAuthorizedForInteraction {
+        approval_id: String,
+        call_id: String,
+    },
+    TaskDraftSaved {
+        step: u32,
     },
     ApprovalRequested {
         approval: Approval,

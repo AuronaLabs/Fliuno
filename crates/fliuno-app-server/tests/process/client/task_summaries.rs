@@ -53,6 +53,7 @@ fn task_summary_batch_reads_current_scoped_rows_in_input_order() {
                 approval_limit: 5,
                 approval_target_bytes: None,
                 recent_task_limit: None,
+                include_actions: false,
             },
             |_| {},
         )

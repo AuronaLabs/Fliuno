@@ -322,7 +322,45 @@ fn workspace_memory_schema_migrates_from_v54() {
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 74);
     drop(peer);
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn explicit_memory_pins_a_reviewed_revision_and_skips_automatic_matches() {
+    let root =
+        std::env::temp_dir().join(format!("fliuno-explicit-memory-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let db = root.join("kernel.db");
+    let mut peer = Peer::start(&db);
+    let workspace = peer.call("workspace/open", json!({"root":root}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let selected = peer.call(
+        "workspace/memory/put",
+        json!({"workspaceId":workspace["id"],"key":"reviewed","content":"Only this note."}),
+    );
+    peer.call(
+        "workspace/memory/put",
+        json!({"workspaceId":workspace["id"],"key":"rust","content":"Rust keyword match."}),
+    );
+    let context =
+        json!({"memorySelection":[{"id":selected["id"],"revision":selected["revision"]}]});
+    let preview = peer.call(
+        "session/context",
+        json!({"sessionId":session["id"],"options":context}),
+    );
+    assert_eq!(preview["memories"].as_array().unwrap().len(), 1);
+    assert_eq!(preview["memories"][0]["matchedBy"], "explicit");
+    let request = json!({"sessionId":session["id"],"input":"Rust report","clientRequestId":"pinned","context":context});
+    let task = peer.call("task/start", request.clone());
+    assert_eq!(task["context"]["memories"], preview["memories"]);
+    peer.call("workspace/memory/put", json!({"workspaceId":workspace["id"],"key":"reviewed","content":"This is the revision.","expectedRevision":selected["revision"]}));
+    assert_eq!(
+        peer.call("task/start", request.clone())["context"]["memories"],
+        preview["memories"]
+    );
+    let mut fresh = request;
+    fresh["clientRequestId"] = json!("new");
+    assert_eq!(peer.request("task/start", fresh)["error"]["code"], -32009);
 }

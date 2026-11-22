@@ -53,6 +53,7 @@ fn headless_workflow_recovers_lost_progress_and_delivers_one_approved_artifact()
                 approval_limit: 10,
                 approval_target_bytes: None,
                 recent_task_limit: Some(10),
+                include_actions: false,
             },
             |_| {},
         )

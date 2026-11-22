@@ -178,7 +178,7 @@ def evaluate(executable, cases, endpoint, minimum, repetitions, profile):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
-    parser.add_argument("--split", choices=["calibration", "holdout", "holdout_v2"], required=True)
+    parser.add_argument("--split", choices=["calibration", "holdout", "holdout_v2", "holdout_v3"], required=True)
     parser.add_argument("--cases", type=Path, default=SCRIPTS / "memory_eval_cases.json")
     parser.add_argument("--weights", type=Path)
     parser.add_argument("--tokenizer", type=Path)

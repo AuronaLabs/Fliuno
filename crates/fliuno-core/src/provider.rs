@@ -85,7 +85,10 @@ impl ModelError {
     }
 }
 
-fn input_attribution(task: &Task, tools: &[ToolSpec]) -> crate::Result<ModelBudgetInputBytes> {
+pub(crate) fn input_attribution(
+    task: &Task,
+    tools: &[ToolSpec],
+) -> crate::Result<ModelBudgetInputBytes> {
     fn size(value: &impl serde::Serialize) -> crate::Result<u64> {
         Ok(crate::json_size(value)? as u64)
     }

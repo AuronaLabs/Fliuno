@@ -44,7 +44,13 @@ impl Kernel {
     }
 
     pub fn tool_specs(&self) -> Vec<ToolSpec> {
-        self.tools.values().map(|tool| tool.spec()).collect()
+        self.active_model_tools()
+            .filter(|(name, tool)| {
+                !crate::interaction::is_internal(name)
+                    && !self.model_tool_revoked(name, &tool.authority())
+            })
+            .map(|(_, tool)| tool.spec())
+            .collect()
     }
 }
 

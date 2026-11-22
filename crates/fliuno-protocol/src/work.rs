@@ -1,5 +1,5 @@
 //! A coherent starting point for a host's task and approval views.
-use super::{ApprovalInboxPage, ApprovalListParams, TaskSummary};
+use super::{ApprovalInboxPage, ApprovalListParams, TaskResumeDisposition, TaskSummary};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +52,9 @@ pub struct WorkSnapshotParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1, max = MAX_WORK_RECENT_TASKS))]
     pub recent_task_limit: Option<u32>,
+    /// Derive actions for the recent tasks at the same snapshot watermark.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_actions: bool,
 }
 
 impl WorkSnapshotParams {
@@ -91,4 +94,28 @@ pub struct WorkSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(max = MAX_WORK_RECENT_TASKS))]
     pub recent_tasks: Option<Vec<TaskSummary>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_actions: Option<Vec<WorkNextAction>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkNextAction {
+    pub task_id: String,
+    pub kind: WorkActionKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WorkActionKind {
+    ReviewApproval,
+    AnswerInput,
+    Recover { disposition: TaskResumeDisposition },
+    Reconcile,
+    ReviewBudget { rejection_sequence: u64 },
 }

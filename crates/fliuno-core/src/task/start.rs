@@ -261,6 +261,7 @@ impl Kernel {
         let request = self.prepare_rpc_start(p)?;
         if request.backend != TaskBackend::Model
             || request.options.disable_memory
+            || request.options.memory_selection.is_some()
             || request.options.mode == ContextMode::Isolated
             || request.options.max_bytes == 0
         {
@@ -460,7 +461,7 @@ impl Kernel {
         };
         let message = input.message(self, session)?;
         let id = new_id("task");
-        let mut context = self.session_context(session, options)?;
+        let mut context = self.build_session_context(session, options, None)?;
         let memory_query = match &message {
             Message::User { text } => text.clone(),
             Message::UserParts { parts } => parts

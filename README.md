@@ -15,7 +15,7 @@
 
 **[快速体验](#快速体验)** · [接入工作台](#接入工作台) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.5** · [更新记录](CHANGELOG.md#005) · [v0.0.4](CHANGELOG.md#004) · [0.0.6 内核计划](docs/plan-0.0.6.md)
+当前版本 **v0.0.6** · [更新记录](CHANGELOG.md#006) · [内核范围与验收](docs/plan-0.0.6.md) · [0.0.7 TUI](docs/roadmap.md#007终端工作台)
 
 ## 快速体验
 
@@ -54,6 +54,7 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 
 | 能力 | 说明 |
 | --- | --- |
+| **任务协作与审批** | 模型可以发布计划和请求澄清。客户端可中途补充要求、为精确的本机只读操作设置限时授权，并在重连后查看下一步。[应用协议](docs/protocol.md#任务计划与澄清) |
 | **任务与 Agent 调度** | SQLite 持久化任务、审批、交付物和 Run 依赖图，支持并发调度、期限和断线续读。[Run 协议](docs/protocol.md#持久-run-dag) |
 | **模型与上下文** | OpenAI、Anthropic、Gemini 支持 Token 预检和自动上下文压缩。会话可检索工作区长期记忆。[会话上下文](docs/context.md) · [工作区记忆](docs/memory.md) |
 | **工具与外部 Agent** | 兼容两代 MCP，包括 Tasks、OAuth 和资源监听，并接入 ACP 和 A2A。[MCP 兼容与配置](docs/mcp.md) |

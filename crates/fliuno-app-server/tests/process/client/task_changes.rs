@@ -158,6 +158,7 @@ fn task_change_replay_keeps_scope_pages_and_watermarks_across_restart() {
                 approval_limit: 20,
                 approval_target_bytes: None,
                 recent_task_limit: None,
+                include_actions: false,
             },
             |_| {},
         )
@@ -349,6 +350,7 @@ fn task_summary_changes_catch_up_from_a_pinned_window_and_then_follow_live() {
                 approval_limit: 20,
                 approval_target_bytes: None,
                 recent_task_limit: None,
+                include_actions: false,
             },
             |_| {},
         )
@@ -543,6 +545,7 @@ fn summary_revision_replay_crosses_upgrade_and_skips_unchanged_commits() {
                 approval_limit: 1,
                 approval_target_bytes: None,
                 recent_task_limit: None,
+                include_actions: false,
             },
             |_| {},
         )

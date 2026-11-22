@@ -100,3 +100,23 @@ python scripts/benchmark_memory.py PATH_TO_CURRENT_APP_SERVER --split calibratio
 ```
 
 验收复现使用 `--split holdout_v2 --repetitions 20 --profile multilingual_e5_en_zh_v1 --minimum-similarity 0.24` 和相同的模型文件。基线同样用 `--split holdout_v2 --repetitions 20`，省略所有模型参数。
+
+## 按修订选择记忆
+
+`initialize.capabilities.taskExplicitMemory` 表示支持 `context.memorySelection`。传入 `[{"id":"<memory-id>","revision":2}]` 可选定此工作区的 1～8 条活动记忆。`session/context` 使用同一 `options.memorySelection` 预览。提交时复核 revision 并保存正文，任务记录中的 `matchedBy` 为 `explicit`。
+
+显式选择跳过词法检索和 Embedding 请求。这些正文计入 16 KiB 记忆上限与整个上下文的 `maxBytes`。选择超限会返回错误。Provider 预检可进一步精简历史，但不会在重试时省略显式选择的记忆。工作区记忆被更新或删除后，带旧修订的新任务会收到错误，已创建任务保留其快照。
+
+自动注入可以用 `context.memoryRecencyHalfLifeDays` 给近期更新的记忆少量排序加权。它不影响显式选择，也不会让未通过相关性筛选的记录进入候选。旧记录至少保留原相关度分数的 80%。使用 `task/contextAttribution` 可查看任务冻结的记忆修订和命中来源。
+
+### 0.0.6 独立样本复验
+
+`holdout_v3` 增加中英改写、单字符键和无答案问题。固定沿用 E5 profile 和 0.24 阈值，每组 12 题、144 次计时。自动注入未达到之前设定的最多 1/12 含误注入门槛。需要精确控制来源时，可选定修订或关闭自动注入。
+
+| 配置 | 命中 | 含误注入 | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| `v0.0.5` 混合检索 | 5/7 | 4/12 | 16.97 ms | 22.47 ms |
+| `v0.0.6` 混合检索 | 5/7 | 4/12 | 18.62 ms | 22.74 ms |
+| `v0.0.6` 词法检索 | 2/7 | 1/12 | 6.22 ms | 9.09 ms |
+
+这些是同一台 Windows 主机调试构建的实测值，测量时同机也运行构建任务。复测可沿用上一节命令，将样本改成 `--split holdout_v3 --repetitions 12`。工作区隔离与修订失效由进程测试覆盖。

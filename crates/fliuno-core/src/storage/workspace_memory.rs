@@ -14,7 +14,7 @@ pub(super) use vectors::migrate as migrate_vectors;
 const MAX_WORKSPACE_MEMORIES: i64 = 4096;
 const MAX_CONTEXT_MEMORY_CANDIDATES: usize = 4096;
 const MAX_CONTEXT_MEMORY_TERMS: usize = 64;
-const MAX_CONTEXT_MEMORY_RECORDS: usize = 8;
+const MAX_CONTEXT_MEMORY_RECORDS: usize = MAX_EXPLICIT_CONTEXT_MEMORIES;
 const MAX_CONTEXT_MEMORY_BYTES: usize = 16 * 1024;
 
 /// Host-supplied retrieval result, scoped to the same workspace as the task.
@@ -246,6 +246,17 @@ pub(super) fn audit_context_access(
     Ok(())
 }
 
+fn freeze(memory: &WorkspaceMemory, matched_by: ContextMemoryMatch) -> ContextMemory {
+    ContextMemory {
+        id: memory.id.clone(),
+        key: memory.key.clone(),
+        content: memory.content.clone(),
+        revision: memory.revision,
+        source_task_id: memory.source_task_id.clone(),
+        matched_by: Some(matched_by),
+    }
+}
+
 impl Kernel {
     pub(crate) fn inject_context_memories(
         &self,
@@ -260,8 +271,10 @@ impl Kernel {
         {
             return Ok(None);
         }
-        let query_terms = lexical_terms(input, MAX_CONTEXT_MEMORY_TERMS);
-        if input.trim().is_empty() && !matches!(query, TaskMemoryQuery::Semantic { .. }) {
+        if context.options.memory_selection.is_none()
+            && input.trim().is_empty()
+            && !matches!(query, TaskMemoryQuery::Semantic { .. })
+        {
             return Ok(None);
         }
 
@@ -274,6 +287,48 @@ impl Kernel {
             )
             .optional()?;
         let workspace_id = workspace_id.ok_or_else(|| Error::NotFound("session".into()))?;
+        if let Some(selection) = &context.options.memory_selection {
+            let mut load = connection.prepare(&format!(
+                "SELECT {MEMORY_COLUMNS} FROM workspace_memory_records
+                 WHERE workspace_id=?1 AND id=?2 AND deleted_at_ms IS NULL"
+            ))?;
+            let mut memories = Vec::with_capacity(selection.len());
+            let mut bytes = 0usize;
+            for item in selection {
+                let memory = load
+                    .query_row(params![workspace_id, item.id], memory_row)
+                    .optional()?
+                    .ok_or_else(|| {
+                        Error::NotFound("selected workspace memory is unavailable".into())
+                    })?;
+                if memory.revision != item.revision {
+                    return Err(Error::Conflict(
+                        "selected workspace memory revision changed".into(),
+                    ));
+                }
+                bytes += memory.content.len();
+                if bytes > MAX_CONTEXT_MEMORY_BYTES {
+                    return Err(Error::Invalid(
+                        "selected memory exceeds 16 KiB; choose fewer records".into(),
+                    ));
+                }
+                context
+                    .memories
+                    .push(freeze(&memory, ContextMemoryMatch::Explicit));
+                memories.push(memory);
+            }
+            if crate::json_size(context)? > context.options.max_bytes as usize {
+                return Err(Error::Invalid(
+                    "selected memory exceeds maxBytes; reduce history or choose fewer records"
+                        .into(),
+                ));
+            }
+            return Ok(Some(ContextMemoryAccess {
+                workspace_id,
+                memories,
+            }));
+        }
+        let query_terms = lexical_terms(input, MAX_CONTEXT_MEMORY_TERMS);
         let (semantic, fallback) = rank_task_vectors(connection, &workspace_id, query)?;
         context.memory_fallback = fallback;
         if fallback.is_some() && crate::json_size(context)? > context.options.max_bytes as usize {
@@ -324,7 +379,16 @@ impl Kernel {
                 (score, matched_by, memory)
             })
             .collect();
-        if !semantic.is_empty() {
+        if let Some(days) = context.options.memory_recency_half_life_days {
+            let now = now_ms().max(0) as u64;
+            let half_life_ms = f64::from(days) * 86_400_000.0;
+            for (score, _, memory) in &mut candidates {
+                let half_lives = now.saturating_sub(memory.updated_at_ms) as f64 / half_life_ms;
+                // Even old records retain 80% of their relevance score.
+                *score = (*score as f64 * (0.8 + 0.2 * (-half_lives).exp2())).round() as usize;
+            }
+        }
+        if !semantic.is_empty() || context.options.memory_recency_half_life_days.is_some() {
             candidates.sort_by_key(|entry| Reverse(entry.0));
         }
 
@@ -337,15 +401,7 @@ impl Kernel {
             if selected_bytes + memory.content.len() > MAX_CONTEXT_MEMORY_BYTES {
                 continue;
             }
-            let item = ContextMemory {
-                id: memory.id.clone(),
-                key: memory.key.clone(),
-                content: memory.content.clone(),
-                revision: memory.revision,
-                source_task_id: memory.source_task_id.clone(),
-                matched_by: Some(matched_by),
-            };
-            context.memories.push(item);
+            context.memories.push(freeze(&memory, matched_by));
             if crate::json_size(context)? > context.options.max_bytes as usize {
                 context.memories.pop();
                 continue;

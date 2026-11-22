@@ -63,6 +63,10 @@
           "format": "uint32",
           "minimum": 1,
           "maximum": 50
+        },
+        "includeActions": {
+          "description": "Derive actions for the recent tasks at the same snapshot watermark.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -140,6 +144,10 @@
           "format": "uint32",
           "minimum": 1,
           "maximum": 50
+        },
+        "includeActions": {
+          "description": "Derive actions for the recent tasks at the same snapshot watermark.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false
@@ -255,6 +263,44 @@
       "additionalProperties": false,
       "required": [
         "workspaceId"
+      ]
+    },
+    "workspace/getInstructions": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceIdParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "workspace/setInstructions": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceSetInstructionsParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "expectedRevision",
+        "text"
       ]
     },
     "workspace/list": {
@@ -862,6 +908,40 @@
               "description": "Disable workspace memory retrieval without discarding session history.",
               "type": "boolean"
             },
+            "enableInteraction": {
+              "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "instructionsRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memorySelection": {
+              "description": "Select exactly these revisions, without keyword or embedding retrieval.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ContextMemoryRef"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "memoryRecencyHalfLifeDays": {
+              "description": "Optional freshness weighting for automatically selected memories.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 3650
+            },
             "maxTurns": {
               "type": "integer",
               "format": "uint32",
@@ -938,6 +1018,24 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextMemoryRef": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision"
           ]
         },
         "ContextSelection": {
@@ -1633,6 +1731,40 @@
               "description": "Disable workspace memory retrieval without discarding session history.",
               "type": "boolean"
             },
+            "enableInteraction": {
+              "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "instructionsRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memorySelection": {
+              "description": "Select exactly these revisions, without keyword or embedding retrieval.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ContextMemoryRef"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "memoryRecencyHalfLifeDays": {
+              "description": "Optional freshness weighting for automatically selected memories.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 3650
+            },
             "maxTurns": {
               "type": "integer",
               "format": "uint32",
@@ -1709,6 +1841,24 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextMemoryRef": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision"
           ]
         },
         "ContextSelection": {
@@ -1850,6 +2000,40 @@
               "description": "Disable workspace memory retrieval without discarding session history.",
               "type": "boolean"
             },
+            "enableInteraction": {
+              "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "instructionsRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memorySelection": {
+              "description": "Select exactly these revisions, without keyword or embedding retrieval.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ContextMemoryRef"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "memoryRecencyHalfLifeDays": {
+              "description": "Optional freshness weighting for automatically selected memories.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 3650
+            },
             "maxTurns": {
               "type": "integer",
               "format": "uint32",
@@ -1926,6 +2110,24 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextMemoryRef": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision"
           ]
         },
         "ContextSelection": {
@@ -2301,6 +2503,40 @@
               "description": "Disable workspace memory retrieval without discarding session history.",
               "type": "boolean"
             },
+            "enableInteraction": {
+              "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "instructionsRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memorySelection": {
+              "description": "Select exactly these revisions, without keyword or embedding retrieval.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ContextMemoryRef"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "memoryRecencyHalfLifeDays": {
+              "description": "Optional freshness weighting for automatically selected memories.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 3650
+            },
             "maxTurns": {
               "type": "integer",
               "format": "uint32",
@@ -2377,6 +2613,24 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextMemoryRef": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision"
           ]
         },
         "ContextSelection": {
@@ -2724,6 +2978,192 @@
           ]
         }
       }
+    },
+    "task/steer": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskSteerParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        },
+        "expectedSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "instruction": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "clientRequestId",
+        "expectedSequence",
+        "instruction"
+      ]
+    },
+    "task/getSteering": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "task/getPlan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "task/contextAttribution": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "task/reconcile": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskReconcileParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/AgentTaskState"
+        },
+        "operator": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "checkId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "state",
+        "operator",
+        "evidence"
+      ],
+      "$defs": {
+        "AgentTaskState": {
+          "description": "Neutral remote execution evidence, separate from the local task lifecycle.",
+          "type": "string",
+          "enum": [
+            "submitted",
+            "working",
+            "completed",
+            "failed",
+            "cancelled",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        }
+      }
+    },
+    "task/getReconciliation": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskIdParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "artifacts/linkRevision": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactLinkRevisionParams",
+      "type": "object",
+      "properties": {
+        "previous": {
+          "$ref": "#/$defs/ArtifactGetParams"
+        },
+        "current": {
+          "$ref": "#/$defs/ArtifactGetParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "previous",
+        "current"
+      ],
+      "$defs": {
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
+          ]
+        }
+      }
+    },
+    "artifacts/getRevision": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactGetParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "artifactId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "artifactId"
+      ]
     },
     "task/get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5954,6 +6394,16 @@
         "TaskContext": {
           "type": "object",
           "properties": {
+            "instructions": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkspaceInstructions"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "options": {
               "$ref": "#/$defs/ContextOptions"
             },
@@ -6015,6 +6465,28 @@
             "omittedTurns"
           ]
         },
+        "WorkspaceInstructions": {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "workspaceId",
+            "revision",
+            "text"
+          ]
+        },
         "ContextOptions": {
           "type": "object",
           "properties": {
@@ -6025,6 +6497,40 @@
             "disableMemory": {
               "description": "Disable workspace memory retrieval without discarding session history.",
               "type": "boolean"
+            },
+            "enableInteraction": {
+              "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "instructionsRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memorySelection": {
+              "description": "Select exactly these revisions, without keyword or embedding retrieval.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ContextMemoryRef"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "memoryRecencyHalfLifeDays": {
+              "description": "Optional freshness weighting for automatically selected memories.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 3650
             },
             "maxTurns": {
               "type": "integer",
@@ -6102,6 +6608,24 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextMemoryRef": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision"
           ]
         },
         "ContextSelection": {
@@ -6425,7 +6949,8 @@
           "enum": [
             "keyword",
             "semantic",
-            "both"
+            "both",
+            "explicit"
           ]
         },
         "WorkspaceMemoryFallback": {
@@ -6997,6 +7522,2111 @@
           ]
         }
       }
+    },
+    "TaskSteeringState": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskSteeringState",
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/TaskStatus"
+        },
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "receipts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskSteeringReceipt"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "throughSequence",
+        "receipts"
+      ],
+      "$defs": {
+        "TaskStatus": {
+          "type": "string",
+          "enum": [
+            "running",
+            "waiting_approval",
+            "waiting_input",
+            "interrupted",
+            "completed",
+            "cancelled",
+            "failed"
+          ]
+        },
+        "TaskSteeringReceipt": {
+          "type": "object",
+          "properties": {
+            "clientRequestId": {
+              "type": "string"
+            },
+            "acceptedSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "attachedStep": {
+              "description": "Step whose durable model input contains the instruction.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "clientRequestId",
+            "acceptedSequence"
+          ]
+        }
+      }
+    },
+    "TaskPlan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskPlan",
+      "type": "object",
+      "properties": {
+        "step": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskPlanStep"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "step",
+        "steps"
+      ],
+      "$defs": {
+        "TaskPlanStep": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskPlanStepStatus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "status"
+          ]
+        },
+        "TaskPlanStepStatus": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ]
+        }
+      }
+    },
+    "WorkspaceInstructions": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceInstructions",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "revision",
+        "text"
+      ]
+    },
+    "TaskContextAttribution": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskContextAttribution",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "modelSteps": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextSummarySource"
+          }
+        },
+        "omittedHistory": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "summarizedHistory": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextSummarySource"
+          }
+        },
+        "memories": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextMemoryAttribution"
+          }
+        },
+        "instructionsRevision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "instructionsBytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "normalizedInputBytes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelBudgetInputBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latestPreflight": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Event"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latestBudgetRejection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Event"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "modelSteps",
+        "history",
+        "omittedHistory",
+        "summarizedHistory",
+        "memories",
+        "instructionsBytes"
+      ],
+      "$defs": {
+        "ContextSummarySource": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "completionSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "completionSequence"
+          ]
+        },
+        "ContextMemoryAttribution": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "matchedBy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextMemoryMatch"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceTaskId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "normalizedBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "omittedForBudget": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision",
+            "normalizedBytes",
+            "omittedForBudget"
+          ]
+        },
+        "ContextMemoryMatch": {
+          "type": "string",
+          "enum": [
+            "keyword",
+            "semantic",
+            "both",
+            "explicit"
+          ]
+        },
+        "ModelBudgetInputBytes": {
+          "description": "Compact JSON sizes of independent input fragments before adapter encoding.\nThey are useful for attribution but do not sum to the wire byte or token count.",
+          "type": "object",
+          "properties": {
+            "history": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memory": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentText": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentMedia": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolDefinitions": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolResults": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "providerReplay": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "history",
+            "memory",
+            "currentText",
+            "currentMedia",
+            "toolDefinitions",
+            "toolResults",
+            "providerReplay"
+          ]
+        },
+        "Event": {
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "data": {
+              "$ref": "#/$defs/EventKind"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sequence",
+            "taskId",
+            "data"
+          ]
+        },
+        "EventKind": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_started"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_started"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "agentId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_session_opened"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "sessionId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "sessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_authentication_changed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "state": {
+                  "$ref": "#/$defs/AgentAuthenticationState"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_update"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "update": true
+              },
+              "required": [
+                "type",
+                "runId",
+                "update"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_remote_task_updated"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "task": {
+                  "$ref": "#/$defs/AgentRemoteTask"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "task"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_remote_continuation_sending"
+                },
+                "runId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_remote_task_checked"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "checkId": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "$ref": "#/$defs/RemoteTaskCheckOutcome"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "checkId",
+                "outcome"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_requested"
+                },
+                "approval": {
+                  "$ref": "#/$defs/AgentApproval"
+                }
+              },
+              "required": [
+                "type",
+                "approval"
+              ]
+            },
+            {
+              "description": "Durable intent; delivery to the peer is not guaranteed after a crash.",
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_resolved"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "decision": {
+                  "$ref": "#/$defs/ApprovalDecision"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "approvalId",
+                "decision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_approval_closed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "approvalId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "approvalId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_finished"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "stopReason": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/AgentStopReason"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "outcomeUnknown": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "outcomeUnknown"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_requested"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "operation": {
+                  "$ref": "#/$defs/AgentHostTool"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "operation"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_started"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "requestId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "agent_host_tool_completed"
+                },
+                "runId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                },
+                "status": {
+                  "$ref": "#/$defs/AgentHostToolStatus"
+                },
+                "output": true,
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "runId",
+                "requestId",
+                "status"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_started"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_memory_omitted_for_budget"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "memoryCount": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep",
+                "memoryCount"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_tool_outputs_reduced"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "outputCount": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep",
+                "outputCount"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_compaction_scheduled"
+                },
+                "rejectedStep": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "rejectedStep"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "context_compacted"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "sources": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ContextSummarySource"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "sources"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_usage_reported"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "usage": {
+                  "$ref": "#/$defs/ModelUsage"
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "usage"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_budget_rejected"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "summarization": {
+                  "type": "boolean"
+                },
+                "report": {
+                  "$ref": "#/$defs/ModelBudgetRejection"
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "summarization",
+                "report"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_preflight_observed"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "countCoverage": {
+                  "$ref": "#/$defs/ModelInputCountCoverage"
+                },
+                "estimatedInputTokens": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "safetyMarginTokens": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "usageStatus": {
+                  "$ref": "#/$defs/ModelPreflightUsageStatus"
+                },
+                "observedInputTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "usageProvider": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "undercountTokens": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "marginExceeded": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "provider",
+                "model",
+                "countCoverage",
+                "estimatedInputTokens",
+                "safetyMarginTokens",
+                "usageStatus"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_steering_accepted"
+                },
+                "clientRequestId": {
+                  "type": "string"
+                },
+                "expectedSequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "instruction": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "clientRequestId",
+                "expectedSequence",
+                "instruction"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_steering_attached"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "clientRequestIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "clientRequestIds"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_outcome_reconciled"
+                },
+                "reconciliation": {
+                  "$ref": "#/$defs/TaskReconciliation"
+                }
+              },
+              "required": [
+                "type",
+                "reconciliation"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "artifact_revision_linked"
+                },
+                "revision": {
+                  "$ref": "#/$defs/ArtifactRevision"
+                }
+              },
+              "required": [
+                "type",
+                "revision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_plan_updated"
+                },
+                "plan": {
+                  "$ref": "#/$defs/TaskPlan"
+                }
+              },
+              "required": [
+                "type",
+                "plan"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_authorized_for_interaction"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "callId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "callId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_draft_saved"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "approval_requested"
+                },
+                "approval": {
+                  "$ref": "#/$defs/Approval"
+                }
+              },
+              "required": [
+                "type",
+                "approval"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "approval_resolved"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "decision": {
+                  "$ref": "#/$defs/ApprovalDecision"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "decision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_authorized_by_policy"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "ruleId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "callId",
+                "ruleId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_completed"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "required": [
+                "type",
+                "callId",
+                "output"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_started"
+                },
+                "call": {
+                  "$ref": "#/$defs/ToolCall"
+                }
+              },
+              "required": [
+                "type",
+                "call"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_input_required"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "requests": true,
+                "round": {
+                  "type": "integer",
+                  "format": "uint8",
+                  "minimum": 0,
+                  "maximum": 255
+                }
+              },
+              "required": [
+                "type",
+                "callId",
+                "requests",
+                "round"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_input_resolved"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "requestId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "callId",
+                "requestId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_outcome_unknown"
+                },
+                "callId": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "output": true
+              },
+              "required": [
+                "type",
+                "callId",
+                "message"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "artifact_created"
+                },
+                "artifactId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "artifactId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_completed"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_cancelled"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_failed"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "message"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_interrupted"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model_outcome_unknown"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_resumed"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          ]
+        },
+        "AgentAuthenticationState": {
+          "description": "Credential-free evidence from an external agent's authentication stage.",
+          "type": "string",
+          "enum": [
+            "required",
+            "terminal_required",
+            "method_unavailable",
+            "started",
+            "succeeded",
+            "rejected",
+            "cancelled",
+            "outcome_unknown"
+          ]
+        },
+        "AgentRemoteTask": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "contextId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "state"
+          ]
+        },
+        "AgentTaskState": {
+          "description": "Neutral remote execution evidence, separate from the local task lifecycle.",
+          "type": "string",
+          "enum": [
+            "submitted",
+            "working",
+            "completed",
+            "failed",
+            "cancelled",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        },
+        "RemoteTaskCheckOutcome": {
+          "description": "A point-in-time check, separate from the original run's recorded outcome.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "observed"
+                },
+                "state": {
+                  "$ref": "#/$defs/AgentTaskState"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "status",
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "unavailable"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "identity_mismatch"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "const": "state_conflict"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "AgentApproval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "runId": {
+              "type": "string"
+            },
+            "permissionId": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/AgentApprovalSource",
+              "default": "agent_permission"
+            },
+            "request": {
+              "description": "Untrusted, read-only peer context. Never interpreted as host authority."
+            },
+            "allowOnceAvailable": {
+              "type": "boolean"
+            },
+            "expiresAtUnixMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "runId",
+            "permissionId",
+            "request",
+            "allowOnceAvailable",
+            "expiresAtUnixMs"
+          ]
+        },
+        "AgentApprovalSource": {
+          "type": "string",
+          "enum": [
+            "agent_permission",
+            "host_tool"
+          ]
+        },
+        "ApprovalDecision": {
+          "type": "string",
+          "enum": [
+            "allow_once",
+            "deny"
+          ]
+        },
+        "AgentStopReason": {
+          "type": "string",
+          "enum": [
+            "end_turn",
+            "refusal",
+            "max_tokens",
+            "max_turn_requests",
+            "cancelled",
+            "failed",
+            "rejected",
+            "input_required",
+            "auth_required",
+            "remote_preflight_failed"
+          ]
+        },
+        "AgentHostTool": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "status": {
+              "$ref": "#/$defs/AgentHostToolStatus"
+            },
+            "output": true,
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "call",
+            "status"
+          ]
+        },
+        "ToolCall": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "arguments": true
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "arguments"
+          ]
+        },
+        "AgentHostToolStatus": {
+          "type": "string",
+          "enum": [
+            "awaiting_approval",
+            "approved",
+            "running",
+            "succeeded",
+            "denied",
+            "failed",
+            "outcome_unknown",
+            "closed"
+          ]
+        },
+        "ModelUsage": {
+          "description": "Token counts reported by the provider for one model step.",
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "inputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "outputTokens": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "cachedInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "reasoningOutputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "inputTokens",
+            "outputTokens"
+          ]
+        },
+        "ModelBudgetRejection": {
+          "description": "Numeric evidence for a request rejected before dispatching generation.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ModelBudgetLimit"
+            },
+            "limit": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "observed": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "observedIsLowerBound": {
+              "type": "boolean"
+            },
+            "transportLimitBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "serializedGenerationBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "budget": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelBudget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "normalizedInputBytes": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelBudgetInputBytes"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "limit",
+            "observed",
+            "observedIsLowerBound",
+            "transportLimitBytes"
+          ]
+        },
+        "ModelBudgetLimit": {
+          "type": "string",
+          "enum": [
+            "local_json_bytes",
+            "provider_input_tokens",
+            "generation_request_bytes",
+            "count_request_bytes"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        },
+        "ModelPreflightUsageStatus": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "missing",
+            "provider_mismatch"
+          ]
+        },
+        "TaskReconciliation": {
+          "type": "object",
+          "properties": {
+            "runId": {
+              "type": "string"
+            },
+            "recordedAtMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "review": {
+              "$ref": "#/$defs/TaskReconcileParams"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "runId",
+            "recordedAtMs",
+            "review"
+          ]
+        },
+        "TaskReconcileParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            },
+            "operator": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "checkId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "state",
+            "operator",
+            "evidence"
+          ]
+        },
+        "ArtifactRevision": {
+          "type": "object",
+          "properties": {
+            "previous": {
+              "$ref": "#/$defs/ArtifactGetParams"
+            },
+            "current": {
+              "$ref": "#/$defs/ArtifactGetParams"
+            },
+            "previousDigest": {
+              "$ref": "#/$defs/ArtifactDigest"
+            },
+            "currentDigest": {
+              "$ref": "#/$defs/ArtifactDigest"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "previous",
+            "current",
+            "previousDigest",
+            "currentDigest"
+          ]
+        },
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
+          ]
+        },
+        "ArtifactDigest": {
+          "type": "object",
+          "properties": {
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "contentBytes",
+            "sha256"
+          ]
+        },
+        "TaskPlan": {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TaskPlanStep"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "step",
+            "steps"
+          ]
+        },
+        "TaskPlanStep": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskPlanStepStatus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "status"
+          ]
+        },
+        "TaskPlanStepStatus": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ]
+        },
+        "Approval": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "call": {
+              "$ref": "#/$defs/ToolCall"
+            },
+            "authority": {
+              "description": "Absent in legacy snapshots, which cannot authorize a new execution.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "executionPlan": {
+              "description": "Bounded, host-produced review data frozen alongside this call."
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "taskId",
+            "call"
+          ]
+        }
+      }
+    },
+    "TaskReconciliation": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskReconciliation",
+      "type": "object",
+      "properties": {
+        "runId": {
+          "type": "string"
+        },
+        "recordedAtMs": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "review": {
+          "$ref": "#/$defs/TaskReconcileParams"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "recordedAtMs",
+        "review"
+      ],
+      "$defs": {
+        "TaskReconcileParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            },
+            "operator": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "checkId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "state",
+            "operator",
+            "evidence"
+          ]
+        },
+        "AgentTaskState": {
+          "description": "Neutral remote execution evidence, separate from the local task lifecycle.",
+          "type": "string",
+          "enum": [
+            "submitted",
+            "working",
+            "completed",
+            "failed",
+            "cancelled",
+            "rejected",
+            "input_required",
+            "auth_required"
+          ]
+        }
+      }
+    },
+    "ArtifactRevision": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ArtifactRevision",
+      "type": "object",
+      "properties": {
+        "previous": {
+          "$ref": "#/$defs/ArtifactGetParams"
+        },
+        "current": {
+          "$ref": "#/$defs/ArtifactGetParams"
+        },
+        "previousDigest": {
+          "$ref": "#/$defs/ArtifactDigest"
+        },
+        "currentDigest": {
+          "$ref": "#/$defs/ArtifactDigest"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "previous",
+        "current",
+        "previousDigest",
+        "currentDigest"
+      ],
+      "$defs": {
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
+          ]
+        },
+        "ArtifactDigest": {
+          "type": "object",
+          "properties": {
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "contentBytes",
+            "sha256"
+          ]
+        }
+      }
+    },
+    "TaskSteeringReceipt": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskSteeringReceipt",
+      "type": "object",
+      "properties": {
+        "clientRequestId": {
+          "type": "string"
+        },
+        "acceptedSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "attachedStep": {
+          "description": "Step whose durable model input contains the instruction.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "clientRequestId",
+        "acceptedSequence"
+      ]
     },
     "Run": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8714,6 +11344,15 @@
             "$ref": "#/$defs/TaskSummary"
           },
           "maxItems": 50
+        },
+        "nextActions": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/WorkNextAction"
+          }
         }
       },
       "additionalProperties": false,
@@ -8967,6 +11606,116 @@
               ]
             }
           ]
+        },
+        "WorkNextAction": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/WorkActionKind"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "kind"
+          ]
+        },
+        "WorkActionKind": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "review_approval"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "answer_input"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "recover"
+                },
+                "disposition": {
+                  "$ref": "#/$defs/TaskResumeDisposition"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "disposition"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "reconcile"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "review_budget"
+                },
+                "rejectionSequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "rejectionSequence"
+              ]
+            }
+          ]
+        },
+        "TaskResumeDisposition": {
+          "description": "Current policy decision for an explicit resume. It reserves no work.",
+          "type": "string",
+          "enum": [
+            "ready",
+            "retry_uncertain_model_step",
+            "not_interrupted",
+            "remote_continuation",
+            "agent_already_started",
+            "agent_unavailable",
+            "agent_registration_changed",
+            "tool_outcome_unknown",
+            "model_step_budget_exhausted"
+          ]
         }
       }
     },
@@ -9077,6 +11826,16 @@
       "title": "TaskContext",
       "type": "object",
       "properties": {
+        "instructions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkspaceInstructions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "options": {
           "$ref": "#/$defs/ContextOptions"
         },
@@ -9138,6 +11897,28 @@
         "omittedTurns"
       ],
       "$defs": {
+        "WorkspaceInstructions": {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "workspaceId",
+            "revision",
+            "text"
+          ]
+        },
         "ContextOptions": {
           "type": "object",
           "properties": {
@@ -9148,6 +11929,40 @@
             "disableMemory": {
               "description": "Disable workspace memory retrieval without discarding session history.",
               "type": "boolean"
+            },
+            "enableInteraction": {
+              "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "instructionsRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memorySelection": {
+              "description": "Select exactly these revisions, without keyword or embedding retrieval.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ContextMemoryRef"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "memoryRecencyHalfLifeDays": {
+              "description": "Optional freshness weighting for automatically selected memories.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 3650
             },
             "maxTurns": {
               "type": "integer",
@@ -9225,6 +12040,24 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ContextMemoryRef": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision"
           ]
         },
         "ContextSelection": {
@@ -9566,7 +12399,8 @@
           "enum": [
             "keyword",
             "semantic",
-            "both"
+            "both",
+            "explicit"
           ]
         },
         "WorkspaceMemoryFallback": {
@@ -9858,7 +12692,8 @@
           "enum": [
             "keyword",
             "semantic",
-            "both"
+            "both",
+            "explicit"
           ]
         }
       }
@@ -14476,6 +17311,143 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "task_steering_accepted"
+                },
+                "clientRequestId": {
+                  "type": "string"
+                },
+                "expectedSequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "instruction": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "clientRequestId",
+                "expectedSequence",
+                "instruction"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_steering_attached"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "clientRequestIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "clientRequestIds"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_outcome_reconciled"
+                },
+                "reconciliation": {
+                  "$ref": "#/$defs/TaskReconciliation"
+                }
+              },
+              "required": [
+                "type",
+                "reconciliation"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "artifact_revision_linked"
+                },
+                "revision": {
+                  "$ref": "#/$defs/ArtifactRevision"
+                }
+              },
+              "required": [
+                "type",
+                "revision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_plan_updated"
+                },
+                "plan": {
+                  "$ref": "#/$defs/TaskPlan"
+                }
+              },
+              "required": [
+                "type",
+                "plan"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_authorized_for_interaction"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "callId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "callId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_draft_saved"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "approval_requested"
                 },
                 "approval": {
@@ -15236,6 +18208,161 @@
             "matched",
             "missing",
             "provider_mismatch"
+          ]
+        },
+        "TaskReconciliation": {
+          "type": "object",
+          "properties": {
+            "runId": {
+              "type": "string"
+            },
+            "recordedAtMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "review": {
+              "$ref": "#/$defs/TaskReconcileParams"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "runId",
+            "recordedAtMs",
+            "review"
+          ]
+        },
+        "TaskReconcileParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            },
+            "operator": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "checkId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "state",
+            "operator",
+            "evidence"
+          ]
+        },
+        "ArtifactRevision": {
+          "type": "object",
+          "properties": {
+            "previous": {
+              "$ref": "#/$defs/ArtifactGetParams"
+            },
+            "current": {
+              "$ref": "#/$defs/ArtifactGetParams"
+            },
+            "previousDigest": {
+              "$ref": "#/$defs/ArtifactDigest"
+            },
+            "currentDigest": {
+              "$ref": "#/$defs/ArtifactDigest"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "previous",
+            "current",
+            "previousDigest",
+            "currentDigest"
+          ]
+        },
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
+          ]
+        },
+        "ArtifactDigest": {
+          "type": "object",
+          "properties": {
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "contentBytes",
+            "sha256"
+          ]
+        },
+        "TaskPlan": {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TaskPlanStep"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "step",
+            "steps"
+          ]
+        },
+        "TaskPlanStep": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskPlanStepStatus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "status"
+          ]
+        },
+        "TaskPlanStepStatus": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
           ]
         },
         "Approval": {
@@ -16660,6 +19787,143 @@
               "properties": {
                 "type": {
                   "type": "string",
+                  "const": "task_steering_accepted"
+                },
+                "clientRequestId": {
+                  "type": "string"
+                },
+                "expectedSequence": {
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0
+                },
+                "instruction": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "clientRequestId",
+                "expectedSequence",
+                "instruction"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_steering_attached"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                },
+                "clientRequestIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "type",
+                "step",
+                "clientRequestIds"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_outcome_reconciled"
+                },
+                "reconciliation": {
+                  "$ref": "#/$defs/TaskReconciliation"
+                }
+              },
+              "required": [
+                "type",
+                "reconciliation"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "artifact_revision_linked"
+                },
+                "revision": {
+                  "$ref": "#/$defs/ArtifactRevision"
+                }
+              },
+              "required": [
+                "type",
+                "revision"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_plan_updated"
+                },
+                "plan": {
+                  "$ref": "#/$defs/TaskPlan"
+                }
+              },
+              "required": [
+                "type",
+                "plan"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "tool_authorized_for_interaction"
+                },
+                "approvalId": {
+                  "type": "string"
+                },
+                "callId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "type",
+                "approvalId",
+                "callId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "task_draft_saved"
+                },
+                "step": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "type",
+                "step"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
                   "const": "approval_requested"
                 },
                 "approval": {
@@ -17420,6 +20684,161 @@
             "matched",
             "missing",
             "provider_mismatch"
+          ]
+        },
+        "TaskReconciliation": {
+          "type": "object",
+          "properties": {
+            "runId": {
+              "type": "string"
+            },
+            "recordedAtMs": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "review": {
+              "$ref": "#/$defs/TaskReconcileParams"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "runId",
+            "recordedAtMs",
+            "review"
+          ]
+        },
+        "TaskReconcileParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/AgentTaskState"
+            },
+            "operator": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "string"
+            },
+            "checkId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "state",
+            "operator",
+            "evidence"
+          ]
+        },
+        "ArtifactRevision": {
+          "type": "object",
+          "properties": {
+            "previous": {
+              "$ref": "#/$defs/ArtifactGetParams"
+            },
+            "current": {
+              "$ref": "#/$defs/ArtifactGetParams"
+            },
+            "previousDigest": {
+              "$ref": "#/$defs/ArtifactDigest"
+            },
+            "currentDigest": {
+              "$ref": "#/$defs/ArtifactDigest"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "previous",
+            "current",
+            "previousDigest",
+            "currentDigest"
+          ]
+        },
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
+          ]
+        },
+        "ArtifactDigest": {
+          "type": "object",
+          "properties": {
+            "contentBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "sha256": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "contentBytes",
+            "sha256"
+          ]
+        },
+        "TaskPlan": {
+          "type": "object",
+          "properties": {
+            "step": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TaskPlanStep"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "step",
+            "steps"
+          ]
+        },
+        "TaskPlanStep": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskPlanStepStatus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "status"
+          ]
+        },
+        "TaskPlanStepStatus": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
           ]
         },
         "Approval": {

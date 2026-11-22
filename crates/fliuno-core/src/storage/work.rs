@@ -204,16 +204,78 @@ impl Kernel {
             .query_row(params![scope, owner], |row| read_counts(row, 0))
             .optional()?
             .unwrap_or_default();
-        let recent_tasks = request
+        let preview_limit = request
             .recent_task_limit
+            .or(request.include_actions.then_some(25));
+        let previews = preview_limit
             .map(|limit| recent_tasks(&tx, request, limit))
+            .transpose()?;
+        let next_actions = request
+            .include_actions
+            .then(|| self.work_actions(previews.as_deref().unwrap_or_default()))
             .transpose()?;
         tx.commit()?;
         Ok(WorkSnapshot {
             task_counts,
             approvals,
-            recent_tasks,
+            recent_tasks: if request.recent_task_limit.is_some() {
+                previews
+            } else {
+                None
+            },
+            next_actions,
         })
+    }
+
+    fn work_actions(&self, tasks: &[TaskSummary]) -> Result<Vec<WorkNextAction>> {
+        let mut actions = Vec::new();
+        for task in tasks {
+            let kind = if task.pending_approval_count > 0 {
+                WorkActionKind::ReviewApproval
+            } else if task.status == TaskStatus::WaitingInput {
+                WorkActionKind::AnswerInput
+            } else if task.agent_outcome_unknown && self.read_reconciliation(&task.id)?.is_none() {
+                WorkActionKind::Reconcile
+            } else if task.status == TaskStatus::Interrupted {
+                let disposition = self.get_task_resume_status(&task.id)?.disposition;
+                if matches!(
+                    disposition,
+                    TaskResumeDisposition::Ready | TaskResumeDisposition::RetryUncertainModelStep
+                ) {
+                    WorkActionKind::Recover { disposition }
+                } else {
+                    continue;
+                }
+            } else if task.status == TaskStatus::Failed {
+                let sequence = self
+                    .db
+                    .prepare_cached(
+                        "SELECT rejection_sequence FROM task_context_evidence WHERE task_id=?1",
+                    )?
+                    .query_row([&task.id], |row| row.get::<_, Option<i64>>(0))
+                    .optional()?
+                    .flatten();
+                let Some(sequence) = sequence else {
+                    continue;
+                };
+                let event = self.get_event(sequence as u64)?;
+                let facts = self.read_resume_facts(&task.id)?;
+                if !matches!(event.data, EventKind::ModelBudgetRejected { step, .. } if step == facts.model_steps)
+                {
+                    continue;
+                }
+                WorkActionKind::ReviewBudget {
+                    rejection_sequence: sequence as u64,
+                }
+            } else {
+                continue;
+            };
+            actions.push(WorkNextAction {
+                task_id: task.id.clone(),
+                kind,
+            });
+        }
+        Ok(actions)
     }
 }
 

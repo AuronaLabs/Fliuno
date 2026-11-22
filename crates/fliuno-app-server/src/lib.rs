@@ -25,10 +25,10 @@ use std::{
 const MAX_BATCH_ITEMS: usize = 128;
 
 pub struct RpcServer {
-    memory_embeddings: Option<memory_embeddings::Service>,
+    memory_embeddings: Option<Arc<memory_embeddings::Service>>,
     kernel: Arc<Mutex<Kernel>>,
-    scheduler: TaskScheduler,
-    agent_catalog: Option<agent_catalog::Catalog>,
+    scheduler: Arc<TaskScheduler>,
+    agent_catalog: Option<Arc<agent_catalog::Catalog>>,
     agent_terminal_logins: Option<agent_login::Service>,
     event_receiver: Option<(u64, EventReceiver)>,
     watermark_receiver: Option<(u64, EventWatermarkReceiver)>,
@@ -102,7 +102,7 @@ impl RpcServer {
     ) -> Self {
         let agent_catalog = kernel
             .agent_session_listing_supported()
-            .then(agent_catalog::Catalog::new);
+            .then(|| Arc::new(agent_catalog::Catalog::new()));
         let event_receiver = kernel
             .subscribe_events()
             .expect("cannot subscribe app-server to kernel events");
@@ -117,7 +117,7 @@ impl RpcServer {
             }
         };
         let kernel = Arc::new(Mutex::new(kernel));
-        let scheduler = TaskScheduler::new(Arc::clone(&kernel));
+        let scheduler = Arc::new(TaskScheduler::new(Arc::clone(&kernel)));
         let server = Self {
             memory_embeddings: None,
             kernel,
@@ -142,6 +142,60 @@ impl RpcServer {
         server
     }
 
+    /// Create another local, trusted protocol connection to the same host.
+    /// Handshake and subscription cursors are per connection. Dropping one
+    /// connection leaves the scheduler running while its host is retained.
+    pub fn attach_connection(&self) -> fliuno_core::Result<Self> {
+        let kernel = self
+            .kernel
+            .lock()
+            .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?;
+        let event_receiver = kernel.subscribe_events()?;
+        let progress_receiver = kernel.subscribe_model_progress()?;
+        Ok(Self {
+            memory_embeddings: self.memory_embeddings.clone(),
+            kernel: Arc::clone(&self.kernel),
+            scheduler: Arc::clone(&self.scheduler),
+            agent_catalog: self.agent_catalog.clone(),
+            agent_terminal_logins: None,
+            event_receiver: Some((0, event_receiver)),
+            watermark_receiver: None,
+            event_scope: EventScope::All,
+            watermark_only: false,
+            event_stream_gap: false,
+            progress_receiver: Some(progress_receiver),
+            progress_stream_gap: false,
+            initialized: false,
+            provider_name: self.provider_name.clone(),
+            terminals: self.terminals.clone(),
+            terminal_subscriptions: terminal_subscriptions::Subscriptions::new(),
+        })
+    }
+
+    pub fn activate_model_tool_version(
+        &self,
+        tool: Box<dyn fliuno_core::Tool>,
+        expected_authority: &str,
+    ) -> fliuno_core::Result<String> {
+        let mut kernel = self
+            .kernel
+            .lock()
+            .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?;
+        kernel.activate_model_tool_version(tool, expected_authority)
+    }
+
+    pub fn revoke_model_tool_version(
+        &self,
+        name: &str,
+        authority: &str,
+    ) -> fliuno_core::Result<()> {
+        let mut kernel = self
+            .kernel
+            .lock()
+            .map_err(|_| Error::Conflict("kernel lock is poisoned".into()))?;
+        kernel.revoke_model_tool_version(name, authority)
+    }
+
     /// Opt in only for the application's direct local stdio connection.
     pub fn enable_local_agent_terminal_login(
         &mut self,
@@ -156,10 +210,10 @@ impl RpcServer {
         &mut self,
         provider: MemoryEmbeddingProvider,
     ) -> std::io::Result<()> {
-        self.memory_embeddings = Some(memory_embeddings::Service::start(
+        self.memory_embeddings = Some(Arc::new(memory_embeddings::Service::start(
             provider,
             Arc::clone(&self.kernel),
-        )?);
+        )?));
         Ok(())
     }
 
@@ -619,6 +673,14 @@ impl RpcServer {
             capabilities["workspaceMemoryAudit"] = json!(true);
             capabilities["workspaceMemorySemanticIndex"] = json!(true);
             capabilities["taskMemoryOptOut"] = json!(true);
+            capabilities["taskExplicitMemory"] = json!(true);
+            capabilities["taskSteering"] = json!(true);
+            capabilities["taskInteraction"] = json!(true);
+            capabilities["taskReconciliation"] = json!(true);
+            capabilities["workNextActions"] = json!(true);
+            capabilities["artifactRevisions"] = json!(true);
+            capabilities["workspaceInstructions"] = json!(true);
+            capabilities["taskContextAttribution"] = json!(true);
             capabilities["taskMemoryBudgetReduction"] = json!(true);
             capabilities["taskMemoryHybridRetrieval"] = json!(self.memory_embeddings.is_some());
             capabilities["maxWorkspaceMemories"] = json!(4096);
@@ -1172,6 +1234,35 @@ impl RpcServer {
             "policy/createReadRule" => {
                 json!(self.kernel()?.create_policy_read_rule(decode(params)?)?)
             }
+            "task/steer" => json!(self.kernel()?.steer_task(&decode(params)?)?),
+            "task/reconcile" => json!(self.kernel()?.reconcile_task(decode(params)?)?),
+            "task/getReconciliation" => {
+                let p: TaskIdParams = decode(params)?;
+                json!(self.kernel()?.task_reconciliation(&p.task_id)?)
+            }
+            "artifacts/linkRevision" => {
+                json!(self.kernel()?.link_artifact_revision(decode(params)?)?)
+            }
+            "artifacts/getRevision" => json!(self.kernel()?.artifact_revision(&decode(params)?)?),
+            "task/contextAttribution" => {
+                let p: TaskIdParams = decode(params)?;
+                json!(self.kernel()?.task_context_attribution(&p.task_id)?)
+            }
+            "workspace/getInstructions" => {
+                let p: WorkspaceIdParams = decode(params)?;
+                json!(self.kernel()?.workspace_instructions(&p.workspace_id)?)
+            }
+            "workspace/setInstructions" => {
+                json!(self.kernel()?.set_workspace_instructions(decode(params)?)?)
+            }
+            "task/getPlan" => {
+                let p: TaskIdParams = decode(params)?;
+                json!(self.kernel()?.task_plan(&p.task_id)?)
+            }
+            "task/getSteering" => {
+                let p: TaskIdParams = decode(params)?;
+                json!(self.kernel()?.task_steering(&p.task_id)?)
+            }
             "policy/list" => {
                 let p: WorkspaceIdParams = decode(params)?;
                 json!(self.kernel()?.list_policy_read_rules(&p.workspace_id)?)
@@ -1555,6 +1646,9 @@ fn terminal_runtime() -> Result<tokio::runtime::Runtime, RpcError> {
             message: "cannot initialize terminal client runtime".into(),
         })
 }
+
+#[cfg(test)]
+mod interaction_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2210,7 +2304,7 @@ mod tests {
         )));
     }
 
-    fn rpc(server: &mut RpcServer, method: &str, params: Value) -> Value {
+    pub(super) fn rpc(server: &mut RpcServer, method: &str, params: Value) -> Value {
         let response = server
             .handle_line(
                 &json!({

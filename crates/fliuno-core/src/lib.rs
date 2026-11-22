@@ -6,10 +6,13 @@ mod approval;
 mod authority;
 pub use authority::authority_digest;
 mod context;
+mod context_attribution;
 pub mod diagnostics;
 mod error;
 mod events;
+mod interaction;
 mod json_size;
+mod model_tool_versions;
 pub use json_size::json_size;
 mod policy;
 mod policy_rules;
@@ -18,7 +21,9 @@ mod query;
 pub use query::MAX_TASK_LIST_TARGET_BYTES;
 pub const MAX_APPROVAL_LIST_TARGET_BYTES: u32 = MAX_TASK_LIST_TARGET_BYTES;
 mod registry;
+mod review;
 mod runs;
+mod steering;
 mod storage;
 mod supervision;
 pub(crate) use storage::ToolInputMutation;
@@ -65,7 +70,7 @@ pub use tool::{Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec};
 use fliuno_protocol::*;
 use rusqlite::Connection;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs::File,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -84,6 +89,9 @@ pub struct Kernel {
     provider: ModelProviderHandle,
     policy: Box<dyn PolicyEngine>,
     tools: BTreeMap<String, Arc<dyn Tool>>,
+    model_tool_overrides: BTreeMap<String, Arc<dyn Tool>>,
+    retained_model_tools: BTreeMap<(String, String), Arc<dyn Tool>>,
+    revoked_model_tools: BTreeMap<String, BTreeSet<String>>,
     agents: BTreeMap<String, Arc<dyn AgentBackend>>,
     agent_controls: BTreeMap<String, agent::AgentControl>,
     events: events::EventHub,

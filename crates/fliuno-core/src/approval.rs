@@ -20,6 +20,11 @@ pub enum ToolInputOutcome {
     },
 }
 
+enum AutomaticAuthorization {
+    ReadRule(String),
+    Interaction,
+}
+
 struct PolicyAuthorization {
     rule_id: String,
     approval: Approval,
@@ -181,8 +186,15 @@ impl Kernel {
         let Some(authority) = &approval.authority else {
             return Ok(None);
         };
-        let Some(rule_id) = self.match_policy_read_rule(&task, &approval.call, authority, None)?
-        else {
+        let source = if crate::interaction::is_internal(&approval.call.name)
+            && crate::interaction::enabled(&task)
+        {
+            AutomaticAuthorization::Interaction
+        } else if let Some(rule_id) =
+            self.match_policy_read_rule(&task, &approval.call, authority, None)?
+        {
+            AutomaticAuthorization::ReadRule(rule_id)
+        } else {
             return Ok(None);
         };
         let approval_id = approval.id.clone();
@@ -191,7 +203,7 @@ impl Kernel {
             &approval_id,
             ApprovalDecision::AllowOnce,
             None,
-            Some(rule_id),
+            Some(source),
         )
         .map(Some)
     }
@@ -212,7 +224,7 @@ impl Kernel {
         approval_id: &str,
         decision: ApprovalDecision,
         resume: Option<&ApprovalResumeParams>,
-        rule_id: Option<String>,
+        auto: Option<AutomaticAuthorization>,
     ) -> Result<ApprovalOutcome> {
         self.require_run_child_before_deadline(&task.id)?;
         self.require_run_child_authority(&task.id)?;
@@ -229,11 +241,22 @@ impl Kernel {
             approval_id: approval_id.into(),
             decision,
         };
+        let binding = if decision == ApprovalDecision::AllowOnce {
+            self.bound_model_tool(&task, &approval.call.name)?
+        } else {
+            None
+        };
         let failure = if decision == ApprovalDecision::Deny {
             Some("tool execution denied".into())
         } else {
-            match self.tools.get(&approval.call.name) {
-                None => Some("approved tool is no longer registered".into()),
+            match binding.as_ref() {
+                None if approval.authority.as_deref().is_some_and(|authority| {
+                    self.model_tool_revoked(&approval.call.name, authority)
+                }) => Some("approved tool version was revoked; create a new task".into()),
+                None if !self.tools.contains_key(&approval.call.name) => {
+                    Some("approved tool is no longer registered".into())
+                }
+                None => Some("approved tool registration changed or its original version is unavailable; create a new task".into()),
                 Some(tool) if approval.authority.as_deref() != Some(tool.authority().as_str()) => {
                     Some("approved tool registration changed or lacks an authority binding; create a new task".into())
                 }
@@ -257,22 +280,32 @@ impl Kernel {
             return Ok(ApprovalOutcome::Finished(task));
         }
 
-        let tool = self.tools[&approval.call.name].clone();
+        let tool = binding.expect("success requires a bound tool version");
         let workspace = self.workspace_for_task(task_id)?;
         task.status = TaskStatus::Running;
         task.in_flight_tool = Some(approval.call.clone());
         let mut events = vec![resolved];
-        let policy_authorization = rule_id.map(|rule_id| {
-            events.push(EventKind::ToolAuthorizedByPolicy {
-                approval_id: approval.id.clone(),
-                call_id: approval.call.id.clone(),
-                rule_id: rule_id.clone(),
-            });
-            PolicyAuthorization {
-                rule_id,
-                approval: approval.clone(),
+        let policy_authorization = match auto {
+            Some(AutomaticAuthorization::ReadRule(rule_id)) => {
+                events.push(EventKind::ToolAuthorizedByPolicy {
+                    approval_id: approval.id.clone(),
+                    call_id: approval.call.id.clone(),
+                    rule_id: rule_id.clone(),
+                });
+                Some(PolicyAuthorization {
+                    rule_id,
+                    approval: approval.clone(),
+                })
             }
-        });
+            Some(AutomaticAuthorization::Interaction) => {
+                events.push(EventKind::ToolAuthorizedForInteraction {
+                    approval_id: approval.id.clone(),
+                    call_id: approval.call.id.clone(),
+                });
+                None
+            }
+            None => None,
+        };
         self.commit_with_bindings(&task, &events, &[], None, resume)?;
         let execution = Box::new(PreparedToolExecution {
             task_id: task.id.clone(),
@@ -315,6 +348,17 @@ impl Kernel {
         }
         self.require_run_child_before_deadline(&task.id)?;
         self.require_run_child_authority(&task.id)?;
+        if self
+            .bound_model_tool(&task, &execution.call.name)?
+            .as_ref()
+            .is_none_or(|binding| !Arc::ptr_eq(binding, &execution.tool))
+        {
+            self.fail(
+                task,
+                "approved tool version is unavailable or revoked".into(),
+            )?;
+            return Ok((false, None));
+        }
         if let PolicyDecision::Deny(message) = self
             .policy
             .evaluate(&execution.tool.spec(), &execution.call)
@@ -387,7 +431,7 @@ impl Kernel {
             .expect("supervised task has a call");
         let workspace = self.workspace_for_task(task_id)?;
         if self.require_run_child_authority(task_id).is_ok()
-            && let Some(tool) = self.tools.get(&call.name).cloned()
+            && let Some(tool) = self.bound_model_tool(&task, &call.name)?
             && tool.supports_supervision()
             && !matches!(
                 self.policy.evaluate(&tool.spec(), &call),
@@ -452,9 +496,7 @@ impl Kernel {
         }
         let call = task.in_flight_tool.clone().expect("checked in-flight call");
         let tool = self
-            .tools
-            .get(&call.name)
-            .cloned()
+            .bound_model_tool(&task, &call.name)?
             .ok_or_else(|| Error::Conflict("approved tool is no longer registered".into()))?;
         if tool.authority() != saved.authority {
             return Err(Error::Conflict(
@@ -582,6 +624,12 @@ impl Kernel {
                 artifact_id: artifact.id.clone(),
             })
             .collect::<Vec<_>>();
+        if execution.call.name == crate::interaction::PLAN {
+            events.push(crate::interaction::plan_event(
+                &execution.call.arguments,
+                task.model_steps,
+            )?);
+        }
         events.push(EventKind::ToolCompleted {
             call_id: execution.call.id.clone(),
             output: prepared.output,

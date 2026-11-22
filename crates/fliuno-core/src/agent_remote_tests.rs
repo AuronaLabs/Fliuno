@@ -322,3 +322,63 @@ fn version_six_agent_snapshots_default_remote_evidence_without_replaying() {
         crate::storage::SCHEMA_VERSION
     );
 }
+
+#[test]
+fn reconciliation_adds_verified_evidence_without_changing_unknown_run() {
+    let (mut kernel, session) = setup();
+    let (task, run) = start(&mut kernel, &session);
+    let run_id = run.request.run_id;
+    kernel
+        .observe_agent(
+            &task.id,
+            &run_id,
+            AgentObservation::RemoteTask(AgentRemoteTask {
+                id: "remote".into(),
+                context_id: Some("context".into()),
+                state: AgentTaskState::Working,
+            }),
+        )
+        .unwrap();
+    let ended = kernel
+        .finish_agent_run(
+            &task.id,
+            &run_id,
+            AgentOutcome {
+                stop_reason: None,
+                outcome_unknown: true,
+            },
+        )
+        .unwrap();
+    kernel
+        .append_remote_task_check(
+            &task.id,
+            run_id,
+            "check".into(),
+            RemoteTaskCheckOutcome::Observed {
+                state: AgentTaskState::Completed,
+            },
+        )
+        .unwrap();
+    let request = TaskReconcileParams {
+        task_id: task.id.clone(),
+        state: AgentTaskState::Completed,
+        operator: "local owner".into(),
+        evidence: "Remote task was verified complete.".into(),
+        check_id: Some("check".into()),
+    };
+    let called = kernel.reconcile_task(request.clone()).unwrap();
+    assert_eq!(kernel.reconcile_task(request).unwrap(), called);
+    assert_eq!(kernel.task_reconciliation(&task.id).unwrap(), Some(called));
+    let after = kernel.get_task(&task.id).unwrap();
+    assert_eq!(after.status, ended.status);
+    assert!(after.agent_run.unwrap().outcome_unknown);
+    assert!(kernel.prepare_resume_task(&task.id, false).is_err());
+    let events = kernel.list_events(&task.id, 0, 100).unwrap().events;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event.data, EventKind::TaskOutcomeReconciled { .. }))
+            .count(),
+        1
+    );
+}

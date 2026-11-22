@@ -46,6 +46,7 @@ impl ContextDetail {
 }
 
 pub const MAX_CONTEXT_SCAN_LIMIT: u32 = 512;
+pub const MAX_EXPLICIT_CONTEXT_MEMORIES: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -55,6 +56,19 @@ pub struct ContextOptions {
     /// Disable workspace memory retrieval without discarding session history.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub disable_memory: bool,
+    /// Expose local plan and clarification tools to this model task.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enable_interaction: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions_revision: Option<u64>,
+    /// Select exactly these revisions, without keyword or embedding retrieval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(length(min = 1, max = MAX_EXPLICIT_CONTEXT_MEMORIES))]
+    pub memory_selection: Option<Vec<ContextMemoryRef>>,
+    /// Optional freshness weighting for automatically selected memories.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = 1, max = 3650))]
+    pub memory_recency_half_life_days: Option<u32>,
     #[serde(default = "default_turns")]
     pub max_turns: u32,
     #[serde(default = "default_bytes")]
@@ -89,6 +103,13 @@ pub struct ContextOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContextMemoryRef {
+    pub id: String,
+    pub revision: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextHistoryQuery {
     pub query: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -107,6 +128,10 @@ impl Default for ContextOptions {
         Self {
             mode: ContextMode::Session,
             disable_memory: false,
+            enable_interaction: false,
+            instructions_revision: None,
+            memory_selection: None,
+            memory_recency_half_life_days: None,
             max_turns: default_turns(),
             max_bytes: default_bytes(),
             selection: ContextSelection::Recent,
@@ -173,6 +198,7 @@ pub enum ContextMemoryMatch {
     Keyword,
     Semantic,
     Both,
+    Explicit,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -201,6 +227,8 @@ pub struct ContextSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<crate::WorkspaceInstructions>,
     pub options: ContextOptions,
     /// Global event cursor at capture time, not a live session attachment.
     pub through_sequence: u64,

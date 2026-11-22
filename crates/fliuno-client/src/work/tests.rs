@@ -27,6 +27,7 @@ fn request() -> WorkSnapshotParams {
         approval_limit: 1,
         approval_target_bytes: None,
         recent_task_limit: Some(2),
+        include_actions: false,
     }
 }
 

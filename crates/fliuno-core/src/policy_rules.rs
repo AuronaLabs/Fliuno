@@ -43,9 +43,10 @@ fn grantable(tool: &dyn Tool) -> bool {
 
 impl Kernel {
     pub fn policy_read_tools(&self) -> Vec<PolicyReadTool> {
-        self.tools
-            .iter()
-            .filter(|(_, tool)| grantable(tool.as_ref()))
+        self.active_model_tools()
+            .filter(|(name, tool)| {
+                grantable(tool.as_ref()) && !self.model_tool_revoked(name, &tool.authority())
+            })
             .map(|(name, tool)| PolicyReadTool {
                 name: name.clone(),
                 authority: tool.authority(),
@@ -107,11 +108,14 @@ impl Kernel {
             ));
         }
         let tool = self
-            .tools
+            .model_tool_overrides
             .get(&p.tool_name)
+            .or_else(|| self.tools.get(&p.tool_name))
             .filter(|tool| grantable(tool.as_ref()))
             .ok_or_else(|| Error::Invalid("tool is ineligible for workspace read rules".into()))?;
-        if tool.authority() != p.expected_authority {
+        if tool.authority() != p.expected_authority
+            || self.model_tool_revoked(&p.tool_name, &p.expected_authority)
+        {
             return Err(Error::Conflict(
                 "tool registration no longer matches reviewed authority".into(),
             ));
@@ -197,7 +201,7 @@ impl Kernel {
         authority: &str,
         required_rule_id: Option<&str>,
     ) -> Result<Option<String>> {
-        let Some(tool) = self.tools.get(&call.name) else {
+        let Some(tool) = self.bound_model_tool(task, &call.name)? else {
             return Ok(None);
         };
         if !grantable(tool.as_ref()) || tool.authority() != authority {

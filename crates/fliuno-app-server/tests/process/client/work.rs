@@ -124,6 +124,7 @@ fn work_snapshot_tracks_recovery_and_bootstraps_an_inbox_after_upgrade() {
         approval_limit: 1,
         approval_target_bytes: Some(1024),
         recent_task_limit: Some(3),
+        include_actions: false,
     };
     assert_eq!(client.info().capabilities["workSubscription"], true);
     assert_eq!(client.info().capabilities["workRecentTasks"], true);

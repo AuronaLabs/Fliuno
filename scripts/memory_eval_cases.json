@@ -64,5 +64,79 @@
       ["怎么把椅子上的咖啡渍洗掉？", []],
       ["Explain why some metals are magnetic.", []]
     ]
+  },
+  "holdout_v3": {
+    "memories": {
+      "thermal-policy": "连续集成跑全套编译时，笔记本优先接电并把并行编译数限制到两个。",
+      "invoice-channel": "For approved vendor invoices, use the finance shared mailbox, never a personal email address.",
+      "release-note-tone": "面向开发者的变更说明只描述可观察的行为和兼容边界，不使用营销语。",
+      "client-snapshots": "Take one screenshot after every approved layout revision so stakeholders can compare versions.",
+      "V": "The single letter shortcut to view the vendor catalog.",
+      "retention-period": "客户支持导出的 CSV 保留三十天，之后从归档删除。"
+    },
+    "queries": [
+      [
+        "I need to build everything in CI on the laptop. How many compile jobs can I use?",
+        [
+          "thermal-policy"
+        ]
+      ],
+      [
+        "财务已批准一张供应商发票，我该用哪个邮箱发送？",
+        [
+          "invoice-channel"
+        ]
+      ],
+      [
+        "How should I write changelog entries for engineers?",
+        [
+          "release-note-tone"
+        ]
+      ],
+      [
+        "设计稿改版获批后，怎样给相关人留下对照材料？",
+        [
+          "client-snapshots"
+        ]
+      ],
+      [
+        "Select `V`.",
+        [
+          "V"
+        ]
+      ],
+      [
+        "How long do we keep exported help desk records before deleting them?",
+        [
+          "retention-period"
+        ]
+      ],
+      [
+        "编译全量仓库时怎样安排笔记本电源和并行度？",
+        [
+          "thermal-policy"
+        ]
+      ],
+      [
+        "Explain why winter fog forms near rivers.",
+        []
+      ],
+      [
+        "帮我选一把初学古典吉他的琴。",
+        []
+      ],
+      [
+        "Which varieties of tomatoes grow in containers?",
+        []
+      ],
+      [
+        "冰箱冷藏室为什么经常积水？",
+        []
+      ],
+      [
+        "What are the major motifs in an epic poem?",
+        []
+      ]
+    ]
   }
 }

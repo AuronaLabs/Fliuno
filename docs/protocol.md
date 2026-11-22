@@ -935,3 +935,37 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 `initialize.capabilities.contextMatchRecent` 表示上下文选项也支持 `selection: "match_recent"` 和 `historyQuery: {query,role?}`，将近期匹配记录直接冻结到新任务。`maxContextScanLimit` 声明 `fit_recent` 与 `match_recent` 可通过上下文选项中的 `scanLimit` 调整候选窗口，默认仍为 128 条；此选项独立于历史搜索的范围。见[上下文扫描范围](context.md#调整上下文扫描范围)。
 
 搜索从既有的精简历史投影读取匹配字段，命中时返回索引中的任务 ID。构建上下文时才完整解码命中项，并继续应用原有的字节预算。
+
+## 运行时补充指令
+
+`taskSteering:true` 表示可用 `task/getSteering` 和 `task/steer`。先按 `taskId` 读取 `throughSequence`，提交 `{taskId,expectedSequence,clientRequestId,instruction}`。只接受同一个活跃模型任务，水位变化后需刷新再提交。每项 4096 字节，每任务最多 8 项。重复请求键和参数返回原收据。
+
+任务在下一次正式模型派发前按接收顺序把指令追加为用户消息。`task_steering_attached` 和收据的 `attachedStep` 表示指令已写入该步骤的请求快照。期间完成的模型回复先保存为草稿，只要剩余模型步数足够便进入下一步。审批、澄清和上下文摘要仍有原有挂起边界。终止时没有 `attachedStep` 的请求表示任务未使用该指令。
+
+## 任务计划与澄清
+
+服务声明 `taskInteraction:true` 时，在模型任务的 `context` 里传 `enableInteraction:true`。模型可通过 `task_publish_plan` 提交最多 12 个步骤，客户端通过 `task/getPlan` 或 `task_plan_updated` 事件读取。计划用于查看当前工作，后续文件、命令和外部工具仍逐次检查权限。
+
+模型也可通过 `task_ask_user` 暂停并提问。任务进入 `waiting_input`，`pendingToolInput.requests` 为 `{"kind":"clarification","question":"…"}`。使用 `task/respondToolInput` 提交与任务和调用 ID 绑定的 `responses:{"answer":"…"}`。明确答复进入原模型任务。等待中的问题可在重启后读取并继续处理。
+
+
+`workNextActions:true` 时，给 `work/snapshot` 或 `work/subscribe` 传 `includeActions:true`。返回的 `nextActions` 与快照共用一个读取水位。它从近期任务推导，默认检查最近 25 项。客户端根据动作类型和任务 ID 读取审批或补答详情，再提交原操作。服务会重新校验当前状态。
+
+## 上下文与项目说明
+
+`workspaceInstructions:true` 时，通过 `workspace/getInstructions` 读取 `{workspaceId,revision,text}`。通过 `workspace/setInstructions` 提交 `{workspaceId,expectedRevision,text}`，首次写入使用修订 `0`。新任务在 `context.instructionsRevision` 中显式选择当前修订，任务保存该修订的文本快照。`taskExplicitMemory:true` 声明任务可选定确切记忆版本，见[工作区记忆](memory.md)。
+
+`taskContextAttribution:true` 时，`task/contextAttribution {taskId}` 返回历史及摘要引用、记忆命中来源和因预算省略状态、说明修订和字节数。`normalizedInputBytes` 是当前可重建的规范化请求估算。`latestPreflight` 和 `latestBudgetRejection` 引用已记录的事件，供应商总量的覆盖范围取自该事件。
+
+## 核对与修订
+
+| 能力 | 方法 | 用途 |
+| --- | --- | --- |
+| `taskReconciliation` | `task/reconcile {taskId,state,operator,evidence,checkId?}` · `task/getReconciliation {taskId}` | 记录已结束且结果未知的外部 Agent run 的终态证据。可选 `checkId` 须对应同一运行和状态。原任务状态保留，提交结论不会派发远端动作。 |
+| `artifactRevisions` | `artifacts/linkRevision {previous,current}` · `artifacts/getRevision {taskId,artifactId}` | 返回两稿引用与摘要。引用形状为 `{taskId,artifactId}`。两稿是同会话、同媒体类型的文本交付物，上一稿必须先于当前稿创建。 |
+
+## Rust 宿主的工具版本与连接
+
+`Kernel::activate_model_tool_version` 以预期的当前 authority 作并发检查。已有模型任务继续使用冻结绑定，新任务读取新绑定。宿主在重启时透过 `retain_model_tool_version` 重新登记历史实现。`revoke_model_tool_version` 持久保存撤销，已开始的工具继续遵循原调用记录。存在运行中的持久 Run 时需先等待该 Run 结束。
+
+`RpcServer::attach_connection` 创建独立的协议连接，和原连接共享同一内核与调度器。连接有自己的握手、订阅和水位。宿主持有运行实例时，关闭单个连接后可附加新连接。服务进程退出后按现有的 SQLite 恢复边界处理。
