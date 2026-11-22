@@ -9,48 +9,29 @@
 
 # Fliuno
 
-**面向工作台的本机 Rust Agent 内核。** Fliuno 驱动任务执行、逐次审批与交付物保存，并将状态和事件持久化到 SQLite，供客户端断线后按游标恢复。
+**在终端里和 AI 一起完成工作。** Fliuno 是一款本机优先的 AI 工作台。在自己的文件夹里提交任务，查看计划，在需要时补充要求和批准操作，最后打开或保存交付物。关掉终端后，可以重新打开已保存的工作。
 
-`Rust 1.89+` · `JSON-RPC 0.1` · `本机优先`
+`Windows` · `Linux` · `Rust TUI`
 
-**[快速体验](#快速体验)** · [接入工作台](#接入工作台) · [文档中心](docs/README.md)
+**[快速体验](#快速体验)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.6** · [更新记录](CHANGELOG.md#006) · [内核范围与验收](docs/plan-0.0.6.md) · [0.0.7 TUI](docs/roadmap.md#007终端工作台)
+当前版本 **v0.0.7** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.7) · [更新记录](CHANGELOG.md#007)
 
 ## 快速体验
 
-在仓库根目录运行离线示例。需要 Rust 1.89+、C/C++ 构建工具和 Python；此流程不需要模型 API Key。[环境说明](docs/setup.md#快速开始)
+从发布页下载对应平台的压缩包，把 `fliuno` 和 `fliuno-app-server` 保留在同一目录。进入该目录，在终端启动离线演示，无需 API Key：
 
 ```sh
-python examples/demo.py
+./fliuno --demo
 ```
 
-示例使用临时数据库，走完任务提交、审批和读取交付物：
+Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` 写任务、`Ctrl+S` 提交；等到审批出现后，按 `Enter` 查看本次操作，选择允许一次或拒绝。完成后按 `V` 打开交付物目录。[全部快捷键和数据库位置](docs/workbench.md)
 
-```text
-Task: waiting_approval
-Proposed tool: artifact_create
-Result: completed
-Artifacts: 1
-```
+## 开始真实工作
 
-加上 `--deny` 可以检查拒绝路径。任务以 `failed` 结束，不会产生交付物。[演示源码](examples/demo.py)
+配置 OpenAI、Anthropic 或 Gemini 对应的模型和密钥，在要工作的文件夹启动 `fliuno`，或通过 `--workspace PATH` 选择文件夹。模型请求发送到所配置的供应商；会话、审批和交付物保存在本机。[模型配置](docs/workbench.md#接入模型)
 
-## 接入工作台
-
-把服务作为本机子进程启动。客户端通过 **stdin** 逐行发送 JSON-RPC，通过 **stdout** 接收响应与通知。
-
-```sh
-cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
-```
-
-调用 `initialize` 握手后，按工作区、会话、任务的顺序进入执行流程：
-
-`workspace/open` → `session/create` → `task/start` → `approval/respond` → `artifacts/list`
-
-[启动与握手](docs/setup.md#再启动自己的服务) · [Rust 客户端和 HTTP / SSE 接入](docs/README.md#连接方式) · [应用协议参考](docs/protocol.md)
-
-## 内核能力
+## 工程能力
 
 | 能力 | 说明 |
 | --- | --- |
@@ -65,6 +46,8 @@ cargo run -p fliuno-app-server -- --db .fliuno/kernel.db
 ## 开发与验证
 
 ```powershell
+cargo build --locked -p fliuno-tui -p fliuno-app-server
+./target/debug/fliuno --demo
 pwsh -NoProfile -File scripts/check.ps1
 ```
 
