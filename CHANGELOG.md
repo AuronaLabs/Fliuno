@@ -13,7 +13,7 @@
 | **备份与恢复** 支持本机创建、列表、轮换、校验和恢复。已演练恢复 v0.0.4 数据库，以及切换到恢复副本后续接 ACP 会话。 | [备份](docs/backup.md) |
 | **沙箱与预算** 报告实际生效的进程限额，优化 Linux cgroup 回收等待；模型请求超限时细分原因，可先省略记忆或投影旧工具结果，再复检。 | [沙箱](docs/sandbox.md) · [上下文](docs/context.md) |
 
-应用协议仍为 `0.1`，SQLite schema 为 67。下一版开始 [Rust TUI](docs/plan-0.0.5.md#006第一版-tui)。
+应用协议仍为 `0.1`，SQLite schema 为 67。后续版本见[开发路线图](docs/roadmap.md)。
 
 ## 0.0.4
 
