@@ -1,3 +1,4 @@
+mod editor;
 mod options;
 mod service;
 mod ui;
@@ -58,6 +59,7 @@ fn run(options: Options) -> io::Result<()> {
         ));
     }
     let demo = options.demo;
+    let theme = options.theme;
     let worker = service::Worker::spawn(options)?;
     let prior = std::panic::take_hook();
     let terminal_thread = std::thread::current().id();
@@ -71,18 +73,26 @@ fn run(options: Options) -> io::Result<()> {
     let _restore = RestoreTerminal;
     execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
     let mut screen = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-    let mut app = ui::App::new(demo);
+    let mut app = ui::App::new(demo, theme);
     let mut redraw = true;
-    loop {
+    'running: loop {
         if app.drain(&worker) || redraw {
             screen.draw(|frame| app.draw(frame))?;
             redraw = false;
         }
-        if event::poll(Duration::from_millis(70))? {
+        for queued in 0..64 {
+            let timeout = if queued == 0 {
+                Duration::from_millis(70)
+            } else {
+                Duration::ZERO
+            };
+            if !event::poll(timeout)? {
+                break;
+            }
             match event::read()? {
                 Event::Key(key) => {
                     if app.key(key, &worker) {
-                        break;
+                        break 'running;
                     }
                     redraw = true;
                 }

@@ -103,6 +103,17 @@ impl Console {
         self.input.flush().unwrap();
     }
 
+    fn capture(&mut self, name: &str) {
+        if let Some(directory) = std::env::var_os("FLIUNO_TUI_CAPTURE") {
+            self.ready();
+            std::fs::write(
+                PathBuf::from(directory).join(format!("{name}.ansi")),
+                self.screen.screen().contents_formatted(),
+            )
+            .unwrap();
+        }
+    }
+
     fn ready(&mut self) {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
@@ -210,7 +221,9 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     console.expect("Acceptance");
     console.expect("No tasks");
     console.ready();
-    console.keys("n");
+    console.keys("/");
+    console.expect("Commands  /");
+    console.keys("new task\r");
     console.expect("New task");
     if cfg!(windows) {
         console.keys("交付报告\rsecond line");
@@ -218,6 +231,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
         console.keys("\x1b[200~交付报告\nsecond line\x1b[201~");
     }
     console.expect("second line");
+    console.capture("draft");
     console.keys("\x13");
     console.expect("Review operation");
     console.ready();
@@ -232,6 +246,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     console.keys("\r");
     console.expect("SHA-256:");
     console.expect("交付报告");
+    console.capture("artifact");
     let saved = root.path().join("verified.txt");
     console.keys("d");
     console.expect("Save artifact to");
@@ -243,11 +258,11 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     );
     console.ready();
     console.resize(18, 48);
-    console.expect(&format!("┌Tasks  |  0 approvals{}┐", "─".repeat(25)));
+    console.expect("Task queue");
     console.keys("\t");
     console.expect("Task detail");
     console.ready();
-    assert!(!console.screen.screen().contents().contains("Tasks  |"));
+    assert!(!console.screen.screen().contents().contains("Task queue"));
     console.quit("\x03");
     let mut reopened = Console::launch(server.as_deref(), root.path());
     reopened.expect("Acceptance");
@@ -258,11 +273,19 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     reopened.keys("Reject this draft\x13");
     reopened.expect("Review operation");
     reopened.ready();
+    reopened.resize(18, 48);
+    reopened.expect("Task queue");
     reopened.keys("a");
     reopened.expect("Allow once / Deny");
+    reopened.expect("artifact_create");
+    reopened.capture("narrow-approval");
     reopened.keys("n");
+    reopened.expect("Failed");
+    reopened.keys("\t");
+    reopened.expect("Failure reason");
     reopened.expect("tool execution denied");
     reopened.ready();
+    reopened.resize(28, 110);
     reopened.keys("n");
     reopened.expect("New task");
     reopened.keys("Cancel this draft\x13");

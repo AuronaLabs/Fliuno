@@ -8,6 +8,7 @@ Usage: fliuno [--demo] [--workspace PATH] [--db PATH] [--server PATH] [-- SERVER
   --workspace PATH   Folder to open (default: current directory)
   --db PATH          Workbench database (default: per-user state directory)
   --server PATH      App-server executable (default: next to fliuno)
+  --theme NAME       auto, dark, light, or mono (default: auto)
   --help             Print help
   --version          Print version";
 
@@ -18,6 +19,16 @@ pub struct Options {
     pub database: PathBuf,
     pub server: PathBuf,
     pub server_args: Vec<OsString>,
+    pub theme: Theme,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Theme {
+    #[default]
+    Auto,
+    Dark,
+    Light,
+    Mono,
 }
 
 pub enum Entry {
@@ -30,6 +41,7 @@ impl Options {
     pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Entry, String> {
         let (mut demo, mut workspace, mut database, mut server) = (false, None, None, None);
         let mut server_args = Vec::new();
+        let mut theme = Theme::default();
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--help" | "-h") => return Ok(Entry::Help),
@@ -38,6 +50,15 @@ impl Options {
                 Some("--workspace") => workspace = args.next().map(PathBuf::from),
                 Some("--db") => database = args.next().map(PathBuf::from),
                 Some("--server") => server = args.next().map(PathBuf::from),
+                Some("--theme") => {
+                    theme = match args.next().as_deref().and_then(|arg| arg.to_str()) {
+                        Some("auto") => Theme::Auto,
+                        Some("dark") => Theme::Dark,
+                        Some("light") => Theme::Light,
+                        Some("mono") => Theme::Mono,
+                        _ => return Err("--theme requires auto, dark, light, or mono".into()),
+                    };
+                }
                 Some("--") => {
                     server_args.extend(args);
                     break;
@@ -71,6 +92,7 @@ impl Options {
             database,
             server,
             server_args,
+            theme,
         }))
     }
 }

@@ -19,6 +19,8 @@
 - [OpenCode TUI](https://github.com/anomalyco/opencode/tree/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/packages/tui)：参考会话历史回补、终端尺寸以及审批显示测试。任务列表和长内容分别处理，窄屏给正文空间。
 - Ratatui 继续作为终端渲染层。审查 0.0.7 的 `lru` 间接依赖告警与升级所需 Rust 版本并记录结果；依赖升级要通过双平台发布构建。
 
+实际升级到 Ratatui 0.30.2，锁文件中的 `lru` 从 0.12.5 升到 0.18.5；工作区声明的最低 Rust 版本保留 1.89。Windows 和 Linux 发布构建及解包 PTY 测试均通过，详见[验收记录](execution-evidence.md#008-发布验收2026-11-23)。
+
 ## 工作区与后续
 
 参考仓库浅克隆至 `D:\Fliuno-References`，新构建使用 D 盘独立目标位置。发布前检查两盘空间，保留已发布包与验证环境。GUI、原生 macOS 沙箱、长期后台通知和跨会话工作收件箱不进入本版。后续版本按可以完整验收的用户工作流来切分；0.0.15 是授权上限，不为凑版本号发布小改动。

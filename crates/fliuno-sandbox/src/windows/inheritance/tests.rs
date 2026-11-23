@@ -24,7 +24,8 @@ fn surrogate_owner_fixture() {
     let owner = Inheritance::new(pipes.child_handles()).unwrap();
     // SAFETY: read-only diagnostic of our own still-live process handle.
     let pid = unsafe { GetProcessId(owner.process.as_raw_handle()) };
-    println!("surrogate:{pid}");
+    // A serial libtest runner prints the test name without a trailing newline.
+    println!("\nsurrogate:{pid}");
     std::io::stdout().flush().unwrap();
     std::io::copy(&mut std::io::stdin(), &mut std::io::sink()).unwrap();
     drop(owner);

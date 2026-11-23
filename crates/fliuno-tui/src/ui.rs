@@ -1,12 +1,16 @@
-use crate::service::{Detail, Preview, Request, Update, Worker};
+use crate::{
+    editor::Editor,
+    options::Theme,
+    service::{Detail, Preview, Request, Update, Worker},
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use fliuno_protocol::{
-    ApprovalDecision, ApprovalDetails, ArtifactGetParams, ArtifactSummary, ObjectPage, Session,
-    TaskResumeDisposition, TaskStatus, WorkActionKind, WorkSnapshot, Workspace,
+    ApprovalDecision, ApprovalDetails, ArtifactGetParams, ArtifactSummary, Message, ObjectPage,
+    Session, TaskResumeDisposition, TaskStatus, WorkActionKind, WorkSnapshot, Workspace,
 };
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Margin, Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
@@ -16,8 +20,76 @@ use unicode_segmentation::UnicodeSegmentation;
 const ACCENT: Color = Color::Cyan;
 const DRAFT_LIMIT: usize = 48 * 1024;
 
+struct Palette {
+    base: Style,
+    rail: Style,
+    label: Style,
+    quiet: Style,
+    choice: Style,
+    mono: bool,
+}
+
+impl Palette {
+    fn new(theme: Theme) -> Self {
+        let bold = |style: Style| style.add_modifier(Modifier::BOLD);
+        match theme {
+            Theme::Dark | Theme::Light => {
+                let (bg, fg, layer, accent, quiet, selected) = if matches!(theme, Theme::Dark) {
+                    (
+                        (17, 20, 22),
+                        (228, 231, 228),
+                        (32, 38, 40),
+                        (132, 224, 180),
+                        (166, 177, 175),
+                        (37, 68, 57),
+                    )
+                } else {
+                    (
+                        (249, 250, 247),
+                        (29, 37, 33),
+                        (230, 236, 230),
+                        (13, 100, 77),
+                        (75, 93, 86),
+                        (205, 229, 217),
+                    )
+                };
+                let rgb = |(r, g, b)| Color::Rgb(r, g, b);
+                let base = Style::default().fg(rgb(fg)).bg(rgb(bg));
+                Self {
+                    base,
+                    rail: base.bg(rgb(layer)),
+                    label: bold(Style::default().fg(rgb(accent))),
+                    quiet: Style::default().fg(rgb(quiet)),
+                    choice: bold(base.bg(rgb(selected))),
+                    mono: true,
+                }
+            }
+            Theme::Auto | Theme::Mono => {
+                let mono = matches!(theme, Theme::Mono);
+                let base = Style::default();
+                Self {
+                    base,
+                    rail: base,
+                    label: bold(if mono { base } else { base.fg(Color::Cyan) }),
+                    quiet: base.add_modifier(Modifier::DIM),
+                    choice: bold(base.add_modifier(Modifier::REVERSED)),
+                    mono,
+                }
+            }
+        }
+    }
+
+    fn status(&self, color: Color) -> Style {
+        if self.mono {
+            self.label
+        } else {
+            self.label.fg(color)
+        }
+    }
+}
+
 enum Layer {
-    Commands(usize),
+    Commands(usize, String),
     Workspaces(Option<ObjectPage<Workspace>>, usize),
     Sessions(Option<ObjectPage<Session>>, usize),
     Artifacts(usize),
@@ -58,6 +130,7 @@ impl Edit {
 
 pub struct App {
     demo: bool,
+    palette: Palette,
     online: bool,
     busy: bool,
     next: Option<Request>,
@@ -69,9 +142,10 @@ pub struct App {
     scroll: u16,
     focus_details: bool,
     layer: Layer,
-    draft: String,
+    draft: Editor,
+    parked: Vec<(String, Editor, String, Option<ArtifactGetParams>)>,
     key: String,
-    input: String,
+    input: Editor,
     input_artifact: Option<ArtifactGetParams>,
     pending_preview: Option<ArtifactGetParams>,
     start_pending: bool,
@@ -80,9 +154,10 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(demo: bool) -> Self {
+    pub fn new(demo: bool, theme: Theme) -> Self {
         Self {
             demo,
+            palette: Palette::new(theme),
             online: false,
             busy: true,
             next: None,
@@ -94,9 +169,10 @@ impl App {
             scroll: 0,
             focus_details: false,
             layer: Layer::None,
-            draft: String::new(),
+            draft: Editor::default(),
+            parked: Vec::new(),
             key: uuid::Uuid::new_v4().to_string(),
-            input: String::new(),
+            input: Editor::default(),
             input_artifact: None,
             pending_preview: None,
             start_pending: false,
@@ -143,14 +219,36 @@ impl App {
     }
 
     fn select_session(&mut self, session: Session) {
+        if self.session.as_ref().map(|current| &current.id) != Some(&session.id) {
+            self.park_draft();
+            if let Some(i) = self.parked.iter().position(|(id, ..)| *id == session.id) {
+                let (_, draft, key, artifact) = self.parked.remove(i);
+                self.draft = draft;
+                self.key = key;
+                self.input_artifact = artifact;
+            }
+        }
         self.next = Some(Request::SelectSession(session.id.clone()));
         self.session = Some(session);
         self.snapshot = None;
         self.selected = None;
         self.detail = None;
-        self.input_artifact = None;
         self.scroll = 0;
         self.layer = Layer::None;
+    }
+
+    fn park_draft(&mut self) {
+        let draft = std::mem::take(&mut self.draft);
+        let artifact = self.input_artifact.take();
+        let key = std::mem::replace(&mut self.key, uuid::Uuid::new_v4().to_string());
+        if let Some(session) = &self.session
+            && (!draft.text().is_empty() || artifact.is_some())
+        {
+            if self.parked.len() >= 8 {
+                self.parked.remove(0);
+            }
+            self.parked.push((session.id.clone(), draft, key, artifact));
+        }
     }
 
     fn select_task(&mut self, id: String) {
@@ -172,6 +270,7 @@ impl App {
                 });
             }
             Update::Workspace(workspace) => {
+                self.park_draft();
                 self.next = Some(sessions(workspace.id.clone(), 0, false));
                 self.workspace = Some(workspace);
                 self.session = None;
@@ -332,11 +431,12 @@ impl App {
             } else {
                 &mut self.input
             };
-            let length = target.len();
-            push_bounded(target, &text, edit_limit(edit));
-            if target.len() != length && matches!(edit, Edit::Task) {
+            if target.insert(&text, edit_limit(edit)) && matches!(edit, Edit::Task) {
                 self.key = uuid::Uuid::new_v4().to_string();
             }
+        } else if let Layer::Commands(index, query) = &mut self.layer {
+            push_bounded(query, &clean(value).replace('\n', " "), 128);
+            *index = 0;
         }
     }
 
@@ -365,50 +465,61 @@ impl App {
             } else {
                 &mut self.input
             };
-            match key.code {
-                KeyCode::Char('s') if pressed && ctrl => {
-                    self.submit(edit, worker);
-                }
-                KeyCode::Enter if pressed && !matches!(edit, Edit::Task) => {
-                    self.submit(edit, worker);
-                }
+            if pressed
+                && ((ctrl && key.code == KeyCode::Char('s'))
+                    || (key.code == KeyCode::Enter && !matches!(edit, Edit::Task)))
+            {
+                self.submit(edit, worker);
+                return false;
+            }
+            let changed = match key.code {
                 KeyCode::Enter if matches!(edit, Edit::Task) => {
-                    push_bounded(value, "\n", edit_limit(&edit));
-                    self.key = uuid::Uuid::new_v4().to_string();
-                }
-                KeyCode::Backspace => {
-                    if let Some((offset, _)) = value.grapheme_indices(true).next_back() {
-                        value.truncate(offset);
-                    }
-                    if matches!(edit, Edit::Task) {
-                        self.key = uuid::Uuid::new_v4().to_string();
-                    }
+                    value.insert("\n", edit_limit(&edit))
                 }
                 KeyCode::Char(c)
                     if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) && !c.is_control() =>
                 {
-                    push_bounded(value, c.encode_utf8(&mut [0; 4]), edit_limit(&edit));
-                    if matches!(edit, Edit::Task) {
-                        self.key = uuid::Uuid::new_v4().to_string();
-                    }
+                    value.insert(c.encode_utf8(&mut [0; 4]), edit_limit(&edit))
                 }
-                _ => {}
+                code => value.key(code),
+            };
+            if changed && matches!(edit, Edit::Task) {
+                self.key = uuid::Uuid::new_v4().to_string();
             }
             return false;
         }
 
         let mut request = None;
         let mut close = false;
-        if let Layer::Commands(index) = self.layer {
-            let commands = self.commands();
-            let mut index = index.min(commands.len().saturating_sub(1));
+        if matches!(self.layer, Layer::Commands(..)) {
+            let Layer::Commands(mut index, mut query) =
+                std::mem::replace(&mut self.layer, Layer::None)
+            else {
+                unreachable!()
+            };
+            match key.code {
+                KeyCode::Backspace => {
+                    if let Some((offset, _)) = query.grapheme_indices(true).next_back() {
+                        query.truncate(offset);
+                    }
+                    index = 0;
+                }
+                KeyCode::Char(c) if !ctrl && !c.is_control() => {
+                    push_bounded(&mut query, c.encode_utf8(&mut [0; 4]), 128);
+                    index = 0;
+                }
+                _ => {}
+            }
+            let commands = self.filtered_commands(&query);
+            index = index.min(commands.len().saturating_sub(1));
             step(key.code, &mut index, commands.len());
-            if pressed && key.code == KeyCode::Enter {
-                let (_, command) = commands[index];
-                self.layer = Layer::None;
+            if pressed
+                && key.code == KeyCode::Enter
+                && let Some(&(_, command)) = commands.get(index)
+            {
                 return self.overview_key(KeyEvent::new(command, KeyModifiers::NONE), worker);
             }
-            self.layer = Layer::Commands(index);
+            self.layer = Layer::Commands(index, query);
             return false;
         }
         match &mut self.layer {
@@ -525,8 +636,12 @@ impl App {
 
     fn overview_key(&mut self, key: KeyEvent, worker: &Worker) -> bool {
         let pressed = key.kind == KeyEventKind::Press;
-        if key.code == KeyCode::F(1) && pressed {
-            self.layer = Layer::Commands(0);
+        if pressed
+            && ((key.code == KeyCode::F(1))
+                || (key.code == KeyCode::Char('/')
+                    && !key.modifiers.contains(KeyModifiers::CONTROL)))
+        {
+            self.layer = Layer::Commands(0, String::new());
             return false;
         }
         if key.code == KeyCode::Char('q') && pressed {
@@ -638,6 +753,17 @@ impl App {
         commands
     }
 
+    fn filtered_commands(&self, query: &str) -> Vec<(&'static str, KeyCode)> {
+        let query = query.to_lowercase();
+        self.commands()
+            .into_iter()
+            .filter(|(label, _)| {
+                let label = label.to_ascii_lowercase();
+                query.split_whitespace().all(|term| label.contains(term))
+            })
+            .collect()
+    }
+
     fn task_key(&mut self, key: KeyCode, worker: &Worker) {
         let Some(detail) = &self.detail else { return };
         let task = &detail.task;
@@ -685,9 +811,9 @@ impl App {
 
     fn submit(&mut self, edit: Edit, worker: &Worker) {
         let value = if matches!(edit, Edit::Task) {
-            self.draft.trim()
+            self.draft.text().trim()
         } else {
-            self.input.trim()
+            self.input.text().trim()
         };
         if value.is_empty() {
             return;
@@ -726,9 +852,17 @@ impl App {
 
     pub fn draw(&self, frame: &mut Frame<'_>) {
         let area = frame.area();
-        let [top, middle, bottom] = Layout::vertical([
-            Constraint::Length(2),
+        frame.render_widget(Block::default().style(self.palette.base), area);
+        let expanded = matches!(self.layer, Layer::Edit(Edit::Task));
+        let editor_height = if expanded {
+            (area.height / 4).clamp(2, 7)
+        } else {
+            2
+        };
+        let [top, middle, composer, bottom] = Layout::vertical([
+            Constraint::Length(if area.height >= 10 { 2 } else { 1 }),
             Constraint::Min(0),
+            Constraint::Length(editor_height),
             Constraint::Length(1),
         ])
         .areas(area);
@@ -737,7 +871,11 @@ impl App {
             .as_ref()
             .map(|root| clean(&root.root))
             .unwrap_or_default();
-        let session = self.session.as_ref().map(session_name).unwrap_or_default();
+        let session = self
+            .session
+            .as_ref()
+            .map(session_name)
+            .unwrap_or_else(|| "No session".into());
         let state = if !self.online {
             "Offline"
         } else if self.demo {
@@ -748,44 +886,77 @@ impl App {
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(vec![
-                    Span::styled(
-                        " Fliuno ",
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(ACCENT)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw(format!("  {state}   {session}")),
+                    Span::styled(" FLIUNO ", self.palette.label),
+                    Span::raw(format!("  {session}")),
+                    Span::styled(format!("  ·  {state}"), self.palette.quiet),
                 ]),
-                Line::styled(format!(" {root}"), Style::default().fg(Color::Gray)),
-            ]),
+                Line::styled(format!(" {root}"), self.palette.quiet),
+            ])
+            .style(self.palette.rail),
             top,
         );
-        if area.width >= 84 {
-            let [tasks, details] =
-                Layout::horizontal([Constraint::Percentage(34), Constraint::Percentage(66)])
-                    .areas(middle);
-            self.draw_tasks(frame, tasks);
-            self.draw_detail(frame, details);
+        if area.width >= 90 {
+            let [tasks, details] = Layout::horizontal([
+                Constraint::Length((area.width / 4).clamp(24, 34)),
+                Constraint::Min(0),
+            ])
+            .areas(middle);
+            self.draw_tasks(frame, tasks, false);
+            self.draw_detail(frame, details.inner(Margin::new(2, 0)));
         } else if self.focus_details {
             self.draw_detail(frame, middle);
         } else {
-            self.draw_tasks(frame, middle);
+            self.draw_tasks(frame, middle, true);
         }
+        self.draw_composer(frame, composer, expanded);
         let message = if self.busy { "Working" } else { &self.message };
         frame.render_widget(
-            Paragraph::new(clean(message)).style(Style::default().fg(if self.online {
-                Color::Gray
-            } else {
-                Color::Yellow
-            })),
+            Paragraph::new(Line::from(vec![
+                Span::styled(" F1 Commands  ", self.palette.label),
+                Span::raw(clean(message).replace('\n', " ")),
+            ]))
+            .style(self.palette.rail),
             bottom,
         );
         self.draw_layer(frame, area);
     }
 
-    fn draw_tasks(&self, frame: &mut Frame<'_>, area: Rect) {
+    fn draw_composer(&self, frame: &mut Frame<'_>, area: Rect, focused: bool) {
+        if area.width < 4 || area.height == 0 {
+            return;
+        }
+        let title = if let Some(artifact) = &self.input_artifact {
+            format!(" New task  ·  Attached: {} ", clean(&artifact.artifact_id))
+        } else if focused {
+            " New task  ·  Ctrl+S submit ".to_owned()
+        } else if self.session.is_none() {
+            " No session ".to_owned()
+        } else {
+            " Draft  ·  N edit ".to_owned()
+        };
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .style(self.palette.rail)
+            .border_style(self.palette.quiet)
+            .title(Span::styled(title, self.palette.label));
+        let body = block.inner(area).inner(Margin::new(1, 0));
+        frame.render_widget(block, area);
+        if body.height == 0 || body.width == 0 {
+            return;
+        }
+        let (lines, x, y) = self.draft.viewport(body.width, body.height);
+        frame.render_widget(
+            Paragraph::new(lines.into_iter().map(Line::raw).collect::<Vec<_>>()),
+            body,
+        );
+        if focused && !self.start_pending {
+            frame.set_cursor_position(Position::new(body.x + x, body.y + y));
+        }
+    }
+
+    fn draw_tasks(&self, frame: &mut Frame<'_>, area: Rect, compact: bool) {
         let tasks = self.tasks();
+        let title = if compact { "Task queue" } else { "Tasks" };
         let mut state = ListState::default().with_selected(
             tasks
                 .iter()
@@ -804,8 +975,9 @@ impl App {
                     status(task.status).0
                 };
                 ListItem::new(vec![
-                    Line::styled(flag, Style::default().fg(status(task.status).1)),
+                    Line::styled(flag, self.palette.status(status(task.status).1)),
                     Line::raw(clean(&task.input_preview).replace('\n', " ")),
+                    Line::raw(""),
                 ])
             })
             .collect();
@@ -818,18 +990,26 @@ impl App {
                 } else {
                     "Disconnected"
                 })
-                .block(panel("Tasks", !self.focus_details)),
+                .block(
+                    Block::default()
+                        .title(Span::styled(format!(" {title} "), self.palette.label))
+                        .style(self.palette.rail),
+                ),
                 area,
             );
         } else {
             frame.render_stateful_widget(
                 List::new(list)
-                    .block(panel(
-                        format!("Tasks  |  {count} approvals"),
-                        !self.focus_details,
-                    ))
-                    .highlight_symbol("> ")
-                    .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White)),
+                    .block(
+                        Block::default()
+                            .title(Span::styled(
+                                format!(" {title}  ·  {count} approvals "),
+                                self.palette.label,
+                            ))
+                            .style(self.palette.rail),
+                    )
+                    .highlight_symbol("› ")
+                    .highlight_style(self.palette.choice),
                 area,
                 &mut state,
             );
@@ -837,14 +1017,14 @@ impl App {
     }
 
     fn draw_detail(&self, frame: &mut Frame<'_>, area: Rect) {
-        let mut lines = Vec::new();
+        let mut lines = vec![
+            Line::styled(" Task detail", self.palette.label),
+            Line::raw(""),
+        ];
         if let Some(detail) = &self.detail {
             let task = &detail.task;
             let (label, color) = status(task.status);
-            lines.push(Line::styled(
-                label,
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ));
+            lines.push(Line::styled(label, self.palette.status(color)));
             if let Some(kind) = self
                 .snapshot
                 .as_ref()
@@ -859,7 +1039,7 @@ impl App {
                     WorkActionKind::Reconcile => "External result needs verification",
                     WorkActionKind::ReviewBudget { .. } => "Context budget reached",
                 };
-                lines.push(Line::styled(action, Style::default().fg(Color::Yellow)));
+                lines.push(Line::styled(action, self.palette.status(Color::Yellow)));
             }
             if let Some(resume) = &detail.resume {
                 lines.push(Line::raw(format!("Recovery: {:?}", resume.disposition)));
@@ -878,7 +1058,7 @@ impl App {
                 append(&mut lines, question);
             }
             if let Some(plan) = &detail.plan {
-                lines.push(Line::styled("Plan", Style::default().fg(ACCENT)));
+                lines.push(Line::styled("Plan", self.palette.label));
                 for step in &plan.steps {
                     lines.push(Line::raw(format!(
                         "{:?}  {}",
@@ -887,12 +1067,8 @@ impl App {
                     )));
                 }
             }
-            if let Some(output) = &task.output {
-                lines.push(Line::raw(""));
-                append(&mut lines, output);
-            }
             if !detail.artifacts.is_empty() {
-                lines.push(Line::styled("Artifacts", Style::default().fg(ACCENT)));
+                lines.push(Line::styled("Artifacts", self.palette.label));
                 for artifact in &detail.artifacts {
                     lines.push(Line::raw(format!(
                         "{}  |  {} B",
@@ -901,12 +1077,41 @@ impl App {
                     )));
                 }
             }
+            for message in task
+                .messages
+                .iter()
+                .filter(|message| {
+                    matches!(message, Message::User { .. } | Message::Assistant { .. })
+                })
+                .take(16)
+            {
+                if let Message::User { text } = message {
+                    lines.push(Line::raw(""));
+                    lines.push(Line::styled("You", self.palette.label));
+                    append(&mut lines, text);
+                } else if let Message::Assistant { text } = message
+                    && task.output.as_ref() != Some(text)
+                {
+                    lines.push(Line::raw(""));
+                    lines.push(Line::styled("Fliuno", self.palette.label));
+                    append(&mut lines, text);
+                }
+            }
+            if let Some(output) = &task.output {
+                lines.push(Line::raw(""));
+                let label = if task.status == TaskStatus::Failed {
+                    "Failure reason"
+                } else {
+                    "Result"
+                };
+                lines.push(Line::styled(label, self.palette.label));
+                append(&mut lines, output);
+            }
         } else {
             lines.push(Line::raw("No task selected"));
         }
         frame.render_widget(
             Paragraph::new(lines)
-                .block(panel("Task detail", self.focus_details))
                 .wrap(Wrap { trim: false })
                 .scroll((self.scroll, 0)),
             area,
@@ -914,56 +1119,82 @@ impl App {
     }
 
     fn draw_layer(&self, frame: &mut Frame<'_>, area: Rect) {
-        if matches!(self.layer, Layer::None) {
+        if matches!(self.layer, Layer::None | Layer::Edit(Edit::Task)) {
             return;
         }
-        let [_, modal, _] = Layout::horizontal([
-            Constraint::Percentage(8),
-            Constraint::Percentage(84),
-            Constraint::Percentage(8),
-        ])
-        .areas(area);
-        let [_, modal, _] = Layout::vertical([
-            Constraint::Percentage(15),
-            Constraint::Percentage(70),
-            Constraint::Percentage(15),
-        ])
-        .areas(modal);
+        let modal = area.inner(Margin::new(
+            if area.width < 60 { 1 } else { area.width / 12 },
+            if area.height < 12 { 0 } else { area.height / 9 },
+        ));
         frame.render_widget(Clear, modal);
+        let (title, actions) = match &self.layer {
+            Layer::None => return,
+            Layer::Commands(_, query) => (format!("Commands  /  {query}"), ""),
+            Layer::Workspaces(..) => ("Workspaces".into(), "Open folder"),
+            Layer::Sessions(..) => ("Sessions".into(), "New session"),
+            Layer::Artifacts(_) => ("Artifacts".into(), ""),
+            Layer::Approval { .. } => ("Review operation".into(), "Allow once / Deny"),
+            Layer::ConfirmCancel(_) => ("Cancel task?".into(), "Cancel task / Keep running"),
+            Layer::Preview(preview, _) => (
+                "Artifact preview".into(),
+                match (preview.text.is_some(), preview.revision.is_some()) {
+                    (true, true) => "Save / Use as input / Previous",
+                    (true, false) => "Save / Use as input",
+                    (false, true) => "Save / Previous",
+                    (false, false) => "Save",
+                },
+            ),
+            Layer::Edit(edit) => (edit.name().into(), ""),
+        };
+        let block = Block::default()
+            .style(self.palette.rail)
+            .border_style(self.palette.quiet)
+            .borders(Borders::ALL)
+            .title(Span::styled(format!(" {title} "), self.palette.label));
+        let body = block.inner(modal).inner(Margin::new(1, 0));
+        frame.render_widget(block, modal);
+        if body.is_empty() {
+            return;
+        }
+        let [body, footer] = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(u16::from(!actions.is_empty() && body.height > 1)),
+        ])
+        .areas(body);
+        frame.render_widget(Paragraph::new(actions).style(self.palette.label), footer);
         match &self.layer {
             Layer::None => {}
-            Layer::Commands(index) => render_list(
+            Layer::Commands(index, query) => render_list(
                 frame,
-                modal,
-                "Commands",
-                self.commands()
+                body,
+                self.filtered_commands(query)
                     .into_iter()
                     .map(|(label, _)| label.to_owned())
                     .collect(),
                 *index,
+                self.palette.choice,
             ),
             Layer::Workspaces(page, index) => render_list(
                 frame,
-                modal,
-                "Workspaces  |  Open folder",
+                body,
                 page.as_ref()
                     .map(|p| p.items.iter().map(|item| clean(&item.root)).collect())
                     .unwrap_or_default(),
                 *index,
+                self.palette.choice,
             ),
             Layer::Sessions(page, index) => render_list(
                 frame,
-                modal,
-                "Sessions  |  New session",
+                body,
                 page.as_ref()
                     .map(|p| p.items.iter().map(session_name).collect())
                     .unwrap_or_default(),
                 *index,
+                self.palette.choice,
             ),
             Layer::Artifacts(index) => render_list(
                 frame,
-                modal,
-                "Artifacts",
+                body,
                 self.detail
                     .as_ref()
                     .map(|d| {
@@ -981,21 +1212,10 @@ impl App {
                     })
                     .unwrap_or_default(),
                 *index,
+                self.palette.choice,
             ),
-            Layer::Approval { text, scroll, .. } => render_text(
-                frame,
-                modal,
-                "Review operation  |  Allow once / Deny",
-                text,
-                *scroll,
-            ),
-            Layer::ConfirmCancel(_) => render_text(
-                frame,
-                modal,
-                "Cancel task?",
-                "Cancel task  /  Keep running",
-                0,
-            ),
+            Layer::Approval { text, scroll, .. } => render_text(frame, body, text, *scroll),
+            Layer::ConfirmCancel(_) => {}
             Layer::Preview(preview, scroll) => {
                 let revision = preview
                     .revision
@@ -1008,34 +1228,31 @@ impl App {
                     preview.digest.sha256,
                     preview.text.as_deref().unwrap_or("No text preview")
                 );
-                render_text(
-                    frame,
-                    modal,
-                    "Artifact preview  |  Save / Use as input",
-                    &text,
-                    *scroll,
-                );
+                render_text(frame, body, &text, *scroll);
             }
             Layer::Edit(edit) => {
-                let value = if matches!(edit, Edit::Task) {
-                    &self.draft
+                let input = if let Edit::Answer(_, _, question) = edit {
+                    let [prompt, input] =
+                        Layout::vertical([Constraint::Length(body.height / 2), Constraint::Min(0)])
+                            .areas(body);
+                    frame.render_widget(
+                        Paragraph::new(clean(question))
+                            .wrap(Wrap { trim: false })
+                            .style(self.palette.quiet),
+                        prompt,
+                    );
+                    input
                 } else {
-                    &self.input
+                    body
                 };
-                let caption = match edit {
-                    Edit::Answer(_, _, question) => format!("{}\n\n", clean(question)),
-                    Edit::Task if self.input_artifact.is_some() => {
-                        "Previous artifact attached\n\n".into()
-                    }
-                    _ => String::new(),
-                };
-                let content = format!("{caption}{value}");
-                let scroll = content
-                    .lines()
-                    .count()
-                    .saturating_sub(modal.height.saturating_sub(3) as usize)
-                    .min(u16::MAX as usize) as u16;
-                render_text(frame, modal, edit.name(), &content, scroll);
+                if !input.is_empty() {
+                    let (lines, x, y) = self.input.viewport(input.width, input.height);
+                    frame.render_widget(
+                        Paragraph::new(lines.into_iter().map(Line::raw).collect::<Vec<_>>()),
+                        input,
+                    );
+                    frame.set_cursor_position(Position::new(input.x + x, input.y + y));
+                }
             }
         }
     }
@@ -1122,33 +1339,24 @@ fn status(status: TaskStatus) -> (&'static str, Color) {
     }
 }
 
-fn panel<'a>(title: impl Into<Line<'a>>, active: bool) -> Block<'a> {
-    Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(if active { ACCENT } else { Color::DarkGray }))
-}
-
-fn render_list(frame: &mut Frame<'_>, area: Rect, title: &str, items: Vec<String>, index: usize) {
+fn render_list(frame: &mut Frame<'_>, area: Rect, items: Vec<String>, index: usize, choice: Style) {
     if items.is_empty() {
-        render_text(frame, area, title, "No entries", 0);
+        render_text(frame, area, "No entries", 0);
         return;
     }
     let mut state = ListState::default().with_selected(Some(index));
     frame.render_stateful_widget(
         List::new(items)
-            .block(panel(title, true))
             .highlight_symbol("> ")
-            .highlight_style(Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)),
+            .highlight_style(choice),
         area,
         &mut state,
     );
 }
 
-fn render_text(frame: &mut Frame<'_>, area: Rect, title: &str, text: &str, scroll: u16) {
+fn render_text(frame: &mut Frame<'_>, area: Rect, text: &str, scroll: u16) {
     frame.render_widget(
         Paragraph::new(clean(text))
-            .block(panel(title, true))
             .wrap(Wrap { trim: false })
             .scroll((scroll, 0)),
         area,
@@ -1171,7 +1379,7 @@ mod tests {
 
     #[test]
     fn stale_browse_cannot_change_the_current_session() {
-        let mut app = App::new(true);
+        let mut app = App::new(true, Theme::Auto);
         app.workspace = Some(Workspace {
             id: "root".into(),
             root: "test".into(),
@@ -1201,16 +1409,73 @@ mod tests {
 
     #[test]
     fn tiny_layout_draws_and_paste_filters_controls_without_splitting_utf8() {
-        let mut app = App::new(true);
+        let mut app = App::new(true, Theme::Auto);
         app.layer = Layer::Edit(Edit::Task);
         app.paste("交付\x1b\u{202e}\0\t明细\n报告");
-        assert_eq!(app.draft, "交付 明细\n报告");
+        assert_eq!(app.draft.text(), "交付 明细\n报告");
         let mut text = String::new();
-        push_bounded(&mut text, &app.draft, 4);
+        push_bounded(&mut text, app.draft.text(), 4);
         assert_eq!(text, "交");
-        for (width, height) in [(20, 5), (48, 18), (110, 28)] {
+        for (width, height) in [(1, 1), (20, 5), (48, 18), (80, 24), (120, 32)] {
             let mut screen = Terminal::new(TestBackend::new(width, height)).unwrap();
             screen.draw(|frame| app.draw(frame)).unwrap();
         }
+    }
+
+    #[test]
+    fn approval_actions_keep_the_terminal_palette_at_supported_sizes() {
+        for theme in [Theme::Auto, Theme::Dark, Theme::Light, Theme::Mono] {
+            let mut app = App::new(true, theme);
+            app.layer = Layer::Approval {
+                task: "task".into(),
+                id: "approval".into(),
+                text: "Operation with many arguments\n".repeat(40),
+                scroll: 10,
+            };
+            for (width, height) in [(48, 18), (80, 24), (120, 32)] {
+                let mut screen = Terminal::new(TestBackend::new(width, height)).unwrap();
+                let frame = screen.draw(|frame| app.draw(frame)).unwrap();
+                let footer = frame
+                    .buffer
+                    .content()
+                    .chunks_exact(width.into())
+                    .find(|row| {
+                        row.iter()
+                            .map(|cell| cell.symbol())
+                            .collect::<String>()
+                            .contains("Allow once / Deny")
+                    })
+                    .expect("approval actions stay visible");
+                let label = footer.iter().find(|cell| cell.symbol() == "A").unwrap();
+                assert_eq!(label.fg, app.palette.label.fg.unwrap_or(Color::Reset));
+                assert_eq!(label.bg, app.palette.rail.bg.unwrap_or(Color::Reset));
+            }
+        }
+    }
+
+    #[test]
+    fn draft_and_attachment_return_only_in_the_original_session() {
+        let mut app = App::new(true, Theme::Mono);
+        let session = |id: &str| Session {
+            id: id.into(),
+            workspace_id: "root".into(),
+            title: None,
+            archived: false,
+        };
+        app.select_session(session("one"));
+        app.layer = Layer::Edit(Edit::Task);
+        app.paste("draft");
+        let key = app.key.clone();
+        app.input_artifact = Some(ArtifactGetParams {
+            task_id: "task".into(),
+            artifact_id: "artifact".into(),
+        });
+        app.select_session(session("two"));
+        assert_eq!(app.draft.text(), "");
+        assert!(app.input_artifact.is_none());
+        app.select_session(session("one"));
+        assert_eq!(app.draft.text(), "draft");
+        assert_eq!(app.key, key);
+        assert_eq!(app.input_artifact.unwrap().artifact_id, "artifact");
     }
 }
