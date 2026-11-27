@@ -139,6 +139,7 @@ impl App {
 
     fn draw_conversation(&self, frame: &mut Frame<'_>, area: Rect) {
         let mut lines = Vec::new();
+        let mut pinned = Vec::new();
         if let Some(detail) = &self.detail {
             let task = &detail.task;
             if self.show_details {
@@ -153,8 +154,11 @@ impl App {
             {
                 heading.push(Span::styled("  ·  Plan only", self.palette.quiet));
             }
-            lines.push(Line::from(heading));
-            self.append_task_actions(detail, &mut lines);
+            if self.follow && area.width >= 48 {
+                heading.push(Span::styled("  ·  Following", self.palette.quiet));
+            }
+            pinned.push(Line::from(heading));
+            self.append_task_actions(detail, &mut pinned);
             for message in task
                 .messages
                 .iter()
@@ -177,6 +181,32 @@ impl App {
                     _ => {}
                 }
             }
+            if task.status == TaskStatus::Running {
+                let phase = if let Some(call) = &task.in_flight_tool {
+                    format!("Running tool  ·  {}", clean(&call.name))
+                } else if task.agent_run.is_some() {
+                    "External Agent running".into()
+                } else if task.model_steps > 0 {
+                    format!("Model request  ·  Attempt {}", task.model_steps)
+                } else {
+                    "Waiting for a model worker".into()
+                };
+                pinned.push(Line::styled(phase, self.palette.quiet));
+                if task.in_flight_tool.is_none()
+                    && let Some(preview) = self.activity.iter().find(|preview| {
+                        preview.task_id == task.id
+                            && preview.step == task.model_steps
+                            && !preview.text.is_empty()
+                    })
+                {
+                    lines.push(Line::raw(""));
+                    lines.push(Line::styled("Live response", self.palette.label));
+                    append(&mut lines, &preview.text);
+                    if preview.clipped {
+                        lines.push(Line::styled("Preview limit reached", self.palette.quiet));
+                    }
+                }
+            }
             if let Some(output) = &task.output {
                 lines.push(Line::raw(""));
                 let title = if task.status == TaskStatus::Failed {
@@ -186,6 +216,16 @@ impl App {
                 };
                 lines.push(Line::styled(title, self.palette.label));
                 append(&mut lines, output);
+            }
+            if let Some(usage) = &detail.usage {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled(
+                    format!(
+                        "Tokens  ·  {} input  ·  {} output",
+                        usage.input_tokens.0, usage.output_tokens.0
+                    ),
+                    self.palette.quiet,
+                ));
             }
             if self.show_details {
                 self.append_task_details(detail, &mut lines);
@@ -219,12 +259,25 @@ impl App {
                 lines.push(Line::styled(hint, self.palette.quiet));
             }
         }
-        frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .scroll((self.scroll, 0)),
-            area,
-        );
+        let header = Paragraph::new(pinned).wrap(Wrap { trim: false });
+        let header_height = header
+            .line_count(area.width)
+            .min(usize::from(area.height / 2)) as u16;
+        let [heading, conversation] =
+            Layout::vertical([Constraint::Length(header_height), Constraint::Min(0)]).areas(area);
+        frame.render_widget(header, heading);
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let max_scroll = paragraph
+            .line_count(conversation.width)
+            .saturating_sub(usize::from(conversation.height))
+            .min(usize::from(u16::MAX)) as u16;
+        let scroll = if self.follow {
+            max_scroll
+        } else {
+            self.scroll.min(max_scroll)
+        };
+        self.rendered_scroll.set(scroll);
+        frame.render_widget(paragraph.scroll((scroll, 0)), conversation);
     }
 
     fn append_task_actions(&self, detail: &Detail, lines: &mut Vec<Line<'static>>) {
@@ -275,7 +328,6 @@ impl App {
                 })
         };
         if let Some(action) = action {
-            lines.push(Line::raw(""));
             lines.extend(
                 action
                     .lines()

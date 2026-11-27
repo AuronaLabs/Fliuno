@@ -1,16 +1,17 @@
+use crate::activity;
 use crate::backup::{self, BackupRequest, BackupResult};
 use crate::{health, options::Options, task_browser::PageAction};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use fliuno_client::{Client, Error as ClientError, EventFeed};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactDigest, ArtifactGetParams,
-    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ObjectPage, Session,
-    SessionContextParams, SessionForkParams, SessionHistoryRole, SessionListOrder,
-    SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan, TaskQueue,
-    TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams, TaskReconciliation,
-    TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState,
-    TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot,
-    WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
+    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelUsageSummary, ModelUsageTotals,
+    ObjectPage, Session, SessionContextParams, SessionForkParams, SessionHistoryRole,
+    SessionListOrder, SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan,
+    TaskQueue, TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams,
+    TaskReconciliation, TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus,
+    TaskSteeringState, TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams,
+    WorkSnapshot, WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -95,6 +96,7 @@ pub struct Detail {
     pub resume: Option<TaskResumeStatus>,
     pub review: Option<TaskReconciliation>,
     pub can_reconcile: bool,
+    pub usage: Option<ModelUsageTotals>,
 }
 
 pub struct Preview {
@@ -163,6 +165,7 @@ pub enum Update {
     Reconciled(String),
     BackupDone(Box<BackupResult>),
     Diagnostics(String),
+    Activity(Vec<activity::Preview>),
     Finished,
     Error(String),
     Offline(String),
@@ -238,6 +241,7 @@ struct Service {
     approval_ids: Vec<String>,
     feed: Option<EventFeed>,
     watermark: Option<u64>,
+    activity: activity::Progress,
 }
 
 fn finish_child(mut child: Child, grace: Duration) {
@@ -305,6 +309,7 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
         approval_ids: Vec::new(),
         feed: None,
         watermark: None,
+        activity: activity::Progress::default(),
     })
 }
 
@@ -388,11 +393,32 @@ fn serve(
                 break;
             }
         }
+        if let Some(previews) = service
+            .as_mut()
+            .and_then(|server| server.activity.changed())
+            && out.send(Update::Activity(previews)).is_err()
+        {
+            break;
+        }
         if finished && out.send(Update::Finished).is_err() {
             break;
         }
     }
     close(&mut service, &slot);
+}
+
+fn observe(
+    feed: &mut Option<EventFeed>,
+    activity: &mut activity::Progress,
+    notice: fliuno_client::Notification,
+) {
+    let notice = match feed {
+        Some(feed) => feed.observe(notice),
+        None => Some(notice),
+    };
+    if let Some(notice) = notice {
+        activity.observe(notice);
+    }
 }
 
 impl Service {
@@ -407,14 +433,17 @@ impl Service {
 
     fn rpc<T: DeserializeOwned>(&mut self, method: &str, params: Value) -> Result<T> {
         let feed = &mut self.feed;
-        Ok(self.client.call(method, &params, |notice| {
-            if let Some(feed) = feed {
-                feed.observe(notice);
-            }
-        })?)
+        let activity = &mut self.activity;
+        Ok(self
+            .client
+            .call(method, &params, |notice| observe(feed, activity, notice))?)
     }
 
     fn refresh(&mut self, out: &Sender<Update>, force: bool) -> Result<()> {
+        if self.activity.gap && self.supports("modelProgressResubscribe") {
+            self.activity.gap = false;
+            let _: Value = self.rpc("modelProgress/resubscribe", json!({}))?;
+        }
         let (workspace_id, session_id) = if self.inbox_visible {
             let workspace = self.workspace.clone().ok_or("Open a workspace first")?;
             (Some(workspace), None)
@@ -432,20 +461,23 @@ impl Service {
             include_actions: self.supports("workNextActions"),
         };
         let (snapshot, approvals) = if self.watermark.is_none() {
-            let sub = self.client.subscribe_work(&params, |_| {})?;
+            let activity = &mut self.activity;
+            let sub = self
+                .client
+                .subscribe_work(&params, |notice| activity.observe(notice))?;
             self.feed = Some(sub.events);
             (sub.snapshot, sub.inbox)
         } else {
             let feed = &mut self.feed;
-            let (snapshot, approvals) = self.client.work_snapshot(&params, |notice| {
-                if let Some(feed) = feed {
-                    feed.observe(notice);
-                }
-            })?;
+            let activity = &mut self.activity;
+            let (snapshot, approvals) = self
+                .client
+                .work_snapshot(&params, |notice| observe(feed, activity, notice))?;
             if let Some(feed) = self.feed.as_mut() {
                 // Updated summaries come from the snapshot; this cursor closes gaps
                 // without retaining event bodies or replaying client actions.
-                let _ = feed.next_task_changes(&mut self.client, 50, |_| {})?;
+                let _ = feed
+                    .next_task_changes(&mut self.client, 50, |notice| activity.observe(notice))?;
             }
             (snapshot, approvals)
         };
@@ -905,7 +937,17 @@ impl Service {
         } else {
             None
         };
+        let usage = if task.model_steps > 0 && self.supports("modelUsageSummary") {
+            let report: ModelUsageSummary = self.rpc(
+                "modelUsage/getSummary",
+                json!({"scope":{"kind":"task","taskId":id}}),
+            )?;
+            (report.totals.report_count.0 != 0).then_some(report.totals)
+        } else {
+            None
+        };
         Ok(Detail {
+            usage,
             review,
             can_reconcile,
             task,

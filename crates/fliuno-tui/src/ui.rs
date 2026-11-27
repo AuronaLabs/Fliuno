@@ -5,6 +5,7 @@ mod workbench;
 use palette::Palette;
 
 use crate::{
+    activity,
     backup::{BackupRequest, BackupResult},
     editor::Editor,
     options::Theme,
@@ -25,7 +26,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
-use std::path::PathBuf;
+use std::{cell::Cell, path::PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -177,7 +178,10 @@ pub struct App {
     history_selection: Option<String>,
     selected: Option<String>,
     detail: Option<Box<Detail>>,
+    activity: Vec<activity::Preview>,
     scroll: u16,
+    rendered_scroll: Cell<u16>,
+    follow: bool,
     show_details: bool,
     layer: Layer,
     draft: Editor,
@@ -217,7 +221,10 @@ impl App {
             history_selection: None,
             selected: None,
             detail: None,
+            activity: Vec::new(),
             scroll: 0,
+            rendered_scroll: Cell::new(0),
+            follow: false,
             show_details: false,
             layer: Layer::None,
             draft: Editor::default(),
@@ -415,6 +422,7 @@ impl App {
         self.selected = Some(id);
         self.detail = None;
         self.scroll = 0;
+        self.follow = false;
         self.show_details = false;
     }
 
@@ -422,6 +430,7 @@ impl App {
         match update {
             Update::Online(initial) => {
                 self.online = true;
+                self.activity.clear();
                 self.message.clear();
                 let id = self.workspace.get_or_insert(initial).id.clone();
                 self.next = Some(match &self.session {
@@ -596,6 +605,7 @@ impl App {
                 {
                     if self.start_acknowledged {
                         self.selected = Some(detail.task.id.clone());
+                        self.follow = true;
                     }
                     self.detail = Some(detail);
                 }
@@ -718,10 +728,12 @@ impl App {
             Update::Notice(message) | Update::Error(message) => self.message = message,
             Update::Offline(message) => {
                 self.online = false;
+                self.activity.clear();
                 self.layer = Layer::None;
                 self.next = None;
                 self.message = message;
             }
+            Update::Activity(previews) => self.activity = previews,
             Update::Diagnostics(text) => {
                 if matches!(self.layer, Layer::Diagnostics(..)) {
                     self.layer = Layer::Diagnostics(text, 0);
@@ -1615,7 +1627,14 @@ impl App {
                 self.show_details = false;
                 self.scroll = 0;
             }
-            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home => {
+            KeyCode::End => self.follow = true,
+            KeyCode::Home => {
+                self.follow = false;
+                self.scroll = 0;
+            }
+            KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
+                self.follow = false;
+                self.scroll = self.rendered_scroll.get();
                 scroll_key(key.code, &mut self.scroll);
             }
             KeyCode::Char('w') if active => {
