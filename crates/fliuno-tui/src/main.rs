@@ -1,5 +1,6 @@
 mod backup;
 mod editor;
+mod health;
 mod options;
 mod recovery;
 mod service;
@@ -28,6 +29,13 @@ fn main() -> std::process::ExitCode {
                 fliuno_config::initialize(&path)
                     .map_err(|error| format!("Cannot create {}: {error}", path.display()))?;
                 println!("{}", path.display());
+            }
+            Entry::Doctor(options) => {
+                let report = health::inspect(&options, None);
+                print!("{}", ui::clean(&report.text));
+                if !report.healthy {
+                    return Err("configuration needs attention".into());
+                }
             }
             Entry::Run(options) => run(options).map_err(|error| error.to_string())?,
         }

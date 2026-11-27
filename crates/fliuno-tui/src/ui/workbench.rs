@@ -76,7 +76,8 @@ impl App {
         } else {
             "Local"
         };
-        let title_width = usize::from(area.width).saturating_sub(state.width() + 15);
+        let title_width = usize::from(area.width.saturating_sub(u16::from(area.width >= 24) * 4))
+            .saturating_sub(state.width() + 16);
         let root = self
             .workspace
             .as_ref()
@@ -206,7 +207,7 @@ impl App {
                 if self.busy {
                     ("Connecting", "")
                 } else {
-                    ("Disconnected", "Press r to reconnect")
+                    ("Disconnected", "r Reconnect  ·  F5 Check configuration")
                 }
             } else if self.selected.is_some() || self.snapshot.is_none() {
                 ("Loading session", "")

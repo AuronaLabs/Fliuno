@@ -395,6 +395,10 @@ impl App {
                 };
                 ("Task recovery".into(), actions)
             }
+            Layer::Diagnostics(..) => (
+                "Connection and configuration".into(),
+                "↑/↓ Scroll  ·  Esc Back",
+            ),
             Layer::Backup(_) => (
                 "Database backups".into(),
                 "c Create  ·  v Verify  ·  r Restore  ·  Esc Back",
@@ -576,11 +580,29 @@ impl App {
                     render_text(frame, body, text.trim(), *scroll);
                 }
             }
+            Layer::Diagnostics(text, scroll) => {
+                let state = if self.online {
+                    ""
+                } else {
+                    "Service: Disconnected\n\n"
+                };
+                let text = if self.busy && text.is_empty() {
+                    "Checking local configuration…".into()
+                } else {
+                    format!("{state}{}", clean(text))
+                };
+                render_text(frame, body, &text, *scroll);
+            }
             Layer::Backup(result) => {
                 let text = if let Some(result) = result {
                     let manifest = &result.manifest;
-                    let mut text = format!(
-                        "{}\n{}\n\nSchema {}  ·  Through event #{}\nTasks: {}  ·  Deliverables: {}  ·  {} bytes\n\nSHA-256\n{}",
+                    let reopen = if matches!(result.request, BackupRequest::Restore { .. }) {
+                        "\nOpen this copy with fliuno --db PATH."
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "{}\n{}{reopen}\n\nSchema {}  ·  Through event #{}\nTasks: {}  ·  Deliverables: {}  ·  {} bytes\n\nSHA-256\n{}",
                         result.request.label(),
                         clean(&result.request.result_path().to_string_lossy()),
                         manifest.schema_version,
@@ -589,11 +611,7 @@ impl App {
                         manifest.artifact_count,
                         manifest.database_bytes,
                         clean(&manifest.database_sha256)
-                    );
-                    if matches!(result.request, BackupRequest::Restore { .. }) {
-                        text.push_str("\n\nOpen the restored copy by starting Fliuno with --db and the path above.");
-                    }
-                    text
+                    )
                 } else if self.busy {
                     "Working on the database backup…".into()
                 } else if !self.message.is_empty() {

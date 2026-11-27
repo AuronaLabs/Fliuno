@@ -72,6 +72,7 @@ enum Layer {
     Recovery(String, u16),
     Reconcile(Box<ReconcileForm>),
     Backup(Option<Box<BackupResult>>),
+    Diagnostics(String, u16),
     Edit(Edit),
     None,
 }
@@ -721,6 +722,11 @@ impl App {
                 self.next = None;
                 self.message = message;
             }
+            Update::Diagnostics(text) => {
+                if matches!(self.layer, Layer::Diagnostics(..)) {
+                    self.layer = Layer::Diagnostics(text, 0);
+                }
+            }
             Update::BackupDone(result) => {
                 self.message = result.request.label().into();
                 self.layer = Layer::Backup(Some(result));
@@ -1251,6 +1257,7 @@ impl App {
                     }
                 }
             }
+            Layer::Diagnostics(_, scroll) => scroll_key(key.code, scroll),
             Layer::Backup(_) => {
                 let edit = match key.code {
                     KeyCode::Char('c') => Some(Edit::BackupCreate),
@@ -1584,6 +1591,12 @@ impl App {
             self.send(worker, Request::Reconnect);
             return false;
         }
+        if key.code == KeyCode::F(5) && pressed && !self.busy {
+            if self.send(worker, Request::Diagnostics) {
+                self.layer = Layer::Diagnostics(String::new(), 0);
+            }
+            return false;
+        }
         if key.code == KeyCode::F(4) && pressed && !self.busy {
             self.layer = Layer::Backup(None);
             self.message.clear();
@@ -1691,7 +1704,10 @@ impl App {
     }
 
     fn commands(&self) -> Vec<(&'static str, KeyCode)> {
-        let mut commands = vec![("Database backups", KeyCode::F(4))];
+        let mut commands = vec![
+            ("Database backups", KeyCode::F(4)),
+            ("Connection and configuration", KeyCode::F(5)),
+        ];
         if self.online {
             commands.push((
                 if self.session.is_some() {

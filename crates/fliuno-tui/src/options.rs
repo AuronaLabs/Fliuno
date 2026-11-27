@@ -11,6 +11,7 @@ Usage: fliuno [--config PATH] [--demo] [--workspace PATH] [--db PATH] [--server 
 
   --config PATH      Settings file (default: ~/.fliuno/config.toml)
   --init-config      Create the settings template and exit
+  --doctor           Check local configuration and paths without starting a service
   --demo             Use the offline demonstration provider
   --workspace PATH   Folder to open (default: current directory)
   --db PATH          Workbench database (default: ~/.fliuno/state/workbench.db)
@@ -19,9 +20,10 @@ Usage: fliuno [--config PATH] [--demo] [--workspace PATH] [--db PATH] [--server 
   --help             Print help
   --version          Print version";
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Options {
     pub demo: bool,
+    pub settings: Settings,
     pub force_demo: bool,
     pub config: Option<PathBuf>,
     pub workspace: PathBuf,
@@ -36,6 +38,7 @@ pub enum Entry {
     Version,
     InitConfig(PathBuf),
     Run(Options),
+    Doctor(Options),
 }
 
 impl Options {
@@ -45,12 +48,14 @@ impl Options {
         let mut config = None;
         let mut server_args = Vec::new();
         let mut theme = None;
+        let mut doctor = false;
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--help" | "-h") => return Ok(Entry::Help),
                 Some("--version" | "-V") => return Ok(Entry::Version),
                 Some("--demo") => force_demo = true,
                 Some("--init-config") => init = true,
+                Some("--doctor") => doctor = true,
                 Some("--workspace") => workspace = Some(read_path(&mut args, "--workspace")?),
                 Some("--db") => database = Some(read_path(&mut args, "--db")?),
                 Some("--server") => server = Some(read_path(&mut args, "--server")?),
@@ -73,6 +78,9 @@ impl Options {
         }
         let directory = user_directory();
         let default_config = directory.as_ref().map(|dir| dir.join("config.toml"));
+        if init && doctor {
+            return Err("Choose either --doctor or --init-config".into());
+        }
         if init {
             return config
                 .or(default_config)
@@ -87,13 +95,13 @@ impl Options {
         {
             config = Some(path);
         }
-        let settings = config
+        let mut settings = config
             .as_deref()
             .map(Settings::load)
             .transpose()?
             .unwrap_or_default();
         let demo = force_demo || matches!(settings.model.provider, Provider::Demo);
-        let server = match server.or(settings.workbench.server) {
+        let server = match server.or_else(|| settings.workbench.server.take()) {
             Some(path) => path,
             None => std::env::current_exe()
                 .map_err(|error| error.to_string())?
@@ -105,7 +113,7 @@ impl Options {
         };
         let database = if let Some(path) = database.or_else(|| {
             (!force_demo)
-                .then_some(settings.workbench.database)
+                .then(|| settings.workbench.database.take())
                 .flatten()
         }) {
             path
@@ -118,7 +126,7 @@ impl Options {
         {
             return Err("Pass --db, --config, and --demo before --".into());
         }
-        Ok(Entry::Run(Self {
+        let options = Self {
             demo,
             force_demo: force_demo || config.is_none(),
             config,
@@ -127,7 +135,13 @@ impl Options {
             server,
             server_args,
             theme: theme.unwrap_or(settings.workbench.theme),
-        }))
+            settings,
+        };
+        Ok(if doctor {
+            Entry::Doctor(options)
+        } else {
+            Entry::Run(options)
+        })
     }
 }
 

@@ -1,5 +1,5 @@
 use crate::backup::{self, BackupRequest, BackupResult};
-use crate::{options::Options, task_browser::PageAction};
+use crate::{health, options::Options, task_browser::PageAction};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use fliuno_client::{Client, Error as ClientError, EventFeed};
 use fliuno_protocol::{
@@ -32,6 +32,7 @@ type ProcessSlot = Arc<Mutex<Option<Child>>>;
 
 pub enum Request {
     Reconnect,
+    Diagnostics,
     Backup(BackupRequest),
     Workspaces(u64),
     OpenWorkspace(String),
@@ -161,6 +162,7 @@ pub enum Update {
     Notice(String),
     Reconciled(String),
     BackupDone(Box<BackupResult>),
+    Diagnostics(String),
     Finished,
     Error(String),
     Offline(String),
@@ -362,6 +364,12 @@ fn serve(
                     }
                 }
             }
+            Ok(Request::Diagnostics) => {
+                let info = service.as_ref().map(|server| server.client.info());
+                let report = health::inspect(&options, info);
+                out.send(Update::Diagnostics(report.text))
+                    .map_err(Into::into)
+            }
             Ok(Request::Backup(request)) => backup::run(&options, request, &backup_slot)
                 .and_then(|result| Ok(out.send(Update::BackupDone(Box::new(result)))?)),
             Ok(request) => service
@@ -495,7 +503,7 @@ impl Service {
 
     fn handle(&mut self, request: Request, out: &Sender<Update>, root: &mut String) -> Result<()> {
         let update = match request {
-            Request::Reconnect | Request::Backup(_) => unreachable!(),
+            Request::Reconnect | Request::Diagnostics | Request::Backup(_) => unreachable!(),
             Request::Workspaces(after) => {
                 Update::Workspaces(self.rpc("workspace/list", json!({"after":after,"limit":30}))?)
             }
