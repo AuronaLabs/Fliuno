@@ -87,11 +87,13 @@ jobs:
         run: |
           cargo build --locked --release -p fliuno-tui -p fliuno-app-server --bins
           version=$(target/release/fliuno --version | cut -d' ' -f2)
-          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
           sh packaging/debian/build.sh target/release dist
           python3 scripts/package_workbench.py "$version" --linux-bin target/release \
             --native-package "dist/fliuno-v$version-linux-amd64.deb" --out dist
-          git rev-parse HEAD > dist/SOURCE-COMMIT.txt
+          printf '%s\n' "$GITHUB_SHA" > dist/SOURCE-COMMIT.txt
       - name: Verify the Debian package lifecycle
         run: sh packaging/debian/verify.sh dist/*.deb target/release "$BASELINE"
       - name: Exercise the installed client in a Linux PTY
