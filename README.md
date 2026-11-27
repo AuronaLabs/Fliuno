@@ -15,7 +15,7 @@
 
 **[快速体验](#快速体验)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.12** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.12) · [更新记录](CHANGELOG.md#0012)
+当前版本 **v0.0.13** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.13) · [更新记录](CHANGELOG.md#0013)
 
 ## 快速体验
 
