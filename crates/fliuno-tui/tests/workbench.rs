@@ -841,6 +841,8 @@ fn model_and_budget_load_from_files_without_provider_environment() {
     std::fs::write(
         &config,
         r#"
+        [workbench]
+        database = "terminal-model.db"
         [model]
         provider = "openai"
         name = "fixture-model"
@@ -852,7 +854,7 @@ fn model_and_budget_load_from_files_without_provider_environment() {
     "#,
     )
     .unwrap();
-    let mut process = Command::new(server)
+    let mut process = Command::new(&server)
         .arg("--config")
         .arg(&config)
         .arg("--db")
@@ -878,6 +880,76 @@ fn model_and_budget_load_from_files_without_provider_environment() {
     drop(writer);
     std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
     assert!(process.wait().unwrap().success());
+    let mut terminal = Console::launch_with_config(Some(&server), root.path(), Some(&config));
+    terminal.expect("New session");
+    terminal.keys("Model profile\r");
+    terminal.expect("No tasks");
+    terminal.ready();
+    terminal.keys("/");
+    terminal.expect("Connection and configuration");
+    terminal.keys("connection\r");
+    terminal.expect("Model: openai / fixture-model");
+    terminal.expect("Active provider: openai");
+    terminal.expect("Service: Connected");
+    terminal.capture("diagnostics-live-model");
+    terminal.resize(20, 48);
+    terminal.ready();
+    terminal.expect("fixture-model");
+    terminal.expect("Service: Connected");
+    terminal.capture("diagnostics-narrow");
+    terminal.quit("\x03");
+}
+
+#[test]
+fn doctor_checks_local_settings_without_starting_or_disclosing_credentials() {
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let data = r#"
+        [workbench]
+        database = "new/workbench.db"
+        server = "missing-server"
+        [model]
+        provider = "openai"
+        name = "fixture-model"
+        api_key_file = "fixture.key"
+    "#;
+    std::fs::write(&config, data).unwrap();
+    let diagnose = || {
+        Command::new(binary())
+            .arg("--doctor")
+            .arg("--config")
+            .arg(&config)
+            .arg("--workspace")
+            .arg(root.path())
+            .output()
+            .unwrap()
+    };
+    let missing = diagnose();
+    assert!(!missing.status.success());
+    let stdout = String::from_utf8(missing.stdout).unwrap();
+    assert!(
+        stdout.contains("Cannot read the configured API key file"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("missing-server"), "{stdout}");
+    assert!(stdout.contains("missing or invalid"), "{stdout}");
+    assert!(!root.path().join("new").exists());
+    let fliuno = serde_json::to_string(&binary().to_string_lossy()).unwrap();
+    std::fs::write(&config, data.replace("\"missing-server\"", &fliuno)).unwrap();
+    std::fs::write(root.path().join("fixture.key"), "must-never-be-printed\n").unwrap();
+    let valid = diagnose();
+    let stdout = String::from_utf8(valid.stdout).unwrap();
+    assert!(valid.status.success(), "{stdout}");
+    assert!(
+        stdout.contains("Configured key file is readable"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("must-never-be-printed"));
+    assert!(!root.path().join("new").exists());
+    std::fs::write(&config, "[model").unwrap();
+    let invalid = diagnose();
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("Invalid configuration"));
 }
 
 #[test]
@@ -928,6 +1000,7 @@ fn terminal_creates_verifies_and_opens_a_restored_database() {
     console.ready();
     console.resize(18, 48);
     console.ready();
+    console.expect("Open this copy with fliuno --db PATH.");
     console.capture("backup-restored-narrow");
     console.keys("r");
     console.expect("Restore from backup folder");
