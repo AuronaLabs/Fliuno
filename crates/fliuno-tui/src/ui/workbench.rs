@@ -1,0 +1,383 @@
+use super::*;
+
+impl App {
+    pub fn draw(&self, frame: &mut Frame<'_>) {
+        let viewport = frame.area();
+        frame.render_widget(Block::default().style(self.palette.base), viewport);
+        let width = viewport.width.min(112);
+        let area = Rect::new(
+            viewport.x + (viewport.width - width) / 2,
+            viewport.y,
+            width,
+            viewport.height,
+        );
+        let editing = matches!(self.layer, Layer::Edit(Edit::Task));
+        let full_page = matches!(
+            self.layer,
+            Layer::Inbox(_) | Layer::History(_) | Layer::TaskBrowser(_)
+        );
+        let show_composer = !full_page && self.session.is_some();
+        let has_notice = self.busy || !self.message.is_empty();
+        let [header, body, composer, status_line] = Layout::vertical([
+            Constraint::Length(if area.height >= 10 { 3 } else { 1 }),
+            Constraint::Min(0),
+            Constraint::Length(if !show_composer {
+                0
+            } else if editing {
+                (area.height / 4).clamp(3, 8)
+            } else {
+                3
+            }),
+            Constraint::Length(1 + u16::from(has_notice && area.height >= 12)),
+        ])
+        .areas(area);
+        self.draw_header(frame, header);
+        if !full_page && !matches!(self.layer, Layer::None | Layer::Edit(Edit::Task)) {
+            self.draw_layer(
+                frame,
+                Rect::new(
+                    area.x,
+                    body.y,
+                    area.width,
+                    area.bottom().saturating_sub(body.y),
+                ),
+            );
+            return;
+        }
+        match &self.layer {
+            Layer::Inbox(_) => self.draw_inbox(frame, body),
+            Layer::History(_) => self.draw_history(frame, body),
+            Layer::TaskBrowser(browser) => self.draw_task_browser(frame, body, browser),
+            _ => self.draw_conversation(
+                frame,
+                body.inner(Margin::new(u16::from(body.width >= 24) * 2, 0)),
+            ),
+        }
+        if show_composer {
+            self.draw_composer(frame, composer, editing);
+        }
+        self.draw_status_line(frame, status_line, editing, full_page);
+    }
+
+    fn draw_header(&self, frame: &mut Frame<'_>, area: Rect) {
+        let session = match self.layer {
+            Layer::Inbox(_) => "Workspace inbox".into(),
+            Layer::History(_) => "Workspace history".into(),
+            _ => self
+                .session
+                .as_ref()
+                .map(session_name)
+                .unwrap_or_else(|| "No session".into()),
+        };
+        let state = if !self.online {
+            "Offline"
+        } else if self.demo {
+            "Offline demo"
+        } else {
+            "Local"
+        };
+        let title_width = usize::from(area.width).saturating_sub(state.width() + 15);
+        let root = self
+            .workspace
+            .as_ref()
+            .map_or_else(String::new, |root| display_path(&root.root));
+        let breadcrumb = self
+            .session
+            .as_ref()
+            .and_then(|session| session.fork_origin.as_ref())
+            .map_or(root.clone(), |origin| {
+                format!("{} inherited turns · {root}", origin.inherited_turns)
+            });
+        let area = area.inner(Margin::new(u16::from(area.width >= 24) * 2, 0));
+        frame.render_widget(
+            Paragraph::new(vec![
+                Line::from(vec![
+                    Span::styled("Fliuno", self.palette.label),
+                    Span::raw(format!("  /  {}", ellipsis(&session, title_width))),
+                    Span::styled(format!("  ·  {state}"), self.palette.quiet),
+                ]),
+                Line::styled(
+                    path_tail(&breadcrumb, usize::from(area.width)),
+                    self.palette.quiet,
+                ),
+            ]),
+            area,
+        );
+    }
+
+    fn draw_status_line(&self, frame: &mut Frame<'_>, area: Rect, editing: bool, full_page: bool) {
+        let message = if self.busy { "Working" } else { &self.message };
+        let help = if editing {
+            if area.width < 60 {
+                "Ctrl+S Send  Ctrl+E Queue  F2 Mode  F3 Context"
+            } else {
+                "Ctrl+S Send  Ctrl+E Queue  F2 Mode  F3 Context  Esc Back"
+            }
+        } else if full_page {
+            "Enter Open  Esc Back"
+        } else if matches!(self.layer, Layer::None) {
+            if area.width < 66 {
+                "F1 Menu  n New  Tab Details  Shift+L Tasks"
+            } else {
+                "F1 Commands  n New  Tab Details  Shift+L All tasks"
+            }
+        } else {
+            "Esc Back"
+        };
+        let area = area.inner(Margin::new(u16::from(area.width >= 24) * 2, 0));
+        let width = usize::from(area.width);
+        let mut lines = vec![Line::styled(ellipsis(help, width), self.palette.quiet)];
+        if !message.is_empty() && area.height >= 2 {
+            let notice = clean(message).replace('\n', " ");
+            lines.push(Line::styled(ellipsis(&notice, width), self.palette.label));
+        } else if self.busy && area.height == 1 {
+            lines[0] = Line::styled("Working", self.palette.label);
+        }
+        frame.render_widget(Paragraph::new(lines), area);
+    }
+
+    fn draw_conversation(&self, frame: &mut Frame<'_>, area: Rect) {
+        let mut lines = Vec::new();
+        if let Some(detail) = &self.detail {
+            let task = &detail.task;
+            if self.show_details {
+                lines.push(Line::styled("Task detail", self.palette.label));
+            }
+            let (label, color) = status(task.status);
+            let mut heading = vec![Span::styled(label, self.palette.status(color))];
+            if task
+                .context
+                .as_ref()
+                .is_some_and(|context| context.options.plan_only)
+            {
+                heading.push(Span::styled("  ·  Plan only", self.palette.quiet));
+            }
+            lines.push(Line::from(heading));
+            self.append_task_actions(detail, &mut lines);
+            for message in task
+                .messages
+                .iter()
+                .filter(|message| {
+                    matches!(message, Message::User { .. } | Message::Assistant { .. })
+                })
+                .take(16)
+            {
+                match message {
+                    Message::User { text } => {
+                        lines.push(Line::raw(""));
+                        lines.push(Line::styled("You", self.palette.label));
+                        append(&mut lines, text);
+                    }
+                    Message::Assistant { text } if task.output.as_ref() != Some(text) => {
+                        lines.push(Line::raw(""));
+                        lines.push(Line::styled("Fliuno", self.palette.label));
+                        append(&mut lines, text);
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(output) = &task.output {
+                lines.push(Line::raw(""));
+                let title = if task.status == TaskStatus::Failed {
+                    "Failure reason"
+                } else {
+                    "Fliuno"
+                };
+                lines.push(Line::styled(title, self.palette.label));
+                append(&mut lines, output);
+            }
+            if self.show_details {
+                self.append_task_details(detail, &mut lines);
+            } else if !detail.artifacts.is_empty() {
+                lines.push(Line::raw(""));
+                let count = detail.artifacts.len();
+                let name = if count == 1 {
+                    "deliverable"
+                } else {
+                    "deliverables"
+                };
+                lines.push(Line::styled(
+                    format!("{count} {name}  ·  v Open"),
+                    self.palette.quiet,
+                ));
+            }
+        } else {
+            let (title, hint) = if !self.online {
+                if self.busy {
+                    ("Connecting", "")
+                } else {
+                    ("Disconnected", "Press r to reconnect")
+                }
+            } else if self.selected.is_some() || self.snapshot.is_none() {
+                ("Loading session", "")
+            } else {
+                ("No tasks yet", "")
+            };
+            lines.push(Line::styled(title, self.palette.label));
+            if !hint.is_empty() {
+                lines.push(Line::styled(hint, self.palette.quiet));
+            }
+        }
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((self.scroll, 0)),
+            area,
+        );
+    }
+
+    fn append_task_actions(&self, detail: &Detail, lines: &mut Vec<Line<'static>>) {
+        let task = &detail.task;
+        let action = if let Some(approval) = &task.pending_approval {
+            Some(format!(
+                "Review operation  ·  {}  ·  a Open",
+                clean(&approval.call.name)
+            ))
+        } else if pending_approval_id(task).is_some() {
+            Some("Review operation  ·  a Open".into())
+        } else if let Some(question) = task
+            .pending_tool_input
+            .as_ref()
+            .and_then(|pending| pending.requests["question"].as_str())
+        {
+            Some(format!(
+                "Clarification requested  ·  a Answer\n{}",
+                clean(question)
+            ))
+        } else {
+            self.snapshot
+                .as_ref()
+                .and_then(|snap| snap.next_actions.as_ref())
+                .and_then(|actions| actions.iter().find(|action| action.task_id == task.id))
+                .map(|action| {
+                    match action.kind {
+                        WorkActionKind::ReviewApproval => "Review operation  ·  a Open",
+                        WorkActionKind::AnswerInput => "Clarification requested  ·  a Answer",
+                        WorkActionKind::Recover { .. } => "Recovery available  ·  r Resume",
+                        WorkActionKind::Reconcile => "External result needs verification",
+                        WorkActionKind::ReviewBudget { .. } => {
+                            "Context budget reached  ·  c Review"
+                        }
+                    }
+                    .into()
+                })
+        };
+        if let Some(action) = action {
+            lines.push(Line::raw(""));
+            lines.extend(
+                action
+                    .lines()
+                    .map(|line| Line::styled(line.to_owned(), self.palette.status(Color::Yellow))),
+            );
+        }
+    }
+
+    fn append_task_details(&self, detail: &Detail, lines: &mut Vec<Line<'static>>) {
+        if let Some(resume) = &detail.resume {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled(
+                format!("Recovery: {:?}", resume.disposition),
+                self.palette.quiet,
+            ));
+        }
+        if let Some(context) = &detail.task.context {
+            let options = &context.options;
+            let setting = if options.mode == ContextMode::Isolated {
+                "Isolated context".into()
+            } else {
+                let history = if options.detail == ContextDetail::Conversation {
+                    "Conversation only"
+                } else {
+                    "Full history"
+                };
+                let memory = if options.disable_memory {
+                    "Memory off"
+                } else {
+                    "Memory enabled"
+                };
+                format!(
+                    "{history} · {memory} · through #{}",
+                    context.through_sequence
+                )
+            };
+            lines.push(Line::styled(setting, self.palette.quiet));
+        }
+        if let Some(plan) = &detail.plan {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("Plan", self.palette.label));
+            for step in &plan.steps {
+                lines.push(Line::raw(format!(
+                    "{:?}  {}",
+                    step.status,
+                    clean(&step.text)
+                )));
+            }
+        }
+        if !detail.artifacts.is_empty() {
+            lines.push(Line::raw(""));
+            lines.push(Line::styled("Artifacts  ·  v Open", self.palette.label));
+            for artifact in &detail.artifacts {
+                lines.push(Line::raw(format!(
+                    "{}  ·  {} B",
+                    clean(&artifact.title),
+                    artifact.content_bytes
+                )));
+            }
+        }
+    }
+    fn draw_composer(&self, frame: &mut Frame<'_>, area: Rect, focused: bool) {
+        if area.width < 4 || area.height == 0 {
+            return;
+        }
+        let mode = if self.plan_only {
+            "Plan only"
+        } else if focused {
+            "New task · Execution"
+        } else {
+            "Draft · Execution"
+        };
+        let title = if self.session.is_none() {
+            " No session ".to_owned()
+        } else {
+            let mut title = format!(" {mode} ");
+            if self.draft_context.mode == ContextMode::Isolated {
+                title.push_str("· Isolated ");
+            } else if self.draft_context.through_sequence.is_some() {
+                title.push_str("· History pinned ");
+            } else if self.draft_context.disable_memory {
+                title.push_str("· Memory off ");
+            }
+            if self.input_artifact.is_some() {
+                title.push_str(" · Attachment ");
+            }
+            title
+        };
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .style(self.palette.rail)
+            .border_style(self.palette.quiet)
+            .title(Span::styled(title, self.palette.label));
+        let body = block.inner(area).inner(Margin::new(2, 0));
+        frame.render_widget(block, area);
+        if body.height == 0 || body.width == 0 {
+            return;
+        }
+        let (lines, x, y) = self.draft.viewport(body.width, body.height);
+        if self.draft.text().is_empty() && !focused {
+            if self.session.is_some() {
+                frame.render_widget(
+                    Paragraph::new("n or Enter to write a task").style(self.palette.quiet),
+                    body,
+                );
+            }
+        } else {
+            frame.render_widget(
+                Paragraph::new(lines.into_iter().map(Line::raw).collect::<Vec<_>>()),
+                body,
+            );
+        }
+        if focused && !self.start_pending {
+            frame.set_cursor_position(Position::new(body.x + x, body.y + y));
+        }
+    }
+}

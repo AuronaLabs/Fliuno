@@ -33,17 +33,26 @@ struct Console {
 
 impl Console {
     fn launch(server: Option<&Path>, root: &Path) -> Self {
+        Self::launch_with_config(server, root, None)
+    }
+
+    fn launch_with_config(server: Option<&Path>, root: &Path, config: Option<&Path>) -> Self {
         let pair = native_pty_system().openpty(size(28, 110)).unwrap();
         let mut command = CommandBuilder::new(binary());
-        command.arg("--demo");
+        if let Some(config) = config {
+            command.arg("--config");
+            command.arg(config);
+        } else {
+            command.arg("--demo");
+            command.arg("--db");
+            command.arg(root.join("workbench.db"));
+        }
         if let Some(server) = server {
             command.arg("--server");
             command.arg(server);
         }
         command.arg("--workspace");
         command.arg(root);
-        command.arg("--db");
-        command.arg(root.join("workbench.db"));
         command.env("TERM", "xterm-256color");
         if let Some(theme) = std::env::var_os("FLIUNO_TEST_THEME") {
             command.arg("--theme");
@@ -243,7 +252,7 @@ fn stalled_initialization_cannot_hold_the_terminal_open() {
     .unwrap();
     std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut console = Console::launch(Some(&server), root.path());
-    console.expect("Disconnected");
+    console.expect("Connecting");
     let until = Instant::now() + Duration::from_secs(10);
     while !root.path().join("workbench.db.started").exists() {
         assert!(Instant::now() < until, "no initialize request");
@@ -330,7 +339,8 @@ fn terminal_plan_queue_branch_and_timeline_workflow() {
     console.capture("context");
     console.ready();
     console.keys("\x1b");
-    console.expect("Task detail");
+    console.expect_absent("Context and memory usage");
+    console.expect("Demo plan ready for review.");
     console.keys("B");
     console.expect("Name the session branch");
     console.keys("Release alternative\r");
@@ -510,7 +520,7 @@ fn task_browser_can_open_a_prompt_outside_the_recent_list() {
     console.capture("task-browser-narrow");
     console.ready();
     console.keys("\r");
-    console.expect("Task detail");
+    console.expect_absent("Session tasks");
     console.expect("Original prompt");
     console.quit("\x03");
 }
@@ -526,6 +536,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     console.expect("Acceptance");
     console.expect("No tasks");
     console.ready();
+    console.capture("empty-session");
     console.keys("/");
     console.expect("Commands  /");
     console.capture("command-menu");
@@ -556,7 +567,9 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     console.expect("No tasks match this filter.");
     console.ready();
     console.keys("\x1b");
-    console.expect("Task detail");
+    console.expect_absent("Session tasks");
+    console.expect("v Open");
+    console.capture("conversation-completed");
     console.keys("v");
     console.expect("text/plain");
     console.keys("\r");
@@ -574,7 +587,9 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     );
     console.ready();
     console.resize(18, 48);
-    console.expect("Session tasks");
+    console.expect("Shift+L Tasks");
+    console.expect("交付报告");
+    console.capture("conversation-narrow");
     console.keys("\t");
     console.expect("Task detail");
     console.ready();
@@ -590,7 +605,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     reopened.expect("Review operation");
     reopened.ready();
     reopened.resize(18, 48);
-    reopened.expect("Session tasks");
+    reopened.expect("Shift+L Tasks");
     reopened.keys("a");
     reopened.expect("y Allow once");
     reopened.expect("n Deny");
@@ -598,7 +613,6 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     reopened.capture("narrow-approval");
     reopened.keys("n");
     reopened.expect("Failed");
-    reopened.keys("\t");
     reopened.expect("Failure reason");
     reopened.expect("tool execution denied");
     reopened.ready();
@@ -757,4 +771,111 @@ fn draft_context_controls_survive_queue_restart() {
     drop(input);
     std::io::copy(&mut output, &mut std::io::sink()).unwrap();
     assert!(child.wait().unwrap().success());
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn terminal_uses_user_configuration_and_relative_state() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("settings/config.toml");
+    let init = || {
+        Command::new(binary())
+            .args(["--init-config", "--config"])
+            .arg(&config)
+            .output()
+            .unwrap()
+    };
+    assert!(init().status.success());
+    let template = std::fs::read_to_string(&config).unwrap();
+    assert!(!init().status.success());
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), template);
+    std::fs::write(
+        &config,
+        r#"
+        [workbench]
+        theme = "dark"
+        database = "state/configured.db"
+        [model]
+        provider = "demo"
+    "#,
+    )
+    .unwrap();
+    let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    console.expect("New session");
+    console.keys("Configured workbench\r");
+    console.expect("No tasks yet");
+    console.ready();
+    let database = root.path().join("settings/state/configured.db");
+    assert!(database.is_file());
+    assert!(!root.path().join("workbench.db").exists());
+    console.resize(24, 80);
+    console.expect("Shift+L All tasks");
+    console.ready();
+    console.capture("configured-80-columns");
+    console.quit("q");
+    let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    reopened.expect("Configured workbench");
+    reopened.ready();
+    reopened.quit("q");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn model_and_budget_load_from_files_without_provider_environment() {
+    use fliuno_client::Client;
+    use std::{io::BufReader, process::Stdio};
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            binary().with_file_name(if cfg!(windows) {
+                "fliuno-app-server.exe"
+            } else {
+                "fliuno-app-server"
+            })
+        });
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(root.path().join("fixture.key"), "offline-test-key\n").unwrap();
+    std::fs::write(
+        &config,
+        r#"
+        [model]
+        provider = "openai"
+        name = "fixture-model"
+        api_key_file = "fixture.key"
+        base_url = "http://127.0.0.1:9/v1/"
+        [model.budget]
+        window = 8192
+        max_output_tokens = 1024
+    "#,
+    )
+    .unwrap();
+    let mut process = Command::new(server)
+        .arg("--config")
+        .arg(&config)
+        .arg("--db")
+        .arg(root.path().join("model.db"))
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("FLIUNO_MODEL")
+        .env("FLIUNO_PROVIDER", "legacy-env-should-not-take-precedence")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let client = Client::connect(
+        BufReader::new(process.stdout.take().unwrap()),
+        process.stdin.take().unwrap(),
+        "terminal-config-test",
+        |_| {},
+    )
+    .unwrap();
+    let capabilities = &client.info().capabilities;
+    assert_eq!(capabilities["provider"], "openai");
+    assert_eq!(capabilities["modelBudget"]["maxOutputTokens"], 1024);
+    let (mut reader, writer) = client.into_parts();
+    drop(writer);
+    std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
+    assert!(process.wait().unwrap().success());
 }
