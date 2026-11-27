@@ -39,3 +39,18 @@ v0.0.16 是当前稳定基线。下一版应让用户在 Windows 和 Debian 上�
 - 锁定依赖，运行格式、Clippy、全工作区测试、协议 schema 校验和现有示例。候选验收从干净提交构建，核对安装包中的程序与通过平台测试的程序一致。
 - 安装生命周期与真实 TUI 工作流均通过，记录测试系统、提交 SHA、候选资产 SHA-256、性能对比及终端截图。公开前远端资产必须与验收清单一一匹配。
 - GitHub Actions 先运行可手动触发的候选构建和验证。签名状态、构建证明状态和支持的系统在版本说明中如实标出。候选失败时修复后重新构建和验收，稳定版继续使用原发布。
+
+## Windows 安装包原型
+
+[WiX 定义](../packaging/windows/Fliuno.wxs)把终端客户端和 app-server 安装到同一目录，PATH 条目随包管理。打包使用 WiX 6.0.2。先在同一检出中构建两个程序，用该检出的 Cargo 版本设定 MSI 版本。以下示例将输出放到现有外部构建目录。
+
+```powershell
+$env:CARGO_TARGET_DIR = 'D:\Fliuno-Build-Target'
+cargo build --locked --release -p fliuno-tui -p fliuno-app-server --bins
+$bin = Join-Path $env:CARGO_TARGET_DIR 'release'
+$version = (& "$bin\fliuno.exe" --version) -replace '^fliuno ', ''
+wix build -arch x64 -d "FliunoVersion=$version" -d "BinDir=$bin" `
+  -out "$env:CARGO_TARGET_DIR\fliuno-v$version-windows-x64.msi" packaging/windows/Fliuno.wxs
+```
+
+候选工作流需从确认一致的源代码版本与二进制构建。当前原型用于检查 MSI 内容与升级顺序，完整系统安装与升级仍按上方生命周期验证。

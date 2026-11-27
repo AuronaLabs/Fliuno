@@ -1,0 +1,30 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Fliuno"
+           Manufacturer="AuronaLabs"
+           Version="$(FliunoVersion)"
+           UpgradeCode="5CBBD82F-84AA-4D30-9DCB-12150C72D42E"
+           Scope="perMachine"
+           InstallerVersion="500">
+    <MajorUpgrade Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of Fliuno is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Fliuno">
+        <Component Id="TerminalClient" Guid="*">
+          <File Id="FliunoExe" Source="$(BinDir)\fliuno.exe" KeyPath="yes" />
+          <Environment Id="FliunoPath" Name="PATH" Value="[INSTALLFOLDER]"
+                       Action="set" Part="last" System="yes" />
+        </Component>
+        <Component Id="AppServer" Guid="*">
+          <File Id="FliunoAppServerExe" Source="$(BinDir)\fliuno-app-server.exe" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="FliunoWorkBench" Title="Fliuno" Level="1">
+      <ComponentRef Id="TerminalClient" />
+      <ComponentRef Id="AppServer" />
+    </Feature>
+  </Package>
+</Wix>
