@@ -2,17 +2,18 @@ use crate::activity;
 use crate::backup::{self, BackupRequest, BackupResult};
 use crate::{health, options::Options, task_browser::PageAction};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
-use fliuno_client::{Client, Error as ClientError, EventFeed};
+use fliuno_client::{Client, Error as ClientError, EventFeed, SessionHistory};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
     ArtifactCatalogSnapshotPage, ArtifactCatalogSnapshotParams, ArtifactDigest, ArtifactGetParams,
     ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelUsageSummary, ModelUsageTotals,
-    ObjectPage, Session, SessionContextParams, SessionForkParams, SessionHistoryRole,
-    SessionListOrder, SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan,
-    TaskQueue, TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams,
-    TaskReconciliation, TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus,
-    TaskSteeringState, TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams,
-    WorkSnapshot, WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
+    ObjectPage, Session, SessionContextParams, SessionForkParams, SessionHistoryListPage,
+    SessionHistoryListParams, SessionHistoryRole, SessionListOrder, SessionListParams, Task,
+    TaskContext, TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
+    TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
+    TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
+    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
+    Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -29,6 +30,8 @@ use std::{
 const REFRESH: Duration = Duration::from_millis(750);
 const MAX_PREVIEW: u64 = 64 * 1024;
 const MAX_DOWNLOAD: u64 = 32 * 1024 * 1024;
+pub const TRANSCRIPT_PAGE_TURNS: u32 = 12;
+pub const TRANSCRIPT_MAX_TURNS: usize = 96;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type ProcessSlot = Arc<Mutex<Option<Child>>>;
 
@@ -54,6 +57,7 @@ pub enum Request {
     },
     NewSession(String, String),
     SelectSession(String),
+    OlderTranscript(SessionHistoryListParams),
     Task(String),
     TaskBrowser(fliuno_protocol::TaskSummaryListParams, PageAction),
     Start {
@@ -137,6 +141,13 @@ pub struct HistoryPage {
     pub items: Vec<HistoryItem>,
 }
 
+pub enum TranscriptPage {
+    Recent(SessionHistoryListPage),
+    Newer(SessionHistoryListPage),
+    CaughtUp(SessionHistoryListPage),
+    Older(SessionHistoryListPage),
+}
+
 pub enum Update {
     Online(Workspace),
     Workspaces(ObjectPage<Workspace>),
@@ -149,6 +160,7 @@ pub enum Update {
     Session(Session),
     SessionMetadata(Session),
     Overview(String, WorkSnapshot),
+    Transcript(String, TranscriptPage),
     Detail(Box<Detail>),
     TaskBrowser {
         session: String,
@@ -264,7 +276,13 @@ struct Service {
     approval_ids: Vec<String>,
     feed: Option<EventFeed>,
     watermark: Option<u64>,
+    transcript: Option<TranscriptHead>,
     activity: activity::Progress,
+}
+
+struct TranscriptHead {
+    through: u64,
+    completed: u64,
 }
 
 fn finish_child(mut child: Child, grace: Duration) {
@@ -332,6 +350,7 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
         approval_ids: Vec::new(),
         feed: None,
         watermark: None,
+        transcript: None,
         activity: activity::Progress::default(),
     })
 }
@@ -505,6 +524,7 @@ impl Service {
             (snapshot, approvals)
         };
         let watermark = snapshot.approvals.snapshot.through_sequence;
+        let completed = snapshot.task_counts.completed;
         let approval_ids: Vec<_> = snapshot
             .approvals
             .page
@@ -523,7 +543,98 @@ impl Service {
             }
         }
         self.watermark = Some(watermark);
+        if !self.inbox_visible
+            && let Some(session) = &self.session
+            && self.supports("liveModels")
+            && self.supports("sessionHistoryList")
+            && self
+                .transcript
+                .as_ref()
+                .is_none_or(|head| head.completed != completed)
+        {
+            self.refresh_transcript(out, session.clone(), watermark, completed)?;
+        }
         Ok(())
+    }
+
+    fn transcript_page(
+        &mut self,
+        params: SessionHistoryListParams,
+    ) -> Result<SessionHistoryListPage> {
+        self.next_transcript_page(&mut SessionHistory::new(params))?
+            .ok_or_else(|| "Conversation history page unavailable".into())
+    }
+
+    fn next_transcript_page(
+        &mut self,
+        history: &mut SessionHistory,
+    ) -> Result<Option<SessionHistoryListPage>> {
+        let feed = &mut self.feed;
+        let activity = &mut self.activity;
+        Ok(history.next_page(&mut self.client, |notification| {
+            observe(feed, activity, notification)
+        })?)
+    }
+
+    fn refresh_transcript(
+        &mut self,
+        out: &Sender<Update>,
+        session: String,
+        through: u64,
+        completed: u64,
+    ) -> Result<()> {
+        let after = self
+            .transcript
+            .as_ref()
+            .filter(|_| self.supports("sessionHistoryAfterSequence"))
+            .map(|head| head.through);
+        let mut history = SessionHistory::new(SessionHistoryListParams {
+            session_id: session.clone(),
+            through_sequence: Some(through),
+            after_sequence: after,
+            before_sequence: None,
+            limit: Some(TRANSCRIPT_PAGE_TURNS),
+            max_bytes: None,
+        });
+        let first = self
+            .next_transcript_page(&mut history)?
+            .ok_or("Conversation history page unavailable")?;
+        let page = if after.is_none() {
+            if self.transcript.is_none() {
+                TranscriptPage::Recent(first)
+            } else {
+                TranscriptPage::CaughtUp(first)
+            }
+        } else {
+            self.catch_up_transcript(first, &mut history)?
+        };
+        self.transcript = Some(TranscriptHead { through, completed });
+        out.send(Update::Transcript(session, page))?;
+        Ok(())
+    }
+
+    fn catch_up_transcript(
+        &mut self,
+        mut first: SessionHistoryListPage,
+        history: &mut SessionHistory,
+    ) -> Result<TranscriptPage> {
+        if first.next_before_sequence.is_none() {
+            return Ok(TranscriptPage::Newer(first));
+        }
+        // Keep the newest page intact in case the backlog exceeds this view's capacity.
+        let mut backlog = Vec::new();
+        while let Some(page) = self.next_transcript_page(history)? {
+            backlog.extend(page.entries);
+            let count = first.entries.len() + backlog.len();
+            if count > TRANSCRIPT_MAX_TURNS
+                || (count == TRANSCRIPT_MAX_TURNS && page.next_before_sequence.is_some())
+            {
+                return Ok(TranscriptPage::CaughtUp(first));
+            }
+        }
+        first.entries.extend(backlog);
+        first.next_before_sequence = None;
+        Ok(TranscriptPage::Newer(first))
     }
 
     fn sessions(&mut self, mut params: SessionListParams, browse: bool) -> Result<Update> {
@@ -612,6 +723,7 @@ impl Service {
                 *root = workspace.root.clone();
                 self.workspace = Some(workspace.id.clone());
                 self.session = None;
+                self.transcript = None;
                 self.inbox_visible = false;
                 self.approvals = None;
                 self.feed = None;
@@ -650,12 +762,23 @@ impl Service {
             )?),
             Request::SelectSession(session) => {
                 self.session = Some(session);
+                self.transcript = None;
                 self.inbox_visible = false;
                 self.approvals = None;
                 self.approval_ids.clear();
                 self.feed = None;
                 self.watermark = None;
                 return self.refresh(out, true);
+            }
+            Request::OlderTranscript(params) => {
+                if self.session.as_ref() != Some(&params.session_id) || self.inbox_visible {
+                    return Err("Conversation history belongs to a different session".into());
+                }
+                let session = params.session_id.clone();
+                Update::Transcript(
+                    session,
+                    TranscriptPage::Older(self.transcript_page(params)?),
+                )
             }
             Request::Task(id) => Update::Detail(Box::new(self.detail(&id)?)),
             Request::TaskBrowser(mut params, action) => {
@@ -848,6 +971,7 @@ impl Service {
                     return Err("Task is outside the selected session".into());
                 }
                 self.session = Some(target.id.clone());
+                self.transcript = None;
                 self.inbox_visible = false;
                 self.approvals = None;
                 self.feed = None;

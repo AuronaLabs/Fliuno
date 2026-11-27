@@ -1038,47 +1038,51 @@ fn terminal_creates_verifies_and_opens_a_restored_database() {
     console.quit("\x03");
 }
 
+fn streaming_fixture_request(listener: &std::net::TcpListener) -> std::net::TcpStream {
+    use std::io::{BufRead, BufReader};
+
+    let (mut socket, _) = listener.accept().unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut input = BufReader::new(&mut socket);
+    let mut line = String::new();
+    let mut content_length = 0;
+    loop {
+        line.clear();
+        assert!(input.read_line(&mut line).unwrap() > 0);
+        if line == "\r\n" {
+            break;
+        }
+        if let Some((header, value)) = line.split_once(':')
+            && header.eq_ignore_ascii_case("Content-Length")
+        {
+            content_length = value.trim().parse().unwrap();
+        }
+    }
+    let mut request = vec![0; content_length];
+    input.read_exact(&mut request).unwrap();
+    let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
+    assert_eq!(request["stream"], true);
+    socket
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+        )
+        .unwrap();
+    socket
+}
+
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn live_preview_follows_output_and_keeps_manual_reading_position() {
     use serde_json::json;
-    use std::{
-        io::{BufRead, BufReader},
-        net::TcpListener,
-    };
+    use std::net::TcpListener;
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let (advance, checkpoints) = channel();
     let provider = thread::spawn(move || {
-        let (mut socket, _) = listener.accept().unwrap();
-        socket
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .unwrap();
-        let mut input = BufReader::new(&mut socket);
-        let mut line = String::new();
-        let mut content_length = 0;
-        loop {
-            line.clear();
-            assert!(input.read_line(&mut line).unwrap() > 0);
-            if line == "\r\n" {
-                break;
-            }
-            if let Some((header, value)) = line.split_once(':')
-                && header.eq_ignore_ascii_case("Content-Length")
-            {
-                content_length = value.trim().parse().unwrap();
-            }
-        }
-        let mut request = vec![0; content_length];
-        input.read_exact(&mut request).unwrap();
-        let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
-        assert_eq!(request["stream"], true);
-        socket
-            .write_all(
-                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
-            )
-            .unwrap();
+        let mut socket = streaming_fixture_request(&listener);
         let mut send = |event: serde_json::Value| {
             write!(socket, "data: {event}\n\n").unwrap();
             socket.flush().unwrap();
@@ -1138,7 +1142,7 @@ fn live_preview_follows_output_and_keeps_manual_reading_position() {
     terminal.expect("PERSISTED-END");
     terminal.expect("12 input");
     terminal.expect("4 output");
-    terminal.expect("Completed");
+    terminal.expect("Ask a follow-up");
     terminal.capture("activity-final-usage");
     terminal.quit("\x03");
     provider.join().unwrap();
@@ -1491,4 +1495,169 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     reopened.expect_absent("Choose your model provider");
     reopened.quit("\x03");
     assert_eq!(std::fs::read_to_string(config).unwrap(), profile_text);
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn conversation_keeps_order_loads_older_turns_and_reopens_with_live_responses() {
+    use fliuno_client::Client;
+    use serde_json::{Value, json};
+    use std::{io::BufReader, net::TcpListener, process::Stdio};
+
+    let root = tempfile::tempdir().unwrap();
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            binary().with_file_name(format!("fliuno-app-server{}", std::env::consts::EXE_SUFFIX))
+        });
+    let database = root.path().join("live.db");
+    let mut child = Command::new(&server)
+        .arg("--db")
+        .arg(&database)
+        .arg("--demo")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut client = Client::connect(
+        BufReader::new(child.stdout.take().unwrap()),
+        child.stdin.take().unwrap(),
+        "conversation-acceptance",
+        |_| {},
+    )
+    .unwrap();
+    let workspace: Value = client
+        .call("workspace/open", &json!({"root":root.path()}), |_| {})
+        .unwrap();
+    let session: Value = client
+        .call(
+            "session/create",
+            &json!({"workspaceId":workspace["id"],"title":"Release discussion"}),
+            |_| {},
+        )
+        .unwrap();
+    for index in 1..=15 {
+        let task: Value = client.call("task/start", &json!({"sessionId":session["id"],"input":format!("Earlier prompt {index:02}"),"context":{"planOnly":true}}), |_| {}).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let current: Value = client
+                .call("task/get", &json!({"taskId":task["id"]}), |_| {})
+                .unwrap();
+            if current["status"] == "completed" {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "seed turn did not complete: {current}"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+    let (mut output, input) = client.into_parts();
+    drop(input);
+    std::io::copy(&mut output, &mut std::io::sink()).unwrap();
+    assert!(child.wait().unwrap().success());
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let provider = thread::spawn(move || {
+        for text in ["First live answer", "Second live answer"] {
+            let mut socket = streaming_fixture_request(&listener);
+            let event = json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":text}]}]}});
+            write!(socket, "data: {event}\n\n").unwrap();
+        }
+    });
+    let config = root.path().join("live.toml");
+    std::fs::write(root.path().join("fixture.key"), "fixture-key\n").unwrap();
+    std::fs::write(
+        &config,
+        format!(
+            r#"
+        [workbench]
+        database = "live.db"
+        [model]
+        provider = "openai"
+        name = "fixture-stream"
+        api_key_file = "fixture.key"
+        base_url = "http://{address}/v1/"
+    "#
+        ),
+    )
+    .unwrap();
+
+    let mut terminal = Console::launch_with_config(Some(&server), root.path(), Some(&config));
+    terminal.expect("Earlier prompt 15");
+    terminal.ready();
+    terminal.keys("\x1b[H");
+    terminal.expect("Earlier prompt 04");
+    terminal.expect("PgUp History");
+    terminal.expect_absent("Earlier prompt 01");
+    terminal.keys("\x1b[5~");
+    terminal.ready();
+    terminal.expect("Earlier prompt 04");
+    terminal.expect_absent("Earlier prompt 01");
+    terminal.keys("\x1b[H");
+    terminal.expect("Earlier prompt 01");
+    terminal.keys("\x1b[F");
+    terminal.expect("Earlier prompt 15");
+    terminal.keys("\r");
+    terminal.expect("Enter Send");
+    terminal.keys("First live question");
+    terminal.expect("First live question");
+    terminal.keys("\r");
+    terminal.expect("First live answer");
+    terminal.expect("Enter Send");
+    terminal.ready();
+    terminal.keys("Second live question");
+    terminal.expect("Second live question");
+    terminal.keys("\r");
+    terminal.expect("Second live answer");
+    terminal.ready();
+    let assert_order = |terminal: &Console| {
+        let content = terminal.screen.screen().contents();
+        let ordered = [
+            "First live question",
+            "First live answer",
+            "Second live question",
+            "Second live answer",
+        ];
+        assert!(
+            ordered
+                .windows(2)
+                .all(|pair| content.find(pair[0]).unwrap() < content.find(pair[1]).unwrap()),
+            "{content}"
+        );
+        for item in ordered {
+            assert_eq!(content.matches(item).count(), 1, "{content}");
+        }
+    };
+    assert_order(&terminal);
+    terminal.capture("conversation-two-live-turns-110");
+    terminal.resize(16, 80);
+    terminal.expect("Second live answer");
+    terminal.capture("conversation-follow-up-80");
+    terminal.quit("\x03");
+    provider.join().unwrap();
+
+    let mut reopened = Console::launch_with_config(Some(&server), root.path(), Some(&config));
+    reopened.expect("Second live answer");
+    reopened.ready();
+    assert_order(&reopened);
+    reopened.keys("L");
+    reopened.expect("Session tasks");
+    reopened.expect("First live question");
+    reopened.ready();
+    reopened.keys("\x1b[B\r");
+    reopened.expect("Task detail");
+    reopened.expect("First live question");
+    reopened.expect_absent("Second live question");
+    reopened.ready();
+    reopened.keys("\x1b");
+    reopened.expect("Second live answer");
+    reopened.ready();
+    assert_order(&reopened);
+    reopened.resize(22, 48);
+    reopened.expect("Second live answer");
+    reopened.capture("conversation-reopened-48");
+    reopened.quit("\x03");
 }

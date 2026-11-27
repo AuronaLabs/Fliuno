@@ -8,10 +8,10 @@ v0.0.16 是当前稳定基线。下一版应让用户在 Windows 和 Debian 上�
 
 | 资料及本地检出 | 对 Fliuno 的具体影响 |
 | --- | --- |
-| [Codex CLI](https://developers.openai.com/codex/cli)、[认证](https://developers.openai.com/codex/auth)与本地 `codex-rs/tui/src/onboarding`、`chatwidget/empty_state_policy.rs`、`thread_transcript.rs` | 将首次配置放在服务启动前。配置后回到当前工作目录的对话和输入区，历史和实时回复使用同一套消息组件。Fliuno 使用自己的界面、模型选择和文件配置。 |
+| [Codex CLI](https://developers.openai.com/codex/cli)、[认证](https://developers.openai.com/codex/auth)、[app-server 的历史分页](https://developers.openai.com/codex/app-server)与本地 `codex-rs/tui/src/onboarding`、`chatwidget/empty_state_policy.rs`、`thread_transcript.rs` | 将首次配置放在服务启动前。配置后回到当前工作目录的对话和输入区，历史和实时回复使用同一套消息组件。Fliuno 使用自己的界面、模型选择和文件配置。 |
 | [Codex 发布流程](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/.github/workflows/rust-release.yml) 与[原生 Windows 构建](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/.github/workflows/rust-release-windows.yml)，本地 `D:\Fliuno-References\codex`，提交 `a1604a8` | 核对发布版本与 Cargo 元数据，按平台构建，把 TUI 和它实际启动的 app-server 一起交付并验收。 |
 | [OpenCode 产物核验](https://github.com/anomalyco/opencode/blob/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/.github/release/verify-artifacts.sh)及[发布流程](https://github.com/anomalyco/opencode/blob/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/.github/workflows/release.yml)，本地 `D:\Fliuno-References\opencode`，提交 `d284e7c` | 用相同字节执行验收和发布。发布前核对资产清单和 SHA-256，拒绝缺失或额外产物。 |
-| [Claude Code 安装文档](https://code.claude.com/docs/en/setup)与[首次使用指引](https://code.claude.com/docs/en/quickstart)，本地 `D:\Fliuno-References\claude-code`，提交 `2771d55` | 为每个平台提供安装、更新、卸载和诊断入口。首版让 Windows Installer 和 Debian 包管理器处理显式升级，配置继续由用户目录中的文件管理。 |
+| [Claude Code 安装文档](https://code.claude.com/docs/en/setup)与[首次使用指引](https://code.claude.com/docs/en/quickstart)、[交互模式](https://code.claude.com/docs/en/interactive-mode)，本地 `D:\Fliuno-References\claude-code`，提交 `2771d55` | 为每个平台提供安装、更新、卸载和诊断入口。首版让 Windows Installer 和 Debian 包管理器处理显式升级，配置继续由用户目录中的文件管理。 |
 | [WiX 主版本升级](https://docs.firegiant.com/wix/schema/wxs/majorupgrade/)与 [Debian 二进制包规范](https://www.debian.org/doc/debian-policy/ch-binary.html) | Windows x64 使用带固定 UpgradeCode 的 MSI，安装两个程序并注册 PATH。Debian 12+ amd64 使用 `.deb`，由包管理器记录 `/usr/bin` 中的程序与文档。ZIP 和 tar.gz 保留给便携用户。 |
 | [GitHub Actions 构建证明](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)与[不可变发布](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases) | 候选构建与验证先以只读工作流运行。启用可落实的构建证明后，正式发布从已验收的候选制品组装草稿，并核对远端资产摘要再公开。Windows 代码签名与 Actions 构建证明分别记录。 |
 
@@ -29,7 +29,7 @@ v0.0.16 是当前稳定基线。下一版应让用户在 Windows 和 Debian 上�
 
 主屏以当前会话的消息为阅读单位。复用 `session/listHistory` 的固定水位和按字节分页加载已完成轮次。新一轮的用户输入、流式回复、待审批和最终回复使用同一视图，完成时用持久轮次替换预览。按任务 ID 去重，向上补页时保持当前阅读位置。任务、工作区收件箱、时间线和交付目录通过 `F1` 等入口按需打开。
 
-首屏只加载最近一页，切换会话或工作区后忽略上一个会话的迟到页。覆盖最早页、超大轮次、提交后断线、重连期间的事件和被跳过的流式预览，核对审批在历史加载期间仍可发现和处理。用同一份数据测量冷开、恢复和静置时的请求数量，再决定轮询和订阅调整的幅度。
+首屏只加载最近一页，切换会话或工作区后忽略上一个会话的迟到页。后台完成多轮时按固定水位补齐增量。超过 96 轮的显示容量时，回到最近一页，并保留向上翻页的入口。覆盖最早页、超大轮次、提交后断线、重连期间的事件和被跳过的流式预览，核对审批在历史加载期间仍可发现和处理。用同一份数据测量冷开、恢复和静置时的请求数量，再决定轮询和订阅调整的幅度。
 
 ## 安装生命周期
 

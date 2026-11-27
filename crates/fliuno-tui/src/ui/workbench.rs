@@ -1,4 +1,4 @@
-use super::*;
+use super::{transcript::message_lines, *};
 
 impl App {
     pub fn draw(&self, frame: &mut Frame<'_>) {
@@ -23,6 +23,10 @@ impl App {
             Constraint::Min(0),
             Constraint::Length(if !show_composer {
                 0
+            } else if editing && !self.demo {
+                let max_rows = (area.height / 4).clamp(3, 8) - 2;
+                let (lines, _, _) = self.draft.viewport(area.width.saturating_sub(4), max_rows);
+                lines.len() as u16 + 2
             } else if editing {
                 (area.height / 4).clamp(3, 8)
             } else {
@@ -121,7 +125,9 @@ impl App {
         } else if full_page {
             "Enter Open  Esc Back"
         } else if matches!(self.layer, Layer::None) {
-            if !self.demo {
+            if !self.demo && !self.show_details && self.transcript.has_older() {
+                "Enter Write  PgUp History  F1 Commands"
+            } else if !self.demo {
                 "Enter Write  F1 Commands  Tab Details"
             } else if area.width < 66 {
                 "F1 Menu  n New  Tab Details  Shift+L Tasks"
@@ -144,7 +150,15 @@ impl App {
     }
 
     fn draw_conversation(&self, frame: &mut Frame<'_>, area: Rect) {
-        let mut lines = Vec::new();
+        let (mut lines, prefix_lines, active_rendered) = if self.demo || self.show_details {
+            (Vec::new(), 0, false)
+        } else {
+            self.transcript.render(
+                self.palette.label,
+                self.palette.quiet,
+                self.selected.as_deref(),
+            )
+        };
         let mut pinned = Vec::new();
         if let Some(detail) = &self.detail {
             let task = &detail.task;
@@ -160,31 +174,31 @@ impl App {
             {
                 heading.push(Span::styled("  ·  Plan only", self.palette.quiet));
             }
-            if self.follow && area.width >= 48 {
-                heading.push(Span::styled("  ·  Following", self.palette.quiet));
+            if self.demo || self.show_details || task.status != TaskStatus::Completed {
+                if self.follow && area.width >= 48 {
+                    heading.push(Span::styled("  ·  Following", self.palette.quiet));
+                }
+                pinned.push(Line::from(heading));
             }
-            pinned.push(Line::from(heading));
             self.append_task_actions(detail, &mut pinned);
-            for message in task
-                .messages
-                .iter()
-                .filter(|message| {
-                    matches!(message, Message::User { .. } | Message::Assistant { .. })
-                })
-                .take(16)
-            {
-                match message {
-                    Message::User { text } => {
-                        lines.push(Line::raw(""));
-                        lines.push(Line::styled("You", self.palette.label));
-                        append(&mut lines, text);
+            if !active_rendered {
+                for message in task
+                    .messages
+                    .iter()
+                    .filter(|message| {
+                        matches!(message, Message::User { .. } | Message::Assistant { .. })
+                    })
+                    .take(16)
+                {
+                    match message {
+                        Message::User { text } => {
+                            message_lines(&mut lines, "You", text, self.palette.label)
+                        }
+                        Message::Assistant { text } if task.output.as_ref() != Some(text) => {
+                            message_lines(&mut lines, "Fliuno", text, self.palette.label);
+                        }
+                        _ => {}
                     }
-                    Message::Assistant { text } if task.output.as_ref() != Some(text) => {
-                        lines.push(Line::raw(""));
-                        lines.push(Line::styled("Fliuno", self.palette.label));
-                        append(&mut lines, text);
-                    }
-                    _ => {}
                 }
             }
             if task.status == TaskStatus::Running {
@@ -205,23 +219,24 @@ impl App {
                             && !preview.text.is_empty()
                     })
                 {
-                    lines.push(Line::raw(""));
-                    lines.push(Line::styled("Live response", self.palette.label));
-                    append(&mut lines, &preview.text);
+                    let title = if self.demo || self.show_details {
+                        "Live response"
+                    } else {
+                        "Fliuno"
+                    };
+                    message_lines(&mut lines, title, &preview.text, self.palette.label);
                     if preview.clipped {
                         lines.push(Line::styled("Preview limit reached", self.palette.quiet));
                     }
                 }
             }
-            if let Some(output) = &task.output {
-                lines.push(Line::raw(""));
+            if !active_rendered && let Some(output) = &task.output {
                 let title = if task.status == TaskStatus::Failed {
                     "Failure reason"
                 } else {
                     "Fliuno"
                 };
-                lines.push(Line::styled(title, self.palette.label));
-                append(&mut lines, output);
+                message_lines(&mut lines, title, output, self.palette.label);
             }
             if let Some(usage) = &detail.usage {
                 lines.push(Line::raw(""));
@@ -248,7 +263,7 @@ impl App {
                     self.palette.quiet,
                 ));
             }
-        } else {
+        } else if lines.is_empty() {
             let (title, hint) = if !self.online {
                 if self.busy {
                     ("Connecting", "")
@@ -274,6 +289,14 @@ impl App {
         let [heading, conversation] =
             Layout::vertical([Constraint::Length(header_height), Constraint::Min(0)]).areas(area);
         frame.render_widget(header, heading);
+        if prefix_lines > 0 && !self.follow {
+            let rows = Paragraph::new(lines[..prefix_lines].to_vec())
+                .wrap(Wrap { trim: false })
+                .line_count(conversation.width)
+                .min(usize::from(u16::MAX)) as u16;
+            self.scroll
+                .set(self.scroll.get().saturating_add(rows.saturating_add(1)));
+        }
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         let max_scroll = paragraph
             .line_count(conversation.width)
@@ -282,7 +305,7 @@ impl App {
         let scroll = if self.follow {
             max_scroll
         } else {
-            self.scroll.min(max_scroll)
+            self.scroll.get().min(max_scroll)
         };
         self.rendered_scroll.set(scroll);
         frame.render_widget(paragraph.scroll((scroll, 0)), conversation);
@@ -444,6 +467,8 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(if self.demo {
                         "n or Enter to write a task"
+                    } else if focused && self.detail.is_some() {
+                        "Ask a follow-up…"
                     } else if focused {
                         "What would you like to do in this folder?"
                     } else {

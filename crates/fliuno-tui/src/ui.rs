@@ -3,9 +3,11 @@ mod memories;
 mod palette;
 mod panels;
 pub(crate) mod setup;
+mod transcript;
 mod workbench;
 
 use palette::Palette;
+use transcript::Transcript;
 
 use crate::{
     activity,
@@ -184,7 +186,8 @@ pub struct App {
     selected: Option<String>,
     detail: Option<Box<Detail>>,
     activity: Vec<activity::Preview>,
-    scroll: u16,
+    scroll: Cell<u16>,
+    transcript: Transcript,
     rendered_scroll: Cell<u16>,
     follow: bool,
     show_details: bool,
@@ -227,7 +230,8 @@ impl App {
             selected: None,
             detail: None,
             activity: Vec::new(),
-            scroll: 0,
+            scroll: Cell::new(0),
+            transcript: Transcript::default(),
             rendered_scroll: Cell::new(0),
             follow: false,
             show_details: false,
@@ -304,7 +308,10 @@ impl App {
         self.snapshot = None;
         self.selected = None;
         self.detail = None;
-        self.scroll = 0;
+        self.transcript = Transcript::default();
+        self.scroll.set(0);
+        self.follow = !self.demo;
+        self.show_details = false;
         self.layer = Layer::None;
     }
 
@@ -426,7 +433,7 @@ impl App {
         self.next = Some(Request::Task(id.clone()));
         self.selected = Some(id);
         self.detail = None;
-        self.scroll = 0;
+        self.scroll.set(0);
         self.follow = false;
         self.show_details = false;
     }
@@ -457,6 +464,7 @@ impl App {
                 self.snapshot = None;
                 self.selected = None;
                 self.detail = None;
+                self.transcript = Transcript::default();
                 self.input.clear();
                 self.input_artifact = None;
                 self.layer = Layer::None;
@@ -584,12 +592,28 @@ impl App {
                         && let Some(task) = self.tasks().first()
                     {
                         self.select_task(task.id.clone());
+                        self.follow = !self.demo;
                     } else if previous != Some(current)
                         && let Some(id) = &self.selected
                     {
                         self.next = Some(Request::Task(id.clone()));
                     } else if !self.demo && previous.is_none() && self.tasks().is_empty() {
                         self.layer = Layer::Edit(Edit::Task);
+                    }
+                }
+            }
+            Update::Transcript(session, page) => {
+                let caught_up = matches!(page, crate::service::TranscriptPage::CaughtUp(_));
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|active| active.id == session)
+                    && self.transcript.install(page)
+                    && !self.show_details
+                {
+                    self.scroll.set(0);
+                    if caught_up && !self.follow {
+                        self.message = "Conversation updated. PageUp loads older turns.".into();
                     }
                 }
             }
@@ -617,7 +641,20 @@ impl App {
                         self.selected = Some(detail.task.id.clone());
                         self.follow = true;
                     }
+                    let restore_composer = !self.demo
+                        && self.follow
+                        && !self.show_details
+                        && matches!(self.layer, Layer::None)
+                        && detail.task.status == TaskStatus::Completed
+                        && (self.start_acknowledged
+                            || self.detail.as_ref().is_some_and(|previous| {
+                                previous.task.id == detail.task.id
+                                    && !previous.task.status.is_terminal()
+                            }));
                     self.detail = Some(detail);
+                    if restore_composer {
+                        self.layer = Layer::Edit(Edit::Task);
+                    }
                 }
             }
             Update::Approval(task, id, details) => {
@@ -734,8 +771,12 @@ impl App {
                 self.input_artifact = None;
                 self.key = uuid::Uuid::new_v4().to_string();
                 self.layer = Layer::None;
-                self.scroll = 0;
-                self.message = "Task submitted".into();
+                self.scroll.set(0);
+                self.message = if self.demo {
+                    "Task submitted".into()
+                } else {
+                    String::new()
+                };
             }
             Update::Notice(message) | Update::Error(message) => self.message = message,
             Update::Offline(message) => {
@@ -1687,25 +1728,46 @@ impl App {
         }
         let active = !self.busy && pressed;
         match key.code {
-            KeyCode::Tab if pressed => {
-                self.show_details = !self.show_details;
-                self.scroll = 0;
-            }
-            KeyCode::Esc if pressed && self.show_details => {
+            KeyCode::Tab | KeyCode::Esc if pressed && self.show_details => {
                 self.show_details = false;
-                self.scroll = 0;
+                self.scroll.set(0);
+                if !self.demo {
+                    if let Some(latest) = self.tasks().first()
+                        && self.selected.as_deref() != Some(&latest.id)
+                    {
+                        self.select_task(latest.id.clone());
+                    }
+                    self.follow = true;
+                }
+            }
+            KeyCode::Tab if pressed => {
+                self.show_details = true;
+                self.scroll.set(0);
             }
             KeyCode::F(6) if active => self.open_memories(worker, false),
             KeyCode::F(7) if active => self.open_deliverables(worker),
             KeyCode::End => self.follow = true,
             KeyCode::Home => {
                 self.follow = false;
-                self.scroll = 0;
+                self.scroll.set(0);
             }
             KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
                 self.follow = false;
-                self.scroll = self.rendered_scroll.get();
-                scroll_key(key.code, &mut self.scroll);
+                let mut scroll = self.rendered_scroll.get();
+                if key.code == KeyCode::PageUp
+                    && scroll == 0
+                    && active
+                    && !self.show_details
+                    && let Some(params) = self
+                        .session
+                        .as_ref()
+                        .and_then(|session| self.transcript.older(&session.id))
+                    && self.send(worker, Request::OlderTranscript(params))
+                {
+                    self.message.clear();
+                }
+                scroll_key(key.code, &mut scroll);
+                self.scroll.set(scroll);
             }
             KeyCode::Char('w') if active => {
                 if self.send(worker, Request::Workspaces(0)) {
