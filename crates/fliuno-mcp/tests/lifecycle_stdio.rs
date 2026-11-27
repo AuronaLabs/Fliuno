@@ -26,7 +26,7 @@ fn default_auto_supports_legacy_stdio_peers_that_keep_or_close_the_process() {
         }))
         .unwrap();
 
-        let tools = fliuno_mcp::connect(config).unwrap();
+        let tools = fliuno_mcp::connect(config).unwrap_or_else(|error| panic!("{mode}: {error}"));
 
         assert!(tools.is_empty());
         assert_eq!(fs::read_to_string(&marker).unwrap(), expected_starts);

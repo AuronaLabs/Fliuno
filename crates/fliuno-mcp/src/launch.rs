@@ -127,12 +127,25 @@ pub(super) async fn connect(
 fn legacy_fallback_closed(error: &ClientInitializeError) -> bool {
     match error {
         ClientInitializeError::ConnectionClosed(_) => true,
-        ClientInitializeError::LegacyFallbackFailed { fallback, .. } => {
-            matches!(
-                fallback.as_ref(),
-                ClientInitializeError::ConnectionClosed(_)
-            )
-        }
+        ClientInitializeError::LegacyFallbackFailed { fallback, .. } => match fallback.as_ref() {
+            ClientInitializeError::ConnectionClosed(_) => true,
+            // A legacy server can flush its discovery rejection and exit before
+            // we manage to write initialize on the same pipe.
+            ClientInitializeError::TransportError { error, context }
+                if context == "send initialize request" =>
+            {
+                error
+                    .error
+                    .downcast_ref::<io::Error>()
+                    .is_some_and(|error| {
+                        matches!(
+                            error.kind(),
+                            io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+                        )
+                    })
+            }
+            _ => false,
+        },
         _ => false,
     }
 }
