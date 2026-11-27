@@ -1664,3 +1664,72 @@ fn conversation_keeps_order_loads_older_turns_and_reopens_with_live_responses() 
     reopened.capture("conversation-reopened-48");
     reopened.quit("\x03");
 }
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn composer_commands_start_and_resume_conversations_without_consuming_literal_input() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(root.path().join("fixture.key"), "fixture-key\n").unwrap();
+    std::fs::write(
+        &config,
+        r#"
+        [workbench]
+        database = "commands.db"
+        [model]
+        provider = "openai"
+        name = "fixture"
+        api_key_file = "fixture.key"
+        base_url = "http://127.0.0.1:9/v1/"
+    "#,
+    )
+    .unwrap();
+
+    let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    console.expect("What would you like to do in this folder?");
+    console.resize(24, 80);
+    console.ready();
+    console.keys("/");
+    console.expect("Start a new conversation");
+    console.expect("/resume");
+    console.expect("Message Fliuno");
+    console.capture("composer-commands-80");
+    console.keys("new\t");
+    console.expect("Untitled session");
+    console.expect("What would you like to do in this folder?");
+
+    console.resize(22, 48);
+    console.ready();
+    console.keys("/resume\t");
+    console.expect("Sessions");
+    console.expect("Enter open");
+    console.ready();
+    console.capture("composer-resume-48");
+    console.keys("\x1b[B\r");
+    console.expect_absent("Sessions");
+    console.expect("Fliuno  /  Conversation");
+    console.expect("What would you like to do in this folder?");
+
+    console.keys("/tmp/notes");
+    console.expect("/tmp/notes");
+    console.keys("\x1bOP");
+    console.expect("Commands");
+    console.keys("\x1b");
+    console.expect_absent("Type to filter");
+    console.expect("/tmp/notes");
+    console.quit("\x03");
+
+    let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    reopened.expect("What would you like to do in this folder?");
+    reopened.keys("\x1b[200~/new\x1b[201~");
+    reopened.expect("/new");
+    reopened.ready();
+    if reopened.screen.screen().contents().contains("Tab run") {
+        // ConPTY can deliver clipboard text as individual keys.
+        reopened.keys("\r");
+        reopened.expect_absent("Tab run");
+    }
+    reopened.expect("/new");
+    reopened.quit("\x03");
+}

@@ -1,3 +1,4 @@
+mod commands;
 mod deliverables;
 mod memories;
 mod palette;
@@ -6,6 +7,7 @@ pub(crate) mod setup;
 mod transcript;
 mod workbench;
 
+use commands::{Command, CommandAction, CommandMenu, CommandOrigin};
 use palette::Palette;
 use transcript::Transcript;
 
@@ -45,7 +47,7 @@ use fliuno_protocol::{
 const DRAFT_LIMIT: usize = 48 * 1024;
 
 enum Layer {
-    Commands(usize, String),
+    Commands(CommandMenu),
     Inbox(usize),
     History(usize),
     TaskBrowser(TaskBrowser),
@@ -495,7 +497,7 @@ impl App {
                 } else if self.demo {
                     self.layer = Layer::Edit(Edit::Session);
                 } else {
-                    self.next = Some(Request::NewSession(workspace, "Conversation".into()));
+                    self.next = Some(Request::NewSession(workspace, Some("Conversation".into())));
                 }
             }
             Update::Session(session) => {
@@ -850,9 +852,15 @@ impl App {
             if !self.busy {
                 form.insert(&clean(value));
             }
-        } else if let Layer::Commands(index, query) = &mut self.layer {
-            push_bounded(query, &clean(value).replace('\n', " "), 128);
-            *index = 0;
+        } else if let Layer::Commands(menu) = &mut self.layer {
+            if menu.origin == CommandOrigin::Slash {
+                let text = format!("/{}{value}", menu.query);
+                self.layer = Layer::Edit(Edit::Task);
+                self.paste(&text);
+            } else {
+                push_bounded(&mut menu.query, &clean(value).replace('\n', " "), 128);
+                menu.index = 0;
+            }
         }
     }
 
@@ -919,6 +927,13 @@ impl App {
             self.layer = Layer::Backup(None);
             return false;
         }
+        if key.code == KeyCode::Esc
+            && let Layer::Commands(menu) = &self.layer
+            && menu.origin != CommandOrigin::Workbench
+        {
+            self.layer = Layer::Edit(Edit::Task);
+            return false;
+        }
         if key.code == KeyCode::Esc && !matches!(self.layer, Layer::None) {
             if !self.start_pending {
                 self.layer = Layer::None;
@@ -932,7 +947,18 @@ impl App {
             let edit = edit.clone();
             let composing = matches!(edit, Edit::Task);
             if composing && pressed && key.code == KeyCode::F(1) {
-                self.layer = Layer::Commands(0, String::new());
+                self.layer = Layer::Commands(CommandMenu::new(CommandOrigin::Composer));
+                return false;
+            }
+            if composing
+                && pressed
+                && key.code == KeyCode::Char('/')
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && self.draft.text().is_empty()
+            {
+                self.layer = Layer::Commands(CommandMenu::new(CommandOrigin::Slash));
                 return false;
             }
             if composing && pressed && key.code == KeyCode::F(6) && !self.busy {
@@ -986,35 +1012,68 @@ impl App {
 
         let mut request = None;
         let mut close = false;
-        if matches!(self.layer, Layer::Commands(..)) {
-            let Layer::Commands(mut index, mut query) =
-                std::mem::replace(&mut self.layer, Layer::None)
-            else {
+        if matches!(self.layer, Layer::Commands(_)) {
+            let Layer::Commands(mut menu) = std::mem::replace(&mut self.layer, Layer::None) else {
                 unreachable!()
             };
+            let slash = menu.origin == CommandOrigin::Slash;
             match key.code {
+                KeyCode::Backspace if slash && menu.query.is_empty() => {
+                    self.layer = Layer::Edit(Edit::Task);
+                    return false;
+                }
                 KeyCode::Backspace => {
-                    if let Some((offset, _)) = query.grapheme_indices(true).next_back() {
-                        query.truncate(offset);
+                    if let Some((offset, _)) = menu.query.grapheme_indices(true).next_back() {
+                        menu.query.truncate(offset);
                     }
-                    index = 0;
+                    menu.index = 0;
                 }
                 KeyCode::Char(c) if !ctrl && !c.is_control() => {
-                    push_bounded(&mut query, c.encode_utf8(&mut [0; 4]), 128);
-                    index = 0;
+                    push_bounded(&mut menu.query, c.encode_utf8(&mut [0; 4]), 128);
+                    menu.index = 0;
                 }
                 _ => {}
             }
-            let commands = self.filtered_commands(&query);
-            index = index.min(commands.len().saturating_sub(1));
-            step(key.code, &mut index, commands.len());
-            if pressed
-                && key.code == KeyCode::Enter
-                && let Some(&(_, command)) = commands.get(index)
-            {
-                return self.overview_key(KeyEvent::new(command, KeyModifiers::NONE), worker);
+            let commands = self.filtered_commands(&menu);
+            if slash && commands.is_empty() && !menu.query.is_empty() {
+                self.layer = Layer::Edit(Edit::Task);
+                self.paste(&format!("/{}", menu.query));
+                return false;
             }
-            self.layer = Layer::Commands(index, query);
+            menu.index = menu.index.min(commands.len().saturating_sub(1));
+            step(key.code, &mut menu.index, commands.len());
+            if slash && pressed && key.code == KeyCode::Enter {
+                self.layer = Layer::Edit(Edit::Task);
+                self.paste(&format!("/{}", menu.query));
+                return false;
+            }
+            let confirm = if slash { KeyCode::Tab } else { KeyCode::Enter };
+            if pressed
+                && key.code == confirm
+                && let Some(command) = commands.get(menu.index)
+            {
+                match command.action {
+                    CommandAction::Shortcut(key) => {
+                        return self.overview_key(KeyEvent::new(key, KeyModifiers::NONE), worker);
+                    }
+                    CommandAction::NewConversation => {
+                        if let Some(workspace) = &self.workspace
+                            && !self.send(worker, Request::NewSession(workspace.id.clone(), None))
+                        {
+                            self.message = "Could not start a conversation. Try again.".into();
+                            if menu.origin != CommandOrigin::Workbench {
+                                self.layer = Layer::Edit(Edit::Task);
+                            }
+                        }
+                        return false;
+                    }
+                    CommandAction::Help => {
+                        self.layer = Layer::Commands(CommandMenu::new(CommandOrigin::Composer));
+                        return false;
+                    }
+                }
+            }
+            self.layer = Layer::Commands(menu);
             return false;
         }
         if matches!(self.layer, Layer::Inbox(_)) {
@@ -1405,7 +1464,7 @@ impl App {
                 }
             }
             Layer::None => return self.overview_key(key, worker),
-            Layer::Inbox(..) | Layer::History(..) | Layer::Commands(..) | Layer::Edit(..) => {
+            Layer::Inbox(..) | Layer::History(..) | Layer::Commands(_) | Layer::Edit(..) => {
                 unreachable!()
             }
         }
@@ -1494,7 +1553,7 @@ impl App {
             return false;
         }
         if matches!(key.code, KeyCode::F(1) | KeyCode::Char('/')) {
-            self.layer = Layer::Commands(0, String::new());
+            self.layer = Layer::Commands(CommandMenu::new(CommandOrigin::Workbench));
             self.next = Some(Request::WorkspaceInbox(false));
             return false;
         }
@@ -1589,7 +1648,7 @@ impl App {
             return false;
         }
         if matches!(key.code, KeyCode::F(1) | KeyCode::Char('/')) {
-            self.layer = Layer::Commands(0, String::new());
+            self.layer = Layer::Commands(CommandMenu::new(CommandOrigin::Workbench));
             return false;
         }
         if key.code == KeyCode::Char('q') {
@@ -1702,7 +1761,7 @@ impl App {
                 || (key.code == KeyCode::Char('/')
                     && !key.modifiers.contains(KeyModifiers::CONTROL)))
         {
-            self.layer = Layer::Commands(0, String::new());
+            self.layer = Layer::Commands(CommandMenu::new(CommandOrigin::Workbench));
             return false;
         }
         if key.code == KeyCode::Char('q') && pressed {
@@ -1925,15 +1984,30 @@ impl App {
         commands
     }
 
-    fn filtered_commands(&self, query: &str) -> Vec<(&'static str, KeyCode)> {
-        let query = query.to_lowercase();
-        self.commands()
-            .into_iter()
-            .filter(|(label, _)| {
-                let label = label.to_ascii_lowercase();
-                query.split_whitespace().all(|term| label.contains(term))
-            })
-            .collect()
+    fn filtered_commands(&self, menu: &CommandMenu) -> Vec<Command> {
+        let mut commands = Vec::new();
+        if self.online && self.workspace.is_some() && !self.busy {
+            commands.push(Command {
+                label: "Start a new conversation",
+                alias: Some("new"),
+                action: CommandAction::NewConversation,
+            });
+        }
+        if menu.origin == CommandOrigin::Slash {
+            commands.push(Command {
+                label: "Show all commands",
+                alias: Some("help"),
+                action: CommandAction::Help,
+            });
+        }
+        commands.extend(
+            self.commands()
+                .into_iter()
+                .map(|(label, key)| Command::shortcut(label, key)),
+        );
+        let query = menu.query.to_lowercase();
+        commands.retain(|command| command.matches(menu.origin, &query));
+        commands
     }
 
     fn task_key(&mut self, key: KeyCode, worker: &Worker) {
@@ -2089,7 +2163,7 @@ impl App {
                 let Some(workspace) = &self.workspace else {
                     return;
                 };
-                Request::NewSession(workspace.id.clone(), value)
+                Request::NewSession(workspace.id.clone(), Some(value))
             }
             Edit::SessionSearch => {
                 let Some(workspace) = &self.workspace else {

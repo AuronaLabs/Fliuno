@@ -61,7 +61,7 @@ pub enum Request {
         title: Option<String>,
         catalog: SessionListParams,
     },
-    NewSession(String, String),
+    NewSession(String, Option<String>),
     SelectSession(String),
     OlderTranscript(SessionHistoryListParams),
     Task(String),

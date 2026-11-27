@@ -299,7 +299,10 @@ impl App {
             return;
         }
         let (max_width, max_height) = match &self.layer {
-            Layer::Commands(..) => (66, 17),
+            Layer::Commands(menu) if menu.origin == CommandOrigin::Slash => {
+                (58, (self.filtered_commands(menu).len() as u16 + 4).max(6))
+            }
+            Layer::Commands(_) => (66, 17),
             Layer::Edit(Edit::Answer(..)) => (76, 15),
             Layer::Edit(_) | Layer::ConfirmCancel(_) => (64, 6),
             Layer::DraftContext { .. } => (76, 19),
@@ -310,17 +313,22 @@ impl App {
         let top_gap = u16::from(area.height >= 22);
         let width = area.width.min(max_width);
         let height = area.height.saturating_sub(top_gap).min(max_height);
-        let modal = Rect::new(
-            area.x + (area.width - width) / 2,
-            area.y + top_gap,
-            width,
-            height,
-        );
+        let y = if matches!(&self.layer, Layer::Commands(menu) if menu.origin != CommandOrigin::Workbench)
+        {
+            area.bottom().saturating_sub(height)
+        } else {
+            area.y + top_gap
+        };
+        let modal = Rect::new(area.x + (area.width - width) / 2, y, width, height);
         frame.render_widget(Clear, modal);
         let (title, actions) = match &self.layer {
             Layer::None | Layer::TaskBrowser(_) => return,
-            Layer::Commands(_, query) => (
-                format!("Commands  /  {query}"),
+            Layer::Commands(menu) if menu.origin == CommandOrigin::Slash => (
+                "Commands".into(),
+                "Tab run  ·  Enter keep as text  ·  Esc back",
+            ),
+            Layer::Commands(menu) => (
+                format!("Commands  /  {}", menu.query),
                 "Type to filter  ·  Enter run  ·  Esc back",
             ),
             Layer::Inbox(_) => (
@@ -462,14 +470,14 @@ impl App {
             Layer::DraftContext { preview, scroll } => {
                 self.draw_draft_context(frame, body, preview.as_deref(), *scroll)
             }
-            Layer::Commands(index, query) => render_list(
+            Layer::Commands(menu) => render_list(
                 frame,
                 body,
-                self.filtered_commands(query)
+                self.filtered_commands(menu)
                     .into_iter()
-                    .map(|(label, key)| format!("{:<10}{label}", key_label(key)))
+                    .map(|command| command.caption())
                     .collect(),
-                *index,
+                menu.index,
                 self.palette.choice,
             ),
             Layer::Workspaces(page, index) => render_list(

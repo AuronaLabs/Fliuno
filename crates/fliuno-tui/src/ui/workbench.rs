@@ -36,7 +36,13 @@ impl App {
         ])
         .areas(area);
         self.draw_header(frame, header);
-        if !full_page && !matches!(self.layer, Layer::None | Layer::Edit(Edit::Task)) {
+        let composer_commands = show_composer
+            && body.height >= 7
+            && matches!(&self.layer, Layer::Commands(menu) if menu.origin != CommandOrigin::Workbench);
+        if !full_page
+            && !composer_commands
+            && !matches!(self.layer, Layer::None | Layer::Edit(Edit::Task))
+        {
             self.draw_layer(
                 frame,
                 Rect::new(
@@ -61,6 +67,9 @@ impl App {
             self.draw_composer(frame, composer, editing);
         }
         self.draw_status_line(frame, status_line, editing, full_page);
+        if composer_commands {
+            self.draw_layer(frame, body);
+        }
     }
 
     fn draw_header(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -114,9 +123,17 @@ impl App {
         let message = if self.busy { "Working" } else { &self.message };
         let help = if editing {
             if !self.demo && area.width < 60 {
-                "Enter Send  Ctrl+N Line  F1 Menu  Esc Back"
+                if self.draft.text().is_empty() {
+                    "Enter Send  Ctrl+N Line  / Menu  Esc Back"
+                } else {
+                    "Enter Send  Ctrl+N Line  F1 Menu  Esc Back"
+                }
             } else if !self.demo {
-                "Enter Send  Ctrl+N New line  F1 Commands  Esc Back"
+                if self.draft.text().is_empty() {
+                    "Enter Send  Ctrl+N New line  / Commands  Esc Back"
+                } else {
+                    "Enter Send  Ctrl+N New line  F1 Commands  Esc Back"
+                }
             } else if area.width < 60 {
                 "Ctrl+S Send  Ctrl+E Queue  F2 Mode  F3 Context"
             } else {
@@ -459,6 +476,16 @@ impl App {
         let body = block.inner(area).inner(Margin::new(2, 0));
         frame.render_widget(block, area);
         if body.height == 0 || body.width == 0 {
+            return;
+        }
+        if let Layer::Commands(menu) = &self.layer
+            && menu.origin == CommandOrigin::Slash
+        {
+            let command = format!("/{}", menu.query);
+            let shown = ellipsis(&command, usize::from(body.width));
+            let caret = shown.width().min(usize::from(body.width - 1)) as u16;
+            frame.render_widget(Paragraph::new(shown), body);
+            frame.set_cursor_position(Position::new(body.x + caret, body.y));
             return;
         }
         let (lines, x, y) = self.draft.viewport(body.width, body.height);
