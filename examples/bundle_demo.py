@@ -62,8 +62,12 @@ def main():
     executable = args.app_server.resolve(strict=True) if args.app_server else build_server()
     runtime = str(Path(args.node if args.runtime == 'node' else args.python).resolve())
     script = 'server.js' if args.runtime == 'node' else 'server.py'
-    runtime_args = (['--preserve-symlinks', '--preserve-symlinks-main', '--max-old-space-size=64']
-                    if args.runtime == 'node' else ['-u', '-B', '-S'])
+    if args.runtime == 'node':
+        runtime_args = ['--preserve-symlinks', '--preserve-symlinks-main', '--max-old-space-size=64']
+        if sys.platform == 'linux':
+            runtime_args.append('--openssl-config=openssl.cnf')
+    else:
+        runtime_args = ['-u', '-B', '-S']
     with tempfile.TemporaryDirectory(prefix='fliuno-bundle-') as temporary, socket.socket() as listener:
         root = Path(temporary)
         source = root / 'sources'
