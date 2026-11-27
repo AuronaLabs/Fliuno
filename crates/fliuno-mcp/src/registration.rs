@@ -127,10 +127,11 @@ mod tests {
     }
     #[test]
     fn resolved_stdio_environment_changes_binding_and_is_used_without_a_second_lookup() {
-        let config = serde_json::from_value(
-            json!({"id":"test","command":std::env::current_exe().unwrap(),
-            "isolation":"trusted_host","cwd":std::env::temp_dir(),"envAllow":["RUN_MODE"]}),
-        )
+        // Resolution hashes bytes without launching them. The test runner can exceed
+        // the production executable limit when linked with all Linux features.
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml");
+        let config = serde_json::from_value(json!({"id":"test","command":fixture,
+            "isolation":"trusted_host","cwd":std::env::temp_dir(),"envAllow":["RUN_MODE"]}))
         .unwrap();
         let (first, identity) = resolve_with(&config, |name| {
             Ok(match name {
@@ -159,7 +160,7 @@ mod tests {
         assert_eq!(environment["RUN_MODE"], "old-value");
         assert_eq!(
             executable_digest,
-            fliuno_sandbox::program_digest(&std::env::current_exe().unwrap()).unwrap()
+            fliuno_sandbox::program_digest(&fixture).unwrap()
         );
     }
 
