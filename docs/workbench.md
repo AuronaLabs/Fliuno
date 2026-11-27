@@ -2,7 +2,7 @@
 
 [产品首页](../README.md) · [文档中心](README.md) · [迭代规划](roadmap.md)
 
-从项目目录在终端里运行 `fliuno`。开发版首次启动会引导你选择 OpenAI、Anthropic 或 Gemini，并填写模型 ID 和 API 密钥文件路径。保存后可直接输入第一条消息，按 `Enter` 发送。`F1` 打开命令搜索，`Esc` 返回对话。用 `Ctrl+J` 或粘贴输入多行。
+从项目目录在终端里运行 `fliuno`。开发版首次启动会引导你选择 OpenAI、Anthropic 或 Gemini，并填写模型 ID 和 API 密钥文件路径。保存后可直接输入第一条消息，按 `Enter` 发送。`F1` 打开命令搜索，`Esc` 返回对话。用 `Ctrl+N` 或粘贴输入多行。
 
 已发布的 v0.0.16 使用下文的手动[模型配置](#接入模型)。两份程序 `fliuno` 和 `fliuno-app-server` 可放在同一目录，也可使用 `--server PATH` 指定服务。要离线体验，显式运行 `fliuno --demo`，在演示会话中用 `Ctrl+S` 发送。
 

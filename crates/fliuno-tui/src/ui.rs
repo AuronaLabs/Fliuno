@@ -928,7 +928,7 @@ impl App {
                 KeyCode::Enter if composing && !send_on_enter => {
                     value.insert("\n", edit_limit(&edit))
                 }
-                KeyCode::Char('j') if composing && ctrl => value.insert("\n", edit_limit(&edit)),
+                KeyCode::Char('n') if composing && ctrl => value.insert("\n", edit_limit(&edit)),
                 KeyCode::Char(c)
                     if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) && !c.is_control() =>
                 {

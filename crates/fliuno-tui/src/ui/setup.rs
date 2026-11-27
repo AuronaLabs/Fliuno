@@ -224,19 +224,33 @@ impl Form {
                     .collect();
                 frame.render_widget(Paragraph::new(lines), body);
             }
-            Step::Model | Step::KeyFile if body.width > 0 && body.height > 0 => {
-                let (editor, hint) = if matches!(self.step, Step::Model) {
-                    (&self.model, PROVIDERS[self.provider].1.to_owned())
+            Step::Model | Step::KeyFile if body.width > 2 && body.height > 0 => {
+                let (editor, placeholder, hint) = if matches!(self.step, Step::Model) {
+                    (
+                        &self.model,
+                        "Model ID",
+                        PROVIDERS[self.provider].1.to_owned(),
+                    )
                 } else {
                     (
                         &self.key_file,
+                        "Path to API key file",
                         format!("Profile  {}", clean(&config.to_string_lossy())),
                     )
                 };
-                let [input, context] =
+                let [row, context] =
                     Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body);
+                let [marker, input] =
+                    Layout::horizontal([Constraint::Length(2), Constraint::Min(0)]).areas(row);
                 let (lines, x, _) = editor.viewport(input.width, 1);
-                frame.render_widget(Paragraph::new(lines.join("")).style(palette.rail), input);
+                frame.render_widget(Block::default().style(palette.rail), row);
+                frame.render_widget(Line::styled("›", palette.label), marker);
+                let value = if editor.text().is_empty() {
+                    Line::styled(placeholder, palette.quiet)
+                } else {
+                    Line::raw(lines.join(""))
+                };
+                frame.render_widget(value, input);
                 frame.set_cursor_position(Position::new(input.x + x, input.y));
                 frame.render_widget(
                     Paragraph::new(hint)

@@ -9,17 +9,23 @@
 
 # Fliuno
 
-**在终端里和 AI 一起完成工作。** Fliuno 是一款本机优先的 AI 工作台。在自己的文件夹里提交任务，查看计划，在需要时补充要求和批准操作，最后打开或保存交付物。关掉终端后，可以重新打开已保存的工作。
+**在终端里和 AI 一起完成工作。** Fliuno 是一款本机优先的 AI 工作台。在自己的项目目录里描述要完成的工作，和 Fliuno 一起整理计划、核对操作和审阅交付物。会话和结果保存在本机，重开终端后可以继续。
 
 `Windows` · `Linux` · `Rust TUI`
 
-**[快速体验](#快速体验)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
+**[开始真实工作](#开始真实工作)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
 当前版本 **v0.0.16** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.16) · [更新记录](CHANGELOG.md#0016)
 
+## 开始真实工作
+
+从发布页下载对应平台的压缩包，解压后保留同目录中的 `fliuno` 和 `fliuno-app-server`。使用开发构建时，可在项目目录直接启动 `fliuno`，按首次引导配置模型，然后在底部输入消息。
+
+使用当前稳定版时，先运行 `fliuno --init-config` 生成 `~/.fliuno/config.toml`，再填写 OpenAI、Anthropic 或 Gemini 的模型和密钥文件。在要工作的文件夹启动 `fliuno`，或通过 `--workspace PATH` 选择文件夹。模型请求发送到所配置的供应商；会话、审批和交付物保存在本机。[模型配置](docs/workbench.md#接入模型)
+
 ## 快速体验
 
-从发布页下载对应平台的压缩包，把 `fliuno` 和 `fliuno-app-server` 保留在同一目录。进入该目录，在终端启动离线演示，无需 API Key：
+想在配置账号前试一遍终端流程，可以选择离线演示。演示无需 API Key：
 
 ```sh
 ./fliuno --demo
@@ -36,12 +42,6 @@ Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` �
 | 安排后续工作 | `Ctrl+E` 入队，`Shift+Q` 查看并启动下一项。 |
 | 探索另一条思路 | `B` 从当前会话分支，`Shift+B` 以所选的已完成任务为边界。 |
 | 查看工具和预算 | `T` 打开时间线，`C` 查看上下文和记忆用量。 |
-
-## 开始真实工作
-
-开发版可在项目目录直接启动 `fliuno`，按首次引导配置模型，然后在底部输入消息。
-
-使用当前稳定版时，先运行 `fliuno --init-config` 生成 `~/.fliuno/config.toml`，再填写 OpenAI、Anthropic 或 Gemini 的模型和密钥文件。在要工作的文件夹启动 `fliuno`，或通过 `--workspace PATH` 选择文件夹。模型请求发送到所配置的供应商；会话、审批和交付物保存在本机。[模型配置](docs/workbench.md#接入模型)
 
 ## 工程能力
 

@@ -64,6 +64,8 @@ impl Console {
         command.env("TERM", "xterm-256color");
         command.env("HOME", root);
         command.env("USERPROFILE", root);
+        command.env("LOCALAPPDATA", root.join("local"));
+        command.env("XDG_STATE_HOME", root.join("state"));
         if let Some(theme) = std::env::var_os("FLIUNO_TEST_THEME") {
             command.arg("--theme");
             command.arg(theme);
@@ -1119,7 +1121,9 @@ fn live_preview_follows_output_and_keeps_manual_reading_position() {
     terminal.expect("Message Fliuno");
     terminal.ready();
     terminal.capture("conversation-first-message");
-    terminal.keys("Live transcript start\r");
+    terminal.keys("Live transcript start\x0esecond input line");
+    terminal.expect("second input line");
+    terminal.keys("\r");
     terminal.expect("FIRST-LIVE-END");
     terminal.expect("Following");
     terminal.capture("activity-follow-live");
@@ -1420,6 +1424,8 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
         .current_dir(root.path())
         .env("HOME", root.path())
         .env("USERPROFILE", root.path())
+        .env("LOCALAPPDATA", root.path().join("local"))
+        .env("XDG_STATE_HOME", root.path().join("state"))
         .output()
         .unwrap();
     assert!(!doctor.status.success());

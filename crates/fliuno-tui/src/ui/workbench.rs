@@ -109,8 +109,10 @@ impl App {
     fn draw_status_line(&self, frame: &mut Frame<'_>, area: Rect, editing: bool, full_page: bool) {
         let message = if self.busy { "Working" } else { &self.message };
         let help = if editing {
-            if !self.demo {
-                "Enter Send  F1 Commands  Esc Back"
+            if !self.demo && area.width < 60 {
+                "Enter Send  Ctrl+N Line  F1 Menu  Esc Back"
+            } else if !self.demo {
+                "Enter Send  Ctrl+N New line  F1 Commands  Esc Back"
             } else if area.width < 60 {
                 "Ctrl+S Send  Ctrl+E Queue  F2 Mode  F3 Context"
             } else {
@@ -258,10 +260,7 @@ impl App {
             } else if self.demo {
                 ("No tasks yet", "")
             } else {
-                (
-                    "Start a conversation",
-                    "Ask Fliuno to help with your project.",
-                )
+                ("Start a conversation", "")
             };
             lines.push(Line::styled(title, self.palette.label));
             if !hint.is_empty() {
