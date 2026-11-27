@@ -1,5 +1,7 @@
+mod backup;
 mod editor;
 mod options;
+mod recovery;
 mod service;
 mod task_browser;
 mod ui;

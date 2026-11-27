@@ -301,6 +301,7 @@ impl App {
             Layer::Edit(Edit::Answer(..)) => (76, 15),
             Layer::Edit(_) | Layer::ConfirmCancel(_) => (64, 6),
             Layer::DraftContext { .. } => (76, 19),
+            Layer::Recovery(..) | Layer::Reconcile(_) | Layer::Backup(_) => (88, 19),
             Layer::Approval { .. } => (88, 21),
             _ => (104, u16::MAX),
         };
@@ -377,6 +378,30 @@ impl App {
                 } else {
                     "n Deny  ·  Esc Back"
                 },
+            ),
+            Layer::Recovery(id, _) => {
+                let actions = match self.detail.as_ref().filter(|detail| detail.task.id == *id) {
+                    Some(detail) if detail.can_reconcile && detail.review.is_none() => {
+                        "o Record outcome  ·  Esc Back"
+                    }
+                    Some(detail) => match detail.resume.as_ref().map(|resume| resume.disposition) {
+                        Some(TaskResumeDisposition::Ready) => "y Resume  ·  Esc Back",
+                        Some(TaskResumeDisposition::RetryUncertainModelStep) => {
+                            "y Confirm retry  ·  Esc Back"
+                        }
+                        _ => "Esc Back",
+                    },
+                    None => "Esc Back",
+                };
+                ("Task recovery".into(), actions)
+            }
+            Layer::Backup(_) => (
+                "Database backups".into(),
+                "c Create  ·  v Verify  ·  r Restore  ·  Esc Back",
+            ),
+            Layer::Reconcile(_) => (
+                "Record external outcome".into(),
+                "Tab Next field  ·  Ctrl+S Record  ·  Esc Back",
             ),
             Layer::ConfirmCancel(_) => {
                 ("Cancel task?".into(), "y Cancel task  ·  Esc Keep running")
@@ -523,6 +548,62 @@ impl App {
                 self.palette.choice,
             ),
             Layer::Approval { text, scroll, .. } => render_text(frame, body, text, *scroll),
+            Layer::Recovery(id, scroll) => {
+                if let Some(detail) = self.detail.as_ref().filter(|detail| detail.task.id == *id) {
+                    let mut text = detail.resume.as_ref().map_or_else(String::new, |status| {
+                        disposition_text(status.disposition).into()
+                    });
+                    if let Some(run) = &detail.task.agent_run {
+                        text.push_str(&format!("\n\nAgent run {}", clean(&run.id)));
+                        if let Some(remote) = &run.remote_task {
+                            text.push_str(&format!(
+                                "\nRemote task {} · {:?}",
+                                clean(&remote.id),
+                                remote.state
+                            ));
+                        }
+                    }
+                    if let Some(review) = &detail.review {
+                        text.push_str(&format!(
+                            "\n\nRecorded outcome: {}\nOperator: {}\nEvidence: {}",
+                            outcome_label(review.review.state),
+                            clean(&review.review.operator),
+                            clean(&review.review.evidence)
+                        ));
+                    } else if detail.can_reconcile {
+                        text.push_str("\n\nVerify the result with the external Agent before recording an outcome. The review is added to the task's audit history.");
+                    }
+                    render_text(frame, body, text.trim(), *scroll);
+                }
+            }
+            Layer::Backup(result) => {
+                let text = if let Some(result) = result {
+                    let manifest = &result.manifest;
+                    let mut text = format!(
+                        "{}\n{}\n\nSchema {}  ·  Through event #{}\nTasks: {}  ·  Deliverables: {}  ·  {} bytes\n\nSHA-256\n{}",
+                        result.request.label(),
+                        clean(&result.request.result_path().to_string_lossy()),
+                        manifest.schema_version,
+                        manifest.event_through_sequence,
+                        manifest.task_count,
+                        manifest.artifact_count,
+                        manifest.database_bytes,
+                        clean(&manifest.database_sha256)
+                    );
+                    if matches!(result.request, BackupRequest::Restore { .. }) {
+                        text.push_str("\n\nOpen the restored copy by starting Fliuno with --db and the path above.");
+                    }
+                    text
+                } else if self.busy {
+                    "Working on the database backup…".into()
+                } else if !self.message.is_empty() {
+                    clean(&self.message)
+                } else {
+                    "Create a verified snapshot of work saved in this database.\n\nVerify an existing snapshot or restore it to a new database path.\n\nSaved conversations, approvals and deliverables are included.".into()
+                };
+                render_text(frame, body, &text, 0);
+            }
+            Layer::Reconcile(form) => self.draw_reconciliation(frame, body, form),
             Layer::ConfirmCancel(_) => {}
             Layer::Preview(preview, scroll) => {
                 let revision = preview
@@ -560,6 +641,67 @@ impl App {
                         input,
                     );
                     frame.set_cursor_position(Position::new(input.x + x, input.y + y));
+                }
+            }
+        }
+    }
+
+    fn draw_reconciliation(&self, frame: &mut Frame<'_>, body: Rect, form: &ReconcileForm) {
+        use crate::recovery::ReconcileField;
+        let [
+            outcome,
+            operator_label,
+            operator,
+            evidence_label,
+            evidence,
+            notice,
+        ] = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(u16::from(!self.message.is_empty()) * 2),
+        ])
+        .areas(body);
+        render_text(frame, notice, &clean(&self.message), 0);
+        let style = |field| {
+            if form.field == field {
+                self.palette.label
+            } else {
+                self.palette.quiet
+            }
+        };
+        let headline = form
+            .state
+            .map_or("Choose a terminal outcome", outcome_label);
+        let selection = format!("Outcome: {headline}  ·  ←/→ Change");
+        frame.render_widget(
+            Paragraph::new(selection)
+                .style(style(ReconcileField::Outcome))
+                .wrap(Wrap { trim: false }),
+            outcome,
+        );
+        frame.render_widget(
+            Paragraph::new("Operator").style(style(ReconcileField::Operator)),
+            operator_label,
+        );
+        frame.render_widget(
+            Paragraph::new("Evidence").style(style(ReconcileField::Evidence)),
+            evidence_label,
+        );
+        for (area, editor, field) in [
+            (operator, &form.operator, ReconcileField::Operator),
+            (evidence, &form.evidence, ReconcileField::Evidence),
+        ] {
+            if !area.is_empty() {
+                let (lines, x, y) = editor.viewport(area.width, area.height);
+                frame.render_widget(
+                    Paragraph::new(lines.into_iter().map(Line::raw).collect::<Vec<_>>()),
+                    area,
+                );
+                if form.field == field {
+                    frame.set_cursor_position(Position::new(area.x + x, area.y + y));
                 }
             }
         }

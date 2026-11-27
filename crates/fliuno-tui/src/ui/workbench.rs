@@ -244,6 +244,15 @@ impl App {
                 "Clarification requested  ·  a Answer\n{}",
                 clean(question)
             ))
+        } else if let Some(review) = &detail.review {
+            Some(format!(
+                "External outcome recorded: {}  ·  r Review",
+                outcome_label(review.review.state)
+            ))
+        } else if detail.can_reconcile {
+            Some("External result needs verification  ·  r Review".into())
+        } else if detail.resume.is_some() {
+            Some("Task interrupted  ·  r Review recovery".into())
         } else {
             self.snapshot
                 .as_ref()
@@ -253,8 +262,10 @@ impl App {
                     match action.kind {
                         WorkActionKind::ReviewApproval => "Review operation  ·  a Open",
                         WorkActionKind::AnswerInput => "Clarification requested  ·  a Answer",
-                        WorkActionKind::Recover { .. } => "Recovery available  ·  r Resume",
-                        WorkActionKind::Reconcile => "External result needs verification",
+                        WorkActionKind::Recover { .. } => "Recovery available  ·  r Review",
+                        WorkActionKind::Reconcile => {
+                            "External result needs verification  ·  r Review"
+                        }
                         WorkActionKind::ReviewBudget { .. } => {
                             "Context budget reached  ·  c Review"
                         }
@@ -276,7 +287,7 @@ impl App {
         if let Some(resume) = &detail.resume {
             lines.push(Line::raw(""));
             lines.push(Line::styled(
-                format!("Recovery: {:?}", resume.disposition),
+                disposition_text(resume.disposition),
                 self.palette.quiet,
             ));
         }

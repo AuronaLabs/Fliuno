@@ -1,3 +1,4 @@
+use crate::backup::{self, BackupRequest, BackupResult};
 use crate::{options::Options, task_browser::PageAction};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use fliuno_client::{Client, Error as ClientError, EventFeed};
@@ -6,9 +7,10 @@ use fliuno_protocol::{
     ArtifactRevision, ArtifactSummary, ContextOptions, Event, ObjectPage, Session,
     SessionContextParams, SessionForkParams, SessionHistoryRole, SessionListOrder,
     SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan, TaskQueue,
-    TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskResumeDisposition, TaskResumeStatus,
-    TaskStatus, TaskSteeringState, TaskSummary, TaskSummaryBatchParams, TaskTimelinePage,
-    TaskTimelineParams, WorkSnapshot, WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
+    TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams, TaskReconciliation,
+    TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState,
+    TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot,
+    WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -30,6 +32,7 @@ type ProcessSlot = Arc<Mutex<Option<Child>>>;
 
 pub enum Request {
     Reconnect,
+    Backup(BackupRequest),
     Workspaces(u64),
     OpenWorkspace(String),
     Sessions(SessionListParams, bool),
@@ -64,7 +67,8 @@ pub enum Request {
     Answer(String, String, String),
     Steer(String, String),
     Cancel(String),
-    Resume(String),
+    Resume(TaskResumeParams),
+    Reconcile(TaskReconcileParams),
     MoreApprovals,
     WorkspaceInbox(bool),
     OpenTask {
@@ -88,6 +92,8 @@ pub struct Detail {
     pub plan: Option<TaskPlan>,
     pub artifacts: Vec<ArtifactSummary>,
     pub resume: Option<TaskResumeStatus>,
+    pub review: Option<TaskReconciliation>,
+    pub can_reconcile: bool,
 }
 
 pub struct Preview {
@@ -153,6 +159,8 @@ pub enum Update {
     DraftContext(String, Box<TaskContext>),
     StartedQueued(String),
     Notice(String),
+    Reconciled(String),
+    BackupDone(Box<BackupResult>),
     Finished,
     Error(String),
     Offline(String),
@@ -162,6 +170,7 @@ pub struct Worker {
     commands: Option<Sender<Request>>,
     pub updates: Receiver<Update>,
     child: ProcessSlot,
+    backup_child: backup::ProcessSlot,
     join: Option<JoinHandle<()>>,
 }
 
@@ -175,13 +184,16 @@ impl Worker {
         let (out, updates) = bounded(16);
         let child = Arc::new(Mutex::new(None));
         let slot = Arc::clone(&child);
+        let backup_child = Arc::new(Mutex::new(backup::BackupProcess::default()));
+        let backup_slot = Arc::clone(&backup_child);
         let join = thread::Builder::new()
             .name("fliuno-connection".into())
-            .spawn(move || serve(options, requests, out, slot))?;
+            .spawn(move || serve(options, requests, out, slot, backup_slot))?;
         Ok(Self {
             commands: Some(commands),
             updates,
             child,
+            backup_child,
             join: Some(join),
         })
     }
@@ -196,6 +208,9 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         self.commands.take();
+        if let Ok(mut backup_child) = self.backup_child.lock() {
+            backup_child.close();
+        }
         let Some(join) = self.join.take() else { return };
         let deadline = Instant::now() + Duration::from_secs(2);
         while !join.is_finished() && Instant::now() < deadline {
@@ -303,7 +318,13 @@ fn disconnected(err: &(dyn std::error::Error + 'static)) -> bool {
     )
 }
 
-fn serve(options: Options, requests: Receiver<Request>, out: Sender<Update>, slot: ProcessSlot) {
+fn serve(
+    options: Options,
+    requests: Receiver<Request>,
+    out: Sender<Update>,
+    slot: ProcessSlot,
+    backup_slot: backup::ProcessSlot,
+) {
     let mut root = options.workspace.to_string_lossy().into_owned();
     let mut service = None;
     let mut first = true;
@@ -341,6 +362,8 @@ fn serve(options: Options, requests: Receiver<Request>, out: Sender<Update>, slo
                     }
                 }
             }
+            Ok(Request::Backup(request)) => backup::run(&options, request, &backup_slot)
+                .and_then(|result| Ok(out.send(Update::BackupDone(Box::new(result)))?)),
             Ok(request) => service
                 .as_mut()
                 .ok_or_else(|| "Connect to the app-server first".into())
@@ -472,7 +495,7 @@ impl Service {
 
     fn handle(&mut self, request: Request, out: &Sender<Update>, root: &mut String) -> Result<()> {
         let update = match request {
-            Request::Reconnect => unreachable!(),
+            Request::Reconnect | Request::Backup(_) => unreachable!(),
             Request::Workspaces(after) => {
                 Update::Workspaces(self.rpc("workspace/list", json!({"after":after,"limit":30}))?)
             }
@@ -652,13 +675,26 @@ impl Service {
                 let _: Value = self.rpc("task/cancel", json!({"taskId":task}))?;
                 return self.changed(&task, out);
             }
-            Request::Resume(task) => {
+            Request::Resume(params) => {
+                let task = params.task_id.clone();
                 let status: TaskResumeStatus =
                     self.rpc("task/getResumeStatus", json!({"taskId":task}))?;
-                if status.disposition != TaskResumeDisposition::Ready {
-                    return Err(format!("Cannot safely resume: {:?}", status.disposition).into());
+                let confirmed = if params.retry_uncertain_model_step {
+                    TaskResumeDisposition::RetryUncertainModelStep
+                } else {
+                    TaskResumeDisposition::Ready
+                };
+                if status.disposition != confirmed {
+                    return Err("The recovery state changed. Review the task again.".into());
                 }
-                let _: Value = self.rpc("task/resume", json!({"taskId":task}))?;
+                let _: Task = self.rpc("task/resume", serde_json::to_value(params)?)?;
+                return self.changed(&task, out);
+            }
+            Request::Reconcile(params) => {
+                let task = params.task_id.clone();
+                let _: TaskReconciliation =
+                    self.rpc("task/reconcile", serde_json::to_value(params)?)?;
+                out.send(Update::Reconciled(task.clone()))?;
                 return self.changed(&task, out);
             }
             Request::MoreApprovals if !self.inbox_visible => {
@@ -851,7 +887,19 @@ impl Service {
         } else {
             None
         };
+        let can_reconcile = self.supports("taskReconciliation")
+            && task
+                .agent_run
+                .as_ref()
+                .is_some_and(|run| run.finished && run.outcome_unknown);
+        let review = if can_reconcile {
+            self.rpc("task/getReconciliation", json!({"taskId":id}))?
+        } else {
+            None
+        };
         Ok(Detail {
+            review,
+            can_reconcile,
             task,
             plan,
             artifacts: page.items,

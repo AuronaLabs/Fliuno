@@ -5,8 +5,10 @@ mod workbench;
 use palette::Palette;
 
 use crate::{
+    backup::{BackupRequest, BackupResult},
     editor::Editor,
     options::Theme,
+    recovery::{ReconcileForm, disposition_text, outcome_label},
     service::{Detail, HistoryPage, Preview, Request, Update, Worker, WorkspaceInbox},
     task_browser::{PageAction, TaskBrowser},
 };
@@ -23,6 +25,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
+use std::path::PathBuf;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -66,6 +69,9 @@ enum Layer {
     },
     Preview(Box<Preview>, u16),
     ConfirmCancel(String),
+    Recovery(String, u16),
+    Reconcile(Box<ReconcileForm>),
+    Backup(Option<Box<BackupResult>>),
     Edit(Edit),
     None,
 }
@@ -82,6 +88,10 @@ enum Edit {
     Steer(String),
     HistorySearch,
     Download(ArtifactGetParams),
+    BackupCreate,
+    BackupVerify,
+    BackupRestoreSource,
+    BackupRestoreDestination(PathBuf),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -127,6 +137,10 @@ impl Edit {
             Self::Steer(_) => "Add instruction",
             Self::HistorySearch => "Search workspace history",
             Self::Download(_) => "Save artifact to",
+            Self::BackupCreate => "Create backup in a new folder",
+            Self::BackupVerify => "Verify backup folder",
+            Self::BackupRestoreSource => "Restore from backup folder",
+            Self::BackupRestoreDestination(_) => "Restore to a new database path",
         }
     }
 }
@@ -707,6 +721,16 @@ impl App {
                 self.next = None;
                 self.message = message;
             }
+            Update::BackupDone(result) => {
+                self.message = result.request.label().into();
+                self.layer = Layer::Backup(Some(result));
+            }
+            Update::Reconciled(task) => {
+                if matches!(&self.layer, Layer::Reconcile(form) if form.task_id == task) {
+                    self.layer = Layer::Recovery(task, 0);
+                }
+                self.message = "External outcome recorded".into();
+            }
             Update::Finished => {
                 self.busy = false;
                 self.start_pending = false;
@@ -728,6 +752,10 @@ impl App {
             };
             if target.insert(&text, edit_limit(edit)) && matches!(edit, Edit::Task) {
                 self.key = uuid::Uuid::new_v4().to_string();
+            }
+        } else if let Layer::Reconcile(form) = &mut self.layer {
+            if !self.busy {
+                form.insert(&clean(value));
             }
         } else if let Layer::Commands(index, query) = &mut self.layer {
             push_bounded(query, &clean(value).replace('\n', " "), 128);
@@ -764,6 +792,26 @@ impl App {
             } else {
                 self.draft_context_key(key, worker);
             }
+            return false;
+        }
+        if key.code == KeyCode::Esc
+            && let Layer::Reconcile(form) = &self.layer
+        {
+            self.layer = Layer::Recovery(form.task_id.clone(), 0);
+            return false;
+        }
+        if key.code == KeyCode::Esc
+            && matches!(
+                self.layer,
+                Layer::Edit(
+                    Edit::BackupCreate
+                        | Edit::BackupVerify
+                        | Edit::BackupRestoreSource
+                        | Edit::BackupRestoreDestination(_)
+                )
+            )
+        {
+            self.layer = Layer::Backup(None);
             return false;
         }
         if key.code == KeyCode::Esc && !matches!(self.layer, Layer::None) {
@@ -1165,6 +1213,69 @@ impl App {
                     }
                 }
             }
+            Layer::Recovery(id, scroll) => {
+                scroll_key(key.code, scroll);
+                if pressed
+                    && let Some(detail) =
+                        self.detail.as_ref().filter(|detail| detail.task.id == *id)
+                {
+                    if key.code == KeyCode::Char('y')
+                        && let Some(disposition) =
+                            detail.resume.as_ref().map(|status| status.disposition)
+                        && matches!(
+                            disposition,
+                            TaskResumeDisposition::Ready
+                                | TaskResumeDisposition::RetryUncertainModelStep
+                        )
+                    {
+                        request = Some(Request::Resume(fliuno_protocol::TaskResumeParams {
+                            task_id: id.clone(),
+                            retry_uncertain_model_step: disposition
+                                == TaskResumeDisposition::RetryUncertainModelStep,
+                        }));
+                        close = true;
+                    } else if key.code == KeyCode::Char('o')
+                        && detail.can_reconcile
+                        && detail.review.is_none()
+                    {
+                        let state = detail
+                            .task
+                            .agent_run
+                            .as_ref()
+                            .and_then(|run| run.remote_task.as_ref())
+                            .map(|remote| remote.state)
+                            .filter(|state| state.is_terminal());
+                        self.message.clear();
+                        self.layer =
+                            Layer::Reconcile(Box::new(ReconcileForm::new(id.clone(), state)));
+                    }
+                }
+            }
+            Layer::Backup(_) => {
+                let edit = match key.code {
+                    KeyCode::Char('c') => Some(Edit::BackupCreate),
+                    KeyCode::Char('v') => Some(Edit::BackupVerify),
+                    KeyCode::Char('r') => Some(Edit::BackupRestoreSource),
+                    _ => None,
+                };
+                if pressed
+                    && !self.busy
+                    && let Some(edit) = edit
+                {
+                    self.input.clear();
+                    self.message.clear();
+                    self.layer = Layer::Edit(edit);
+                }
+            }
+            Layer::Reconcile(form) => match key.code {
+                KeyCode::Tab if pressed => form.next_field(),
+                KeyCode::Char('s') if ctrl && pressed => match form.params() {
+                    Ok(params) => request = Some(Request::Reconcile(params)),
+                    Err(message) => self.message = message.into(),
+                },
+                code if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) => form.key(code),
+                _ => {}
+            },
             Layer::ConfirmCancel(id) => {
                 if pressed && key.code == KeyCode::Char('y') {
                     request = Some(Request::Cancel(id.clone()));
@@ -1473,6 +1584,11 @@ impl App {
             self.send(worker, Request::Reconnect);
             return false;
         }
+        if key.code == KeyCode::F(4) && pressed && !self.busy {
+            self.layer = Layer::Backup(None);
+            self.message.clear();
+            return false;
+        }
         if !self.online {
             return false;
         }
@@ -1575,7 +1691,7 @@ impl App {
     }
 
     fn commands(&self) -> Vec<(&'static str, KeyCode)> {
-        let mut commands = Vec::new();
+        let mut commands = vec![("Database backups", KeyCode::F(4))];
         if self.online {
             commands.push((
                 if self.session.is_some() {
@@ -1618,12 +1734,8 @@ impl App {
                     }
                     commands.push(("Cancel task", KeyCode::Char('x')));
                 }
-                if detail
-                    .resume
-                    .as_ref()
-                    .is_some_and(|status| status.disposition == TaskResumeDisposition::Ready)
-                {
-                    commands.push(("Resume task", KeyCode::Char('r')));
+                if detail.resume.is_some() || detail.can_reconcile {
+                    commands.push(("Review task recovery", KeyCode::Char('r')));
                 }
                 commands.push(("Task timeline", KeyCode::Char('t')));
                 commands.push(("Context and memory usage", KeyCode::Char('c')));
@@ -1733,13 +1845,8 @@ impl App {
                 self.input.clear();
                 self.layer = Layer::Edit(Edit::Steer(task.id.clone()));
             }
-            KeyCode::Char('r')
-                if detail
-                    .resume
-                    .as_ref()
-                    .is_some_and(|status| status.disposition == TaskResumeDisposition::Ready) =>
-            {
-                self.send(worker, Request::Resume(task.id.clone()));
+            KeyCode::Char('r') if detail.resume.is_some() || detail.can_reconcile => {
+                self.layer = Layer::Recovery(task.id.clone(), 0);
             }
             _ => {}
         }
@@ -1781,6 +1888,15 @@ impl App {
             return;
         }
         let value = value.to_owned();
+        if matches!(edit, Edit::BackupRestoreSource) {
+            self.layer = Layer::Edit(Edit::BackupRestoreDestination(value.into()));
+            self.input.clear();
+            return;
+        }
+        let backup = matches!(
+            edit,
+            Edit::BackupCreate | Edit::BackupVerify | Edit::BackupRestoreDestination(_)
+        );
         let starts = matches!(edit, Edit::Task);
         let history_search = matches!(edit, Edit::HistorySearch);
         let session_browse = matches!(edit, Edit::SessionSearch | Edit::RenameSession(_));
@@ -1845,6 +1961,13 @@ impl App {
                 append: false,
             },
             Edit::Download(id) => Request::Download(id, value.into()),
+            Edit::BackupCreate => Request::Backup(BackupRequest::Create(value.into())),
+            Edit::BackupVerify => Request::Backup(BackupRequest::Verify(value.into())),
+            Edit::BackupRestoreSource => unreachable!(),
+            Edit::BackupRestoreDestination(source) => Request::Backup(BackupRequest::Restore {
+                source,
+                destination: value.into(),
+            }),
         };
         if self.send(worker, request) {
             if starts {
@@ -1857,6 +1980,8 @@ impl App {
                 self.layer = Layer::History(0);
             } else if session_browse {
                 self.layer = Layer::Sessions(None, 0);
+            } else if backup {
+                self.layer = Layer::Backup(None);
             } else if !fork {
                 self.layer = Layer::None;
             }
