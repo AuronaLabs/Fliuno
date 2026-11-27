@@ -1,4 +1,7 @@
-use super::{transcript::message_lines, *};
+use super::{
+    transcript::{message_lines, response_lines},
+    *,
+};
 
 impl App {
     pub fn draw(&self, frame: &mut Frame<'_>) {
@@ -179,11 +182,8 @@ impl App {
         let (mut lines, prefix_lines, active_rendered) = if self.demo || self.show_details {
             (Vec::new(), 0, false)
         } else {
-            self.transcript.render(
-                self.palette.label,
-                self.palette.quiet,
-                self.selected.as_deref(),
-            )
+            self.transcript
+                .render(&self.palette, area.width, self.selected.as_deref())
         };
         let mut pinned = Vec::new();
         if let Some(detail) = &self.detail {
@@ -221,7 +221,7 @@ impl App {
                             message_lines(&mut lines, "You", text, self.palette.label)
                         }
                         Message::Assistant { text } if task.output.as_ref() != Some(text) => {
-                            message_lines(&mut lines, "Fliuno", text, self.palette.label);
+                            response_lines(&mut lines, "Fliuno", text, &self.palette, area.width);
                         }
                         _ => {}
                     }
@@ -250,19 +250,18 @@ impl App {
                     } else {
                         "Fliuno"
                     };
-                    message_lines(&mut lines, title, &preview.text, self.palette.label);
+                    response_lines(&mut lines, title, &preview.text, &self.palette, area.width);
                     if preview.clipped {
                         lines.push(Line::styled("Preview limit reached", self.palette.quiet));
                     }
                 }
             }
             if !active_rendered && let Some(output) = &task.output {
-                let title = if task.status == TaskStatus::Failed {
-                    "Failure reason"
+                if task.status == TaskStatus::Failed {
+                    message_lines(&mut lines, "Failure reason", output, self.palette.label);
                 } else {
-                    "Fliuno"
-                };
-                message_lines(&mut lines, title, output, self.palette.label);
+                    response_lines(&mut lines, "Fliuno", output, &self.palette, area.width);
+                }
             }
             if let Some(usage) = &detail.usage {
                 lines.push(Line::raw(""));

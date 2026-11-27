@@ -1675,6 +1675,85 @@ fn conversation_keeps_order_loads_older_turns_and_reopens_with_live_responses() 
 
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn markdown_code_is_readable_while_streaming_and_after_reopening() {
+    use serde_json::json;
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (complete, held) = channel();
+    let provider = thread::spawn(move || {
+        let mut socket = streaming_fixture_request(&listener);
+        let answer = concat!(
+            "## Read a project file\n\n",
+            "Use `std::fs::read_to_string` to read the contents.\n\n",
+            "- Keep the file path relative to your project.\n",
+            "- Report an error if the file cannot be opened.\n\n",
+            "```rust\n",
+            "fn read_project_notes() -> std::io::Result<String> {\n",
+            "    std::fs::read_to_string(\"\u{9879}\u{76ee}-notes-and-reference.txt\")\n",
+            "}\n",
+        );
+        let delta = json!({"type":"response.output_text.delta","delta":answer});
+        write!(socket, "data: {delta}\n\n").unwrap();
+        socket.flush().unwrap();
+        held.recv_timeout(Duration::from_secs(20)).unwrap();
+        let final_answer = format!("{answer}```\n\nRead completed.");
+        let event = json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":final_answer}]}]}});
+        write!(socket, "data: {event}\n\n").unwrap();
+    });
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("live.toml");
+    std::fs::write(root.path().join("fixture.key"), "fixture-key\n").unwrap();
+    std::fs::write(
+        &config,
+        format!(
+            r#"
+        [workbench]
+        database = "live.db"
+        [model]
+        provider = "openai"
+        name = "fixture-stream"
+        api_key_file = "fixture.key"
+        base_url = "http://{address}/v1/"
+    "#
+        ),
+    )
+    .unwrap();
+
+    let mut terminal = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    terminal.expect("Start a conversation");
+    terminal.keys("Show a Rust example for reading a file\r");
+    terminal.expect("    std::fs::read_to_string(");
+    terminal.expect("Keep the file path relative to your project.");
+    terminal.expect_absent("```rust");
+    terminal.capture("markdown-streaming-110");
+    terminal.resize(25, 80);
+    terminal.ready();
+    terminal.expect("    std::fs::read_to_string(");
+    terminal.capture("markdown-streaming-80");
+    terminal.resize(25, 48);
+    terminal.ready();
+    terminal.expect("    std::fs::read_to_string(");
+    terminal.capture("markdown-streaming-48");
+    complete.send(()).unwrap();
+    terminal.expect("Read completed.");
+    terminal.quit("\x03");
+    provider.join().unwrap();
+
+    let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    reopened.resize(25, 48);
+    reopened.ready();
+    reopened.expect("Read completed.");
+    reopened.expect("    std::fs::read_to_string(");
+    reopened.expect_absent("```rust");
+    reopened.capture("markdown-reopened-48");
+    reopened.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn composer_commands_start_and_resume_conversations_without_consuming_literal_input() {
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
     let root = tempfile::tempdir().unwrap();
