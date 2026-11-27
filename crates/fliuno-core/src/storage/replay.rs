@@ -106,6 +106,54 @@ impl Kernel {
         event_row(row)
     }
 
+    pub fn task_timeline(&self, request: &TaskTimelineParams) -> Result<TaskTimelinePage> {
+        self.require_task(&request.task_id)?;
+        let watermark = self.event_watermark()?;
+        let through = request.through_sequence.unwrap_or(watermark);
+        if request.after > through || through > watermark {
+            return Err(Error::Invalid(
+                "timeline cursors must be ordered and within the event log".into(),
+            ));
+        }
+        let mut read = self.db.prepare_cached(
+            "SELECT sequence,json_extract(data,'$.type'),octet_length(data),
+               substr(COALESCE(json_extract(data,'$.approvalId'),json_extract(data,'$.approval.id')),1,128),
+               substr(COALESCE(json_extract(data,'$.call.name'),json_extract(data,'$.approval.call.name')),1,128)
+             FROM events WHERE task_id=?1 AND sequence>?2 AND sequence<=?3
+             ORDER BY sequence LIMIT ?4",
+        )?;
+        let mut entries = read
+            .query_map(
+                params![
+                    request.task_id,
+                    validate_event_cursor(request.after)?,
+                    validate_event_cursor(through)?,
+                    TASK_TIMELINE_PAGE_SIZE + 1
+                ],
+                |r| {
+                    Ok(TaskTimelineEntry {
+                        sequence: r.get::<_, i64>(0)? as u64,
+                        kind: r.get(1)?,
+                        payload_bytes: r.get::<_, i64>(2)? as u64,
+                        approval_id: r.get(3)?,
+                        tool_name: r.get(4)?,
+                    })
+                },
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let more = entries.len() > TASK_TIMELINE_PAGE_SIZE as usize;
+        if more {
+            entries.pop();
+        }
+        let next_after = entries.last().filter(|_| more).map(|entry| entry.sequence);
+        Ok(TaskTimelinePage {
+            task_id: request.task_id.clone(),
+            through_sequence: through,
+            entries,
+            next_after,
+        })
+    }
+
     pub fn list_events(&self, task_id: &str, after: u64, limit: u32) -> Result<EventsPage> {
         self.list_events_with_target(task_id, after, limit, None)
     }

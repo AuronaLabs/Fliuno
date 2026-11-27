@@ -117,6 +117,7 @@ pub(crate) fn validate_options(options: &ContextOptions) -> Result<()> {
 }
 
 pub(crate) fn normalize_options(mut options: ContextOptions) -> Result<ContextOptions> {
+    options.enable_interaction |= options.plan_only;
     validate_options(&options)?;
     // Preserve the snapshot wire shape and keyed identity of legacy defaults.
     options.scan_limit = options.scan_limit.filter(|&n| n != MAX_CONTEXT_CANDIDATES);
@@ -311,10 +312,23 @@ pub fn context_prompt(context: Option<&TaskContext>) -> Result<Option<String>> {
 }
 
 pub fn task_context_prompt(task: &Task) -> Result<Option<String>> {
-    project_context_prompt(
+    let history = project_context_prompt(
         task.context.as_ref(),
         task.context_memory_omitted_for_budget,
-    )
+    )?;
+    if task
+        .context
+        .as_ref()
+        .is_some_and(|context| context.options.plan_only)
+    {
+        let instructions = "Planning mode is active. Investigate with the available read tools, ask necessary questions, and present an actionable plan. Do not attempt to execute the plan or change workspace files.\n";
+        Ok(Some(format!(
+            "{instructions}{}",
+            history.as_deref().unwrap_or_default()
+        )))
+    } else {
+        Ok(history)
+    }
 }
 
 pub(crate) fn project_context_prompt(

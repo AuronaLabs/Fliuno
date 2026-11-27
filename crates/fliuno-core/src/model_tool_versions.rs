@@ -152,8 +152,9 @@ impl Kernel {
 
     pub(crate) fn current_model_bindings(&self, task: &Task) -> Result<Bindings> {
         let mut bindings = BTreeMap::new();
+        let options = task.context.as_ref().map(|context| &context.options);
         for (name, tool) in self.active_model_tools() {
-            if crate::interaction::is_internal(name) && !crate::interaction::enabled(task) {
+            if !crate::interaction::allows_model_tool(options, name, tool.as_ref()) {
                 continue;
             }
             let authority = tool.authority();
@@ -197,29 +198,29 @@ impl Kernel {
         task: &Task,
         name: &str,
     ) -> Result<Option<Arc<dyn Tool>>> {
-        if crate::interaction::is_internal(name) && !crate::interaction::enabled(task) {
-            return Ok(None);
-        }
-        if let Some(bindings) = self.model_bindings(&task.id)? {
-            return match bindings.get(name) {
-                Some(authority) => self.lookup_model_version(name, authority),
-                None => Ok(None),
-            };
-        }
-        let Some(tool) = self.tools.get(name) else {
-            return Ok(None);
+        let tool = if let Some(bindings) = self.model_bindings(&task.id)? {
+            match bindings.get(name) {
+                Some(authority) => self.lookup_model_version(name, authority)?,
+                None => None,
+            }
+        } else {
+            self.tools
+                .get(name)
+                .filter(|tool| !self.model_tool_revoked(name, &tool.authority()))
+                .cloned()
         };
-        if self.model_tool_revoked(name, &tool.authority()) {
-            return Ok(None);
-        }
-        Ok(Some(tool.clone()))
+        let options = task.context.as_ref().map(|context| &context.options);
+        Ok(tool.filter(|tool| crate::interaction::allows_model_tool(options, name, tool.as_ref())))
     }
 
     pub(crate) fn bound_model_specs(&self, task: &Task) -> Result<Vec<ToolSpec>> {
+        let options = task.context.as_ref().map(|context| &context.options);
         if let Some(bindings) = self.model_bindings(&task.id)? {
             let mut specs = Vec::with_capacity(bindings.len());
             for (name, authority) in bindings {
-                if let Some(tool) = self.lookup_model_version(&name, &authority)? {
+                if let Some(tool) = self.lookup_model_version(&name, &authority)?
+                    && crate::interaction::allows_model_tool(options, &name, tool.as_ref())
+                {
                     specs.push(tool.spec());
                 }
             }
@@ -227,7 +228,7 @@ impl Kernel {
         }
         let mut specs = Vec::new();
         for (name, tool) in &self.tools {
-            if (crate::interaction::enabled(task) || !crate::interaction::is_internal(name))
+            if crate::interaction::allows_model_tool(options, name, tool.as_ref())
                 && !self.model_tool_revoked(name, &tool.authority())
             {
                 specs.push(tool.spec());

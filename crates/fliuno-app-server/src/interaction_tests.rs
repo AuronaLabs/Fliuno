@@ -14,6 +14,8 @@ impl fliuno_core::ModelProvider for PlanningModel {
         _: &fliuno_core::CancellationToken,
     ) -> Result<fliuno_core::ModelTurn, String> {
         assert!(tools.iter().any(|tool| tool.name == "task_ask_user"));
+        assert!(!tools.iter().any(|tool| tool.name == "artifact_create"));
+        assert!(task.context.as_ref().unwrap().options.plan_only);
         let decision = match task.model_steps {
             1 => fliuno_core::ModelDecision::Call(ToolCall {
                 name: "task_publish_plan".into(),
@@ -83,7 +85,7 @@ fn model_publishes_a_plan_and_receives_one_answer_after_restart() {
     let task = rpc(
         &mut server,
         "task/start",
-        json!({"sessionId":session["id"],"input":"make a report","context":{"enableInteraction":true}}),
+        json!({"sessionId":session["id"],"input":"make a report","context":{"planOnly":true}}),
     );
     let waiting = wait(&mut server, &task["id"], "waiting_input");
     assert_eq!(

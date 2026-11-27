@@ -19,6 +19,11 @@ use ratatui::{
 use unicode_segmentation::UnicodeSegmentation;
 
 const ACCENT: Color = Color::Cyan;
+use fliuno_protocol::{
+    EventKind, SessionForkParams, SessionListOrder, SessionListParams, TaskContextAttribution,
+    TaskQueue, TaskQueueItemParams, TaskQueueState, TaskTimelinePage, TaskTimelineParams,
+};
+
 const DRAFT_LIMIT: usize = 48 * 1024;
 
 struct Palette {
@@ -96,6 +101,16 @@ enum Layer {
     Workspaces(Option<ObjectPage<Workspace>>, usize),
     Sessions(Option<ObjectPage<Session>>, usize),
     Artifacts(usize),
+    Queue(Option<TaskQueue>, usize),
+    Timeline(Option<TaskTimelinePage>, usize),
+    TimelineEvent {
+        page: TaskTimelinePage,
+        index: usize,
+        sequence: u64,
+        text: String,
+        scroll: u16,
+    },
+    Context(String, u16),
     Approval {
         task: String,
         id: String,
@@ -114,6 +129,9 @@ enum Edit {
     Task,
     Workspace,
     Session,
+    SessionSearch,
+    RenameSession(Session),
+    Fork(SessionForkParams),
     Answer(String, String, String),
     Steer(String),
     HistorySearch,
@@ -156,12 +174,23 @@ impl Edit {
             Self::Task => "New task",
             Self::Workspace => "Open folder",
             Self::Session => "New session",
+            Self::SessionSearch => "Find sessions by title or ID",
+            Self::RenameSession(_) => "Rename session",
+            Self::Fork(_) => "Name the session branch",
             Self::Answer(_, _, _) => "Answer clarification",
             Self::Steer(_) => "Add instruction",
             Self::HistorySearch => "Search workspace history",
             Self::Download(_) => "Save artifact to",
         }
     }
+}
+
+struct ParkedDraft {
+    session_id: String,
+    text: Editor,
+    key: String,
+    artifact: Option<ArtifactGetParams>,
+    plan_only: bool,
 }
 
 pub struct App {
@@ -172,6 +201,8 @@ pub struct App {
     next: Option<Request>,
     workspace: Option<Workspace>,
     session: Option<Session>,
+    session_query: Option<String>,
+    session_archived: bool,
     snapshot: Option<WorkSnapshot>,
     inbox: Option<WorkspaceInbox>,
     inbox_filter: InboxFilter,
@@ -188,7 +219,8 @@ pub struct App {
     focus_details: bool,
     layer: Layer,
     draft: Editor,
-    parked: Vec<(String, Editor, String, Option<ArtifactGetParams>)>,
+    parked: Vec<ParkedDraft>,
+    plan_only: bool,
     key: String,
     input: Editor,
     input_artifact: Option<ArtifactGetParams>,
@@ -208,6 +240,8 @@ impl App {
             next: None,
             workspace: None,
             session: None,
+            session_query: None,
+            session_archived: false,
             snapshot: None,
             inbox: None,
             inbox_filter: InboxFilter::Attention,
@@ -225,6 +259,7 @@ impl App {
             layer: Layer::None,
             draft: Editor::default(),
             parked: Vec::new(),
+            plan_only: false,
             key: uuid::Uuid::new_v4().to_string(),
             input: Editor::default(),
             input_artifact: None,
@@ -275,11 +310,16 @@ impl App {
     fn install_session(&mut self, session: Session) {
         if self.session.as_ref().map(|current| &current.id) != Some(&session.id) {
             self.park_draft();
-            if let Some(i) = self.parked.iter().position(|(id, ..)| *id == session.id) {
-                let (_, draft, key, artifact) = self.parked.remove(i);
-                self.draft = draft;
-                self.key = key;
-                self.input_artifact = artifact;
+            if let Some(i) = self
+                .parked
+                .iter()
+                .position(|draft| draft.session_id == session.id)
+            {
+                let draft = self.parked.remove(i);
+                self.draft = draft.text;
+                self.key = draft.key;
+                self.input_artifact = draft.artifact;
+                self.plan_only = draft.plan_only;
             }
         }
         self.session = Some(session);
@@ -371,15 +411,33 @@ impl App {
     fn park_draft(&mut self) {
         let draft = std::mem::take(&mut self.draft);
         let artifact = self.input_artifact.take();
+        let plan_only = std::mem::take(&mut self.plan_only);
         let key = std::mem::replace(&mut self.key, uuid::Uuid::new_v4().to_string());
         if let Some(session) = &self.session
-            && (!draft.text().is_empty() || artifact.is_some())
+            && (!draft.text().is_empty() || artifact.is_some() || plan_only)
         {
             if self.parked.len() >= 8 {
                 self.parked.remove(0);
             }
-            self.parked.push((session.id.clone(), draft, key, artifact));
+            self.parked.push(ParkedDraft {
+                session_id: session.id.clone(),
+                text: draft,
+                key,
+                artifact,
+                plan_only,
+            });
         }
+    }
+
+    fn toggle_plan_mode(&mut self) {
+        self.plan_only = !self.plan_only;
+        self.key = uuid::Uuid::new_v4().to_string();
+        self.message = if self.plan_only {
+            "Plan mode enabled"
+        } else {
+            "Execution mode enabled"
+        }
+        .into();
     }
 
     fn select_task(&mut self, id: String) {
@@ -406,6 +464,8 @@ impl App {
                 self.inbox_approvals.clear();
                 self.inbox_approvals_more = false;
                 self.history_page = None;
+                self.session_query = None;
+                self.session_archived = false;
                 self.next = Some(sessions(workspace.id.clone(), 0, false));
                 self.workspace = Some(workspace);
                 self.session = None;
@@ -450,6 +510,12 @@ impl App {
                 {
                     self.select_session(session);
                 }
+            }
+            Update::SessionMetadata(saved) => {
+                if self.session.as_ref().is_some_and(|s| s.id == saved.id) {
+                    self.session = Some(saved);
+                }
+                self.message = "Session updated".into();
             }
             Update::Inbox(inbox) => self.update_inbox(inbox),
             Update::Approvals(approvals, has_more) => {
@@ -582,6 +648,64 @@ impl App {
                     self.layer = Layer::Preview(preview, 0);
                 }
             }
+            Update::Timeline(page) => {
+                if self.selected.as_deref() == Some(&page.task_id)
+                    && matches!(self.layer, Layer::Timeline(..))
+                {
+                    self.layer = Layer::Timeline(Some(page), 0);
+                }
+            }
+            Update::Event(sequence, text) => {
+                if let Layer::Timeline(Some(page), index) = &self.layer
+                    && page
+                        .entries
+                        .get(*index)
+                        .is_some_and(|entry| entry.sequence == sequence)
+                {
+                    self.layer = Layer::TimelineEvent {
+                        page: page.clone(),
+                        index: *index,
+                        sequence,
+                        text,
+                        scroll: 0,
+                    };
+                }
+            }
+            Update::ContextAttribution(attribution) => {
+                if self.selected.as_deref() == Some(&attribution.task_id)
+                    && matches!(self.layer, Layer::Context(..))
+                {
+                    self.layer = Layer::Context(format_context_attribution(&attribution), 0);
+                }
+            }
+            Update::Queue(queue) => {
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|s| s.id == queue.session_id)
+                    && let Layer::Queue(current, index) = &mut self.layer
+                {
+                    *index = (*index).min(queue.pending.len().saturating_sub(1));
+                    *current = Some(queue);
+                }
+            }
+            Update::Enqueued(item) => {
+                self.draft.clear();
+                self.input_artifact = None;
+                self.key = uuid::Uuid::new_v4().to_string();
+                self.layer = Layer::None;
+                self.message = match item.status {
+                    TaskQueueState::Pending => "Prompt queued (Q to open)".into(),
+                    TaskQueueState::Cancelled => "Prompt was already cancelled".into(),
+                    TaskQueueState::Started { .. } => "Prompt already started".into(),
+                };
+            }
+            Update::StartedQueued(id) => {
+                self.select_task(id);
+                self.next = None;
+                self.layer = Layer::None;
+                self.message = "Queued prompt started".into();
+            }
             Update::Started(id) => {
                 self.start_acknowledged = true;
                 self.selected = Some(id);
@@ -644,6 +768,12 @@ impl App {
             }
             return false;
         }
+        if key.code == KeyCode::Esc
+            && let Layer::TimelineEvent { page, index, .. } = &self.layer
+        {
+            self.layer = Layer::Timeline(Some(page.clone()), *index);
+            return false;
+        }
         if key.code == KeyCode::Esc && !matches!(self.layer, Layer::None) {
             if !self.start_pending {
                 self.layer = Layer::None;
@@ -655,16 +785,22 @@ impl App {
                 return false;
             }
             let edit = edit.clone();
+            if matches!(edit, Edit::Task) && pressed && key.code == KeyCode::F(2) && !self.busy {
+                self.toggle_plan_mode();
+                return false;
+            }
             let value = if matches!(edit, Edit::Task) {
                 &mut self.draft
             } else {
                 &mut self.input
             };
+            let enqueue = matches!(edit, Edit::Task) && ctrl && key.code == KeyCode::Char('e');
             if pressed
-                && ((ctrl && key.code == KeyCode::Char('s'))
+                && (enqueue
+                    || (ctrl && key.code == KeyCode::Char('s'))
                     || (key.code == KeyCode::Enter && !matches!(edit, Edit::Task)))
             {
-                self.submit(edit, worker);
+                self.submit(edit, worker, enqueue);
                 return false;
             }
             let changed = match key.code {
@@ -753,13 +889,66 @@ impl App {
                 }
             }
             Layer::Sessions(page, index) => {
+                if self.busy {
+                    return false;
+                }
+                if pressed && key.code == KeyCode::Char('f') {
+                    self.input.clear();
+                    if let Some(query) = &self.session_query {
+                        let _ = self.input.insert(query, 480);
+                    }
+                    self.layer = Layer::Edit(Edit::SessionSearch);
+                    return false;
+                }
                 if pressed && key.code == KeyCode::Char('n') {
                     self.input.clear();
                     self.layer = Layer::Edit(Edit::Session);
                     return false;
                 }
+                if pressed
+                    && key.code == KeyCode::Char('A')
+                    && let Some(root) = &self.workspace
+                {
+                    self.session_archived = !self.session_archived;
+                    *page = None;
+                    *index = 0;
+                    request = Some(Request::Sessions(
+                        session_catalog(
+                            root.id.clone(),
+                            0,
+                            self.session_archived,
+                            self.session_query.clone(),
+                        ),
+                        true,
+                    ));
+                }
                 if let (Some(page), Some(root)) = (page, &self.workspace) {
                     step(key.code, index, page.items.len());
+                    if pressed && let Some(item) = page.items.get(*index) {
+                        match key.code {
+                            KeyCode::Char('r') => {
+                                self.input.clear();
+                                if let Some(title) = &item.title {
+                                    let _ = self.input.insert(title, 480);
+                                }
+                                self.layer = Layer::Edit(Edit::RenameSession(item.clone()));
+                                return false;
+                            }
+                            KeyCode::Char('x') => {
+                                request = Some(Request::UpdateSession {
+                                    session: item.clone(),
+                                    title: None,
+                                    catalog: session_catalog(
+                                        root.id.clone(),
+                                        0,
+                                        self.session_archived,
+                                        self.session_query.clone(),
+                                    ),
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
                     if pressed
                         && !self.busy
                         && key.code == KeyCode::Enter
@@ -770,9 +959,125 @@ impl App {
                         self.sync(worker);
                         return false;
                     } else if pressed && key.code == KeyCode::PageDown && page.has_more {
-                        request = Some(sessions(root.id.clone(), page.next_after, true));
+                        request = Some(Request::Sessions(
+                            session_catalog(
+                                root.id.clone(),
+                                page.next_after,
+                                self.session_archived,
+                                self.session_query.clone(),
+                            ),
+                            true,
+                        ));
                     } else if pressed && key.code == KeyCode::PageUp {
-                        request = Some(sessions(root.id.clone(), 0, true));
+                        request = Some(Request::Sessions(
+                            session_catalog(
+                                root.id.clone(),
+                                0,
+                                self.session_archived,
+                                self.session_query.clone(),
+                            ),
+                            true,
+                        ));
+                    }
+                }
+            }
+            Layer::Timeline(page, index) => {
+                if !self.busy
+                    && let Some(page) = page
+                {
+                    step(key.code, index, page.entries.len());
+                    let mut timeline = TaskTimelineParams {
+                        task_id: page.task_id.clone(),
+                        after: 0,
+                        through_sequence: Some(page.through_sequence),
+                    };
+                    if pressed {
+                        match key.code {
+                            KeyCode::PageDown => {
+                                if let Some(after) = page.next_after {
+                                    timeline.after = after;
+                                    request = Some(Request::Timeline(timeline));
+                                }
+                            }
+                            KeyCode::Home => request = Some(Request::Timeline(timeline)),
+                            KeyCode::Char('r') => {
+                                timeline.through_sequence = None;
+                                request = Some(Request::Timeline(timeline));
+                            }
+                            KeyCode::Char('a') => {
+                                let approval = page
+                                    .entries
+                                    .get(*index)
+                                    .and_then(|entry| entry.approval_id.as_deref());
+                                let pending = self
+                                    .detail
+                                    .as_ref()
+                                    .and_then(|detail| pending_approval_id(&detail.task));
+                                if let Some(id) = approval.filter(|id| Some(*id) == pending) {
+                                    request =
+                                        Some(Request::Approval(page.task_id.clone(), id.into()));
+                                    close = true;
+                                } else {
+                                    self.message = "Selected event has no pending approval".into();
+                                }
+                            }
+                            KeyCode::Enter => {
+                                if let Some(entry) = page.entries.get(*index) {
+                                    if entry.payload_bytes <= 64 * 1024 {
+                                        request = Some(Request::Event(
+                                            page.task_id.clone(),
+                                            entry.sequence,
+                                        ));
+                                    } else {
+                                        self.message = format!(
+                                            "Event {} is too large to preview ({} B)",
+                                            entry.sequence, entry.payload_bytes
+                                        );
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Layer::Context(_, scroll) | Layer::TimelineEvent { scroll, .. } => {
+                scroll_key(key.code, scroll)
+            }
+            Layer::Queue(queue, index) => {
+                if pressed && !self.busy && key.code == KeyCode::Char('r') {
+                    request = self.session.as_ref().map(|s| Request::Queue(s.id.clone()));
+                }
+                if let Some(queue) = queue {
+                    if pressed
+                        && !self.busy
+                        && key.code == KeyCode::Char('g')
+                        && let Some(blocker) = queue.blocking_task_id.clone()
+                    {
+                        self.select_task(blocker);
+                        self.layer = Layer::None;
+                        self.sync(worker);
+                        return false;
+                    }
+                    step(key.code, index, queue.pending.len());
+                    if pressed
+                        && !self.busy
+                        && let Some(item) = queue.pending.get(*index)
+                    {
+                        let target = TaskQueueItemParams {
+                            session_id: queue.session_id.clone(),
+                            queue_id: item.queue_id.clone(),
+                        };
+                        match key.code {
+                            KeyCode::Enter if *index == 0 => {
+                                request = Some(Request::StartQueued(target))
+                            }
+                            KeyCode::Enter => {
+                                self.message = "Start the first prompt in the queue".into()
+                            }
+                            KeyCode::Delete => request = Some(Request::CancelQueued(target)),
+                            _ => {}
+                        }
                     }
                 }
             }
@@ -1104,7 +1409,18 @@ impl App {
             }
             KeyCode::Char('s') if active => {
                 if let Some(root) = &self.workspace
-                    && self.send(worker, sessions(root.id.clone(), 0, true))
+                    && self.send(
+                        worker,
+                        Request::Sessions(
+                            session_catalog(
+                                root.id.clone(),
+                                0,
+                                self.session_archived,
+                                self.session_query.clone(),
+                            ),
+                            true,
+                        ),
+                    )
                 {
                     self.layer = Layer::Sessions(None, 0);
                 }
@@ -1116,6 +1432,15 @@ impl App {
                     self.layer = Layer::Inbox(0);
                 }
             }
+            KeyCode::Char('b') if active && self.session.is_some() => self.draft_fork(None),
+            KeyCode::Char('Q') if active => {
+                if let Some(session) = &self.session
+                    && self.send(worker, Request::Queue(session.id.clone()))
+                {
+                    self.layer = Layer::Queue(None, 0);
+                }
+            }
+            KeyCode::F(2) if active && self.session.is_some() => self.toggle_plan_mode(),
             KeyCode::Char('H') if active => {
                 self.input.clear();
                 self.layer = Layer::Edit(Edit::HistorySearch);
@@ -1151,6 +1476,16 @@ impl App {
             ));
             commands.push(("Workspaces", KeyCode::Char('w')));
             commands.push(("Sessions", KeyCode::Char('s')));
+            if self.session.is_some() {
+                commands.push(("Queued prompts", KeyCode::Char('Q')));
+                commands.push(("Branch current session", KeyCode::Char('b')));
+                let label = if self.plan_only {
+                    "Switch to execution mode"
+                } else {
+                    "Switch to plan mode"
+                };
+                commands.push((label, KeyCode::F(2)));
+            }
             commands.push(("Workspace inbox", KeyCode::Char('I')));
             commands.push(("Search workspace history", KeyCode::Char('H')));
             if let Some(detail) = &self.detail {
@@ -1176,6 +1511,14 @@ impl App {
                     .is_some_and(|status| status.disposition == TaskResumeDisposition::Ready)
                 {
                     commands.push(("Resume task", KeyCode::Char('r')));
+                }
+                commands.push(("Task timeline", KeyCode::Char('t')));
+                commands.push(("Context and memory usage", KeyCode::Char('c')));
+                if task.status == TaskStatus::Completed {
+                    commands.push(("Branch from completed task", KeyCode::Char('B')));
+                }
+                if Self::can_implement(detail) {
+                    commands.push(("Draft implementation", KeyCode::Char('P')));
                 }
                 if !detail.artifacts.is_empty() {
                     commands.push(("Open artifacts", KeyCode::Char('v')));
@@ -1223,6 +1566,51 @@ impl App {
                     self.focus_details = true;
                 }
             }
+            KeyCode::Char('t') => {
+                if self.send(
+                    worker,
+                    Request::Timeline(TaskTimelineParams {
+                        task_id: task.id.clone(),
+                        after: 0,
+                        through_sequence: None,
+                    }),
+                ) {
+                    self.layer = Layer::Timeline(None, 0);
+                }
+            }
+            KeyCode::Char('c') => {
+                if self.send(worker, Request::ContextAttribution(task.id.clone())) {
+                    self.layer = Layer::Context(String::new(), 0);
+                }
+            }
+            KeyCode::Char('B') if task.status == TaskStatus::Completed => {
+                self.draft_fork(Some(task.id.clone()));
+            }
+            KeyCode::Char('P') if Self::can_implement(detail) => {
+                if !self.draft.text().is_empty() || self.input_artifact.is_some() {
+                    self.message = "Submit or clear the current draft first".into();
+                    return;
+                }
+                let plan = detail.plan.as_ref().expect("checked for a published plan");
+                let steps = plan
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .map(|(i, step)| format!("{}. {}", i + 1, clean(&step.text)))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let text = format!(
+                    "Implement the following plan from task {}.\n\n{steps}",
+                    task.id
+                );
+                if self.draft.insert(&text, DRAFT_LIMIT) {
+                    self.key = uuid::Uuid::new_v4().to_string();
+                    self.plan_only = false;
+                    self.layer = Layer::Edit(Edit::Task);
+                    self.message =
+                        "Review the implementation draft and press Ctrl+S to submit".into();
+                }
+            }
             KeyCode::Char('x') if !task.status.is_terminal() => {
                 self.layer = Layer::ConfirmCancel(task.id.clone())
             }
@@ -1244,13 +1632,35 @@ impl App {
         }
     }
 
-    fn submit(&mut self, edit: Edit, worker: &Worker) {
+    fn draft_fork(&mut self, through_task_id: Option<String>) {
+        let Some(session) = &self.session else { return };
+        self.input.clear();
+        self.layer = Layer::Edit(Edit::Fork(SessionForkParams {
+            session_id: session.id.clone(),
+            client_request_id: uuid::Uuid::new_v4().to_string(),
+            title: None,
+            through_task_id,
+            through_sequence: None,
+        }));
+    }
+
+    fn can_implement(detail: &Detail) -> bool {
+        detail.task.status == TaskStatus::Completed
+            && detail.plan.is_some()
+            && detail
+                .task
+                .context
+                .as_ref()
+                .is_some_and(|c| c.options.plan_only)
+    }
+
+    fn submit(&mut self, edit: Edit, worker: &Worker, enqueue: bool) {
         let value = if matches!(edit, Edit::Task) {
             self.draft.text().trim()
         } else {
             self.input.text().trim()
         };
-        if value.is_empty() {
+        if value.is_empty() && !matches!(edit, Edit::Fork(_) | Edit::SessionSearch) {
             return;
         }
         if self.busy {
@@ -1260,6 +1670,8 @@ impl App {
         let value = value.to_owned();
         let starts = matches!(edit, Edit::Task);
         let history_search = matches!(edit, Edit::HistorySearch);
+        let session_browse = matches!(edit, Edit::SessionSearch | Edit::RenameSession(_));
+        let fork = matches!(edit, Edit::Fork(_));
         let history_query = history_search.then(|| value.clone());
         let request = match edit {
             Edit::Task => {
@@ -1269,6 +1681,8 @@ impl App {
                     text: value,
                     key: self.key.clone(),
                     input: self.input_artifact.clone(),
+                    plan_only: self.plan_only,
+                    enqueue,
                 }
             }
             Edit::Workspace => Request::OpenWorkspace(value),
@@ -1277,6 +1691,35 @@ impl App {
                     return;
                 };
                 Request::NewSession(workspace.id.clone(), value)
+            }
+            Edit::SessionSearch => {
+                let Some(workspace) = &self.workspace else {
+                    return;
+                };
+                self.session_query = (!value.is_empty()).then_some(value);
+                Request::Sessions(
+                    session_catalog(
+                        workspace.id.clone(),
+                        0,
+                        self.session_archived,
+                        self.session_query.clone(),
+                    ),
+                    true,
+                )
+            }
+            Edit::RenameSession(session) => Request::UpdateSession {
+                catalog: session_catalog(
+                    session.workspace_id.clone(),
+                    0,
+                    self.session_archived,
+                    self.session_query.clone(),
+                ),
+                session,
+                title: Some(value),
+            },
+            Edit::Fork(mut request) => {
+                request.title = (!value.is_empty()).then_some(value);
+                Request::ForkSession(request)
             }
             Edit::Answer(task, call, _) => Request::Answer(task, call, value),
             Edit::Steer(task) => Request::Steer(task, value),
@@ -1298,7 +1741,9 @@ impl App {
                 self.history_page = None;
                 self.history_selection = None;
                 self.layer = Layer::History(0);
-            } else {
+            } else if session_browse {
+                self.layer = Layer::Sessions(None, 0);
+            } else if !fork {
                 self.layer = Layer::None;
             }
         }
@@ -1352,7 +1797,22 @@ impl App {
                     Span::raw(format!("  {session}")),
                     Span::styled(format!("  ·  {state}"), self.palette.quiet),
                 ]),
-                Line::styled(format!(" {root}"), self.palette.quiet),
+                Line::styled(
+                    self.session
+                        .as_ref()
+                        .and_then(|s| s.fork_origin.as_ref())
+                        .map_or_else(
+                            || format!(" {root}"),
+                            |origin| {
+                                format!(
+                                    " Branch of {} · {} inherited turns · {root}",
+                                    clean(&origin.session_id),
+                                    origin.inherited_turns
+                                )
+                            },
+                        ),
+                    self.palette.quiet,
+                ),
             ])
             .style(self.palette.rail),
             top,
@@ -1573,15 +2033,23 @@ impl App {
         if area.width < 4 || area.height == 0 {
             return;
         }
-        let title = if let Some(artifact) = &self.input_artifact {
-            format!(" New task  ·  Attached: {} ", clean(&artifact.artifact_id))
+        let mode = if self.plan_only {
+            "Plan only"
         } else if focused {
-            " New task  ·  Ctrl+S submit ".to_owned()
+            "New task · Execution"
+        } else {
+            "Draft · Execution"
+        };
+        let mut title = if focused {
+            format!(" {mode}  ·  Ctrl+S submit  ·  Ctrl+E queue  ·  F2 mode ")
         } else if self.session.is_none() {
             " No session ".to_owned()
         } else {
-            " Draft  ·  N edit ".to_owned()
+            format!(" {mode}  ·  N edit  ·  F2 mode ")
         };
+        if let Some(artifact) = &self.input_artifact {
+            title.push_str(&format!(" · Attached: {} ", clean(&artifact.artifact_id)));
+        }
         let block = Block::default()
             .borders(Borders::TOP)
             .style(self.palette.rail)
@@ -1604,7 +2072,7 @@ impl App {
 
     fn draw_tasks(&self, frame: &mut Frame<'_>, area: Rect, compact: bool) {
         let tasks = self.tasks();
-        let title = if compact { "Task queue" } else { "Tasks" };
+        let title = if compact { "Session tasks" } else { "Tasks" };
         let mut state = ListState::default().with_selected(
             tasks
                 .iter()
@@ -1705,6 +2173,13 @@ impl App {
             {
                 append(&mut lines, question);
             }
+            if task
+                .context
+                .as_ref()
+                .is_some_and(|context| context.options.plan_only)
+            {
+                lines.push(Line::styled("Plan only", self.palette.quiet));
+            }
             if let Some(plan) = &detail.plan {
                 lines.push(Line::styled("Plan", self.palette.label));
                 for step in &plan.steps {
@@ -1790,8 +2265,46 @@ impl App {
                 "Enter open / PgDn more / U user / A assistant / B both",
             ),
             Layer::Workspaces(..) => ("Workspaces".into(), "Open folder"),
-            Layer::Sessions(..) => ("Sessions".into(), "New session"),
+            Layer::Sessions(..) => (
+                format!(
+                    "{}{}",
+                    if self.session_archived {
+                        "Archived sessions"
+                    } else {
+                        "Sessions"
+                    },
+                    self.session_query
+                        .as_deref()
+                        .map_or_else(String::new, |q| format!("  /  {}", clean(q)))
+                ),
+                "Enter open / f find / A archive view / r rename / x archive or restore / n new",
+            ),
             Layer::Artifacts(_) => ("Artifacts".into(), ""),
+            Layer::Timeline(page, _) => (
+                page.as_ref().map_or_else(
+                    || "Task timeline".into(),
+                    |p| format!("Task timeline · through #{}", p.through_sequence),
+                ),
+                "Enter details / a approval / PgDn more / Home first / r refresh",
+            ),
+            Layer::TimelineEvent { sequence, .. } => (format!("Event #{sequence}"), "Esc timeline"),
+            Layer::Context(..) => ("Context and memory usage".into(), "Esc back"),
+            Layer::Queue(queue, _) => (
+                queue.as_ref().map_or_else(
+                    || "Queued prompts".into(),
+                    |q| {
+                        let state = if q.archived {
+                            " · Archived"
+                        } else if q.blocking_task_id.is_some() {
+                            " · Task in progress"
+                        } else {
+                            ""
+                        };
+                        format!("Queued prompts ({}){state}", q.pending.len())
+                    },
+                ),
+                "Enter start first / Del remove / g blocking task / r refresh",
+            ),
             Layer::Approval { allow_once, .. } => (
                 "Review operation".into(),
                 if *allow_once {
@@ -1856,6 +2369,49 @@ impl App {
                 page.as_ref()
                     .map(|p| p.items.iter().map(session_name).collect())
                     .unwrap_or_default(),
+                *index,
+                self.palette.choice,
+            ),
+            Layer::Timeline(page, index) => render_list(
+                frame,
+                body,
+                page.as_ref().map_or_else(Vec::new, |page| {
+                    page.entries
+                        .iter()
+                        .map(|entry| {
+                            let label = clean(&entry.kind.replace('_', " "));
+                            let tool = entry
+                                .tool_name
+                                .as_ref()
+                                .map_or_else(String::new, |name| format!("  ·  {}", clean(name)));
+                            let approval = entry
+                                .approval_id
+                                .as_ref()
+                                .map_or_else(String::new, |id| format!("  ·  {}", clean(id)));
+                            format!("#{}  {label}{tool}{approval}", entry.sequence)
+                        })
+                        .collect()
+                }),
+                *index,
+                self.palette.choice,
+            ),
+            Layer::TimelineEvent { text, scroll, .. } | Layer::Context(text, scroll) => {
+                render_text(frame, body, text, *scroll)
+            }
+            Layer::Queue(queue, index) => render_list(
+                frame,
+                body,
+                queue.as_ref().map_or_else(Vec::new, |queue| {
+                    queue
+                        .pending
+                        .iter()
+                        .map(|item| {
+                            let mode = if item.plan_only { "Plan" } else { "Execution" };
+                            let text = clean(&item.input_preview).replace('\n', " ");
+                            format!("{mode}  ·  {text}")
+                        })
+                        .collect()
+                }),
                 *index,
                 self.palette.choice,
             ),
@@ -1925,6 +2481,72 @@ impl App {
     }
 }
 
+fn format_context_attribution(report: &TaskContextAttribution) -> String {
+    let mut lines = vec![
+        format!("{} model attempts", report.model_steps),
+        format!(
+            "{} history turns · {} omitted · {} summarized",
+            report.history.len(),
+            report.omitted_history,
+            report.summarized_history.len()
+        ),
+        format!(
+            "{} memories · {} omitted for budget",
+            report.memories.len(),
+            report
+                .memories
+                .iter()
+                .filter(|item| item.omitted_for_budget)
+                .count()
+        ),
+        format!("{} B of workspace instructions", report.instructions_bytes),
+    ];
+    if let Some(bytes) = &report.normalized_input_bytes {
+        lines.push(format!("\nNormalized fragments (bytes)\nCurrent text {} · media {}\nHistory {} · memory {}\nTool definitions {} · results {} · provider replay {}",
+            bytes.current_text, bytes.current_media, bytes.history, bytes.memory,
+            bytes.tool_definitions, bytes.tool_results, bytes.provider_replay));
+    }
+    if let Some(EventKind::ModelPreflightObserved {
+        model,
+        estimated_input_tokens,
+        safety_margin_tokens,
+        observed_input_tokens,
+        ..
+    }) = report.latest_preflight.as_ref().map(|event| &event.data)
+    {
+        let observed = observed_input_tokens
+            .map_or_else(String::new, |tokens| format!(" · reported {tokens}"));
+        lines.push(format!("\n{} · estimated {estimated_input_tokens} tokens · margin {safety_margin_tokens}{observed}", clean(model)));
+    }
+    if let Some(EventKind::ModelBudgetRejected { report, .. }) = report
+        .latest_budget_rejection
+        .as_ref()
+        .map(|event| &event.data)
+    {
+        lines.push(format!(
+            "\nBudget rejection · {:?} · observed {} · limit {}",
+            report.kind, report.observed, report.limit
+        ));
+    }
+    if !report.memories.is_empty() {
+        lines.push("\nMemory sources".into());
+        for source in &report.memories {
+            lines.push(format!(
+                "{} · revision {} · {} B{}",
+                clean(&source.id),
+                source.revision,
+                source.normalized_bytes,
+                if source.omitted_for_budget {
+                    " · omitted"
+                } else {
+                    ""
+                }
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
 fn artifact_id(value: &ArtifactSummary) -> ArtifactGetParams {
     ArtifactGetParams {
         task_id: value.task_id.clone(),
@@ -1932,18 +2554,30 @@ fn artifact_id(value: &ArtifactSummary) -> ArtifactGetParams {
     }
 }
 
-fn sessions(workspace: String, after: u64, browse: bool) -> Request {
-    Request::Sessions {
-        workspace,
+fn session_catalog(
+    workspace_id: String,
+    after: u64,
+    archived: bool,
+    query: Option<String>,
+) -> SessionListParams {
+    SessionListParams {
+        workspace_id,
         after,
-        browse,
+        archived: Some(archived),
+        query,
+        order: Some(SessionListOrder::NewestFirst),
+        limit: 30,
     }
+}
+
+fn sessions(workspace: String, after: u64, browse: bool) -> Request {
+    Request::Sessions(session_catalog(workspace, after, false, None), browse)
 }
 
 fn edit_limit(edit: &Edit) -> usize {
     match edit {
         Edit::Task => DRAFT_LIMIT,
-        Edit::Session => 120,
+        Edit::Session | Edit::SessionSearch | Edit::RenameSession(_) | Edit::Fork(_) => 480,
         Edit::HistorySearch => 256,
         _ => 4096,
     }
@@ -2117,6 +2751,7 @@ mod tests {
             workspace_id: "root".into(),
             title: None,
             archived: false,
+            fork_origin: None,
         };
         app.session = Some(old.clone());
         app.update(Update::Sessions {
@@ -2362,10 +2997,12 @@ mod tests {
             workspace_id: "root".into(),
             title: None,
             archived: false,
+            fork_origin: None,
         };
         app.select_session(session("one"));
         app.layer = Layer::Edit(Edit::Task);
         app.paste("draft");
+        app.toggle_plan_mode();
         let key = app.key.clone();
         app.input_artifact = Some(ArtifactGetParams {
             task_id: "task".into(),
@@ -2374,7 +3011,9 @@ mod tests {
         app.select_session(session("two"));
         assert_eq!(app.draft.text(), "");
         assert!(app.input_artifact.is_none());
+        assert!(!app.plan_only);
         app.select_session(session("one"));
+        assert!(app.plan_only);
         assert_eq!(app.draft.text(), "draft");
         assert_eq!(app.key, key);
         assert_eq!(app.input_artifact.unwrap().artifact_id, "artifact");

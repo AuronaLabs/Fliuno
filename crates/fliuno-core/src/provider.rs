@@ -298,6 +298,30 @@ impl ModelProvider for DemoProvider {
         _cancellation: &CancellationToken,
     ) -> std::result::Result<ModelTurn, String> {
         if task
+            .context
+            .as_ref()
+            .is_some_and(|context| context.options.plan_only)
+        {
+            return Ok(
+                if task
+                    .messages
+                    .iter()
+                    .any(|message| matches!(message, Message::ToolResult { .. }))
+                {
+                    ModelDecision::Complete("Demo plan ready for review.".into()).into()
+                } else {
+                    ModelDecision::Call(ToolCall {
+                    id: new_id("call"),
+                    name: crate::interaction::PLAN.into(),
+                    arguments: json!({"steps":[
+                        {"text":"Review the task and workspace context","status":"pending"},
+                        {"text":"Confirm the proposed changes before implementation","status":"pending"}
+                    ]}),
+                }).into()
+                },
+            );
+        }
+        if task
             .messages
             .iter()
             .any(|m| matches!(m, Message::ToolResult { .. }))

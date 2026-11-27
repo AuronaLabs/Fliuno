@@ -22,7 +22,7 @@ impl Kernel {
             ));
         }
         let projection =
-            conversation_projection("?4", ", s.task_id, s.sequence", "session_turns s");
+            conversation_projection("?4", ", s.task_id, s.sequence", "session_context_turns s");
         let sql = format!("{projection} WHERE s.session_id=?1 AND s.task_id=?2 AND s.sequence<=?3");
         let mut statement = self.db.prepare_cached(&sql)?;
         let mut rows = statement.query(params![
@@ -79,7 +79,7 @@ impl Kernel {
         };
 
         let projection =
-            conversation_projection("?3", ", s.task_id, s.sequence", "session_turns s");
+            conversation_projection("?3", ", s.task_id, s.sequence", "session_context_turns s");
         let sql = format!(
             "{projection} WHERE s.session_id=?1 AND s.sequence<=?2 AND s.sequence>?5 ORDER BY s.sequence DESC LIMIT ?4"
         );

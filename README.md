@@ -15,7 +15,7 @@
 
 **[快速体验](#快速体验)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.9** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.9) · [更新记录](CHANGELOG.md#009)
+当前版本 **v0.0.10** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.10) · [更新记录](CHANGELOG.md#0010)
 
 ## 快速体验
 
@@ -28,6 +28,13 @@
 Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` 写任务、`Ctrl+S` 提交；等到审批出现后，按 `Enter` 查看本次操作，选择允许一次或拒绝。完成后按 `V` 打开交付物目录。[全部快捷键和数据库位置](docs/workbench.md)
 
 按 `Shift+I` 查看当前工作区各会话的待办，按 `Shift+H` 搜索已完成的历史并跳回原任务。按 `F1` 或 `/` 搜索当前可用的命令。宽屏可以同时看任务队列和详情，窄屏用 `Tab` 切换；运行时加 `--theme dark`、`light` 或 `mono` 可选择显示主题。
+
+| 0.0.10 工作流 | 快捷键 |
+| --- | --- |
+| 审阅计划后开始实施 | `F2` 切换计划模式，任务完成后 `Shift+P` 创建实施草稿。 |
+| 安排后续工作 | `Ctrl+E` 入队，`Shift+Q` 查看并启动下一项。 |
+| 探索另一条思路 | `B` 从当前会话分支，`Shift+B` 以所选的已完成任务为边界。 |
+| 查看工具和预算 | `T` 打开时间线，`C` 查看上下文和记忆用量。 |
 
 ## 开始真实工作
 

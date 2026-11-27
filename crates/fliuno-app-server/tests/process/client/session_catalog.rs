@@ -95,6 +95,7 @@ fn newest_session_catalog_resumes_after_restart_without_mixing_new_rows_or_scope
         after: 0,
         limit: 1,
         order: Some(SessionListOrder::NewestFirst),
+        query: None,
     };
     let mut active = SessionCatalog::new(request.clone());
     assert_eq!(

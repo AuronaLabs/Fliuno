@@ -27,6 +27,8 @@ mod artifact_catalog;
 mod artifact_digest;
 #[path = "client/artifact_download.rs"]
 mod artifact_download;
+#[path = "client/collaboration.rs"]
+mod collaboration;
 #[path = "client/feed.rs"]
 mod feed;
 #[path = "client/headless_workflow.rs"]

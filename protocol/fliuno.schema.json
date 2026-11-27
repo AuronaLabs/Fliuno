@@ -751,6 +751,46 @@
         "sessionId"
       ]
     },
+    "session/fork": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionForkParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "clientRequestId": {
+          "type": "string"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "throughTaskId": {
+          "description": "An inclusive completion boundary, resolved against the source session.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "throughSequence": {
+          "description": "Mutually exclusive with throughTaskId. Omit both for the current watermark.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "clientRequestId"
+      ]
+    },
     "session/rename": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "SessionRenameParams",
@@ -849,6 +889,15 @@
               "type": "null"
             }
           ]
+        },
+        "query": {
+          "description": "Literal title or session ID substring. ASCII matching is case insensitive.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 120
         }
       },
       "additionalProperties": false,
@@ -910,6 +959,10 @@
             },
             "enableInteraction": {
               "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "planOnly": {
+              "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
             "instructionsRevision": {
@@ -1735,6 +1788,10 @@
               "description": "Expose local plan and clarification tools to this model task.",
               "type": "boolean"
             },
+            "planOnly": {
+              "description": "Limit this model task to planning, clarification and trusted confined reads.",
+              "type": "boolean"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -1924,6 +1981,455 @@
         }
       }
     },
+    "taskQueue/enqueue": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskStartParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/TaskInput"
+        },
+        "artifactInputs": {
+          "description": "Append immutable UTF-8 text, image or PDF artifacts from the same session in this order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ArtifactGetParams"
+          },
+          "maxItems": 4
+        },
+        "clientRequestId": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "backend": {
+          "$ref": "#/$defs/TaskBackend",
+          "default": {
+            "type": "model"
+          }
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContextOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "maxModelSteps": {
+          "description": "Model tasks only. Limits attempts, including uncertain requests.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 1,
+          "maximum": 8
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "input"
+      ],
+      "$defs": {
+        "TaskInput": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/UserContentPart"
+              }
+            }
+          ]
+        },
+        "UserContentPart": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "text"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "text"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "image"
+                },
+                "mimeType": {
+                  "$ref": "#/$defs/ImageMimeType"
+                },
+                "data": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "mimeType",
+                "data"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "pdf"
+                },
+                "data": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "data"
+              ]
+            }
+          ]
+        },
+        "ImageMimeType": {
+          "type": "string",
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp"
+          ]
+        },
+        "ArtifactGetParams": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "taskId",
+            "artifactId"
+          ]
+        },
+        "TaskBackend": {
+          "description": "Host-registered execution target. Commands and credentials never enter RPC.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "model"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "external_agent"
+                },
+                "agentId": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "agentId"
+              ]
+            }
+          ]
+        },
+        "ContextOptions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/ContextMode",
+              "default": "session"
+            },
+            "disableMemory": {
+              "description": "Disable workspace memory retrieval without discarding session history.",
+              "type": "boolean"
+            },
+            "enableInteraction": {
+              "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "planOnly": {
+              "description": "Limit this model task to planning, clarification and trusted confined reads.",
+              "type": "boolean"
+            },
+            "instructionsRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memorySelection": {
+              "description": "Select exactly these revisions, without keyword or embedding retrieval.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ContextMemoryRef"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "memoryRecencyHalfLifeDays": {
+              "description": "Optional freshness weighting for automatically selected memories.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 3650
+            },
+            "maxTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 16
+            },
+            "maxBytes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 131072
+            },
+            "selection": {
+              "description": "FitRecent may skip whole records within a bounded recent window.",
+              "$ref": "#/$defs/ContextSelection"
+            },
+            "detail": {
+              "$ref": "#/$defs/ContextDetail"
+            },
+            "taskIds": {
+              "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "historyQuery": {
+              "description": "Required in match_recent mode; searches only user and assistant text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextHistoryQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scanLimit": {
+              "description": "Maximum completed records examined by fit_recent or match_recent.\nOmit to examine at most 128 records, including any skipped records.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 512
+            },
+            "afterSequence": {
+              "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "throughSequence": {
+              "description": "Pin the inclusive completion watermark for preview and task creation.\nOmit to use the current watermark. Zero selects an empty history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContextMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "isolated"
+          ]
+        },
+        "ContextMemoryRef": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision"
+          ]
+        },
+        "ContextSelection": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "recent",
+                "fit_recent"
+              ]
+            },
+            {
+              "description": "Fit recent records whose conversation matches an explicit query.",
+              "type": "string",
+              "const": "match_recent"
+            }
+          ]
+        },
+        "ContextDetail": {
+          "description": "Controls which parts of a completed record count toward the context budget.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            },
+            {
+              "description": "Keep user and assistant messages and artifact references.",
+              "type": "string",
+              "const": "conversation"
+            }
+          ]
+        },
+        "ContextHistoryQuery": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionHistoryRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        }
+      }
+    },
+    "taskQueue/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SessionIdParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ]
+    },
+    "taskQueue/startNext": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskQueueItemParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "queueId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "queueId"
+      ]
+    },
+    "taskQueue/cancel": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskQueueItemParams",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "queueId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "queueId"
+      ]
+    },
     "run/start": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "RunStartParams",
@@ -2002,6 +2508,10 @@
             },
             "enableInteraction": {
               "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "planOnly": {
+              "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
             "instructionsRevision": {
@@ -2505,6 +3015,10 @@
             },
             "enableInteraction": {
               "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "planOnly": {
+              "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
             "instructionsRevision": {
@@ -3172,6 +3686,35 @@
       "properties": {
         "taskId": {
           "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId"
+      ]
+    },
+    "task/timeline": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskTimelineParams",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "after": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "throughSequence": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -6030,13 +6573,49 @@
         },
         "archived": {
           "type": "boolean"
+        },
+        "forkOrigin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
       "required": [
         "id",
         "workspaceId"
-      ]
+      ],
+      "$defs": {
+        "SessionForkOrigin": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "throughSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "inheritedTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sessionId",
+            "throughSequence",
+            "inheritedTurns"
+          ]
+        }
+      }
     },
     "Task": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -6500,6 +7079,10 @@
             },
             "enableInteraction": {
               "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "planOnly": {
+              "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
             "instructionsRevision": {
@@ -7636,6 +8219,253 @@
             "pending",
             "in_progress",
             "completed"
+          ]
+        }
+      }
+    },
+    "TaskQueue": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskQueue",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskQueueItem"
+          }
+        },
+        "blockingTaskId": {
+          "description": "A task in progress, waiting for the user, or interrupted in this session.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "archived": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId",
+        "pending",
+        "archived"
+      ],
+      "$defs": {
+        "TaskQueueItem": {
+          "type": "object",
+          "properties": {
+            "queueId": {
+              "type": "string"
+            },
+            "inputPreview": {
+              "type": "string"
+            },
+            "planOnly": {
+              "type": "boolean"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskQueueState"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "queueId",
+            "inputPreview",
+            "planOnly",
+            "status"
+          ]
+        },
+        "TaskQueueState": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "pending"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "started"
+                },
+                "taskId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "taskId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "cancelled"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "TaskTimelinePage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskTimelinePage",
+      "type": "object",
+      "properties": {
+        "taskId": {
+          "type": "string"
+        },
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskTimelineEntry"
+          }
+        },
+        "nextAfter": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "throughSequence",
+        "entries"
+      ],
+      "$defs": {
+        "TaskTimelineEntry": {
+          "type": "object",
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "kind": {
+              "type": "string"
+            },
+            "payloadBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "approvalId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "toolName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sequence",
+            "kind",
+            "payloadBytes"
+          ]
+        }
+      }
+    },
+    "TaskQueueItem": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TaskQueueItem",
+      "type": "object",
+      "properties": {
+        "queueId": {
+          "type": "string"
+        },
+        "inputPreview": {
+          "type": "string"
+        },
+        "planOnly": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/TaskQueueState"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "queueId",
+        "inputPreview",
+        "planOnly",
+        "status"
+      ],
+      "$defs": {
+        "TaskQueueState": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "pending"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "started"
+                },
+                "taskId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "taskId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "const": "cancelled"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            }
           ]
         }
       }
@@ -11934,6 +12764,10 @@
               "description": "Expose local plan and clarification tools to this model task.",
               "type": "boolean"
             },
+            "planOnly": {
+              "description": "Limit this model task to planning, clarification and trusted confined reads.",
+              "type": "boolean"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -15386,12 +16220,46 @@
             },
             "archived": {
               "type": "boolean"
+            },
+            "forkOrigin": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionForkOrigin"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "additionalProperties": false,
           "required": [
             "id",
             "workspaceId"
+          ]
+        },
+        "SessionForkOrigin": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "throughSequence": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "inheritedTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "sessionId",
+            "throughSequence",
+            "inheritedTurns"
           ]
         }
       }

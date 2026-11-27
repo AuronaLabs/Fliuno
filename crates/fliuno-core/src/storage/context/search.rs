@@ -21,9 +21,13 @@ impl Kernel {
         mut visit: impl FnMut(ConversationRow<'_>) -> Result<bool>,
     ) -> Result<Option<u64>> {
         let (owner, source, predicate, cursor, session_column) = match scope {
-            HistoryScope::Session(id) => {
-                (id, "session_turns s", "s.session_id", "s.sequence", "NULL")
-            }
+            HistoryScope::Session(id) => (
+                id,
+                "session_context_turns s",
+                "s.session_id",
+                "s.sequence",
+                "NULL",
+            ),
             // Keep the workspace range on the outside of the join so LIMIT
             // bounds work even if unrelated workspaces have much more history.
             HistoryScope::Workspace(id) => (

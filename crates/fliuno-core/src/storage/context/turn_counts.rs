@@ -74,7 +74,8 @@ impl Kernel {
                 ) FROM session_turn_checkpoints c
                 WHERE c.session_id=?1 AND c.sequence<=?2 ORDER BY c.sequence DESC LIMIT 1),
                 (SELECT COUNT(*) FROM session_turns WHERE session_id=?1 AND sequence<=?2))
-             END FROM session_turn_stats WHERE session_id=?1), 0)",
+             END FROM session_turn_stats WHERE session_id=?1), 0)
+             + (SELECT COUNT(*) FROM session_fork_turns WHERE session_id=?1 AND sequence<=?2)",
         )?;
         // With append-only history, the tail (or the prefix before the first
         // checkpoint) contains at most CHECKPOINT_INTERVAL-1 matching turns.

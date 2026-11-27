@@ -14,6 +14,7 @@ mod run_boundaries;
 mod sessions;
 mod task_cancel;
 mod task_changes;
+pub(crate) mod task_queue;
 mod task_resume;
 mod task_revisions;
 mod task_starts;
@@ -39,7 +40,7 @@ use std::{
 pub(crate) use task_resume::ResumeFacts;
 pub(crate) use tool_inputs::Mutation as ToolInputMutation;
 
-pub(crate) const SCHEMA_VERSION: u32 = 74;
+pub(crate) const SCHEMA_VERSION: u32 = 76;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 fn read_task(db: &Connection, id: &str) -> Result<Task> {
@@ -728,6 +729,12 @@ impl Kernel {
         if version < 74 {
             crate::model_tool_versions::migrate(&db)?;
         }
+        if version < 75 {
+            task_queue::migrate(&mut db)?;
+        }
+        if version < 76 {
+            sessions::migrate_forks(&mut db)?;
+        }
         if let Some((provider_id, model)) = provider.model_identity() {
             let undercount: i64 = db.query_row(
                 "SELECT COALESCE(MAX(CAST(json_extract(data,'$.undercountTokens') AS INTEGER)),0)
@@ -847,6 +854,7 @@ impl Kernel {
         request: Option<(&str, [u8; 32])>,
         context_memory_access: Option<&workspace_memory::ContextMemoryAccess>,
         owner: Option<RunChild<'_>>,
+        queued_prompt: Option<&str>,
     ) -> Result<()> {
         let events = &[EventKind::TaskStarted];
         let receipt = request
@@ -859,8 +867,19 @@ impl Kernel {
         let tool_bindings = (task.backend == TaskBackend::Model)
             .then(|| self.current_model_bindings(task))
             .transpose()?;
-        let tx = self.db.transaction()?;
+        let tx = if let Some(queue_id) = queued_prompt {
+            let tx = self
+                .db
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            task_queue::require_dispatch(&tx, &task.session_id, queue_id)?;
+            tx
+        } else {
+            self.db.transaction()?
+        };
         let sequences = write_transition(&tx, task, events, &[], binding, None, None)?;
+        if let Some(queue_id) = queued_prompt {
+            task_queue::record_dispatch(&tx, task, queue_id)?;
+        }
         if let Some(bindings) = &tool_bindings {
             crate::model_tool_versions::record(&tx, &task.id, bindings)?;
         }

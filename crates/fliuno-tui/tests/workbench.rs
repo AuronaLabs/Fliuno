@@ -212,6 +212,106 @@ fn stalled_initialization_cannot_hold_the_terminal_open() {
 
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn terminal_plan_mode_completes_without_creating_an_artifact() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let mut console = Console::launch(server.as_deref(), root.path());
+    console.expect("New session");
+    console.keys("Planning session\r");
+    console.expect("No tasks");
+    console.ready();
+    console.keys("n");
+    console.expect("New task");
+    console.keys("\x1bOQ");
+    console.expect("Plan only");
+    console.keys("Plan the report\x13");
+    console.expect("Demo plan ready for review.");
+    console.expect("Completed");
+    console.ready();
+    assert!(
+        !console
+            .screen
+            .screen()
+            .contents()
+            .contains("artifact_create")
+    );
+    console.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn terminal_plan_queue_branch_and_timeline_workflow() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let mut console = Console::launch(server.as_deref(), root.path());
+    console.expect("New session");
+    console.keys("Planning desk\r");
+    console.expect("No tasks");
+    console.ready();
+    console.keys("n");
+    console.expect("New task");
+    console.keys("\x1bOQ");
+    console.expect("Plan only");
+    console.keys("Draft a release plan\x05");
+    console.expect("Prompt queued");
+    console.ready();
+    console.quit("q");
+
+    let mut console = Console::launch(server.as_deref(), root.path());
+    console.expect("Planning desk");
+    console.ready();
+    console.keys("Q");
+    console.expect("Queued prompts (1)");
+    console.expect("Draft a release plan");
+    console.ready();
+    console.keys("\r");
+    console.expect("Demo plan ready for review.");
+    console.expect("Completed");
+    console.ready();
+    console.keys("t");
+    console.expect("Task timeline");
+    console.expect("task started");
+    console.ready();
+    console.keys("\r");
+    console.expect("task_started");
+    console.ready();
+    console.keys("\x1b");
+    console.expect("Task timeline");
+    console.keys("\x1b");
+    console.expect("Task detail");
+    console.keys("c");
+    console.expect("Context and memory usage");
+    console.expect("history turns");
+    console.ready();
+    console.keys("\x1b");
+    console.expect("Task detail");
+    console.keys("B");
+    console.expect("Name the session branch");
+    console.keys("Release alternative\r");
+    console.expect("Release alternative");
+    console.expect("1 inherited turns");
+    console.ready();
+    console.keys("s");
+    console.expect("Sessions");
+    console.ready();
+    console.keys("f");
+    console.expect("Find sessions by title or ID");
+    console.keys("Planning desk\r");
+    console.expect("Sessions  /  Planning desk");
+    console.ready();
+    console.keys("\r");
+    console.expect("Completed");
+    console.ready();
+    console.keys("P");
+    console.expect("Implement the following plan");
+    console.expect("Execution");
+    console.keys("\x13");
+    console.expect("Review operation");
+    console.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn terminal_workspace_inbox_and_history_search_cross_sessions() {
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
     let root = tempfile::tempdir().unwrap();
@@ -318,11 +418,11 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     );
     console.ready();
     console.resize(18, 48);
-    console.expect("Task queue");
+    console.expect("Session tasks");
     console.keys("\t");
     console.expect("Task detail");
     console.ready();
-    assert!(!console.screen.screen().contents().contains("Task queue"));
+    assert!(!console.screen.screen().contents().contains("Session tasks"));
     console.quit("\x03");
     let mut reopened = Console::launch(server.as_deref(), root.path());
     reopened.expect("Acceptance");
@@ -334,7 +434,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     reopened.expect("Review operation");
     reopened.ready();
     reopened.resize(18, 48);
-    reopened.expect("Task queue");
+    reopened.expect("Session tasks");
     reopened.keys("a");
     reopened.expect("Allow once / Deny");
     reopened.expect("artifact_create");

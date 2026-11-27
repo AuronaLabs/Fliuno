@@ -2,6 +2,9 @@
 use super::*;
 use crate::task::validate_key;
 
+mod forks;
+pub(super) use forks::migrate as migrate_forks;
+
 pub(super) fn migrate_requests(db: &mut Connection) -> Result<()> {
     let tx = db.transaction()?;
     tx.execute_batch(
@@ -93,6 +96,7 @@ impl Kernel {
             workspace_id: workspace_id.into(),
             title: title.map(str::to_owned),
             archived: false,
+            fork_origin: None,
         };
         let tx = self.db.transaction()?;
         tx.execute(

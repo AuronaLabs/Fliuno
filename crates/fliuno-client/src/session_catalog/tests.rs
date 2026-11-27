@@ -32,6 +32,7 @@ fn malformed_catalog_pages_keep_the_continuation_and_legacy_order_omits_the_fiel
         after: 17,
         limit: 2,
         order: Some(SessionListOrder::NewestFirst),
+        query: None,
     });
     for _ in 0..5 {
         assert!(matches!(
@@ -57,6 +58,7 @@ fn malformed_catalog_pages_keep_the_continuation_and_legacy_order_omits_the_fiel
         after: 0,
         limit: 2,
         order: Some(SessionListOrder::OldestFirst),
+        query: None,
     });
     let encoded: Value = serde_json::to_value(legacy.next_request().unwrap()).unwrap();
     assert!(encoded.get("order").is_none());

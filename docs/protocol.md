@@ -951,6 +951,19 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `workNextActions:true` 时，给 `work/snapshot` 或 `work/subscribe` 传 `includeActions:true`。返回的 `nextActions` 与快照共用一个读取水位。它从近期任务推导，默认检查最近 25 项。客户端根据动作类型和任务 ID 读取审批或补答详情，再提交原操作。服务会重新校验当前状态。
 
+## 终端协作接口
+
+| 握手能力 | 方法与语义 |
+| --- | --- |
+| `taskPlanOnly` | 模型任务在 `context.planOnly` 传 `true`。执行绑定包含计划、澄清与宿主明确支持只读规则的 `WorkspaceRead` 工具。新建实施任务时按当前配置重新绑定并评估权限。 |
+| `taskQueue` | `taskQueue/enqueue` 使用 `TaskStartParams`，要求模型后端、文本输入和 `clientRequestId`，可携带同会话的产物引用。相同请求键和草稿返回原回执。`taskQueue/list {sessionId}` 按入队顺序返回最多 16 个待执行项及阻塞任务。 |
+| `taskQueue` | `taskQueue/startNext {sessionId,queueId}` 原子创建任务并记下回执，要求目标为首个待执行项、会话未归档且无非终态任务。再提交同一 ID 返回原回执。`taskQueue/cancel` 接受同样参数，取消待执行项。已创建的任务使用 `task/cancel`。 |
+| `sessionFork` | `session/fork {sessionId,clientRequestId,title?,throughTaskId?,throughSequence?}` 继承固定完成水位以内最近 64 条对话，返回新会话的 `forkOrigin`。两个水位参数最多传一个。继承的文字用于上下文及历史浏览，任务、操作审批、授权和队列属于原会话。 |
+| `sessionSearch` | `session/list` 可传 `query`，按标题或 ID 做字面子串匹配，ASCII 忽略大小写。与 `archived`、`order` 和分页游标组合使用。 |
+| `taskTimeline` | `task/timeline {taskId,after?,throughSequence?}` 返回最多 32 条事件索引。续页传 `nextAfter` 与首批返回的 `throughSequence`，按需使用 `events/get {sequence}` 读取原事件。 |
+
+未结任务占用所属会话的队列。用户可恢复任务、完成审批或澄清，或取消任务后手动启动下一项。任务详情及原事件会保留结果未知的记录。
+
 ## 上下文与项目说明
 
 `workspaceInstructions:true` 时，通过 `workspace/getInstructions` 读取 `{workspaceId,revision,text}`。通过 `workspace/setInstructions` 提交 `{workspaceId,expectedRevision,text}`，首次写入使用修订 `0`。新任务在 `context.instructionsRevision` 中显式选择当前修订，任务保存该修订的文本快照。`taskExplicitMemory:true` 声明任务可选定确切记忆版本，见[工作区记忆](memory.md)。

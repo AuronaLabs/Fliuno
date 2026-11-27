@@ -63,6 +63,52 @@ fn setup() -> (Kernel, Session) {
 }
 
 #[test]
+fn planning_task_binds_restricted_tools_and_rejects_fabricated_write_calls() {
+    let (mut kernel, session) = setup();
+    let options = ContextOptions {
+        plan_only: true,
+        mode: ContextMode::Isolated,
+        ..ContextOptions::default()
+    };
+    let (task, _) = kernel
+        .create_task_with_context(
+            &session.id,
+            "plan the report",
+            Some("plan"),
+            TaskBackend::Model,
+            Some(options),
+        )
+        .unwrap();
+    assert!(
+        task_context_prompt(&task)
+            .unwrap()
+            .unwrap()
+            .contains("Planning mode is active")
+    );
+    assert!(matches!(
+        kernel.create_task_with_key(&session.id, "plan the report", Some("plan")),
+        Err(Error::Conflict(_))
+    ));
+    let PreparedModelStep::Ready { task, tools } = kernel.prepare_model_step(&task.id).unwrap()
+    else {
+        panic!("expected a planning model attempt");
+    };
+    let names: Vec<_> = tools.iter().map(|tool| tool.name.as_str()).collect();
+    assert_eq!(names, ["task_ask_user", "task_publish_plan"]);
+    let id = task.id.clone();
+    let reply = ModelDecision::Call(ToolCall {
+        id: "write".into(),
+        name: "artifact_create".into(),
+        arguments: json!({"title":"unrequested", "content":"unsafe"}),
+    })
+    .into();
+    let rejected = kernel.apply_model_response(task, Ok(reply)).unwrap();
+    assert_eq!(rejected.status, TaskStatus::Failed);
+    assert!(rejected.pending_approval.is_none());
+    assert!(kernel.list_artifacts(&id).unwrap().is_empty());
+}
+
+#[test]
 fn approved_task_creates_one_artifact_and_replays_events() {
     let (mut kernel, session) = setup();
     let task = kernel.start_task(&session.id, "hello world").unwrap();

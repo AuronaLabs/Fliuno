@@ -295,7 +295,7 @@ impl Kernel {
             Some(options),
             max_model_steps,
         )?;
-        self.create_fresh_task(request, Some(owner), TaskMemoryQuery::Keyword)
+        self.create_fresh_task(request, Some(owner), TaskMemoryQuery::Keyword, None)
     }
 
     fn create_prepared_task(&mut self, request: StartRequest<'_>) -> Result<(Task, bool)> {
@@ -318,6 +318,58 @@ impl Kernel {
     ) -> Result<TaskSummaryStart> {
         let request = self.prepare_rpc_start(&p)?;
         self.create_prepared_summary(request, query)
+    }
+
+    /// Store a validated model draft without querying providers or allocating a task.
+    pub fn enqueue_task_prompt(&mut self, p: TaskStartParams) -> Result<TaskQueueItem> {
+        let request = self.prepare_rpc_start(&p)?;
+        let key = request
+            .key
+            .ok_or_else(|| Error::Invalid("queued prompts require clientRequestId".into()))?;
+        let Prompt::Text(text) = request.input.prompt else {
+            return Err(Error::Invalid("queued prompts require text input".into()));
+        };
+        if request.backend != TaskBackend::Model {
+            return Err(Error::Invalid(
+                "queued prompts require the model backend".into(),
+            ));
+        }
+        let payload = serde_json::to_string(&p)?;
+        if payload.len() > MAX_APP_REQUEST_BYTES {
+            return Err(Error::Invalid(
+                "queued prompt exceeds the request size limit".into(),
+            ));
+        }
+        let preview = text.chars().take(160).collect::<String>();
+        let plan_only = request.options.plan_only;
+        let digest: [u8; 32] = Sha256::digest(payload.as_bytes()).into();
+        self.store_queued_prompt(
+            &p.session_id,
+            storage::task_queue::NewQueuedPrompt {
+                key,
+                payload: &payload,
+                digest,
+                preview,
+                plan_only,
+            },
+        )
+    }
+
+    pub fn start_queued_prompt(
+        &mut self,
+        target: &TaskQueueItemParams,
+        query: TaskMemoryQuery<'_>,
+    ) -> Result<(TaskQueueItem, Option<Task>)> {
+        let (mut item, params) = self.queued_prompt_to_start(target)?;
+        let Some(params) = params else {
+            return Ok((item, None));
+        };
+        let request = self.prepare_rpc_start(&params)?;
+        let task = self.create_fresh_task(request, None, query, Some(&target.queue_id))?;
+        item.status = TaskQueueState::Started {
+            task_id: task.id.clone(),
+        };
+        Ok((item, Some(task)))
     }
 
     fn prepare_rpc_start<'a>(&self, p: &'a TaskStartParams) -> Result<StartRequest<'a>> {
@@ -356,7 +408,7 @@ impl Kernel {
             return Ok(TaskSummaryStart::Existing(summary));
         }
         Ok(TaskSummaryStart::Created(Box::new(
-            self.create_fresh_task(request, None, query)?,
+            self.create_fresh_task(request, None, query, None)?,
         )))
     }
 
@@ -388,6 +440,11 @@ impl Kernel {
         let max_model_steps = max_model_steps.filter(|limit| *limit != DEFAULT_TASK_MODEL_STEPS);
         let explicit_context = options.is_some();
         let options = context::normalize_options(options.unwrap_or_default())?;
+        if options.plan_only && backend != TaskBackend::Model {
+            return Err(Error::Invalid(
+                "planOnly applies only to model tasks".into(),
+            ));
+        }
         if let Some(key) = key {
             validate_key(key)?;
         }
@@ -440,6 +497,7 @@ impl Kernel {
         request: StartRequest<'_>,
         owner: Option<storage::RunChild<'_>>,
         query: TaskMemoryQuery<'_>,
+        queued_prompt: Option<&str>,
     ) -> Result<Task> {
         let StartRequest {
             session,
@@ -497,6 +555,7 @@ impl Kernel {
             key.map(|key| (key, input.digest())),
             memory_access.as_ref(),
             owner,
+            queued_prompt,
         )?;
         Ok(task)
     }

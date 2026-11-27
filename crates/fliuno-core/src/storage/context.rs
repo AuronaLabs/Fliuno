@@ -16,10 +16,10 @@ fn projection(detail: ContextDetail, budget: &str, extra_columns: &str) -> Strin
     // column itself so rejected records do not require reading overflow pages.
     match detail {
         ContextDetail::Full => format!(
-            "SELECT CASE WHEN octet_length(s.data)<={budget} THEN s.data END{extra_columns} FROM session_turns s"
+            "SELECT CASE WHEN octet_length(s.data)<={budget} THEN s.data END{extra_columns} FROM session_context_turns s"
         ),
         ContextDetail::Conversation => {
-            conversation_projection(budget, extra_columns, "session_turns s")
+            conversation_projection(budget, extra_columns, "session_context_turns s")
         }
     }
 }
@@ -133,7 +133,7 @@ impl Kernel {
     ) -> Result<bool> {
         let mut statement = self.db.prepare_cached(
             "SELECT CASE WHEN octet_length(data)<=?3 THEN data END
-             FROM session_turns WHERE session_id=?1 AND sequence=?2",
+             FROM session_context_turns WHERE session_id=?1 AND sequence=?2",
         )?;
         let mut rows = statement.query(params![
             session,

@@ -35,8 +35,7 @@ impl RunState {
     fn matches_authority(&self, kernel: &Kernel) -> bool {
         kernel.provider.persistent_identity().as_ref() == Some(&self.model_identity)
             && self.model_budget == stable_budget(kernel.provider.configured_budget())
-            && self.tool_authority_digest
-                == current_tool_authority_digest(kernel, self.context.enable_interaction)
+            && self.tool_authority_digest == current_tool_authority_digest(kernel, &self.context)
             && kernel.policy.persistent_identity().as_ref() == Some(&self.policy_identity)
     }
 }
@@ -131,10 +130,7 @@ impl Kernel {
                 .persistent_identity()
                 .ok_or_else(|| Error::Conflict("provider has no stable run identity".into()))?,
             model_budget: stable_budget(self.provider.configured_budget()),
-            tool_authority_digest: current_tool_authority_digest(
-                self,
-                frozen_context.enable_interaction,
-            ),
+            tool_authority_digest: current_tool_authority_digest(self, &frozen_context),
             context: frozen_context,
             policy_identity: self
                 .policy
@@ -805,10 +801,12 @@ fn composed_input(
     Ok(input)
 }
 
-fn current_tool_authority_digest(kernel: &Kernel, interaction_enabled: bool) -> String {
+fn current_tool_authority_digest(kernel: &Kernel, context: &ContextOptions) -> String {
     let tools = kernel
         .active_model_tools()
-        .filter(|(name, _)| interaction_enabled || !crate::interaction::is_internal(name))
+        .filter(|(name, tool)| {
+            crate::interaction::allows_model_tool(Some(context), name, tool.as_ref())
+        })
         .map(|(name, tool)| {
             let spec = tool.spec();
             serde_json::json!({

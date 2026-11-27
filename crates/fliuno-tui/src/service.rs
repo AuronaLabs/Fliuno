@@ -3,9 +3,11 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use fliuno_client::{Client, Error as ClientError, EventFeed};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactDigest, ArtifactGetParams,
-    ArtifactRevision, ArtifactSummary, ObjectPage, Session, SessionHistoryRole, Task, TaskPlan,
-    TaskResumeDisposition, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
-    TaskSummaryBatchParams, WorkSnapshot, WorkSnapshotParams, Workspace,
+    ArtifactRevision, ArtifactSummary, Event, ObjectPage, Session, SessionForkParams,
+    SessionHistoryRole, SessionListOrder, SessionListParams, Task, TaskContextAttribution,
+    TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskResumeDisposition,
+    TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary, TaskSummaryBatchParams,
+    TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams, Workspace,
     WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
@@ -30,10 +32,12 @@ pub enum Request {
     Reconnect,
     Workspaces(u64),
     OpenWorkspace(String),
-    Sessions {
-        workspace: String,
-        after: u64,
-        browse: bool,
+    Sessions(SessionListParams, bool),
+    ForkSession(SessionForkParams),
+    UpdateSession {
+        session: Session,
+        title: Option<String>,
+        catalog: SessionListParams,
     },
     NewSession(String, String),
     SelectSession(String),
@@ -43,7 +47,15 @@ pub enum Request {
         text: String,
         key: String,
         input: Option<ArtifactGetParams>,
+        plan_only: bool,
+        enqueue: bool,
     },
+    Queue(String),
+    Timeline(TaskTimelineParams),
+    Event(String, u64),
+    ContextAttribution(String),
+    StartQueued(TaskQueueItemParams),
+    CancelQueued(TaskQueueItemParams),
     Approval(String, String),
     Decide(String, String, ApprovalDecision),
     Answer(String, String, String),
@@ -114,6 +126,7 @@ pub enum Update {
         browse: bool,
     },
     Session(Session),
+    SessionMetadata(Session),
     Overview(String, WorkSnapshot),
     Detail(Box<Detail>),
     Inbox(WorkspaceInbox),
@@ -123,6 +136,12 @@ pub enum Update {
     Approval(String, String, Box<ApprovalDetails>),
     Preview(Box<Preview>),
     Started(String),
+    Enqueued(TaskQueueItem),
+    Queue(TaskQueue),
+    Timeline(TaskTimelinePage),
+    Event(u64, String),
+    ContextAttribution(Box<TaskContextAttribution>),
+    StartedQueued(String),
     Notice(String),
     Finished,
     Error(String),
@@ -409,6 +428,36 @@ impl Service {
         Ok(())
     }
 
+    fn sessions(&mut self, mut params: SessionListParams, browse: bool) -> Result<Update> {
+        if !self.supports("sessionListOrdering")
+            && params.order == Some(SessionListOrder::NewestFirst)
+        {
+            params.order = None;
+        }
+        if params.query.is_some() && !self.supports("sessionSearch") {
+            return Err("This app-server does not support session search".into());
+        }
+        let page = self.rpc("session/list", json!(params))?;
+        Ok(Update::Sessions {
+            workspace: params.workspace_id,
+            page,
+            browse,
+        })
+    }
+
+    fn require_task_queue(&self) -> Result<()> {
+        if self.supports("taskQueue") {
+            Ok(())
+        } else {
+            Err("This app-server does not support queued prompts".into())
+        }
+    }
+
+    fn task_queue(&mut self, session: &str) -> Result<TaskQueue> {
+        self.require_task_queue()?;
+        self.rpc("taskQueue/list", json!({"sessionId":session}))
+    }
+
     fn handle(&mut self, request: Request, out: &Sender<Update>, root: &mut String) -> Result<()> {
         let update = match request {
             Request::Reconnect => unreachable!(),
@@ -426,17 +475,31 @@ impl Service {
                 self.watermark = None;
                 Update::Workspace(workspace)
             }
-            Request::Sessions {
-                workspace,
-                after,
-                browse,
-            } => {
-                let page = self.rpc("session/list", json!({"workspaceId":workspace,"after":after,"order":"newest_first","archived":false,"limit":30}))?;
-                Update::Sessions {
-                    workspace,
-                    page,
-                    browse,
+            Request::Sessions(params, browse) => self.sessions(params, browse)?,
+            Request::ForkSession(params) => {
+                if !self.supports("sessionFork") {
+                    return Err("This app-server does not support session forks".into());
                 }
+                Update::Session(self.rpc("session/fork", json!(params))?)
+            }
+            Request::UpdateSession {
+                session,
+                title,
+                catalog,
+            } => {
+                let saved: Session = if let Some(title) = title {
+                    self.rpc(
+                        "session/rename",
+                        json!({"sessionId":session.id,"title":title}),
+                    )?
+                } else {
+                    self.rpc(
+                        "session/setArchived",
+                        json!({"sessionId":session.id,"archived":!session.archived}),
+                    )?
+                };
+                out.send(Update::SessionMetadata(saved))?;
+                self.sessions(catalog, true)?
             }
             Request::NewSession(workspace, title) => Update::Session(self.rpc(
                 "session/create",
@@ -457,14 +520,68 @@ impl Service {
                 text,
                 key,
                 input,
+                plan_only,
+                enqueue,
             } => {
-                let context = self
-                    .supports("taskInteraction")
-                    .then(|| json!({"enableInteraction":true}));
-                let task: Task = self.rpc("task/start", json!({"sessionId":session,"input":text,"clientRequestId":key,"context":context,"artifactInputs":input.into_iter().collect::<Vec<_>>()}))?;
+                let context = if plan_only {
+                    if !self.supports("taskPlanOnly") {
+                        return Err("This app-server does not support planning mode".into());
+                    }
+                    Some(json!({"planOnly":true}))
+                } else {
+                    self.supports("taskInteraction")
+                        .then(|| json!({"enableInteraction":true}))
+                };
+                let params = json!({"sessionId":session,"input":text,"clientRequestId":key,
+                    "context":context,"artifactInputs":input.into_iter().collect::<Vec<_>>()});
+                if enqueue {
+                    self.require_task_queue()?;
+                    out.send(Update::Enqueued(self.rpc("taskQueue/enqueue", params)?))?;
+                    return Ok(());
+                }
+                let task: Task = self.rpc("task/start", params)?;
                 out.send(Update::Started(task.id.clone()))?;
                 out.send(Update::Detail(Box::new(self.detail(&task.id)?)))?;
                 return self.refresh(out, true);
+            }
+            Request::Timeline(params) => {
+                if !self.supports("taskTimeline") {
+                    return Err("This app-server does not support task timelines".into());
+                }
+                Update::Timeline(self.rpc("task/timeline", json!(params))?)
+            }
+            Request::Event(task, sequence) => {
+                let event: Event = self.rpc("events/get", json!({"sequence":sequence}))?;
+                if event.task_id != task || event.sequence != sequence {
+                    return Err("The event does not belong to this task timeline".into());
+                }
+                Update::Event(sequence, serde_json::to_string_pretty(&event.data)?)
+            }
+            Request::ContextAttribution(task) => {
+                if !self.supports("taskContextAttribution") {
+                    return Err("This app-server does not support context attribution".into());
+                }
+                Update::ContextAttribution(Box::new(
+                    self.rpc("task/contextAttribution", json!({"taskId":task}))?,
+                ))
+            }
+            Request::Queue(session) => Update::Queue(self.task_queue(&session)?),
+            Request::StartQueued(target) => {
+                self.require_task_queue()?;
+                let receipt: TaskQueueItem = self.rpc("taskQueue/startNext", json!(target))?;
+                if let TaskQueueState::Started { task_id } = receipt.status {
+                    out.send(Update::StartedQueued(task_id.clone()))?;
+                    out.send(Update::Detail(Box::new(self.detail(&task_id)?)))?;
+                    return self.refresh(out, true);
+                }
+                out.send(Update::Notice("Prompt was cancelled".into()))?;
+                Update::Queue(self.task_queue(&target.session_id)?)
+            }
+            Request::CancelQueued(target) => {
+                self.require_task_queue()?;
+                let _: TaskQueueItem = self.rpc("taskQueue/cancel", json!(target))?;
+                out.send(Update::Notice("Queued prompt cancelled".into()))?;
+                Update::Queue(self.task_queue(&target.session_id)?)
             }
             Request::Approval(task, approval) => {
                 let details =

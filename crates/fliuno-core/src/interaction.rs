@@ -16,6 +16,18 @@ pub(crate) fn enabled(task: &Task) -> bool {
         .is_some_and(|ctx| ctx.options.enable_interaction)
 }
 
+pub(crate) fn allows_model_tool(
+    options: Option<&ContextOptions>,
+    name: &str,
+    tool: &dyn Tool,
+) -> bool {
+    if is_internal(name) {
+        return options.is_some_and(|options| options.enable_interaction);
+    }
+    options.is_none_or(|options| !options.plan_only)
+        || (tool.supports_read_rules() && matches!(tool.spec().effect, ToolEffect::WorkspaceRead))
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PlanArgs {

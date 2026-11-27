@@ -59,6 +59,9 @@ pub struct ContextOptions {
     /// Expose local plan and clarification tools to this model task.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub enable_interaction: bool,
+    /// Limit this model task to planning, clarification and trusted confined reads.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub plan_only: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions_revision: Option<u64>,
     /// Select exactly these revisions, without keyword or embedding retrieval.
@@ -129,6 +132,7 @@ impl Default for ContextOptions {
             mode: ContextMode::Session,
             disable_memory: false,
             enable_interaction: false,
+            plan_only: false,
             instructions_revision: None,
             memory_selection: None,
             memory_recency_half_life_days: None,

@@ -676,6 +676,9 @@ impl RpcServer {
             capabilities["taskExplicitMemory"] = json!(true);
             capabilities["taskSteering"] = json!(true);
             capabilities["taskInteraction"] = json!(true);
+            capabilities["taskPlanOnly"] = json!(true);
+            capabilities["taskQueue"] = json!(true);
+            capabilities["taskTimeline"] = json!(true);
             capabilities["taskReconciliation"] = json!(true);
             capabilities["workNextActions"] = json!(true);
             capabilities["artifactRevisions"] = json!(true);
@@ -726,6 +729,8 @@ impl RpcServer {
             capabilities["sessionArchiving"] = json!(true);
             capabilities["sessionListOrdering"] = json!(true);
             capabilities["sessionArchiveBatch"] = json!(true);
+            capabilities["sessionFork"] = json!(true);
+            capabilities["sessionSearch"] = json!(true);
             capabilities["maxSessionArchiveBatch"] =
                 json!(fliuno_protocol::MAX_SESSION_ARCHIVE_BATCH);
             capabilities["artifactByteReads"] = json!(true);
@@ -912,13 +917,7 @@ impl RpcServer {
             }
             "session/list" => {
                 let p: SessionListParams = decode(params)?;
-                json!(self.kernel()?.list_sessions_ordered(
-                    &p.workspace_id,
-                    p.after,
-                    p.limit,
-                    p.archived,
-                    p.order.unwrap_or_default(),
-                )?)
+                json!(self.kernel()?.list_session_catalog(&p)?)
             }
             "task/list" => {
                 let p: TaskListParams = decode(params)?;
@@ -962,6 +961,9 @@ impl RpcServer {
                     p.title.as_deref(),
                     p.client_request_id.as_deref()
                 )?)
+            }
+            "session/fork" => {
+                json!(self.kernel()?.fork_session(&decode(params)?)?)
             }
             "session/get" => {
                 let p: SessionIdParams = decode(params)?;
@@ -1013,6 +1015,30 @@ impl RpcServer {
                     p.options,
                     p.through_sequence,
                 )?)
+            }
+            "taskQueue/enqueue" => {
+                json!(self.kernel()?.enqueue_task_prompt(decode(params)?)?)
+            }
+            "taskQueue/list" => {
+                let p: SessionIdParams = decode(params)?;
+                json!(self.kernel()?.list_task_queue(&p.session_id)?)
+            }
+            "taskQueue/cancel" => {
+                json!(self.kernel()?.cancel_queued_prompt(&decode(params)?)?)
+            }
+            "taskQueue/startNext" => {
+                let p: TaskQueueItemParams = decode(params)?;
+                let (_, start) = self.kernel()?.queued_prompt_to_start(&p)?;
+                let memory = start
+                    .as_ref()
+                    .map_or(Ok(memory_embeddings::Retrieved::Keyword), |start| {
+                        self.retrieve_task_memory(start)
+                    })?;
+                let (receipt, task) = self.kernel()?.start_queued_prompt(&p, memory.query())?;
+                if let Some(task) = task {
+                    self.schedule_or_fail(task)?;
+                }
+                json!(receipt)
             }
             "task/startSummary" => {
                 let p: TaskStartParams = decode(params)?;
@@ -1296,6 +1322,9 @@ impl RpcServer {
             "approval/getRunPending" => {
                 let p: ApprovalRunPendingParams = decode(params)?;
                 json!(self.kernel()?.get_approval_run_pending(&p)?)
+            }
+            "task/timeline" => {
+                json!(self.kernel()?.task_timeline(&decode(params)?)?)
             }
             "events/get" => {
                 let p: EventGetParams = decode(params)?;

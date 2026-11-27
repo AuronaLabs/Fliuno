@@ -107,6 +107,56 @@ impl Kernel {
         self.query_object_page(sql, params![workspace, bound, fetch], after, limit, None)
     }
 
+    pub fn list_session_catalog(&self, params: &SessionListParams) -> Result<ObjectPage<Session>> {
+        let order = params.order.unwrap_or_default();
+        let Some(query) = params.query.as_deref() else {
+            return self.list_sessions_ordered(
+                &params.workspace_id,
+                params.after,
+                params.limit,
+                params.archived,
+                order,
+            );
+        };
+        let query = query.trim();
+        if query.is_empty()
+            || query.chars().take(MAX_SESSION_TITLE_CHARS + 1).count() > MAX_SESSION_TITLE_CHARS
+            || query.chars().any(char::is_control)
+        {
+            return Err(Error::Invalid(
+                "session query must contain 1 to 120 printable characters".into(),
+            ));
+        }
+        self.require_workspace(&params.workspace_id)?;
+        let (cursor, fetch) = page_range(params.after, params.limit)?;
+        let (bound, predicate, direction) = match order {
+            SessionListOrder::OldestFirst => (cursor, ">", "ASC"),
+            SessionListOrder::NewestFirst => (
+                if cursor == 0 { i64::MAX } else { cursor - 1 },
+                "<=",
+                "DESC",
+            ),
+        };
+        let archive_filter = if params.archived.is_some() {
+            "AND COALESCE(json_extract(data,'$.archived'),0)=?5"
+        } else {
+            "AND ?5 IS NULL"
+        };
+        let sql = format!(
+            "SELECT rowid,data FROM sessions WHERE workspace_id=?1 AND rowid{predicate}?2
+            {archive_filter} AND (instr(lower(id),lower(?4))>0
+                OR instr(lower(json_extract(data,'$.title')),lower(?4))>0)
+            ORDER BY rowid {direction} LIMIT ?3"
+        );
+        self.query_object_page(
+            &sql,
+            params![params.workspace_id, bound, fetch, query, params.archived],
+            params.after,
+            params.limit,
+            None,
+        )
+    }
+
     pub fn list_tasks(&self, session: &str, after: u64, limit: u32) -> Result<ObjectPage<Task>> {
         self.list_tasks_with_target(session, after, limit, None)
     }
