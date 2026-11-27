@@ -155,7 +155,10 @@ pub enum TranscriptPage {
 }
 
 pub enum Update {
-    Online(Workspace),
+    Online {
+        workspace: Workspace,
+        model: Option<String>,
+    },
     Workspaces(ObjectPage<Workspace>),
     Workspace(Workspace),
     Sessions {
@@ -409,8 +412,11 @@ fn serve(
                     let workspace: Workspace =
                         server.rpc("workspace/open", json!({"root":root}))?;
                     server.workspace = Some(workspace.id.clone());
+                    let model = server.client.info().capabilities["modelCapabilities"]["model"]
+                        .as_str()
+                        .map(str::to_owned);
                     service = Some(server);
-                    out.send(Update::Online(workspace))?;
+                    out.send(Update::Online { workspace, model })?;
                     Ok(())
                 }) {
                     Ok(()) => Ok(()),

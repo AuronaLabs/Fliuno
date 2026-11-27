@@ -82,15 +82,25 @@ impl App {
                 .map(session_name)
                 .unwrap_or_else(|| "No session".into()),
         };
+        let area = area.inner(Margin::new(u16::from(area.width >= 24) * 2, 0));
         let state = if !self.online {
             "Offline"
         } else if self.demo {
             "Offline demo"
         } else {
-            "Local"
+            self.model.as_deref().unwrap_or("Connected")
         };
-        let title_width = usize::from(area.width.saturating_sub(u16::from(area.width >= 24) * 4))
-            .saturating_sub(state.width() + 16);
+        let title_room = usize::from(area.width).saturating_sub("Fliuno  /  ".width());
+        let state_separator = "  ·  ";
+        let state_width = state
+            .width()
+            .min(title_room.saturating_sub(session.width().min(12) + state_separator.width()));
+        let state_suffix = if state_width >= 2 {
+            format!("{state_separator}{}", ellipsis(state, state_width))
+        } else {
+            String::new()
+        };
+        let title_width = title_room.saturating_sub(state_suffix.width());
         let root = self
             .workspace
             .as_ref()
@@ -102,13 +112,12 @@ impl App {
             .map_or(root.clone(), |origin| {
                 format!("{} inherited turns · {root}", origin.inherited_turns)
             });
-        let area = area.inner(Margin::new(u16::from(area.width >= 24) * 2, 0));
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(vec![
                     Span::styled("Fliuno", self.palette.label),
                     Span::raw(format!("  /  {}", ellipsis(&session, title_width))),
-                    Span::styled(format!("  ·  {state}"), self.palette.quiet),
+                    Span::styled(state_suffix, self.palette.quiet),
                 ]),
                 Line::styled(
                     path_tail(&breadcrumb, usize::from(area.width)),

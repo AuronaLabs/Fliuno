@@ -169,6 +169,7 @@ pub struct App {
     demo: bool,
     palette: Palette,
     online: bool,
+    model: Option<String>,
     busy: bool,
     next: Option<Request>,
     workspace: Option<Workspace>,
@@ -213,6 +214,7 @@ impl App {
             demo,
             palette: Palette::new(theme),
             online: false,
+            model: None,
             busy: true,
             next: None,
             workspace: None,
@@ -442,11 +444,14 @@ impl App {
 
     fn update(&mut self, update: Update) {
         match update {
-            Update::Online(initial) => {
+            Update::Online { workspace, model } => {
                 self.online = true;
+                self.model = model
+                    .map(|name| clean(&name).replace('\n', " ").trim().to_owned())
+                    .filter(|name| !name.is_empty());
                 self.activity.clear();
                 self.message.clear();
-                let id = self.workspace.get_or_insert(initial).id.clone();
+                let id = self.workspace.get_or_insert(workspace).id.clone();
                 self.next = Some(match &self.session {
                     Some(session) => Request::SelectSession(session.id.clone()),
                     None => sessions(id, 0, false),
@@ -783,6 +788,7 @@ impl App {
             Update::Notice(message) | Update::Error(message) => self.message = message,
             Update::Offline(message) => {
                 self.online = false;
+                self.model = None;
                 self.activity.clear();
                 self.layer = Layer::None;
                 self.next = None;

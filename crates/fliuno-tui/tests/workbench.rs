@@ -887,6 +887,7 @@ fn model_and_budget_load_from_files_without_provider_environment() {
     .unwrap();
     let capabilities = &client.info().capabilities;
     assert_eq!(capabilities["provider"], "openai");
+    assert_eq!(capabilities["modelCapabilities"]["model"], "fixture-model");
     assert_eq!(capabilities["modelBudget"]["maxOutputTokens"], 1024);
     let (mut reader, writer) = client.into_parts();
     drop(writer);
@@ -895,6 +896,13 @@ fn model_and_budget_load_from_files_without_provider_environment() {
     let mut terminal = Console::launch_with_config(Some(&server), root.path(), Some(&config));
     terminal.expect("Start a conversation");
     terminal.expect("Message Fliuno");
+    terminal.expect("·  fixture-model");
+    terminal.capture("active-model-110");
+    terminal.resize(20, 48);
+    terminal.ready();
+    terminal.expect("·  fixture-model");
+    terminal.capture("active-model-48");
+    terminal.resize(30, 110);
     terminal.ready();
     terminal.keys("\x1bOP");
     terminal.expect("Connection and configuration");
