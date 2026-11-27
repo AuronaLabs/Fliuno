@@ -143,7 +143,7 @@ impl App {
         if let Some(detail) = &self.detail {
             let task = &detail.task;
             if self.show_details {
-                lines.push(Line::styled("Task detail", self.palette.label));
+                pinned.push(Line::styled("Task detail", self.palette.label));
             }
             let (label, color) = status(task.status);
             let mut heading = vec![Span::styled(label, self.palette.status(color))];
