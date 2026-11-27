@@ -48,6 +48,8 @@ Windows Python 演示使用已有 CPython 3.12，明确复制对应 DLL、两个
 
 2026 年 11 月 19 日，Debian x86_64 来宾使用 Node 24.4.1 与系统 CPython 3.13.5，分别通过 默认允许流程、`--deny` 和 `--tamper`。使用 `--app-server /path/to/fliuno-app-server` 可直接测试预编译的 app-server。两种运行时都从私有目录加载已固定的脚本、模块和数据。App-server 通过真实 stdio 搭配本机模型夹具处理审批。来宾无外网，探针先在无隔离对照中连接本机端口，再验证隔离进程被拒绝。
 
+Linux 的 Node 示例通过 `--openssl-config=openssl.cnf` 读取随 `assets` 固定摘要暂存的文件。示例使用 Node 默认的 OpenSSL 提供方，启动只依赖沙箱内的配置。需要自定义 OpenSSL 配置的服务可以按同样的方式暂存所需文件。
+
 Linux 演示把 CPython 标准库和动态扩展放在来宾的系统只读运行库目录。位于其他位置的安装仍需显式提供依赖。Windows 演示对 CPython 3.12 使用上面列出的显式暂存清单。
 
 官方参考：

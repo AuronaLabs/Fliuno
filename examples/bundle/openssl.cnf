@@ -1,0 +1,2 @@
+# The offline bundle uses Node's default OpenSSL providers.
+# Keep configuration inside the staged bundle for isolated Linux startup.
