@@ -15,13 +15,13 @@
 
 **[开始真实工作](#开始真实工作)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.16** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.16) · [更新记录](CHANGELOG.md#0016)
+[下载稳定版](https://github.com/AuronaLabs/Fliuno/releases/latest) · [更新记录](CHANGELOG.md)
 
 ## 开始真实工作
 
-从发布页下载对应平台的压缩包，解压后保留同目录中的 `fliuno` 和 `fliuno-app-server`。使用开发构建时，可在项目目录直接启动 `fliuno`，按首次引导配置模型，然后在底部输入消息。
+在要工作的文件夹运行 `fliuno`。从 v0.0.17 起，首次启动会引导选择模型和已有密钥文件，完成后直接进入对话。按 `Enter` 发送，按 `Ctrl+N` 换行，按 `F1` 查看命令。配置、会话、审批和交付物都保存在本机。模型请求发送给你配置的供应商。
 
-使用当前稳定版时，先运行 `fliuno --init-config` 生成 `~/.fliuno/config.toml`，再填写 OpenAI、Anthropic 或 Gemini 的模型和密钥文件。在要工作的文件夹启动 `fliuno`，或通过 `--workspace PATH` 选择文件夹。模型请求发送到所配置的供应商；会话、审批和交付物保存在本机。[模型配置](docs/workbench.md#接入模型)
+从发布页选择对应平台的包。v0.0.17 提供 Windows x64 MSI 和 Debian amd64 安装包。使用便携压缩包时，把 `fliuno` 和 `fliuno-app-server` 解压到同一目录。v0.0.16 用户可运行 `fliuno --init-config` 创建模板，再按指南编辑配置。[安装与模型配置](docs/workbench.md#安装)
 
 ## 快速体验
 
@@ -33,7 +33,7 @@
 
 Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` 写任务、`Ctrl+S` 提交；等到审批出现后，按 `Enter` 查看本次操作，选择允许一次或拒绝。完成后按 `V` 打开交付物目录。[全部快捷键和数据库位置](docs/workbench.md)
 
-按 `Shift+I` 查看当前工作区各会话的待办，按 `Shift+H` 搜索已完成的历史并跳回原任务。按 `F1` 或 `/` 搜索当前可用的命令。主界面显示当前任务对话，按 `Tab` 展开详情，按 `Shift+L` 浏览完整任务列表。主题可在配置文件中选择。
+按 `Shift+I` 查看当前工作区各会话的待办，按 `Shift+H` 搜索已完成的历史并跳回原任务。按 `F1` 或 `/` 搜索当前可用的命令。主界面显示当前会话消息，按 `Tab` 展开单个任务的详情。按 `F7` 查看工作区交付物，按 `Shift+L` 浏览完整任务列表。主题可在配置文件中选择。
 
 | 工作流 | 快捷键 |
 | --- | --- |
