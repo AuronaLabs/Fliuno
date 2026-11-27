@@ -3,7 +3,9 @@
 use crate::protocol::{Output, Snapshot};
 use base64::Engine;
 use rusqlite::{Connection, params};
-use std::path::Path;
+use std::{path::Path, time::Duration};
+
+const READ_BUSY_TIMEOUT: Duration = Duration::from_millis(200);
 
 pub(crate) struct Spool {
     db: Connection,
@@ -297,11 +299,19 @@ fn open_saved(dir: &Path) -> Result<Connection, String> {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
     )
     .map_err(|_| "terminal spool unavailable")?;
-    db.busy_timeout(std::time::Duration::from_millis(50))
+    db.busy_timeout(READ_BUSY_TIMEOUT)
         .map_err(|_| "cannot bound terminal spool read")?;
     let version: u32 = db
         .pragma_query_value(None, "user_version", |r| r.get(0))
-        .map_err(|_| "invalid terminal spool version")?;
+        .map_err(|error| match error {
+            rusqlite::Error::SqliteFailure(code, _) => {
+                format!(
+                    "cannot read terminal spool version (SQLite {})",
+                    code.extended_code
+                )
+            }
+            _ => "invalid terminal spool version".into(),
+        })?;
     if version != 1 {
         return Err("unsupported terminal spool version".into());
     }
@@ -455,6 +465,36 @@ mod tests {
             Some("host startup refused")
         );
     }
+    #[test]
+    fn saved_output_waits_for_a_short_writer_commit() {
+        let dir = Directory::new();
+        let mut spool = Spool::create(&dir.0, 65536, &snapshot()).unwrap();
+        spool.append(b"committed").unwrap();
+        let tx = spool
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)
+            .unwrap();
+        std::thread::scope(|scope| {
+            let (started, in_flight) = std::sync::mpsc::channel();
+            let dir = &dir.0;
+            let reader = scope.spawn(move || {
+                started.send(()).unwrap();
+                offline(dir, 0, 100)
+            });
+            in_flight.recv().unwrap();
+            std::thread::sleep(Duration::from_millis(75));
+            tx.commit().unwrap();
+            let output = reader.join().unwrap().unwrap();
+            assert_eq!(output.next, 9);
+            assert_eq!(
+                base64::engine::general_purpose::STANDARD
+                    .decode(output.data_base64)
+                    .unwrap(),
+                b"committed"
+            );
+        });
+    }
+
     #[test]
     fn operation_reservation_and_completed_result_survive_reopen_without_replay() {
         let dir = Directory::new();
