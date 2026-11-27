@@ -1131,3 +1131,109 @@ fn live_preview_follows_output_and_keeps_manual_reading_position() {
     terminal.quit("\x03");
     provider.join().unwrap();
 }
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn terminal_reviews_edits_and_pins_a_workspaces_memory() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let mut terminal = Console::launch(server.as_deref(), root.path());
+    terminal.expect("New session");
+    terminal.keys("Memory acceptance\r");
+    terminal.expect("No tasks");
+    terminal.ready();
+    let open_memories = |terminal: &mut Console| {
+        terminal.keys("/");
+        terminal.expect("Workspace memories");
+        terminal.keys("workspace memories\r");
+        terminal.expect("Saved workspace memories");
+        terminal.ready();
+    };
+    open_memories(&mut terminal);
+    terminal.keys("n");
+    terminal.expect("Memory key");
+    terminal.keys("rust-notes\r");
+    terminal.expect("New memory");
+    terminal.keys("Rust 系统开发\x13");
+    terminal.expect("rust-notes  ·  v1");
+    terminal.ready();
+    terminal.keys("f");
+    terminal.expect("Find memories");
+    terminal.keys("系统开发\r");
+    terminal.expect("Results for 系统开发");
+    terminal.expect("rust-notes  ·  v1");
+    terminal.ready();
+    terminal.keys("\r");
+    terminal.expect("Source: Manual entry");
+    terminal.expect("Rust 系统开发");
+    terminal.capture("memory-source-wide");
+    terminal.keys("e");
+    terminal.expect("Editing rust-notes");
+    terminal.keys(" for kernel work\x13");
+    terminal.expect("rust-notes  ·  v2");
+    terminal.ready();
+    terminal.keys("f");
+    terminal.expect("Find memories");
+    if cfg!(windows) {
+        terminal.keys("\x08\x08\x08\x08");
+    } else {
+        terminal.keys("\x7f\x7f\x7f\x7f");
+    }
+    terminal.keys("kernel\r");
+    terminal.expect("Results for kernel");
+    terminal.expect("rust-notes  ·  v2");
+    terminal.ready();
+    terminal.resize(20, 48);
+    terminal.ready();
+    terminal.capture("memory-filter-narrow");
+    terminal.keys("\x1b");
+    terminal.expect_absent("Workspace memories");
+    terminal.resize(28, 110);
+    terminal.ready();
+    terminal.keys("n");
+    terminal.expect("New task");
+    terminal.keys("Review workspace design decisions\x1bOR");
+    terminal.expect("Draft context");
+    terminal.ready();
+    terminal.keys("v");
+    terminal.expect("0 of 8 selected");
+    terminal.expect("rust-notes  ·  v2");
+    terminal.ready();
+    terminal.keys(" ");
+    terminal.expect("1 of 8 selected");
+    terminal.capture("memory-draft-selection");
+    terminal.keys("\x13");
+    terminal.expect("New task");
+    terminal.keys("\x1bOR");
+    terminal.expect("Pinned memory revisions: 1");
+    terminal.keys("\x1b");
+    terminal.expect("New task");
+    terminal.keys("\x13");
+    terminal.expect("Review operation");
+    terminal.ready();
+    terminal.keys("a");
+    terminal.expect("y Allow once");
+    terminal.keys("y");
+    terminal.expect("Completed");
+    terminal.ready();
+    terminal.keys("c");
+    terminal.expect("1 memories");
+    terminal.expect("revision 2");
+    terminal.keys("\x1b");
+    terminal.expect_absent("Context and memory usage");
+    terminal.ready();
+    terminal.keys("w");
+    terminal.expect("Workspaces");
+    terminal.keys("o");
+    terminal.expect("Open folder");
+    terminal.keys(&format!("{}\r", outside.path().display()));
+    terminal.expect("New session");
+    terminal.keys("Separate workspace\r");
+    terminal.expect("No tasks");
+    terminal.ready();
+    open_memories(&mut terminal);
+    terminal.expect("No memories match");
+    terminal.expect_absent("rust-notes");
+    terminal.quit("\x03");
+}
