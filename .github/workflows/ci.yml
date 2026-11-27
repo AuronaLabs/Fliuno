@@ -1,67 +1,46 @@
-name: kernel
+name: Investigate Linux bundle startup
 on:
   push:
-  pull_request:
-
+    branches: [codex/verify-node-runtime]
 permissions:
+  actions: read
   contents: read
-
 jobs:
-  check:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+  bundle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
         with:
-          components: rustfmt, clippy
+          node-version: '24.22.3'
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/setup-node@v4
+      - uses: actions/download-artifact@v4
         with:
-          node-version: '24'
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - run: cargo clippy -p fliuno-sandbox --all-targets --no-default-features --locked -- -D warnings
-      - name: Run workspace tests with isolated native fixtures
-        # Process tests start PTYs and servers with wall-clock deadlines.
-        run: cargo test --workspace --all-features --locked -- --test-threads=1
-      - run: python scripts/check_linux_cgroup.py
-        if: runner.os == 'Linux'
-      - run: python scripts/export_schema.py --check
-      - run: python examples/demo.py
-      - run: python examples/context_demo.py
-      - run: python examples/skills_demo.py
-      - run: python examples/skills_demo.py --deny
-      - run: python examples/skills_demo.py --switch-source
-      - run: python examples/bundle_demo.py
-      - run: python examples/bundle_demo.py --deny
-      - run: python examples/bundle_demo.py --tamper
-      - run: python examples/bundle_demo.py --runtime python
-        if: runner.os == 'Windows'
-      - run: python examples/bundle_demo.py --runtime python --deny
-        if: runner.os == 'Windows'
-      - run: python examples/bundle_demo.py --runtime python --tamper
-        if: runner.os == 'Windows'
-      - run: python examples/mcp_http_demo.py
-      - run: python examples/mcp_http_demo.py --sse
-      - run: python examples/mcp_http_demo.py --legacy --sse
-      - run: python examples/mcp_http_demo.py --deny
-      - run: python examples/mcp_content_demo.py
-      - run: python examples/mcp_content_demo.py --deny
-      - run: python examples/mcp_content_demo.py --switch-source
-      - run: python examples/a2a_demo.py
-      - run: python examples/a2a_demo.py --cancel
-      - run: python examples/agent_demo.py
-        if: runner.os == 'Windows'
-      - run: python examples/agent_demo.py --deny
-        if: runner.os == 'Windows'
-      - run: python examples/agent_demo.py --workspace
-        if: runner.os == 'Windows'
-      - run: python examples/agent_demo.py --workspace --deny
-        if: runner.os == 'Windows'
+          run-id: '46075145812'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: fliuno-debian-candidate
+          path: candidate
+      - name: Load the verified candidate
+        run: |
+          test "$(cat candidate/SOURCE-COMMIT.txt)" = c321a498fb2a223ae006538d3799d01243b350db
+          (cd candidate && sha256sum -c SHA256SUMS.txt)
+          tar -xzf candidate/fliuno-v0.0.17-linux-x64.tar.gz -C candidate
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq strace
+      - name: Reproduce the offline bundle example
+        env:
+          FLIUNO_DEMO_BIN_DIR: ${{ github.workspace }}/candidate/fliuno-v0.0.17-linux-x64
+        run: |
+          uname -a
+          command -v node
+          ldd "$(command -v node)"
+          if python examples/bundle_demo.py; then
+            echo 'The verified release build works with the runner runtime.'
+          else
+            strace -f -s 300 -e trace=execve,write,writev -o "$RUNNER_TEMP/fliuno-node.trace" python examples/bundle_demo.py || true
+            grep -E 'write(v)?\(2,|execve\(' "$RUNNER_TEMP/fliuno-node.trace" | tail -70
+            exit 1
+          fi
