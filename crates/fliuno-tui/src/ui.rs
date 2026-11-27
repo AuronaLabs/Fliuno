@@ -457,6 +457,7 @@ impl App {
                 self.snapshot = None;
                 self.selected = None;
                 self.detail = None;
+                self.input.clear();
                 self.input_artifact = None;
                 self.layer = Layer::None;
             }

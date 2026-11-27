@@ -1242,6 +1242,7 @@ fn terminal_reviews_edits_and_pins_a_workspaces_memory() {
     terminal.keys(&format!("{}\r", outside.path().display()));
     terminal.expect("New session");
     terminal.keys("Separate workspace\r");
+    terminal.expect("Fliuno  /  Separate workspace");
     terminal.expect("No tasks");
     terminal.ready();
     open_memories(&mut terminal);
