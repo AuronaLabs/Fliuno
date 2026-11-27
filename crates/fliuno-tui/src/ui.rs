@@ -22,7 +22,8 @@ use unicode_width::UnicodeWidthStr;
 
 const ACCENT: Color = Color::Cyan;
 use fliuno_protocol::{
-    EventKind, SessionForkParams, SessionListOrder, SessionListParams, TaskContextAttribution,
+    ContextDetail, ContextMessage, ContextMode, ContextOptions, EventKind, SessionContextParams,
+    SessionForkParams, SessionListOrder, SessionListParams, TaskContext, TaskContextAttribution,
     TaskQueue, TaskQueueItemParams, TaskQueueState, TaskTimelinePage, TaskTimelineParams,
 };
 
@@ -133,6 +134,10 @@ enum Layer {
         scroll: u16,
     },
     Context(String, u16),
+    DraftContext {
+        preview: Option<Box<TaskContext>>,
+        scroll: u16,
+    },
     Approval {
         task: String,
         id: String,
@@ -212,6 +217,7 @@ struct ParkedDraft {
     text: Editor,
     key: String,
     artifact: Option<ArtifactGetParams>,
+    context: ContextOptions,
     plan_only: bool,
 }
 
@@ -242,6 +248,7 @@ pub struct App {
     layer: Layer,
     draft: Editor,
     parked: Vec<ParkedDraft>,
+    draft_context: ContextOptions,
     plan_only: bool,
     key: String,
     input: Editor,
@@ -281,6 +288,7 @@ impl App {
             layer: Layer::None,
             draft: Editor::default(),
             parked: Vec::new(),
+            draft_context: ContextOptions::default(),
             plan_only: false,
             key: uuid::Uuid::new_v4().to_string(),
             input: Editor::default(),
@@ -342,6 +350,7 @@ impl App {
                 self.key = draft.key;
                 self.input_artifact = draft.artifact;
                 self.plan_only = draft.plan_only;
+                self.draft_context = draft.context;
             }
         }
         self.session = Some(session);
@@ -434,9 +443,13 @@ impl App {
         let draft = std::mem::take(&mut self.draft);
         let artifact = self.input_artifact.take();
         let plan_only = std::mem::take(&mut self.plan_only);
+        let context = std::mem::take(&mut self.draft_context);
         let key = std::mem::replace(&mut self.key, uuid::Uuid::new_v4().to_string());
         if let Some(session) = &self.session
-            && (!draft.text().is_empty() || artifact.is_some() || plan_only)
+            && (!draft.text().is_empty()
+                || artifact.is_some()
+                || plan_only
+                || context != ContextOptions::default())
         {
             if self.parked.len() >= 8 {
                 self.parked.remove(0);
@@ -446,6 +459,7 @@ impl App {
                 text: draft,
                 key,
                 artifact,
+                context,
                 plan_only,
             });
         }
@@ -726,7 +740,19 @@ impl App {
                     *current = Some(queue);
                 }
             }
+            Update::DraftContext(session, context) => {
+                if self
+                    .session
+                    .as_ref()
+                    .is_some_and(|current| current.id == session)
+                    && let Layer::DraftContext { preview, scroll } = &mut self.layer
+                {
+                    *preview = Some(context);
+                    *scroll = 0;
+                }
+            }
             Update::Enqueued(item) => {
+                self.draft_context.through_sequence = None;
                 self.draft.clear();
                 self.input_artifact = None;
                 self.key = uuid::Uuid::new_v4().to_string();
@@ -744,6 +770,7 @@ impl App {
                 self.message = "Queued prompt started".into();
             }
             Update::Started(id) => {
+                self.draft_context.through_sequence = None;
                 self.start_acknowledged = true;
                 self.selected = Some(id);
                 self.draft.clear();
@@ -811,6 +838,14 @@ impl App {
             self.layer = Layer::Timeline(Some(page.clone()), *index);
             return false;
         }
+        if matches!(self.layer, Layer::DraftContext { .. }) {
+            if key.code == KeyCode::Esc || key.code == KeyCode::F(3) {
+                self.layer = Layer::Edit(Edit::Task);
+            } else {
+                self.draft_context_key(key, worker);
+            }
+            return false;
+        }
         if key.code == KeyCode::Esc && !matches!(self.layer, Layer::None) {
             if !self.start_pending {
                 self.layer = Layer::None;
@@ -824,6 +859,10 @@ impl App {
             let edit = edit.clone();
             if matches!(edit, Edit::Task) && pressed && key.code == KeyCode::F(2) && !self.busy {
                 self.toggle_plan_mode();
+                return false;
+            }
+            if matches!(edit, Edit::Task) && pressed && key.code == KeyCode::F(3) && !self.busy {
+                self.open_draft_context(worker);
                 return false;
             }
             let value = if matches!(edit, Edit::Task) {
@@ -1078,6 +1117,7 @@ impl App {
                     }
                 }
             }
+            Layer::DraftContext { .. } => {}
             Layer::Context(_, scroll) | Layer::TimelineEvent { scroll, .. } => {
                 scroll_key(key.code, scroll)
             }
@@ -1223,6 +1263,70 @@ impl App {
             self.layer = Layer::None;
         }
         false
+    }
+
+    fn open_draft_context(&mut self, worker: &Worker) {
+        if self.session.is_none() {
+            return;
+        }
+        self.layer = Layer::DraftContext {
+            preview: None,
+            scroll: 0,
+        };
+        self.fetch_draft_context(worker);
+    }
+
+    fn fetch_draft_context(&mut self, worker: &Worker) {
+        if let Some(session) = &self.session {
+            let params = SessionContextParams {
+                session_id: session.id.clone(),
+                through_sequence: None,
+                options: self.draft_context.clone(),
+            };
+            self.send(worker, Request::DraftContext(Box::new(params)));
+        }
+    }
+
+    fn draft_context_key(&mut self, key: KeyEvent, worker: &Worker) {
+        let Layer::DraftContext { preview, scroll } = &mut self.layer else {
+            return;
+        };
+        scroll_key(key.code, scroll);
+        if self.busy || !self.online || key.kind != KeyEventKind::Press {
+            return;
+        }
+        let options = &mut self.draft_context;
+        match key.code {
+            KeyCode::Char('s') => {
+                options.mode = match options.mode {
+                    ContextMode::Session => ContextMode::Isolated,
+                    ContextMode::Isolated => ContextMode::Session,
+                };
+                options.detail = ContextDetail::Full;
+                options.through_sequence = None;
+            }
+            KeyCode::Char('m') if options.mode == ContextMode::Session => {
+                options.disable_memory = !options.disable_memory;
+            }
+            KeyCode::Char('h') if options.mode == ContextMode::Session => {
+                options.detail = match options.detail {
+                    ContextDetail::Full => ContextDetail::Conversation,
+                    ContextDetail::Conversation => ContextDetail::Full,
+                };
+            }
+            KeyCode::Char('p') if options.mode == ContextMode::Session => {
+                options.through_sequence = match options.through_sequence {
+                    Some(_) => None,
+                    None => preview.as_ref().map(|value| value.through_sequence),
+                };
+            }
+            KeyCode::Char('r') => {}
+            _ => return,
+        }
+        self.key = uuid::Uuid::new_v4().to_string();
+        *preview = None;
+        *scroll = 0;
+        self.fetch_draft_context(worker);
     }
 
     fn inbox_key(&mut self, key: KeyEvent, worker: &Worker) -> bool {
@@ -1522,6 +1626,7 @@ impl App {
                 }
             }
             KeyCode::F(2) if active && self.session.is_some() => self.toggle_plan_mode(),
+            KeyCode::F(3) if active => self.open_draft_context(worker),
             KeyCode::Char('H') if active => {
                 self.input.clear();
                 self.layer = Layer::Edit(Edit::HistorySearch);
@@ -1567,6 +1672,7 @@ impl App {
                     "Switch to plan mode"
                 };
                 commands.push((label, KeyCode::F(2)));
+                commands.push(("Review draft context", KeyCode::F(3)));
             }
             commands.push(("Workspace inbox", KeyCode::Char('I')));
             commands.push(("Search workspace history", KeyCode::Char('H')));
@@ -1764,6 +1870,7 @@ impl App {
                     key: self.key.clone(),
                     input: self.input_artifact.clone(),
                     plan_only: self.plan_only,
+                    context: Box::new(self.draft_context.clone()),
                     enqueue,
                 }
             }
@@ -1933,9 +2040,9 @@ impl App {
         let message = if self.busy { "Working" } else { &self.message };
         let help = if expanded {
             if area.width < 65 {
-                " Ctrl+S Submit  Ctrl+E Queue  F2 "
+                " Ctrl+S Send  Ctrl+E Queue  F2/F3 Mode/Context "
             } else {
-                " Ctrl+S Submit  Ctrl+E Queue  F2 Mode  Esc Back "
+                " Ctrl+S Submit  Ctrl+E Queue  F2 Mode  F3 Context  Esc Back "
             }
         } else if full_view {
             " Enter Open  Esc Back "
@@ -2194,6 +2301,56 @@ impl App {
         }
     }
 
+    fn draw_draft_context(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        preview: Option<&TaskContext>,
+        scroll: u16,
+    ) {
+        let options = &self.draft_context;
+        let isolated = options.mode == ContextMode::Isolated;
+        let scope = if isolated {
+            "Isolated prompt"
+        } else {
+            "Session history"
+        };
+        let mut settings = vec![Line::styled(
+            format!("s  Scope    {scope}"),
+            self.palette.label,
+        )];
+        if !isolated {
+            let memory = if options.disable_memory {
+                "Off"
+            } else {
+                "Automatic"
+            };
+            let history = match options.detail {
+                ContextDetail::Full => "Full records",
+                ContextDetail::Conversation => "Conversation only",
+            };
+            let pin = options.through_sequence.map_or_else(
+                || "Live".into(),
+                |sequence| format!("Pinned at #{sequence}"),
+            );
+            settings.extend([
+                Line::raw(format!("m  Memory   {memory}")),
+                Line::raw(format!("h  History  {history}")),
+                Line::raw(format!("p  Preview  {pin}")),
+            ]);
+        }
+        settings.push(Line::styled("r  Refresh", self.palette.quiet));
+        let [controls, result] = Layout::vertical([
+            Constraint::Length(settings.len() as u16 + 1),
+            Constraint::Min(0),
+        ])
+        .areas(area);
+        frame.render_widget(Paragraph::new(settings), controls);
+        let text =
+            format_draft_context(preview, self.busy, &self.message, usize::from(result.width));
+        render_text(frame, result, &text, scroll);
+    }
+
     fn draw_composer(&self, frame: &mut Frame<'_>, area: Rect, focused: bool) {
         if area.width < 4 || area.height == 0 {
             return;
@@ -2209,6 +2366,13 @@ impl App {
             " No session ".to_owned()
         } else {
             let mut title = format!(" {mode} ");
+            if self.draft_context.mode == ContextMode::Isolated {
+                title.push_str("· Isolated ");
+            } else if self.draft_context.through_sequence.is_some() {
+                title.push_str("· History pinned ");
+            } else if self.draft_context.disable_memory {
+                title.push_str("· Memory off ");
+            }
             if self.input_artifact.is_some() {
                 title.push_str(" · Attachment ");
             }
@@ -2481,6 +2645,7 @@ impl App {
             ),
             Layer::TimelineEvent { sequence, .. } => (format!("Event #{sequence}"), "Esc timeline"),
             Layer::Context(..) => ("Context and memory usage".into(), "Esc back"),
+            Layer::DraftContext { .. } => ("Draft context".into(), "Esc Return to draft"),
             Layer::Queue(queue, _) => (
                 queue.as_ref().map_or_else(
                     || "Queued prompts".into(),
@@ -2548,6 +2713,9 @@ impl App {
         match &self.layer {
             Layer::None => {}
             Layer::Inbox(_) | Layer::History(_) | Layer::TaskBrowser(_) => {}
+            Layer::DraftContext { preview, scroll } => {
+                self.draw_draft_context(frame, body, preview.as_deref(), *scroll)
+            }
             Layer::Commands(index, query) => render_list(
                 frame,
                 body,
@@ -2683,6 +2851,53 @@ impl App {
             }
         }
     }
+}
+
+fn format_draft_context(
+    preview: Option<&TaskContext>,
+    busy: bool,
+    message: &str,
+    width: usize,
+) -> String {
+    let Some(preview) = preview else {
+        return if busy {
+            "Reading session history…"
+        } else {
+            message
+        }
+        .to_owned();
+    };
+    if preview.options.mode == ContextMode::Isolated {
+        return "This prompt starts without session history or workspace memory.".into();
+    }
+    let mut lines = vec![format!(
+        "{} completed turns · {} omitted · through #{}",
+        preview.turns.len(),
+        preview.omitted_turns,
+        preview.through_sequence,
+    )];
+    if !preview.options.disable_memory {
+        lines.push("Automatic memory is selected when the task starts.".into());
+    }
+    lines.push(String::new());
+    for turn in preview.turns.iter().rev() {
+        let prompt = turn.messages.iter().find_map(|message| match message {
+            ContextMessage::User { text } => Some(text),
+            _ => None,
+        });
+        let title = prompt.map_or_else(
+            || "Completed task".to_owned(),
+            |text| clean(text).split_whitespace().collect::<Vec<_>>().join(" "),
+        );
+        lines.push(ellipsis(
+            &format!("#{}  {title}", turn.completion_sequence),
+            width,
+        ));
+    }
+    lines.join(
+        "
+",
+    )
 }
 
 fn format_context_attribution(report: &TaskContextAttribution) -> String {

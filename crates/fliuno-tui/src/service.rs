@@ -3,12 +3,12 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use fliuno_client::{Client, Error as ClientError, EventFeed};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactDigest, ArtifactGetParams,
-    ArtifactRevision, ArtifactSummary, Event, ObjectPage, Session, SessionForkParams,
-    SessionHistoryRole, SessionListOrder, SessionListParams, Task, TaskContextAttribution,
-    TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskResumeDisposition,
-    TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary, TaskSummaryBatchParams,
-    TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams, Workspace,
-    WorkspaceHistorySearchParams,
+    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ObjectPage, Session,
+    SessionContextParams, SessionForkParams, SessionHistoryRole, SessionListOrder,
+    SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan, TaskQueue,
+    TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskResumeDisposition, TaskResumeStatus,
+    TaskStatus, TaskSteeringState, TaskSummary, TaskSummaryBatchParams, TaskTimelinePage,
+    TaskTimelineParams, WorkSnapshot, WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -49,12 +49,14 @@ pub enum Request {
         key: String,
         input: Option<ArtifactGetParams>,
         plan_only: bool,
+        context: Box<ContextOptions>,
         enqueue: bool,
     },
     Queue(String),
     Timeline(TaskTimelineParams),
     Event(String, u64),
     ContextAttribution(String),
+    DraftContext(Box<SessionContextParams>),
     StartQueued(TaskQueueItemParams),
     CancelQueued(TaskQueueItemParams),
     Approval(String, String),
@@ -148,6 +150,7 @@ pub enum Update {
     Timeline(TaskTimelinePage),
     Event(u64, String),
     ContextAttribution(Box<TaskContextAttribution>),
+    DraftContext(String, Box<TaskContext>),
     StartedQueued(String),
     Notice(String),
     Finished,
@@ -549,17 +552,18 @@ impl Service {
                 key,
                 input,
                 plan_only,
+                mut context,
                 enqueue,
             } => {
-                let context = if plan_only {
-                    if !self.supports("taskPlanOnly") {
-                        return Err("This app-server does not support planning mode".into());
-                    }
-                    Some(json!({"planOnly":true}))
-                } else {
-                    self.supports("taskInteraction")
-                        .then(|| json!({"enableInteraction":true}))
-                };
+                if plan_only && !self.supports("taskPlanOnly") {
+                    return Err("This app-server does not support planning mode".into());
+                }
+                if *context != ContextOptions::default() && !self.supports("sessionContext") {
+                    return Err("This app-server does not support draft context settings".into());
+                }
+                context.plan_only = plan_only;
+                context.enable_interaction = !plan_only && self.supports("taskInteraction");
+                let context = (*context != ContextOptions::default()).then_some(context);
                 let params = json!({"sessionId":session,"input":text,"clientRequestId":key,
                     "context":context,"artifactInputs":input.into_iter().collect::<Vec<_>>()});
                 if enqueue {
@@ -584,6 +588,15 @@ impl Service {
                     return Err("The event does not belong to this task timeline".into());
                 }
                 Update::Event(sequence, serde_json::to_string_pretty(&event.data)?)
+            }
+            Request::DraftContext(params) => {
+                if !self.supports("sessionContext") {
+                    return Err("This app-server does not support context preview".into());
+                }
+                Update::DraftContext(
+                    params.session_id.clone(),
+                    Box::new(self.rpc("session/context", serde_json::to_value(params)?)?),
+                )
             }
             Request::ContextAttribution(task) => {
                 if !self.supports("taskContextAttribution") {

@@ -615,3 +615,146 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     reopened.expect("Cancelled");
     reopened.quit("q");
 }
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn draft_context_controls_survive_queue_restart() {
+    use fliuno_client::Client;
+    use serde_json::{Value, json};
+    use std::{io::BufReader, process::Stdio};
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let mut console = Console::launch(server.as_deref(), root.path());
+    console.expect("New session");
+    console.keys("Context desk\r");
+    console.expect("No tasks");
+    console.ready();
+    console.keys("n");
+    console.expect("New task");
+    console.keys("\x1bOQ");
+    console.expect("Plan only");
+    console.keys("Review the work history\x13");
+    console.expect("Demo plan ready for review.");
+    console.expect("Completed");
+    console.ready();
+    console.keys("n");
+    console.keys("Use the reviewed context");
+    console.keys("\x1bOR");
+    console.expect("Draft context");
+    console.expect("1 completed turns");
+    console.expect("Automatic memory is selected");
+    console.ready();
+    console.capture("draft-context-wide");
+    console.keys("s");
+    console.expect("Isolated prompt");
+    console.expect("without session history");
+    console.ready();
+    console.resize(18, 48);
+    console.expect("Esc Return to draft");
+    console.expect("Isolated prompt");
+    console.capture("draft-context-isolated");
+    console.keys("s");
+    console.expect("1 completed turns");
+    console.ready();
+    console.keys("m");
+    console.expect("Memory   Off");
+    console.ready();
+    console.keys("h");
+    console.expect("Conversation only");
+    console.ready();
+    console.keys("p");
+    console.expect("Pinned at #");
+    console.ready();
+    console.capture("draft-context-pinned");
+    console.keys("\x1b");
+    console.expect("History pinned");
+    console.expect("Use the reviewed context");
+    console.capture("draft-context-composer");
+    console.keys("\x05");
+    console.expect("Prompt queued");
+    console.ready();
+    console.quit("q");
+
+    let mut console = Console::launch(server.as_deref(), root.path());
+    console.expect("Context desk");
+    console.ready();
+    console.keys("Q");
+    console.expect("Queued prompts (1)");
+    console.expect("Use the reviewed context");
+    console.ready();
+    console.keys("\r");
+    console.expect("Demo plan ready for review.");
+    console.expect("Completed");
+    console.ready();
+    console.keys("c");
+    console.expect("Context and memory usage");
+    console.expect("history turns");
+    console.capture("draft-context-attribution");
+    console.quit("\x03");
+
+    let server = server.unwrap_or_else(|| {
+        binary().with_file_name(if cfg!(windows) {
+            "fliuno-app-server.exe"
+        } else {
+            "fliuno-app-server"
+        })
+    });
+    let mut child = Command::new(server)
+        .arg("--db")
+        .arg(root.path().join("workbench.db"))
+        .env("FLIUNO_PROVIDER", "demo")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut client = Client::connect(
+        BufReader::new(child.stdout.take().unwrap()),
+        child.stdin.take().unwrap(),
+        "terminal-context-test",
+        |_| {},
+    )
+    .unwrap();
+    let workspace: Value = client
+        .call("workspace/open", &json!({"root":root.path()}), |_| {})
+        .unwrap();
+    let sessions: Value = client
+        .call(
+            "session/list",
+            &json!({"workspaceId":workspace["id"]}),
+            |_| {},
+        )
+        .unwrap();
+    let tasks: Value = client
+        .call(
+            "task/listSummaries",
+            &json!({"sessionId":sessions["items"][0]["id"]}),
+            |_| {},
+        )
+        .unwrap();
+    let queued = tasks["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["inputPreview"] == "Use the reviewed context")
+        .unwrap();
+    let task: Value = client
+        .call("task/get", &json!({"taskId":queued["id"]}), |_| {})
+        .unwrap();
+    let context = &task["context"];
+    assert_eq!(context["options"]["mode"], "session");
+    assert_eq!(context["options"]["detail"], "conversation");
+    assert_eq!(context["options"]["disableMemory"], true);
+    assert_eq!(context["options"]["planOnly"], true);
+    assert!(context["throughSequence"].as_u64().unwrap() > 0);
+    assert_eq!(
+        context["throughSequence"],
+        context["options"]["throughSequence"]
+    );
+    assert_eq!(context["turns"].as_array().unwrap().len(), 1);
+    assert!(context.get("memories").is_none());
+    let (mut output, input) = client.into_parts();
+    drop(input);
+    std::io::copy(&mut output, &mut std::io::sink()).unwrap();
+    assert!(child.wait().unwrap().success());
+}
