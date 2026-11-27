@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+fliuno-config.workspace = true
 fliuno-core.workspace = true
 fliuno-protocol.workspace = true
 serde.workspace = true

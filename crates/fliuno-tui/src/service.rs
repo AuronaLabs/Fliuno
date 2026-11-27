@@ -267,8 +267,10 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    if options.demo {
-        command.env("FLIUNO_PROVIDER", "demo");
+    if options.force_demo {
+        command.arg("--demo");
+    } else if let Some(config) = &options.config {
+        command.arg("--config").arg(config);
     }
     let mut child = command.spawn()?;
     let input = child.stdin.take().expect("piped stdin");

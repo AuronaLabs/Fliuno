@@ -144,39 +144,92 @@ fn context_budget_from_env() -> Result<Option<BudgetConfig>, String> {
 
 /// No implicit paid model. Live execution requires explicit provider + model.
 pub fn from_env() -> Result<(String, Box<dyn ModelProvider>), String> {
+    use fliuno_config::Provider;
     let name = std::env::var("FLIUNO_PROVIDER").unwrap_or_else(|_| "demo".into());
-    if name == "demo" {
-        return Ok((name, Box::new(DemoProvider)));
-    }
+    let (provider, url_var, key_var) = match name.as_str() {
+        "demo" => return Ok((name, Box::new(DemoProvider))),
+        "openai" => (Provider::OpenAi, "OPENAI_BASE_URL", "OPENAI_API_KEY"),
+        "anthropic" => (
+            Provider::Anthropic,
+            "ANTHROPIC_BASE_URL",
+            "ANTHROPIC_API_KEY",
+        ),
+        "gemini" => (Provider::Gemini, "GEMINI_BASE_URL", "GEMINI_API_KEY"),
+        _ => return Err(format!("unknown provider: {name}")),
+    };
     let model =
         std::env::var("FLIUNO_MODEL").map_err(|_| "FLIUNO_MODEL is required for live providers")?;
-    if model.trim().is_empty() {
-        return Err("FLIUNO_MODEL must not be empty".into());
-    }
     let budget = context_budget_from_env()?;
-    let provider: Box<dyn ModelProvider> = match name.as_str() {
-        "openai" => {
-            let provider = OpenAiProvider::new(
-                &std::env::var("OPENAI_BASE_URL")
-                    .unwrap_or_else(|_| "https://api.openai.com/v1/".into()),
-                &std::env::var("OPENAI_API_KEY").map_err(|_| "OPENAI_API_KEY is required")?,
-                &model,
-            )?;
-            let budget = budget.map(|config| config.resolve(|_| {
-                Err("FLIUNO_CONTEXT_WINDOW_TOKENS=provider is unsupported for OpenAI; configure a numeric window".into())
-            })).transpose()?;
+    let key = std::env::var(key_var).map_err(|_| format!("{key_var} is required"))?;
+    let base_url = std::env::var(url_var).ok();
+    build_provider(provider, &model, base_url.as_deref(), &key, budget)
+}
+
+pub fn from_settings(
+    settings: &fliuno_config::ModelSettings,
+) -> Result<(String, Box<dyn ModelProvider>), String> {
+    use fliuno_config::{ContextWindow, Provider};
+    if matches!(settings.provider, Provider::Demo) {
+        return Ok(("demo".into(), Box::new(DemoProvider)));
+    }
+    let model = settings
+        .name
+        .as_deref()
+        .ok_or("[model] name is required for a live provider")?;
+    let key_path = settings
+        .api_key_file
+        .as_ref()
+        .ok_or("[model] api_key_file is required for a live provider")?;
+    let key = fliuno_config::read_api_key(key_path)?;
+    let budget = settings.budget.as_ref().map(|budget| BudgetConfig {
+        window: match budget.window {
+            ContextWindow::Tokens(window) => BudgetWindow::Tokens(window),
+            ContextWindow::Discovery(_) => BudgetWindow::Provider,
+        },
+        max_output_tokens: budget.max_output_tokens,
+        provider_count: budget.provider_count,
+    });
+    build_provider(
+        settings.provider,
+        model,
+        settings.base_url.as_deref(),
+        &key,
+        budget,
+    )
+}
+
+fn build_provider(
+    kind: fliuno_config::Provider,
+    model: &str,
+    base_url: Option<&str>,
+    key: &str,
+    budget: Option<BudgetConfig>,
+) -> Result<(String, Box<dyn ModelProvider>), String> {
+    use fliuno_config::Provider;
+    if model.trim().is_empty() {
+        return Err("The model name must not be empty".into());
+    }
+    let provider: Box<dyn ModelProvider> = match kind {
+        Provider::Demo => Box::new(DemoProvider),
+        Provider::OpenAi => {
+            let provider =
+                OpenAiProvider::new(base_url.unwrap_or("https://api.openai.com/v1/"), key, model)?;
+            let budget = budget
+                .map(|config| {
+                    config.resolve(|_| Err("OpenAI requires a numeric context window".into()))
+                })
+                .transpose()?;
             Box::new(if let Some(budget) = budget {
                 provider.with_context_budget(budget)
             } else {
                 provider
             })
         }
-        "anthropic" => {
+        Provider::Anthropic => {
             let mut provider = AnthropicProvider::new(
-                &std::env::var("ANTHROPIC_BASE_URL")
-                    .unwrap_or_else(|_| "https://api.anthropic.com/v1/".into()),
-                &std::env::var("ANTHROPIC_API_KEY").map_err(|_| "ANTHROPIC_API_KEY is required")?,
-                &model,
+                base_url.unwrap_or("https://api.anthropic.com/v1/"),
+                key,
+                model,
             )?;
             let budget = budget
                 .map(|config| config.resolve(|output| provider.discover_context_budget(output)))
@@ -187,23 +240,20 @@ pub fn from_env() -> Result<(String, Box<dyn ModelProvider>), String> {
                 provider
             })
         }
-        "gemini" => {
+        Provider::Gemini => {
             let provider = GeminiProvider::new(
-                &std::env::var("GEMINI_BASE_URL")
-                    .unwrap_or_else(|_| "https://generativelanguage.googleapis.com/v1beta/".into()),
-                &std::env::var("GEMINI_API_KEY").map_err(|_| "GEMINI_API_KEY is required")?,
-                &model,
+                base_url.unwrap_or("https://generativelanguage.googleapis.com/v1beta/"),
+                key,
+                model,
             )?;
             if let Some(config) = budget {
-                let budget = config.resolve(|_| {
-                    Err("FLIUNO_CONTEXT_WINDOW_TOKENS=provider is unsupported for Gemini; configure a numeric window".into())
-                })?;
+                let budget =
+                    config.resolve(|_| Err("Gemini requires a numeric context window".into()))?;
                 Box::new(provider.with_context_budget(budget)?)
             } else {
                 Box::new(provider)
             }
         }
-        _ => return Err(format!("unknown provider: {name}")),
     };
-    Ok((name, provider))
+    Ok((kind.name().into(), provider))
 }

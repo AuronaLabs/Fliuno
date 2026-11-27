@@ -1,0 +1,13 @@
+[package]
+name = "fliuno-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
+
+[lints]
+workspace = true

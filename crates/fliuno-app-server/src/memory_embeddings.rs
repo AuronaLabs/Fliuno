@@ -12,6 +12,7 @@ use reqwest::{Url, header::HeaderValue};
 use serde::Deserialize;
 use std::{
     collections::BTreeSet,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
@@ -39,6 +40,7 @@ pub struct MemoryEmbeddingConfig {
     model_identity: String,
     dimensions: usize,
     api_key_env: Option<String>,
+    api_key_file: Option<PathBuf>,
     workspaces: Vec<String>,
     #[serde(default)]
     profile: EmbeddingProfile,
@@ -54,7 +56,14 @@ pub struct MemoryEmbeddingProvider {
 }
 
 impl MemoryEmbeddingProvider {
-    pub fn new(mut config: MemoryEmbeddingConfig) -> Result<Self, &'static str> {
+    pub fn new(config: MemoryEmbeddingConfig) -> Result<Self, &'static str> {
+        Self::from_directory(config, Path::new("."))
+    }
+
+    pub fn from_directory(
+        mut config: MemoryEmbeddingConfig,
+        directory: &Path,
+    ) -> Result<Self, &'static str> {
         const INVALID: &str = "invalid workspace memory embedding configuration";
         let centered = config.profile == EmbeddingProfile::MultilingualE5EnZhV1;
         let minimum_similarity =
@@ -94,11 +103,18 @@ impl MemoryEmbeddingProvider {
             return Err(INVALID);
         }
         let mut headers = reqwest::header::HeaderMap::new();
-        if let Some(name) = &config.api_key_env {
-            if !valid(name) || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-                return Err(INVALID);
+        let key = match (&config.api_key_file, &config.api_key_env) {
+            (Some(_), Some(_)) => return Err("Use one memory embedding API key source"),
+            (Some(file), None) => Some(fliuno_config::read_api_key(&directory.join(file))?),
+            (None, Some(name)) => {
+                if !valid(name) || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+                    return Err(INVALID);
+                }
+                Some(std::env::var(name).map_err(|_| "memory embedding API key is unavailable")?)
             }
-            let key = std::env::var(name).map_err(|_| "memory embedding API key is unavailable")?;
+            (None, None) => None,
+        };
+        if let Some(key) = key {
             if key.is_empty() || key.len() > 8192 || key.chars().any(char::is_whitespace) {
                 return Err(INVALID);
             }

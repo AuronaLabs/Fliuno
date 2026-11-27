@@ -59,7 +59,9 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let mut db = PathBuf::from(".fliuno/kernel.db");
+    let mut db: Option<PathBuf> = None;
+    let mut user_config: Option<PathBuf> = None;
+    let mut demo = false;
     let mut mcp_config: Option<PathBuf> = None;
     let mut mcp_oauth_config: Option<PathBuf> = None;
     let mut mcp_oauth_vault: Option<PathBuf> = None;
@@ -130,7 +132,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .into(),
                 )
             }
-            "--db" => db = args.next().ok_or("--db requires a path")?.into(),
+            "--db" => db = Some(args.next().ok_or("--db requires a path")?.into()),
+            "--config" => user_config = Some(args.next().ok_or("--config requires a path")?.into()),
+            "--demo" => demo = true,
             "--memory-embedding-config" => {
                 memory_embedding_config = Some(
                     args.next()
@@ -141,7 +145,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--help" | "-h" => {
                 println!("{}", backup::USAGE);
                 println!(
-                    "fliuno-app-server [--db PATH] [--mcp-config PATH] [--mcp-oauth-config PATH] [--mcp-oauth-vault PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--trace-log PATH] [--otlp-endpoint URL] [--schema]\nLocal stdio JSON-RPC. --mcp-oauth-config enables host authorization before initialize. --mcp-oauth-vault persists encrypted grants separately from the kernel database. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. FLIUNO_PROVIDER=demo|openai|anthropic|gemini; live providers require FLIUNO_MODEL and an API key."
+                    "fliuno-app-server [--config PATH] [--demo] [--db PATH] [--mcp-config PATH] [--mcp-oauth-config PATH] [--mcp-oauth-vault PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--trace-log PATH] [--otlp-endpoint URL] [--schema]\nLocal stdio JSON-RPC. --mcp-oauth-config enables host authorization before initialize. --mcp-oauth-vault persists encrypted grants separately from the kernel database. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. Use --config for model selection and a local API key file."
                 );
                 println!(
                     "--memory-embedding-config PATH enables hybrid memory retrieval for host-selected workspaces."
@@ -153,6 +157,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     // Parse every startup file before opening SQLite or allowing an earlier
     // adapter to connect/spawn. Semantic validation remains adapter-owned.
+    let mut user_config = user_config
+        .as_deref()
+        .map(fliuno_config::Settings::load)
+        .transpose()?;
+    if let Some(config) = &mut user_config {
+        db = db.or_else(|| config.workbench.database.take());
+        mcp_config = mcp_config.or_else(|| config.integrations.mcp.take());
+        mcp_oauth_config = mcp_oauth_config.or_else(|| config.integrations.mcp_oauth.take());
+        mcp_oauth_vault = mcp_oauth_vault.or_else(|| config.integrations.mcp_oauth_vault.take());
+        acp_config = acp_config.or_else(|| config.integrations.acp.take());
+        a2a_config = a2a_config.or_else(|| config.integrations.a2a.take());
+        exec_config = exec_config.or_else(|| config.integrations.execution.take());
+        terminal_config = terminal_config.or_else(|| config.integrations.terminal.take());
+        skills_dir = skills_dir.or_else(|| config.integrations.skills.take());
+        memory_embedding_config =
+            memory_embedding_config.or_else(|| config.integrations.memory_embedding.take());
+    }
+    let db = db.unwrap_or_else(|| PathBuf::from(".fliuno/kernel.db"));
     let mcp_config = mcp_config
         .as_deref()
         .map(|path| configuration::load::<fliuno_mcp::McpConfig>(path, "MCP"))
@@ -198,9 +220,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?;
     let memory_embeddings = memory_embedding_config
         .as_deref()
-        .map(|path| configuration::load::<MemoryEmbeddingConfig>(path, "memory embedding"))
-        .transpose()?
-        .map(MemoryEmbeddingProvider::new)
+        .map(|path| -> Result<_, Box<dyn std::error::Error>> {
+            let config = configuration::load::<MemoryEmbeddingConfig>(path, "memory embedding")?;
+            let directory = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            Ok(MemoryEmbeddingProvider::from_directory(config, directory)?)
+        })
         .transpose()?;
     #[cfg(feature = "test-fixtures")]
     if mcp_oauth_loopback && mcp_oauth_config.is_none() {
@@ -231,7 +255,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err("MCP OAuth vault must be separate from the kernel database".into());
         }
     }
-    let (provider_name, provider) = fliuno_providers::from_env()?;
+    let (provider_name, provider) = if demo {
+        fliuno_providers::from_settings(&fliuno_config::ModelSettings::default())?
+    } else if let Some(config) = &user_config {
+        fliuno_providers::from_settings(&config.model)?
+    } else {
+        fliuno_providers::from_env()?
+    };
     let (input_tx, input_rx) = crossbeam_channel::bounded::<InputFrame>(64);
     thread::Builder::new()
         .name("fliuno-stdio-reader".into())

@@ -22,6 +22,11 @@ fn main() -> std::process::ExitCode {
         match entry {
             Entry::Help => println!("{}", options::HELP),
             Entry::Version => println!("fliuno {}", env!("CARGO_PKG_VERSION")),
+            Entry::InitConfig(path) => {
+                fliuno_config::initialize(&path)
+                    .map_err(|error| format!("Cannot create {}: {error}", path.display()))?;
+                println!("{}", path.display());
+            }
             Entry::Run(options) => run(options).map_err(|error| error.to_string())?,
         }
         Ok(())
