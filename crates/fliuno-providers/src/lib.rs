@@ -216,7 +216,7 @@ fn build_provider(
                 OpenAiProvider::new(base_url.unwrap_or("https://api.openai.com/v1/"), key, model)?;
             let budget = budget
                 .map(|config| {
-                    config.resolve(|_| Err("OpenAI requires a numeric context window".into()))
+                    config.resolve(|_| Err("Context window discovery is unsupported for OpenAI; configure a numeric window".into()))
                 })
                 .transpose()?;
             Box::new(if let Some(budget) = budget {
@@ -248,7 +248,7 @@ fn build_provider(
             )?;
             if let Some(config) = budget {
                 let budget =
-                    config.resolve(|_| Err("Gemini requires a numeric context window".into()))?;
+                    config.resolve(|_| Err("Context window discovery is unsupported for Gemini; configure a numeric window".into()))?;
                 Box::new(provider.with_context_budget(budget)?)
             } else {
                 Box::new(provider)
