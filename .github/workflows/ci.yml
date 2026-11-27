@@ -38,7 +38,9 @@ jobs:
           command -v node
           ldd "$(command -v node)"
           if python examples/bundle_demo.py; then
-            echo 'The verified release build works with the runner runtime.'
+            python examples/bundle_demo.py --deny
+            python examples/bundle_demo.py --tamper
+            echo 'Verified the three isolation paths.'
           else
             strace -f -s 300 -e trace=execve,write,writev -o "$RUNNER_TEMP/fliuno-node.trace" python examples/bundle_demo.py || true
             grep -E 'write(v)?\(2,|execve\(' "$RUNNER_TEMP/fliuno-node.trace" | tail -70
