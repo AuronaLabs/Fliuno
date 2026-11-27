@@ -1456,12 +1456,14 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.keys("\r");
     console.expect("Enter a model ID");
     console.resize(24, 80);
+    console.ready();
     console.capture("setup-model-80");
     console.keys("fixture-model");
     console.expect("fixture-model");
     console.keys("\r");
     console.expect("Connect an API key file");
     console.resize(21, 48);
+    console.ready();
     console.keys("fixture key.txt\r");
     console.expect("Cannot read the configured API key file");
     console.capture("setup-key-file-48");
