@@ -1,3 +1,4 @@
+mod memories;
 mod palette;
 mod panels;
 mod workbench;
@@ -74,6 +75,7 @@ enum Layer {
     Reconcile(Box<ReconcileForm>),
     Backup(Option<Box<BackupResult>>),
     Diagnostics(String, u16),
+    Memories(Box<memories::MemoryPanel>),
     Edit(Edit),
     None,
 }
@@ -734,6 +736,12 @@ impl App {
                 self.message = message;
             }
             Update::Activity(previews) => self.activity = previews,
+            Update::Memories {
+                workspace,
+                query,
+                page,
+            } => self.install_memories(&workspace, &query, page),
+            Update::MemorySaved(workspace) => self.memory_saved(&workspace),
             Update::Diagnostics(text) => {
                 if matches!(self.layer, Layer::Diagnostics(..)) {
                     self.layer = Layer::Diagnostics(text, 0);
@@ -771,6 +779,10 @@ impl App {
             if target.insert(&text, edit_limit(edit)) && matches!(edit, Edit::Task) {
                 self.key = uuid::Uuid::new_v4().to_string();
             }
+        } else if let Layer::Memories(panel) = &mut self.layer {
+            if !self.busy {
+                panel.paste(value);
+            }
         } else if let Layer::Reconcile(form) = &mut self.layer {
             if !self.busy {
                 form.insert(&clean(value));
@@ -790,6 +802,10 @@ impl App {
         if ctrl && key.code == KeyCode::Char('c') {
             return true;
         }
+        if matches!(self.layer, Layer::Memories(_)) {
+            self.memories_key(key, worker);
+            return false;
+        }
         if key.code == KeyCode::Esc && matches!(self.layer, Layer::Inbox(_)) {
             if !self.start_pending {
                 self.layer = Layer::None;
@@ -805,6 +821,10 @@ impl App {
             return false;
         }
         if matches!(self.layer, Layer::DraftContext { .. }) {
+            if pressed && !self.busy && matches!(key.code, KeyCode::Char('v') | KeyCode::F(6)) {
+                self.open_memories(worker, true);
+                return false;
+            }
             if key.code == KeyCode::Esc || key.code == KeyCode::F(3) {
                 self.layer = Layer::Edit(Edit::Task);
             } else {
@@ -843,6 +863,10 @@ impl App {
                 return false;
             }
             let edit = edit.clone();
+            if matches!(edit, Edit::Task) && pressed && key.code == KeyCode::F(6) && !self.busy {
+                self.open_memories(worker, true);
+                return false;
+            }
             if matches!(edit, Edit::Task) && pressed && key.code == KeyCode::F(2) && !self.busy {
                 self.toggle_plan_mode();
                 return false;
@@ -1270,6 +1294,7 @@ impl App {
                 }
             }
             Layer::Diagnostics(_, scroll) => scroll_key(key.code, scroll),
+            Layer::Memories(_) => unreachable!(),
             Layer::Backup(_) => {
                 let edit = match key.code {
                     KeyCode::Char('c') => Some(Edit::BackupCreate),
@@ -1354,9 +1379,15 @@ impl App {
                 };
                 options.detail = ContextDetail::Full;
                 options.through_sequence = None;
+                if options.mode == ContextMode::Isolated {
+                    options.memory_selection = None;
+                }
             }
             KeyCode::Char('m') if options.mode == ContextMode::Session => {
                 options.disable_memory = !options.disable_memory;
+                if options.disable_memory {
+                    options.memory_selection = None;
+                }
             }
             KeyCode::Char('h') if options.mode == ContextMode::Session => {
                 options.detail = match options.detail {
@@ -1627,6 +1658,7 @@ impl App {
                 self.show_details = false;
                 self.scroll = 0;
             }
+            KeyCode::F(6) if active => self.open_memories(worker, false),
             KeyCode::End => self.follow = true,
             KeyCode::Home => {
                 self.follow = false;
@@ -1738,6 +1770,7 @@ impl App {
             ));
             commands.push(("Workspaces", KeyCode::Char('w')));
             commands.push(("Sessions", KeyCode::Char('s')));
+            commands.push(("Workspace memories", KeyCode::F(6)));
             if self.session.is_some() {
                 commands.push(("Browse session tasks", KeyCode::Char('L')));
                 commands.push(("Queued prompts", KeyCode::Char('Q')));
@@ -2047,7 +2080,9 @@ fn format_draft_context(
         preview.omitted_turns,
         preview.through_sequence,
     )];
-    if !preview.options.disable_memory {
+    if let Some(picks) = &preview.options.memory_selection {
+        lines.push(format!("Pinned memory revisions: {}", picks.len()));
+    } else if !preview.options.disable_memory {
         lines.push("Automatic memory is selected when the task starts.".into());
     }
     lines.push(String::new());

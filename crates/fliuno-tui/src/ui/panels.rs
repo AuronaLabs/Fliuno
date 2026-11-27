@@ -255,9 +255,11 @@ impl App {
         )];
         if !isolated {
             let memory = if options.disable_memory {
-                "Off"
+                "Off".into()
+            } else if let Some(picks) = &options.memory_selection {
+                format!("Pinned ({})", picks.len())
             } else {
-                "Automatic"
+                "Automatic".into()
             };
             let history = match options.detail {
                 ContextDetail::Full => "Full records",
@@ -268,7 +270,7 @@ impl App {
                 |sequence| format!("Pinned at #{sequence}"),
             );
             settings.extend([
-                Line::raw(format!("m  Memory   {memory}")),
+                Line::raw(format!("m  Memory   {memory}  ·  v Choose")),
                 Line::raw(format!("h  History  {history}")),
                 Line::raw(format!("p  Preview  {pin}")),
             ]);
@@ -395,6 +397,7 @@ impl App {
                 };
                 ("Task recovery".into(), actions)
             }
+            Layer::Memories(panel) => ("Workspace memories".into(), panel.help()),
             Layer::Diagnostics(..) => (
                 "Connection and configuration".into(),
                 "↑/↓ Scroll  ·  Esc Back",
@@ -580,6 +583,7 @@ impl App {
                     render_text(frame, body, text.trim(), *scroll);
                 }
             }
+            Layer::Memories(panel) => self.draw_memories(frame, body, panel),
             Layer::Diagnostics(text, scroll) => {
                 let state = if self.online {
                     ""

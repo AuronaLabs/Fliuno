@@ -355,9 +355,11 @@ impl App {
                     "Full history"
                 };
                 let memory = if options.disable_memory {
-                    "Memory off"
+                    "Memory off".into()
+                } else if let Some(picks) = &options.memory_selection {
+                    format!("{} pinned memories", picks.len())
                 } else {
-                    "Memory enabled"
+                    "Memory automatic".into()
                 };
                 format!(
                     "{history} · {memory} · through #{}",

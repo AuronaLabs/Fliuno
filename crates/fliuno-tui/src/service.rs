@@ -34,6 +34,12 @@ type ProcessSlot = Arc<Mutex<Option<Child>>>;
 pub enum Request {
     Reconnect,
     Diagnostics,
+    Memories {
+        workspace: String,
+        query: String,
+        after: u64,
+    },
+    SaveMemory(fliuno_protocol::WorkspaceMemoryPutParams),
     Backup(BackupRequest),
     Workspaces(u64),
     OpenWorkspace(String),
@@ -166,6 +172,12 @@ pub enum Update {
     BackupDone(Box<BackupResult>),
     Diagnostics(String),
     Activity(Vec<activity::Preview>),
+    Memories {
+        workspace: String,
+        query: String,
+        page: ObjectPage<fliuno_protocol::WorkspaceMemory>,
+    },
+    MemorySaved(String),
     Finished,
     Error(String),
     Offline(String),
@@ -520,6 +532,13 @@ impl Service {
         })
     }
 
+    fn require_memory_workspace(&self, workspace: &str) -> Result<()> {
+        if !self.supports("workspaceMemory") || self.workspace.as_deref() != Some(workspace) {
+            return Err("Workspace memories are unavailable".into());
+        }
+        Ok(())
+    }
+
     fn require_task_queue(&self) -> Result<()> {
         if self.supports("taskQueue") {
             Ok(())
@@ -538,6 +557,44 @@ impl Service {
             Request::Reconnect | Request::Diagnostics | Request::Backup(_) => unreachable!(),
             Request::Workspaces(after) => {
                 Update::Workspaces(self.rpc("workspace/list", json!({"after":after,"limit":30}))?)
+            }
+            Request::Memories {
+                workspace,
+                query,
+                after,
+            } => {
+                self.require_memory_workspace(&workspace)?;
+                let (method, params) = if query.is_empty() {
+                    (
+                        "workspace/memory/list",
+                        json!({"workspaceId":workspace,"after":after,"limit":20}),
+                    )
+                } else {
+                    (
+                        "workspace/memory/search",
+                        json!({"workspaceId":workspace,"query":query,"after":after,"limit":20}),
+                    )
+                };
+                let page: ObjectPage<fliuno_protocol::WorkspaceMemory> =
+                    self.rpc(method, params)?;
+                if page
+                    .items
+                    .iter()
+                    .any(|record| record.workspace_id != workspace)
+                {
+                    return Err("Memory response outside the current workspace".into());
+                }
+                Update::Memories {
+                    workspace,
+                    query,
+                    page,
+                }
+            }
+            Request::SaveMemory(record) => {
+                self.require_memory_workspace(&record.workspace_id)?;
+                let _: fliuno_protocol::WorkspaceMemory =
+                    self.rpc("workspace/memory/put", json!(record))?;
+                Update::MemorySaved(record.workspace_id)
             }
             Request::OpenWorkspace(path) => {
                 let workspace: Workspace = self.rpc("workspace/open", json!({"root":path}))?;
