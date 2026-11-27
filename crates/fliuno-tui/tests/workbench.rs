@@ -1239,7 +1239,10 @@ fn terminal_reviews_edits_and_pins_a_workspaces_memory() {
     terminal.expect("Workspaces");
     terminal.keys("o");
     terminal.expect("Open folder");
-    terminal.keys(&format!("{}\r", outside.path().display()));
+    terminal.keys(&outside.path().to_string_lossy());
+    terminal.expect(outside.path().file_name().unwrap().to_str().unwrap());
+    terminal.keys("\r");
+    terminal.expect_absent("Open folder");
     terminal.expect("New session");
     terminal.keys("Separate workspace\r");
     terminal.expect("Fliuno  /  Separate workspace");
@@ -1449,7 +1452,9 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.expect("Enter a model ID");
     console.resize(24, 80);
     console.capture("setup-model-80");
-    console.keys("fixture-model\r");
+    console.keys("fixture-model");
+    console.expect("fixture-model");
+    console.keys("\r");
     console.expect("Connect an API key file");
     console.resize(21, 48);
     console.keys("fixture key.txt\r");
