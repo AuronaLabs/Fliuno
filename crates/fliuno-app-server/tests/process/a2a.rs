@@ -766,6 +766,19 @@ fn incomplete_stream_is_unknown_and_is_never_replayed_or_polled() {
     let interrupted = wait_finished(&mut peer, &submitted["id"]);
     assert_eq!(interrupted["status"], "interrupted");
     assert_eq!(interrupted["agentRun"]["outcomeUnknown"], true);
+    let review = json!({"taskId":submitted["id"],"state":"completed","operator":"Local reviewer","evidence":"Result independently verified"});
+    let recorded = peer.call("task/reconcile", review.clone());
+    assert_eq!(recorded["review"], review);
+    assert_eq!(peer.call("task/reconcile", review), recorded);
+    drop(peer);
+    let mut peer = Peer::start_with_a2a(&directory.db, &directory.config);
+    assert_eq!(
+        peer.call("task/getReconciliation", json!({"taskId":submitted["id"]})),
+        recorded
+    );
+    let after = peer.call("task/get", json!({"taskId":submitted["id"]}));
+    assert_eq!(after["status"], "interrupted");
+    assert_eq!(after["agentRun"], interrupted["agentRun"]);
     let requests = wire.requests();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].body["method"], "SendStreamingMessage");

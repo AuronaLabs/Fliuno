@@ -879,3 +879,78 @@ fn model_and_budget_load_from_files_without_provider_environment() {
     std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
     assert!(process.wait().unwrap().success());
 }
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn terminal_creates_verifies_and_opens_a_restored_database() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let copy = tempfile::tempdir().unwrap();
+    let backup = root.path().join("backup copy");
+    let restored = copy.path().join("workbench.db");
+    let mut console = Console::launch(server.as_deref(), root.path());
+    console.expect("New session");
+    console.keys("Restore acceptance\r");
+    console.expect("No tasks");
+    console.ready();
+    console.keys("n");
+    console.keys("Approval and deliverable in the snapshot\x13");
+    console.expect("Review operation");
+    console.ready();
+    console.keys("a");
+    console.expect("y Allow once");
+    console.keys("y");
+    console.expect("Completed");
+    console.ready();
+    console.keys("/");
+    console.expect("Database backups");
+    console.keys("database backups\r");
+    console.expect("c Create");
+    console.capture("backup-menu-wide");
+    console.keys("c");
+    console.expect("Create backup in a new folder");
+    console.keys(&format!("{}\r", backup.display()));
+    console.expect("Backup created");
+    console.expect("Tasks: 1");
+    console.ready();
+    console.keys("v");
+    console.expect("Verify backup folder");
+    console.keys(&format!("{}\r", backup.display()));
+    console.expect("Backup verified");
+    console.ready();
+    console.keys("r");
+    console.expect("Restore from backup folder");
+    console.keys(&format!("{}\r", backup.display()));
+    console.expect("Restore to a new database path");
+    console.keys(&format!("{}\r", restored.display()));
+    console.expect("Database restored");
+    console.expect("SHA-256");
+    console.ready();
+    console.resize(18, 48);
+    console.ready();
+    console.capture("backup-restored-narrow");
+    console.keys("r");
+    console.expect("Restore from backup folder");
+    console.keys(&format!("{}\r", backup.display()));
+    console.expect("Restore to a new database path");
+    console.keys(&format!("{}\r", restored.display()));
+    console.expect("restore destination already");
+    console.expect("restore to a new database path");
+    console.quit("\x03");
+
+    let config = root.path().join("restored.toml");
+    let database = serde_json::to_string(&restored.to_string_lossy()).unwrap();
+    std::fs::write(&config, format!("[workbench]\ndatabase = {database}\n")).unwrap();
+    let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    console.expect("Restore acceptance");
+    console.expect("Approval and deliverable in the snapshot");
+    console.expect("Completed");
+    console.ready();
+    console.keys("v");
+    console.expect("text/plain");
+    console.keys("\r");
+    console.expect("SHA-256:");
+    console.expect("Approval and deliverable in the snapshot");
+    console.capture("backup-reopened-deliverable");
+    console.quit("\x03");
+}
