@@ -108,35 +108,35 @@ def main() -> int:
 
     parent = delegated_base() / f"fliuno-ci-{uuid.uuid4()}"
     runner_group = parent / "runner"
-    created = False
-    runner_created = False
+    target_group = parent / "targets"
+    created: list[Path] = []
     cleanup_errors: list[str] = []
     try:
-        sudo("mkdir", str(parent))
-        created = True
         owner = f"{os.getuid()}:{os.getgid()}"
-        sudo(
-            "chown",
-            owner,
-            str(parent),
-            str(parent / "cgroup.procs"),
-            str(parent / "cgroup.subtree_control"),
-        )
-        sudo(
-            "tee",
-            str(parent / "cgroup.subtree_control"),
-            input_bytes=b"+cpu +memory +pids\n",
-        )
+        for group in (parent, runner_group, target_group):
+            sudo("mkdir", str(group))
+            created.append(group)
+            if group == runner_group:
+                continue
+            sudo(
+                "chown",
+                owner,
+                str(group),
+                str(group / "cgroup.procs"),
+                str(group / "cgroup.subtree_control"),
+            )
+            sudo(
+                "tee",
+                str(group / "cgroup.subtree_control"),
+                input_bytes=b"+cpu +memory +pids\n",
+            )
 
-        # Cargo and its descendants start inside the delegation. Leave the
-        # delegation root empty so controllers can apply to its child groups.
-        sudo("mkdir", str(runner_group))
-        runner_created = True
-
+        # Cargo starts in a sibling of the target subtree. Migration stays
+        # within the delegation, and probes can inspect only target groups.
         environment = os.environ.copy()
         environment["FLIUNO_REQUIRE_DELEGATED_CGROUP"] = "1"
         environment["FLIUNO_REQUIRE_RESOURCE_LIMITS"] = "1"
-        environment["FLIUNO_TEST_CGROUP_V2_PARENT"] = str(parent)
+        environment["FLIUNO_TEST_CGROUP_V2_PARENT"] = str(target_group)
         for test in [
             "linux::delegated_cgroup_kills_a_descendant_after_setsid",
             "linux::delegated_cgroup_enforces_the_configured_process_limit",
@@ -189,11 +189,9 @@ def main() -> int:
             return terminal_result
         return 0
     finally:
-        if runner_created and sudo("rmdir", str(runner_group), check=False):
-            cleanup_errors.append("cgroup probe runner still contains processes")
-        if created:
-            if sudo("rmdir", str(parent), check=False):
-                cleanup_errors.append("temporary cgroup delegation still has child groups")
+        for group in reversed(created):
+            if sudo("rmdir", str(group), check=False):
+                cleanup_errors.append(f"cgroup probe cleanup left {group}")
         if cleanup_errors:
             raise RuntimeError("; ".join(cleanup_errors))
 
