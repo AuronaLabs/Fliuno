@@ -1,6 +1,11 @@
 //! Fill the bounded live queue inside one dispatch, then recover on that stdio connection.
 use super::*;
 
+// Burst setup writes 72 tasks durably in one batch. Slow Windows runner disks
+// can spend tens of seconds flushing the fixture. Marker RPCs below still use
+// the regular peer deadline after the batch has finished.
+const DURABLE_BURST_DEADLINE: Duration = Duration::from_secs(60);
+
 #[test]
 fn live_event_stream_can_resubscribe_and_catch_up_to_a_fixed_watermark() {
     let root = std::env::temp_dir().join(format!(
@@ -26,7 +31,7 @@ fn live_event_stream_can_resubscribe_and_catch_up_to_a_fixed_watermark() {
         "params":{"sessionId":session["id"],"input":format!("task {i}"),"context":{"mode":"isolated"}}})).collect();
     writeln!(peer.input, "{}", json!(batch)).unwrap();
     peer.input.flush().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + DURABLE_BURST_DEADLINE;
     let mut live = Vec::new();
     let gap_after = loop {
         let frame = peer
@@ -186,7 +191,7 @@ fn exercise_scoped_live_events(workspace_scope: bool) {
     let history = peer.request_with_timeout(
         "events/listSession",
         json!({"sessionId":other,"limit":1000}),
-        Duration::from_secs(20),
+        DURABLE_BURST_DEADLINE,
     );
     assert!(history.get("error").is_none(), "{history}");
     assert!(history["result"]["events"].as_array().unwrap().len() >= 72);
@@ -209,7 +214,7 @@ fn exercise_scoped_live_events(workspace_scope: bool) {
         assert!(event["params"]["event"]["sequence"].as_u64().unwrap() > baseline);
     }
     submit_batch(&mut peer, &selected);
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + DURABLE_BURST_DEADLINE;
     let gap_after = loop {
         let frame = peer
             .output
