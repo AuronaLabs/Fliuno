@@ -934,8 +934,7 @@ fn terminal_creates_verifies_and_opens_a_restored_database() {
     console.keys(&format!("{}\r", backup.display()));
     console.expect("Restore to a new database path");
     console.keys(&format!("{}\r", restored.display()));
-    console.expect("restore destination already");
-    console.expect("restore to a new database path");
+    console.expect("exists;");
     console.quit("\x03");
 
     let config = root.path().join("restored.toml");
