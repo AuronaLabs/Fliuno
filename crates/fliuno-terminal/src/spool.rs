@@ -5,7 +5,9 @@ use base64::Engine;
 use rusqlite::{Connection, params};
 use std::{path::Path, time::Duration};
 
-const READ_BUSY_TIMEOUT: Duration = Duration::from_millis(200);
+// Output floods can hold the rollback journal through a slow disk flush.
+// Keep independent readers bounded without interrupting the writer's commit.
+const READ_BUSY_TIMEOUT: Duration = Duration::from_millis(750);
 
 pub(crate) struct Spool {
     db: Connection,
@@ -466,7 +468,7 @@ mod tests {
         );
     }
     #[test]
-    fn saved_output_waits_for_a_short_writer_commit() {
+    fn saved_output_waits_for_a_slow_writer_commit() {
         let dir = Directory::new();
         let mut spool = Spool::create(&dir.0, 65536, &snapshot()).unwrap();
         spool.append(b"committed").unwrap();
@@ -482,7 +484,7 @@ mod tests {
                 offline(dir, 0, 100)
             });
             in_flight.recv().unwrap();
-            std::thread::sleep(Duration::from_millis(75));
+            std::thread::sleep(Duration::from_millis(300));
             tx.commit().unwrap();
             let output = reader.join().unwrap().unwrap();
             assert_eq!(output.next, 9);
