@@ -37,7 +37,6 @@ impl Console {
     }
 
     fn launch_with_config(server: Option<&Path>, root: &Path, config: Option<&Path>) -> Self {
-        let pair = native_pty_system().openpty(size(28, 110)).unwrap();
         let mut command = CommandBuilder::new(binary());
         if let Some(config) = config {
             command.arg("--config");
@@ -47,6 +46,15 @@ impl Console {
             command.arg("--db");
             command.arg(root.join("workbench.db"));
         }
+        Self::spawn(command, server, root)
+    }
+
+    fn launch_unconfigured(server: Option<&Path>, root: &Path) -> Self {
+        Self::spawn(CommandBuilder::new(binary()), server, root)
+    }
+
+    fn spawn(mut command: CommandBuilder, server: Option<&Path>, root: &Path) -> Self {
+        let pair = native_pty_system().openpty(size(28, 110)).unwrap();
         if let Some(server) = server {
             command.arg("--server");
             command.arg(server);
@@ -54,6 +62,8 @@ impl Console {
         command.arg("--workspace");
         command.arg(root);
         command.env("TERM", "xterm-256color");
+        command.env("HOME", root);
+        command.env("USERPROFILE", root);
         if let Some(theme) = std::env::var_os("FLIUNO_TEST_THEME") {
             command.arg("--theme");
             command.arg(theme);
@@ -881,11 +891,10 @@ fn model_and_budget_load_from_files_without_provider_environment() {
     std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
     assert!(process.wait().unwrap().success());
     let mut terminal = Console::launch_with_config(Some(&server), root.path(), Some(&config));
-    terminal.expect("New session");
-    terminal.keys("Model profile\r");
-    terminal.expect("No tasks");
+    terminal.expect("Start a conversation");
+    terminal.expect("Message Fliuno");
     terminal.ready();
-    terminal.keys("/");
+    terminal.keys("\x1bOP");
     terminal.expect("Connection and configuration");
     terminal.keys("connection\r");
     terminal.expect("Model: openai / fixture-model");
@@ -1106,12 +1115,11 @@ fn live_preview_follows_output_and_keeps_manual_reading_position() {
     )
     .unwrap();
     let mut terminal = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    terminal.expect("New session");
-    terminal.keys("Activity acceptance\r");
-    terminal.expect("No tasks");
+    terminal.expect("Start a conversation");
+    terminal.expect("Message Fliuno");
     terminal.ready();
-    terminal.keys("n");
-    terminal.keys("Live transcript start\x13");
+    terminal.capture("conversation-first-message");
+    terminal.keys("Live transcript start\r");
     terminal.expect("FIRST-LIVE-END");
     terminal.expect("Following");
     terminal.capture("activity-follow-live");
@@ -1397,4 +1405,78 @@ fn workspace_deliverables_filter_review_versions_and_verify_saved_bytes() {
     );
     console.capture("deliverables-save-receipt");
     console.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn first_launch_guides_live_setup_and_reopens_the_profile() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let profile = root.path().join(".fliuno");
+    let config = profile.join("config.toml");
+    let data = profile.join("state/workbench.db");
+    let doctor = Command::new(binary())
+        .arg("--doctor")
+        .current_dir(root.path())
+        .env("HOME", root.path())
+        .env("USERPROFILE", root.path())
+        .output()
+        .unwrap();
+    assert!(!doctor.status.success());
+    assert!(String::from_utf8_lossy(&doctor.stdout).contains("No model profile"));
+    assert!(!profile.exists());
+
+    let mut cancelled = Console::launch_unconfigured(server.as_deref(), root.path());
+    cancelled.expect("Choose your model provider");
+    cancelled.expect("Google Gemini");
+    cancelled.capture("setup-provider-110");
+    cancelled.quit("\x03");
+    assert!(
+        !profile.exists(),
+        "opening and cancelling must leave no profile"
+    );
+
+    let mut console = Console::launch_unconfigured(server.as_deref(), root.path());
+    console.expect("Choose your model provider");
+    console.keys("\r");
+    console.expect("Enter a model ID");
+    console.resize(24, 80);
+    console.capture("setup-model-80");
+    console.keys("fixture-model\r");
+    console.expect("Connect an API key file");
+    console.resize(21, 48);
+    console.keys("fixture key.txt\r");
+    console.expect("Cannot read the configured API key file");
+    console.capture("setup-key-file-48");
+    assert!(!config.exists());
+    assert!(!data.exists());
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::write(profile.join("fixture key.txt"), "fixture-secret-value\n").unwrap();
+    std::fs::write(&config, "concurrent profile").unwrap();
+    console.keys("\r");
+    console.expect("A profile already exists.");
+    assert_eq!(
+        std::fs::read_to_string(&config).unwrap(),
+        "concurrent profile"
+    );
+    std::fs::remove_file(&config).unwrap();
+    console.keys("\r");
+    console.expect("Start a conversation");
+    console.expect("Message Fliuno");
+    console.expect_absent("Offline demo");
+    console.expect_absent("fixture-secret-value");
+    console.capture("conversation-first-launch-48");
+    let profile_text = std::fs::read_to_string(&config).unwrap();
+    assert!(profile_text.contains("provider = \"openai\""));
+    assert!(profile_text.contains("api_key_file = \"fixture key.txt\""));
+    assert!(!profile_text.contains("fixture-secret-value"));
+    assert!(data.is_file());
+    console.quit("\x03");
+
+    let mut reopened = Console::launch_unconfigured(server.as_deref(), root.path());
+    reopened.expect("Start a conversation");
+    reopened.expect("Message Fliuno");
+    reopened.expect_absent("Choose your model provider");
+    reopened.quit("\x03");
+    assert_eq!(std::fs::read_to_string(config).unwrap(), profile_text);
 }

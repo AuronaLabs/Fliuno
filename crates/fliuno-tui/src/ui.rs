@@ -2,6 +2,7 @@ mod deliverables;
 mod memories;
 mod palette;
 mod panels;
+pub(crate) mod setup;
 mod workbench;
 
 use palette::Palette;
@@ -482,8 +483,10 @@ impl App {
                     }
                 } else if let Some(session) = page.items.into_iter().next() {
                     self.select_session(session);
-                } else {
+                } else if self.demo {
                     self.layer = Layer::Edit(Edit::Session);
+                } else {
+                    self.next = Some(Request::NewSession(workspace, "Conversation".into()));
                 }
             }
             Update::Session(session) => {
@@ -584,6 +587,8 @@ impl App {
                         && let Some(id) = &self.selected
                     {
                         self.next = Some(Request::Task(id.clone()));
+                    } else if !self.demo && previous.is_none() && self.tasks().is_empty() {
+                        self.layer = Layer::Edit(Edit::Task);
                     }
                 }
             }
@@ -883,7 +888,12 @@ impl App {
                 return false;
             }
             let edit = edit.clone();
-            if matches!(edit, Edit::Task) && pressed && key.code == KeyCode::F(6) && !self.busy {
+            let composing = matches!(edit, Edit::Task);
+            if composing && pressed && key.code == KeyCode::F(1) {
+                self.layer = Layer::Commands(0, String::new());
+                return false;
+            }
+            if composing && pressed && key.code == KeyCode::F(6) && !self.busy {
                 self.open_memories(worker, true);
                 return false;
             }
@@ -900,19 +910,25 @@ impl App {
             } else {
                 &mut self.input
             };
-            let enqueue = matches!(edit, Edit::Task) && ctrl && key.code == KeyCode::Char('e');
+            let enqueue = composing && ctrl && key.code == KeyCode::Char('e');
+            let send_on_enter = !composing
+                || (!self.demo
+                    && !key
+                        .modifiers
+                        .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT));
             if pressed
                 && (enqueue
                     || (ctrl && key.code == KeyCode::Char('s'))
-                    || (key.code == KeyCode::Enter && !matches!(edit, Edit::Task)))
+                    || (key.code == KeyCode::Enter && send_on_enter))
             {
                 self.submit(edit, worker, enqueue);
                 return false;
             }
             let changed = match key.code {
-                KeyCode::Enter if matches!(edit, Edit::Task) => {
+                KeyCode::Enter if composing && !send_on_enter => {
                     value.insert("\n", edit_limit(&edit))
                 }
+                KeyCode::Char('j') if composing && ctrl => value.insert("\n", edit_limit(&edit)),
                 KeyCode::Char(c)
                     if !ctrl && !key.modifiers.contains(KeyModifiers::ALT) && !c.is_control() =>
                 {

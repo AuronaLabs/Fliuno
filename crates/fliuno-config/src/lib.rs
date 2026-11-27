@@ -12,11 +12,10 @@ theme = "auto"
 # database = "state/workbench.db"
 
 [model]
-provider = "demo"
-# For a live provider, set provider, name and a separate key file.
-# provider = "openai"
-# name = "your-model"
-# api_key_file = "credentials/openai.key"
+# Choose openai, anthropic, or gemini and fill in the model ID and key file.
+provider = "openai"
+name = ""
+api_key_file = "credentials/openai.key"
 "#;
 
 #[derive(Debug, Default, Deserialize)]

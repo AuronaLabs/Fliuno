@@ -7,10 +7,12 @@ use std::{
 
 pub const HELP: &str = "Fliuno - local AI workbench
 
+Run from a project folder. First launch guides model setup.
+
 Usage: fliuno [--config PATH] [--demo] [--workspace PATH] [--db PATH] [--server PATH] [-- SERVER_ARGS...]
 
   --config PATH      Settings file (default: ~/.fliuno/config.toml)
-  --init-config      Create the settings template and exit
+  --init-config      Create an editable settings template and exit
   --doctor           Check local configuration and paths without starting a service
   --demo             Use the offline demonstration provider
   --workspace PATH   Folder to open (default: current directory)
@@ -33,10 +35,16 @@ pub struct Options {
     pub theme: Theme,
 }
 
+pub struct SetupOptions {
+    pub config: PathBuf,
+    pub theme: Theme,
+}
+
 pub enum Entry {
     Help,
     Version,
     InitConfig(PathBuf),
+    Setup(SetupOptions),
     Run(Options),
     Doctor(Options),
 }
@@ -87,13 +95,31 @@ impl Options {
                 .map(Entry::InitConfig)
                 .ok_or_else(|| "Pass --config to choose a settings file".into());
         }
-        if config.is_none()
-            && let Some(path) = default_config
-            && path
+        if server_args
+            .iter()
+            .any(|arg| matches!(arg.to_str(), Some("--db" | "--config" | "--demo")))
+        {
+            return Err("Pass --db, --config, and --demo before --".into());
+        }
+        let explicit_config = config.is_some();
+        config = config.or(default_config);
+        if let Some(path) = config.as_ref()
+            && !path
                 .try_exists()
                 .map_err(|error| format!("Cannot inspect {}: {error}", path.display()))?
         {
-            config = Some(path);
+            if !force_demo && !doctor {
+                return Ok(Entry::Setup(SetupOptions {
+                    config: path.clone(),
+                    theme: theme.unwrap_or_default(),
+                }));
+            }
+            if !explicit_config {
+                config = None;
+            }
+        }
+        if config.is_none() && !force_demo && !doctor {
+            return Err("Pass --config to choose a model profile".into());
         }
         let mut settings = config
             .as_deref()
@@ -120,15 +146,9 @@ impl Options {
         } else {
             default_database(directory.as_deref(), force_demo)?
         };
-        if server_args
-            .iter()
-            .any(|arg| matches!(arg.to_str(), Some("--db" | "--config" | "--demo")))
-        {
-            return Err("Pass --db, --config, and --demo before --".into());
-        }
         let options = Self {
             demo,
-            force_demo: force_demo || config.is_none(),
+            force_demo,
             config,
             workspace,
             database,

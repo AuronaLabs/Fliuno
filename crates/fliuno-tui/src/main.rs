@@ -22,26 +22,7 @@ use std::{
 };
 
 fn main() -> std::process::ExitCode {
-    let result = Options::parse(std::env::args_os().skip(1)).and_then(|entry| {
-        match entry {
-            Entry::Help => println!("{}", options::HELP),
-            Entry::Version => println!("fliuno {}", env!("CARGO_PKG_VERSION")),
-            Entry::InitConfig(path) => {
-                fliuno_config::initialize(&path)
-                    .map_err(|error| format!("Cannot create {}: {error}", path.display()))?;
-                println!("{}", path.display());
-            }
-            Entry::Doctor(options) => {
-                let report = health::inspect(&options, None);
-                print!("{}", ui::clean(&report.text));
-                if !report.healthy {
-                    return Err("configuration needs attention".into());
-                }
-            }
-            Entry::Run(options) => run(options).map_err(|error| error.to_string())?,
-        }
-        Ok(())
-    });
+    let result = launch();
     match result {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(error) => {
@@ -50,6 +31,42 @@ fn main() -> std::process::ExitCode {
         }
     }
 }
+
+fn launch() -> Result<(), String> {
+    let parse = || Options::parse(std::env::args_os().skip(1));
+    match parse()? {
+        Entry::Help => println!("{}", options::HELP),
+        Entry::Version => println!("fliuno {}", env!("CARGO_PKG_VERSION")),
+        Entry::InitConfig(path) => {
+            fliuno_config::initialize(&path)
+                .map_err(|error| format!("Cannot create {}: {error}", path.display()))?;
+            println!("{}", path.display());
+        }
+        Entry::Doctor(options) => {
+            let report = health::inspect(&options, None);
+            print!("{}", ui::clean(&report.text));
+            if !report.healthy {
+                return Err("configuration needs attention".into());
+            }
+        }
+        Entry::Setup(options) => with_terminal(|screen| {
+            if ui::setup::run(screen, options)? {
+                let Entry::Run(options) = parse().map_err(io::Error::other)? else {
+                    return Err(io::Error::other("The saved model profile is unavailable"));
+                };
+                run(options, screen)?;
+            }
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?,
+        Entry::Run(options) => {
+            with_terminal(|screen| run(options, screen)).map_err(|error| error.to_string())?
+        }
+    }
+    Ok(())
+}
+
+type Screen = Terminal<CrosstermBackend<io::Stdout>>;
 
 struct RestoreTerminal;
 
@@ -69,15 +86,12 @@ fn restore() {
     let _ = terminal::disable_raw_mode();
 }
 
-fn run(options: Options) -> io::Result<()> {
+fn with_terminal(use_screen: impl FnOnce(&mut Screen) -> io::Result<()>) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other(
             "the workbench requires an interactive terminal",
         ));
     }
-    let demo = options.demo;
-    let theme = options.theme;
-    let worker = service::Worker::spawn(options)?;
     let prior = std::panic::take_hook();
     let terminal_thread = std::thread::current().id();
     std::panic::set_hook(Box::new(move |info| {
@@ -90,7 +104,12 @@ fn run(options: Options) -> io::Result<()> {
     let _restore = RestoreTerminal;
     execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
     let mut screen = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-    let mut app = ui::App::new(demo, theme);
+    use_screen(&mut screen)
+}
+
+fn run(options: Options, screen: &mut Screen) -> io::Result<()> {
+    let mut app = ui::App::new(options.demo, options.theme);
+    let worker = service::Worker::spawn(options)?;
     let mut redraw = true;
     'running: loop {
         if app.drain(&worker) || redraw {

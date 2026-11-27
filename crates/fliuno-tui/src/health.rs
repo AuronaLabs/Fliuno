@@ -56,13 +56,21 @@ pub fn inspect(options: &Options, service: Option<&ServerInfo>) -> Report {
     report.check(
         "Config",
         &options.config.as_ref().map_or_else(
-            || "Built-in defaults (run fliuno --init-config to create a profile)".into(),
+            || {
+                if options.force_demo {
+                    "Built-in offline demo".into()
+                } else {
+                    "No model profile. Run fliuno in a terminal to configure it.".into()
+                }
+            },
             |path| format!("{}", path.display()),
         ),
         false,
     );
     let model = &options.settings.model;
-    if options.demo {
+    if options.config.is_none() && !options.force_demo {
+        report.healthy = false;
+    } else if options.demo {
         report.check("Model", "Offline demo", false);
     } else {
         report.check(

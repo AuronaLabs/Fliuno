@@ -109,7 +109,9 @@ impl App {
     fn draw_status_line(&self, frame: &mut Frame<'_>, area: Rect, editing: bool, full_page: bool) {
         let message = if self.busy { "Working" } else { &self.message };
         let help = if editing {
-            if area.width < 60 {
+            if !self.demo {
+                "Enter Send  F1 Commands  Esc Back"
+            } else if area.width < 60 {
                 "Ctrl+S Send  Ctrl+E Queue  F2 Mode  F3 Context"
             } else {
                 "Ctrl+S Send  Ctrl+E Queue  F2 Mode  F3 Context  Esc Back"
@@ -117,7 +119,9 @@ impl App {
         } else if full_page {
             "Enter Open  Esc Back"
         } else if matches!(self.layer, Layer::None) {
-            if area.width < 66 {
+            if !self.demo {
+                "Enter Write  F1 Commands  Tab Details"
+            } else if area.width < 66 {
                 "F1 Menu  n New  Tab Details  Shift+L Tasks"
             } else {
                 "F1 Commands  n New  Tab Details  Shift+L All tasks"
@@ -251,8 +255,13 @@ impl App {
                 }
             } else if self.selected.is_some() || self.snapshot.is_none() {
                 ("Loading session", "")
-            } else {
+            } else if self.demo {
                 ("No tasks yet", "")
+            } else {
+                (
+                    "Start a conversation",
+                    "Ask Fliuno to help with your project.",
+                )
             };
             lines.push(Line::styled(title, self.palette.label));
             if !hint.is_empty() {
@@ -397,6 +406,8 @@ impl App {
         }
         let mode = if self.plan_only {
             "Plan only"
+        } else if !self.demo {
+            "Message Fliuno"
         } else if focused {
             "New task · Execution"
         } else {
@@ -429,10 +440,17 @@ impl App {
             return;
         }
         let (lines, x, y) = self.draft.viewport(body.width, body.height);
-        if self.draft.text().is_empty() && !focused {
+        if self.draft.text().is_empty() && (!focused || !self.demo) {
             if self.session.is_some() {
                 frame.render_widget(
-                    Paragraph::new("n or Enter to write a task").style(self.palette.quiet),
+                    Paragraph::new(if self.demo {
+                        "n or Enter to write a task"
+                    } else if focused {
+                        "What would you like to do in this folder?"
+                    } else {
+                        "Press Enter to write a message"
+                    })
+                    .style(self.palette.quiet),
                     body,
                 );
             }

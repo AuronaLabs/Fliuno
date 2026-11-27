@@ -39,7 +39,9 @@ Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` �
 
 ## 开始真实工作
 
-先运行 `fliuno --init-config` 生成 `~/.fliuno/config.toml`，再填写 OpenAI、Anthropic 或 Gemini 的模型和密钥文件。在要工作的文件夹启动 `fliuno`，或通过 `--workspace PATH` 选择文件夹。模型请求发送到所配置的供应商；会话、审批和交付物保存在本机。[模型配置](docs/workbench.md#接入模型)
+开发版可在项目目录直接启动 `fliuno`，按首次引导配置模型，然后在底部输入消息。
+
+使用当前稳定版时，先运行 `fliuno --init-config` 生成 `~/.fliuno/config.toml`，再填写 OpenAI、Anthropic 或 Gemini 的模型和密钥文件。在要工作的文件夹启动 `fliuno`，或通过 `--workspace PATH` 选择文件夹。模型请求发送到所配置的供应商；会话、审批和交付物保存在本机。[模型配置](docs/workbench.md#接入模型)
 
 ## 工程能力
 
