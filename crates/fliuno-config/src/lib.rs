@@ -1,4 +1,7 @@
 //! User-owned startup settings shared by the terminal client and app-server.
+mod credentials;
+pub use credentials::PendingApiKey;
+
 use serde::Deserialize;
 use std::{
     fs::{self, File, OpenOptions},
@@ -72,6 +75,7 @@ pub struct ModelSettings {
     pub name: Option<String>,
     pub base_url: Option<String>,
     pub api_key_file: Option<PathBuf>,
+    pub api_key_credential: Option<String>,
     pub budget: Option<BudgetSettings>,
 }
 
@@ -166,13 +170,18 @@ impl Settings {
 pub fn read_api_key(path: &Path) -> Result<String, &'static str> {
     let key = read_file(path, 8194).map_err(|_| "Cannot read the configured API key file")?;
     let key = key.trim_end_matches(['\r', '\n']);
+    validate_api_key(key)?;
+    Ok(key.to_owned())
+}
+
+fn validate_api_key(key: &str) -> Result<(), &'static str> {
     if key.is_empty()
         || key.len() > 8192
         || key.chars().any(|ch| ch.is_whitespace() || ch.is_control())
     {
         return Err("The API key file must contain one non-empty key");
     }
-    Ok(key.to_owned())
+    Ok(())
 }
 
 fn read_file(path: &Path, limit: u64) -> io::Result<String> {

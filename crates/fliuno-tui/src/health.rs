@@ -1,6 +1,6 @@
 use crate::options::Options;
 use fliuno_client::ServerInfo;
-use fliuno_config::{ContextWindow, Provider, read_api_key};
+use fliuno_config::{ContextWindow, Provider};
 use std::{fmt::Write, fs, io::Read, path::Path};
 
 pub struct Report {
@@ -89,16 +89,16 @@ pub fn inspect(options: &Options, service: Option<&ServerInfo>) -> Report {
         {
             report.check("Model settings", "[model].name is required", true);
         }
-        match model.api_key_file.as_deref() {
-            None => report.check("Credentials", "[model].api_key_file is required", true),
-            Some(path) => match read_api_key(path) {
-                Ok(_) => report.check("Credentials", "Configured key file is readable", false),
-                Err(error) => report.check(
-                    "Credentials",
-                    &format!("{} · {error}", path.display()),
-                    true,
-                ),
-            },
+        match model.read_api_key() {
+            Ok(_) if model.api_key_file.is_some() => {
+                report.check("Credentials", "Configured key file is readable", false);
+            }
+            Ok(_) => report.check(
+                "Credentials",
+                "Windows Credential Manager entry is readable",
+                false,
+            ),
+            Err(error) => report.check("Credentials", error, true),
         }
         if let Some(budget) = &model.budget {
             let error = match budget.window {

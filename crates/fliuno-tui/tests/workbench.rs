@@ -1469,6 +1469,8 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.keys("fixture-model");
     console.expect("fixture-model");
     console.keys("\r");
+    console.expect("Connect your API key");
+    console.keys("\x1bOQ");
     console.expect("Connect an API key file");
     console.resize(21, 48);
     console.ready();
@@ -1506,6 +1508,84 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     reopened.expect_absent("Choose your model provider");
     reopened.quit("\x03");
     assert_eq!(std::fs::read_to_string(config).unwrap(), profile_text);
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn first_launch_stores_a_pasted_key_without_exposing_it() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join(".fliuno/config.toml");
+    let mut terminal = Console::launch_unconfigured(server.as_deref(), root.path());
+    terminal.expect("Choose your model provider");
+    terminal.keys("\r");
+    terminal.expect("Enter a model ID");
+    terminal.keys("fixture-managed\r");
+    terminal.expect("Connect your API key");
+    terminal.resize(21, 48);
+    terminal.ready();
+    terminal.keys("\r");
+    terminal.expect("Paste your API key");
+    terminal.keys("fixture-managed-secret-value");
+    terminal.expect("••••••");
+    terminal.expect_absent("fixture-managed-secret-value");
+    terminal.capture("setup-managed-key-48");
+    terminal.keys("\r");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !config.is_file() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    let text = std::fs::read_to_string(&config).unwrap();
+    let settings = fliuno_config::Settings::load(&config).unwrap();
+    #[cfg(windows)]
+    let _cleanup = {
+        struct RemoveFixture(String);
+        impl Drop for RemoveFixture {
+            fn drop(&mut self) {
+                let _ = Command::new("cmdkey")
+                    .arg(format!("/delete:{}.fliuno-model", self.0))
+                    .output();
+            }
+        }
+        let id = settings.model.api_key_credential.as_ref().unwrap();
+        assert!(uuid::Uuid::parse_str(id).is_ok());
+        RemoveFixture(id.clone())
+    };
+    #[cfg(unix)]
+    assert!(settings.model.api_key_file.as_ref().unwrap().is_file());
+    assert!(!text.contains("fixture-managed-secret-value"));
+    assert_eq!(
+        settings.model.read_api_key().unwrap(),
+        "fixture-managed-secret-value"
+    );
+
+    terminal.expect("Start a conversation");
+    terminal.expect("fixture-managed");
+    terminal.quit("\x03");
+    let mut doctor = Command::new(binary());
+    doctor
+        .arg("--doctor")
+        .arg("--config")
+        .arg(&config)
+        .arg("--workspace")
+        .arg(root.path());
+    if let Some(server) = &server {
+        doctor.arg("--server").arg(server);
+    }
+    let diagnostic = doctor.output().unwrap();
+    assert!(
+        diagnostic.status.success(),
+        "{}",
+        String::from_utf8_lossy(&diagnostic.stdout)
+    );
+    assert!(!String::from_utf8_lossy(&diagnostic.stdout).contains("fixture-managed-secret-value"));
+
+    let mut reopened = Console::launch_unconfigured(server.as_deref(), root.path());
+    reopened.expect("Start a conversation");
+    reopened.expect("fixture-managed");
+    reopened.expect_absent("Connect your API key");
+    reopened.quit("\x03");
 }
 
 #[test]

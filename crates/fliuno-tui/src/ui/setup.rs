@@ -1,7 +1,7 @@
 use super::{clean, palette::Palette};
 use crate::{Screen, editor::Editor, options::SetupOptions};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use fliuno_config::{Provider, read_api_key};
+use fliuno_config::{PendingApiKey, Provider, read_api_key};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Position, Rect},
@@ -14,6 +14,7 @@ use std::{
     io::{self, Write},
     path::Path,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 const PROVIDERS: [(Provider, &str); 3] = [
     (Provider::OpenAi, "OpenAI"),
@@ -26,7 +27,7 @@ enum Step {
     #[default]
     Provider,
     Model,
-    KeyFile,
+    Credential,
 }
 
 #[derive(Default)]
@@ -35,6 +36,8 @@ struct Form {
     provider: usize,
     model: Editor,
     key_file: Editor,
+    use_key_file: bool,
+    api_key: Zeroizing<String>,
     error: String,
 }
 
@@ -44,18 +47,27 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
     loop {
         screen.draw(|frame| form.draw(frame, &options.config, &palette))?;
         match event::read()? {
-            Event::Paste(text) => form.insert(&text),
+            Event::Paste(mut text) => {
+                form.insert(&text);
+                text.zeroize();
+            }
             Event::Key(key) if key.kind != KeyEventKind::Release => {
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
                     KeyCode::Char('c') if ctrl => return Ok(false),
                     KeyCode::Esc => {
                         form.error.clear();
+                        form.api_key.zeroize();
                         form.step = match form.step {
                             Step::Provider => return Ok(false),
                             Step::Model => Step::Provider,
-                            Step::KeyFile => Step::Model,
+                            Step::Credential => Step::Model,
                         };
+                    }
+                    KeyCode::F(2) if matches!(form.step, Step::Credential) => {
+                        form.use_key_file = !form.use_key_file;
+                        form.api_key.zeroize();
+                        form.error.clear();
                     }
                     KeyCode::Enter if key.kind == KeyEventKind::Press => {
                         form.error.clear();
@@ -64,8 +76,8 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                             Step::Model if form.model.text().trim().is_empty() => {
                                 form.error = "Enter a model ID available on your account.".into();
                             }
-                            Step::Model => form.step = Step::KeyFile,
-                            Step::KeyFile => match form.save(&options.config) {
+                            Step::Model => form.step = Step::Credential,
+                            Step::Credential => match form.save(&options.config) {
                                 Ok(()) => return Ok(true),
                                 Err(error) => form.error = error,
                             },
@@ -85,19 +97,30 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
 impl Form {
     fn field(&mut self) -> Option<&mut Editor> {
         match self.step {
-            Step::Provider => None,
             Step::Model => Some(&mut self.model),
-            Step::KeyFile => Some(&mut self.key_file),
+            Step::Credential if self.use_key_file => Some(&mut self.key_file),
+            _ => None,
         }
     }
 
     fn insert(&mut self, text: &str) {
+        let text = text.trim_matches(['\r', '\n']);
+        if matches!(self.step, Step::Credential) && !self.use_key_file {
+            if self.api_key.len() + text.len() > 8192
+                || text.chars().any(|ch| ch.is_whitespace() || ch.is_control())
+            {
+                self.error = "Paste a single API key without whitespace.".into();
+            } else {
+                self.api_key.push_str(text);
+                self.error.clear();
+            }
+            return;
+        }
         let limit = if matches!(self.step, Step::Model) {
             256
         } else {
             4096
         };
-        let text = text.trim_matches(['\r', '\n']);
         if !text.chars().any(char::is_control)
             && let Some(field) = self.field()
             && field.text().len() + text.len() <= limit
@@ -112,6 +135,11 @@ impl Form {
             if field.key(key) {
                 self.error.clear();
             }
+        } else if matches!(self.step, Step::Credential) {
+            if key == KeyCode::Backspace {
+                self.api_key.pop();
+                self.error.clear();
+            }
         } else {
             match key {
                 KeyCode::Up | KeyCode::Left => self.provider = self.provider.saturating_sub(1),
@@ -124,21 +152,32 @@ impl Form {
     }
 
     fn save(&self, config: &Path) -> Result<(), String> {
-        let key_file = self.key_file.text().trim();
-        if key_file.is_empty() {
-            return Err("Enter the path to your API key file.".into());
-        }
         let parent = config
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        read_api_key(&parent.join(key_file))?;
         let provider = PROVIDERS[self.provider].0.name();
         // JSON and TOML use the same string escapes for these single-line, control-free inputs.
         let model = serde_json::to_string(self.model.text().trim()).map_err(|e| e.to_string())?;
-        let file = serde_json::to_string(key_file).map_err(|e| e.to_string())?;
-        let content =
-            format!("[model]\nprovider = \"{provider}\"\nname = {model}\napi_key_file = {file}\n");
+        let mut pending = None;
+        let credential = if self.use_key_file {
+            let key_file = self.key_file.text().trim();
+            if key_file.is_empty() {
+                return Err("Enter the path to your API key file.".into());
+            }
+            read_api_key(&parent.join(key_file))?;
+            let file = serde_json::to_string(key_file).map_err(|e| e.to_string())?;
+            format!("api_key_file = {file}")
+        } else {
+            if self.api_key.is_empty() {
+                return Err("Paste your API key or press F2 to use a key file.".into());
+            }
+            let key = PendingApiKey::stage(config, &self.api_key)?;
+            let setting = key.setting().to_owned();
+            pending = Some(key);
+            setting
+        };
+        let content = format!("[model]\nprovider = \"{provider}\"\nname = {model}\n{credential}\n");
         let write = || -> io::Result<()> {
             fs::create_dir_all(parent)?;
             let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
@@ -153,7 +192,11 @@ impl Form {
             } else {
                 format!("Could not save profile: {error}")
             }
-        })
+        })?;
+        if let Some(key) = pending {
+            key.commit();
+        }
+        Ok(())
     }
 
     fn draw(&self, frame: &mut Frame<'_>, config: &Path, palette: &Palette) {
@@ -183,11 +226,21 @@ impl Form {
                 "Use a model ID from your provider account.",
                 "Enter Continue   Esc Back",
             ),
-            Step::KeyFile => (
+            Step::Credential if self.use_key_file => (
                 3,
                 "Connect an API key file",
                 "Enter an absolute path or one relative to the profile. Use a file with one API key.",
-                "Enter Save and open   Esc Back",
+                "Enter Save   F2 Paste key   Esc Back",
+            ),
+            Step::Credential => (
+                3,
+                "Connect your API key",
+                if cfg!(windows) {
+                    "Paste a key from your model provider. Windows Credential Manager stores it for your account."
+                } else {
+                    "Paste a key from your model provider. Fliuno stores it in a private file next to your profile."
+                },
+                "Enter Save   F2 Key file   Esc Back",
             ),
         };
         let header = Paragraph::new(vec![
@@ -202,7 +255,7 @@ impl Form {
             Constraint::Length(match self.step {
                 Step::Provider => 4,
                 Step::Model => 3,
-                Step::KeyFile => 5,
+                Step::Credential => 5,
             }),
             Constraint::Length(4),
             Constraint::Min(0),
@@ -224,7 +277,7 @@ impl Form {
                     .collect();
                 frame.render_widget(Paragraph::new(lines), body);
             }
-            Step::Model | Step::KeyFile if body.width > 2 && body.height > 0 => {
+            Step::Model | Step::Credential if body.width > 2 && body.height > 0 => {
                 let (editor, placeholder, hint) = if matches!(self.step, Step::Model) {
                     (
                         &self.model,
@@ -242,14 +295,27 @@ impl Form {
                     Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body);
                 let [marker, input] =
                     Layout::horizontal([Constraint::Length(2), Constraint::Min(0)]).areas(row);
-                let (lines, x, _) = editor.viewport(input.width, 1);
+                let managed = matches!(self.step, Step::Credential) && !self.use_key_file;
+                let (value, x) = if managed {
+                    let max = usize::from(input.width.saturating_sub(1));
+                    let cells = self.api_key.chars().count().min(max);
+                    let value = if self.api_key.is_empty() {
+                        Line::styled("Paste API key", palette.quiet)
+                    } else {
+                        Line::raw("•".repeat(cells))
+                    };
+                    (value, cells as u16)
+                } else {
+                    let (lines, x, _) = editor.viewport(input.width, 1);
+                    let value = if editor.text().is_empty() {
+                        Line::styled(placeholder, palette.quiet)
+                    } else {
+                        Line::raw(lines.join(""))
+                    };
+                    (value, x)
+                };
                 frame.render_widget(Block::default().style(palette.rail), row);
                 frame.render_widget(Line::styled("›", palette.label), marker);
-                let value = if editor.text().is_empty() {
-                    Line::styled(placeholder, palette.quiet)
-                } else {
-                    Line::raw(lines.join(""))
-                };
                 frame.render_widget(value, input);
                 frame.set_cursor_position(Position::new(input.x + x, input.y));
                 frame.render_widget(

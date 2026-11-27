@@ -176,11 +176,7 @@ pub fn from_settings(
         .name
         .as_deref()
         .ok_or("[model] name is required for a live provider")?;
-    let key_path = settings
-        .api_key_file
-        .as_ref()
-        .ok_or("[model] api_key_file is required for a live provider")?;
-    let key = fliuno_config::read_api_key(key_path)?;
+    let key = settings.read_api_key()?;
     let budget = settings.budget.as_ref().map(|budget| BudgetConfig {
         window: match budget.window {
             ContextWindow::Tokens(window) => BudgetWindow::Tokens(window),

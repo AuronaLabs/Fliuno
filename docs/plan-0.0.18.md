@@ -11,6 +11,8 @@
 | [OpenCode TUI](https://opencode.ai/docs/cli/tui/)，本地 `D:\Fliuno-References\opencode` `d284e7c` 的 `packages/tui/src/component/dialog-session-list.tsx`、`dialog-model.tsx` | `/resume` 聚焦当前目录下的可搜索会话。会话与模型切换都要标出当前位置，短暂连接失败时能回到当前对话。 |
 | Codex `a1604a8` 的 `markdown_render.rs`、`history_cell/markdown_render_cache.rs` | 让实时与重启后的回答共享排版。缓存已完成消息在当前宽度下的渲染结果，用长历史重绘和窄屏截图检验收益。 |
 
+Windows 凭据使用本机持久范围。核对了 [Windows 凭据规范](https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw) 和本地 Codex `a1604a8` 的 `codex-rs/keyring-store/src/lib.rs`。Debian 安装包面向普通终端与无桌面的机器，所以在当前用户配置目录创建 `0600` 密钥文件。两个平台都先保存独立凭据，再写入只含引用的 TOML。并发配置写入失败时撤回本次凭据，继续兼容 `api_key_file`。
+
 ## 开发范围
 
 | 板块 | 从现有功能出发 | 验收 |
