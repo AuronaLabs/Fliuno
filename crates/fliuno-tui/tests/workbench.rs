@@ -1026,3 +1026,108 @@ fn terminal_creates_verifies_and_opens_a_restored_database() {
     console.capture("backup-reopened-deliverable");
     console.quit("\x03");
 }
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn live_preview_follows_output_and_keeps_manual_reading_position() {
+    use serde_json::json;
+    use std::{
+        io::{BufRead, BufReader},
+        net::TcpListener,
+    };
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (advance, checkpoints) = channel();
+    let provider = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        let mut input = BufReader::new(&mut socket);
+        let mut line = String::new();
+        let mut content_length = 0;
+        loop {
+            line.clear();
+            assert!(input.read_line(&mut line).unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((header, value)) = line.split_once(':')
+                && header.eq_ignore_ascii_case("Content-Length")
+            {
+                content_length = value.trim().parse().unwrap();
+            }
+        }
+        let mut request = vec![0; content_length];
+        input.read_exact(&mut request).unwrap();
+        let request: serde_json::Value = serde_json::from_slice(&request).unwrap();
+        assert_eq!(request["stream"], true);
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        let mut send = |event: serde_json::Value| {
+            write!(socket, "data: {event}\n\n").unwrap();
+            socket.flush().unwrap();
+        };
+        let first_lines = (1..=32)
+            .map(|row| format!("Draft line {row}\n"))
+            .collect::<String>();
+        send(
+            json!({"type":"response.output_text.delta","delta":format!("{first_lines}FIRST-LIVE-END")}),
+        );
+        checkpoints.recv_timeout(Duration::from_secs(20)).unwrap();
+        send(json!({"type":"response.output_text.delta","delta":"\nSECOND-LIVE-END"}));
+        checkpoints.recv_timeout(Duration::from_secs(20)).unwrap();
+        let final_text = format!("{first_lines}PERSISTED-END");
+        send(
+            json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":final_text}]}],"usage":{"input_tokens":12,"output_tokens":4}}}),
+        );
+    });
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("live.toml");
+    std::fs::write(root.path().join("fixture.key"), "fixture-key\n").unwrap();
+    std::fs::write(
+        &config,
+        format!(
+            r#"
+        [workbench]
+        database = "live.db"
+        [model]
+        provider = "openai"
+        name = "fixture-stream"
+        api_key_file = "fixture.key"
+        base_url = "http://{address}/v1/"
+    "#
+        ),
+    )
+    .unwrap();
+    let mut terminal = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    terminal.expect("New session");
+    terminal.keys("Activity acceptance\r");
+    terminal.expect("No tasks");
+    terminal.ready();
+    terminal.keys("n");
+    terminal.keys("Live transcript start\x13");
+    terminal.expect("FIRST-LIVE-END");
+    terminal.expect("Following");
+    terminal.capture("activity-follow-live");
+    terminal.keys("\x1b[H");
+    terminal.expect("Live transcript start");
+    terminal.expect_absent("Following");
+    advance.send(()).unwrap();
+    terminal.capture("activity-manual-reading");
+    terminal.keys("\x1b[F");
+    terminal.expect("SECOND-LIVE-END");
+    advance.send(()).unwrap();
+    terminal.expect("PERSISTED-END");
+    terminal.expect("12 input");
+    terminal.expect("4 output");
+    terminal.expect("Completed");
+    terminal.capture("activity-final-usage");
+    terminal.quit("\x03");
+    provider.join().unwrap();
+}
