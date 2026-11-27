@@ -303,6 +303,7 @@ impl App {
                 (58, (self.filtered_commands(menu).len() as u16 + 4).max(6))
             }
             Layer::Commands(_) => (66, 17),
+            Layer::ModelPicker(picker) => (66, picker.preferred_height()),
             Layer::Edit(Edit::Answer(..)) => (76, 15),
             Layer::Edit(_) | Layer::ConfirmCancel(_) => (64, 6),
             Layer::DraftContext { .. } => (76, 19),
@@ -330,6 +331,10 @@ impl App {
             Layer::Commands(menu) => (
                 format!("Commands  /  {}", menu.query),
                 "Type to filter  ·  Enter run  ·  Esc back",
+            ),
+            Layer::ModelPicker(_) => (
+                "Switch model".into(),
+                "↑/↓ Move  ·  Enter switch  ·  Esc back",
             ),
             Layer::Inbox(_) => (
                 "Workspace inbox".into(),
@@ -594,6 +599,7 @@ impl App {
             }
             Layer::Memories(panel) => self.draw_memories(frame, body, panel),
             Layer::Deliverables(catalog) => self.draw_deliverables(frame, body, catalog),
+            Layer::ModelPicker(picker) => picker.draw(frame, body, &self.palette),
             Layer::Diagnostics(text, scroll) => {
                 let state = if self.online {
                     ""

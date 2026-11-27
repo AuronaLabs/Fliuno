@@ -11,10 +11,11 @@ use fliuno_client::{Client, Error as ClientError, EventFeed, SessionHistory};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
     ArtifactCatalogSnapshotPage, ArtifactCatalogSnapshotParams, ArtifactDigest, ArtifactGetParams,
-    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelUsageSummary, ModelUsageTotals,
-    ObjectPage, Session, SessionContextParams, SessionForkParams, SessionHistoryListPage,
-    SessionHistoryListParams, SessionHistoryRole, SessionListOrder, SessionListParams, Task,
-    TaskContext, TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
+    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelProfileEntry, ModelProfileList,
+    ModelProfileSelectParams, ModelUsageSummary, ModelUsageTotals, ObjectPage, Session,
+    SessionContextParams, SessionForkParams, SessionHistoryListPage, SessionHistoryListParams,
+    SessionHistoryRole, SessionListOrder, SessionListParams, Task, TaskContext,
+    TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
     TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
     TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
     TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
@@ -44,6 +45,8 @@ type ProcessSlot = Arc<Mutex<Option<Child>>>;
 pub enum Request {
     Reconnect,
     Diagnostics,
+    ModelProfiles,
+    SelectModel(ModelProfileSelectParams),
     Memories {
         workspace: String,
         query: String,
@@ -158,7 +161,11 @@ pub enum Update {
     Online {
         workspace: Workspace,
         model: Option<String>,
+        model_profiles: bool,
     },
+    ModelProfiles(ModelProfileList),
+    ModelSelected(ModelProfileEntry),
+    ModelProfileError(String),
     Workspaces(ObjectPage<Workspace>),
     Workspace(Workspace),
     Sessions {
@@ -289,6 +296,7 @@ struct Service {
     watermark: Option<u64>,
     transcript: Option<TranscriptHead>,
     activity: activity::Progress,
+    selected_model: Option<ModelProfileEntry>,
 }
 
 struct TranscriptHead {
@@ -369,7 +377,20 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
         watermark: None,
         transcript: None,
         activity: activity::Progress::default(),
+        selected_model: None,
     })
+}
+
+fn profile_error(error: &(dyn std::error::Error + 'static)) -> String {
+    if let Some(ClientError::Rpc { message, .. }) = error.downcast_ref::<ClientError>() {
+        message
+            .strip_prefix("state conflict: ")
+            .or_else(|| message.strip_prefix("invalid argument: "))
+            .unwrap_or(message)
+            .to_owned()
+    } else {
+        error.to_string()
+    }
 }
 
 fn disconnected(err: &(dyn std::error::Error + 'static)) -> bool {
@@ -418,8 +439,13 @@ fn serve(
                     let model = server.client.info().capabilities["modelCapabilities"]["model"]
                         .as_str()
                         .map(str::to_owned);
+                    let model_profiles = server.supports("modelProfiles");
                     service = Some(server);
-                    out.send(Update::Online { workspace, model })?;
+                    out.send(Update::Online {
+                        workspace,
+                        model,
+                        model_profiles,
+                    })?;
                     Ok(())
                 }) {
                     Ok(()) => Ok(()),
@@ -432,7 +458,10 @@ fn serve(
             }
             Incoming::Command(Request::Diagnostics) => {
                 let info = service.as_ref().map(|server| server.client.info());
-                let report = health::inspect(&options, info);
+                let selected_model = service
+                    .as_ref()
+                    .and_then(|server| server.selected_model.as_ref());
+                let report = health::inspect(&options, info, selected_model);
                 out.send(Update::Diagnostics(report.text))
                     .map_err(Into::into)
             }
@@ -751,6 +780,25 @@ impl Service {
     fn handle(&mut self, request: Request, out: &Sender<Update>, root: &mut String) -> Result<()> {
         let update = match request {
             Request::Reconnect | Request::Diagnostics | Request::Backup(_) => unreachable!(),
+            Request::ModelProfiles => match self.rpc("modelProfiles/list", json!({})) {
+                Ok(profiles) => Update::ModelProfiles(profiles),
+                Err(error) if !disconnected(error.as_ref()) => {
+                    Update::ModelProfileError(profile_error(error.as_ref()))
+                }
+                Err(error) => return Err(error),
+            },
+            Request::SelectModel(params) => {
+                match self.rpc::<ModelProfileEntry>("modelProfiles/select", json!(params)) {
+                    Ok(model) => {
+                        self.selected_model = Some(model.clone());
+                        Update::ModelSelected(model)
+                    }
+                    Err(error) if !disconnected(error.as_ref()) => {
+                        Update::ModelProfileError(profile_error(error.as_ref()))
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
             Request::Workspaces(after) => {
                 Update::Workspaces(self.rpc("workspace/list", json!({"after":after,"limit":30}))?)
             }

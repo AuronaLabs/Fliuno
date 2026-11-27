@@ -1118,6 +1118,12 @@ fn terminal_creates_verifies_and_opens_a_restored_database() {
 }
 
 fn streaming_fixture_request(listener: &std::net::TcpListener) -> std::net::TcpStream {
+    streaming_fixture_input(listener).0
+}
+
+fn streaming_fixture_input(
+    listener: &std::net::TcpListener,
+) -> (std::net::TcpStream, serde_json::Value) {
     use std::io::{BufRead, BufReader};
 
     let (mut socket, _) = listener.accept().unwrap();
@@ -1148,7 +1154,7 @@ fn streaming_fixture_request(listener: &std::net::TcpListener) -> std::net::TcpS
             b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
         )
         .unwrap();
-    socket
+    (socket, request)
 }
 
 #[test]
@@ -1970,4 +1976,127 @@ fn composer_commands_start_and_resume_conversations_without_consuming_literal_in
     }
     reopened.expect("/new");
     reopened.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft() {
+    use serde_json::json;
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (finish_first, completion) = channel();
+    let (observed, requests) = channel();
+    let provider = thread::spawn(move || {
+        for answer in ["Original model answer", "Selected model answer"] {
+            let (mut socket, request) = streaming_fixture_input(&listener);
+            observed.send(request).unwrap();
+            if answer == "Original model answer" {
+                completion.recv_timeout(Duration::from_secs(25)).unwrap();
+            }
+            let event = json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":answer}]}]}});
+            write!(socket, "data: {event}\n\n").unwrap();
+        }
+    });
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(root.path().join("fixture.key"), "fixture-key\n").unwrap();
+    let settings = format!(
+        r#"
+        [workbench]
+        database = "models.db"
+        [model]
+        provider = "openai"
+        name = "first-model"
+        api_key_file = "fixture.key"
+        base_url = "http://{address}/v1/"
+        [models.broken]
+        provider = "openai"
+        name = "missing-key-model"
+        api_key_file = "missing.key"
+        base_url = "http://{address}/v1/"
+        [models.lab]
+        provider = "openai"
+        name = "second-model"
+        api_key_file = "fixture.key"
+        base_url = "http://{address}/v1/"
+        "#
+    );
+    std::fs::write(&config, &settings).unwrap();
+
+    let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    console.expect("Start a conversation");
+    console.expect("first-model");
+    console.keys("Retain the first prompt\r");
+    let first = requests.recv_timeout(Duration::from_secs(12)).unwrap();
+    assert_eq!(first["model"], "first-model");
+    console.ready();
+    console.keys("\x1bOPmodel");
+    console.expect("Commands  /  model");
+    console.ready();
+    console.keys("\r");
+    console.expect("second-model");
+    console.ready();
+    console.keys("\x1b[B\x1b[B\r");
+    console.expect("Finish or resolve existing model work");
+    console.ready();
+    console.keys("\x1b");
+    console.expect_absent("Switch model");
+    finish_first.send(()).unwrap();
+    console.expect("Original model answer");
+    console.ready();
+
+    console.keys("Send this preserved draft");
+    console.keys("\x1bOPmodel");
+    console.expect("Commands  /  model");
+    console.ready();
+    console.keys("\r");
+    console.expect("Switch model");
+    console.expect("second-model");
+    console.ready();
+    console.capture("model-picker-110");
+    console.resize(24, 80);
+    console.ready();
+    console.capture("model-picker-80");
+    console.resize(22, 48);
+    console.ready();
+    console.capture("model-picker-48");
+    console.keys("\x1b[B\r");
+    console.expect("Cannot read the configured");
+    console.ready();
+    console.capture("model-picker-error-48");
+    console.keys("\x1b");
+    console.expect_absent("Switch model");
+    console.expect("Send this preserved draft");
+    console.keys("\x1bOPmodel");
+    console.expect("Commands  /  model");
+    console.ready();
+    console.keys("\r");
+    console.expect("second-model");
+    console.ready();
+    console.keys("\x1b[B\x1b[B\r");
+    console.expect_absent("Switch model");
+    console.expect("second-model");
+    console.expect("Original model answer");
+    console.expect("Send this preserved draft");
+    console.ready();
+    console.capture("model-switched-48");
+    console.keys("\r");
+    let second = requests.recv_timeout(Duration::from_secs(12)).unwrap();
+    assert_eq!(second["model"], "second-model");
+    let input = second["input"].to_string();
+    assert!(input.contains("Retain the first prompt"), "{input}");
+    assert!(input.contains("Send this preserved draft"), "{input}");
+    console.expect("Selected model answer");
+    console.ready();
+    console.quit("\x03");
+    provider.join().unwrap();
+
+    let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    reopened.expect("first-model");
+    reopened.expect("Selected model answer");
+    reopened.quit("\x03");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), settings);
 }

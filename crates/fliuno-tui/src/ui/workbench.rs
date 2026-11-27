@@ -39,13 +39,14 @@ impl App {
         ])
         .areas(area);
         self.draw_header(frame, header);
-        let composer_commands = show_composer
+        let overlay = show_composer
             && body.height >= 7
-            && matches!(&self.layer, Layer::Commands(menu) if menu.origin != CommandOrigin::Workbench);
-        if !full_page
-            && !composer_commands
-            && !matches!(self.layer, Layer::None | Layer::Edit(Edit::Task))
-        {
+            && match &self.layer {
+                Layer::Commands(menu) => menu.origin != CommandOrigin::Workbench,
+                Layer::ModelPicker(_) => true,
+                _ => false,
+            };
+        if !full_page && !overlay && !matches!(self.layer, Layer::None | Layer::Edit(Edit::Task)) {
             self.draw_layer(
                 frame,
                 Rect::new(
@@ -70,7 +71,7 @@ impl App {
             self.draw_composer(frame, composer, editing);
         }
         self.draw_status_line(frame, status_line, editing, full_page);
-        if composer_commands {
+        if overlay {
             self.draw_layer(frame, body);
         }
     }

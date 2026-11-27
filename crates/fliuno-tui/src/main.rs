@@ -44,7 +44,7 @@ fn launch() -> Result<(), String> {
             println!("{}", path.display());
         }
         Entry::Doctor(options) => {
-            let report = health::inspect(&options, None);
+            let report = health::inspect(&options, None, None);
             print!("{}", ui::clean(&report.text));
             if !report.healthy {
                 return Err("configuration needs attention".into());

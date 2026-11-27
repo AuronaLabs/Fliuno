@@ -28,6 +28,7 @@ impl CommandMenu {
 pub(super) enum CommandAction {
     Shortcut(KeyCode),
     NewConversation,
+    ModelProfiles,
     Help,
 }
 

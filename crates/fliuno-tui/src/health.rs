@@ -15,7 +15,11 @@ impl Report {
     }
 }
 
-pub fn inspect(options: &Options, service: Option<&ServerInfo>) -> Report {
+pub fn inspect(
+    options: &Options,
+    service: Option<&ServerInfo>,
+    selected_model: Option<&fliuno_protocol::ModelProfileEntry>,
+) -> Report {
     let mut report = Report {
         text: String::new(),
         healthy: true,
@@ -30,7 +34,18 @@ pub fn inspect(options: &Options, service: Option<&ServerInfo>) -> Report {
             ),
             false,
         );
-        if let Some(provider) = capabilities
+        if let Some(model) = selected_model {
+            report.check(
+                "Active model",
+                &format!("{} / {}", model.provider, model.model),
+                false,
+            );
+            report.check(
+                "Active profile",
+                model.profile.as_deref().unwrap_or("[model]"),
+                false,
+            );
+        } else if let Some(provider) = capabilities
             .get("provider")
             .and_then(serde_json::Value::as_str)
         {
@@ -81,10 +96,22 @@ pub fn inspect(options: &Options, service: Option<&ServerInfo>) -> Report {
             .model_profile
             .as_deref())
         {
-            report.check("Model profile", profile, false);
+            report.check(
+                if selected_model.is_some() {
+                    "Launch profile"
+                } else {
+                    "Model profile"
+                },
+                profile,
+                false,
+            );
         }
         report.check(
-            "Model",
+            if selected_model.is_some() {
+                "Launch model"
+            } else {
+                "Model"
+            },
             &format!(
                 "{} / {}",
                 model.provider.name(),

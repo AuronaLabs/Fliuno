@@ -2,6 +2,7 @@ mod answer;
 mod commands;
 mod deliverables;
 mod memories;
+mod model_picker;
 mod palette;
 mod panels;
 pub(crate) mod setup;
@@ -49,6 +50,7 @@ const DRAFT_LIMIT: usize = 48 * 1024;
 
 enum Layer {
     Commands(CommandMenu),
+    ModelPicker(model_picker::Picker),
     Inbox(usize),
     History(usize),
     TaskBrowser(TaskBrowser),
@@ -171,6 +173,7 @@ pub struct App {
     palette: Palette,
     online: bool,
     model: Option<String>,
+    model_profiles: bool,
     busy: bool,
     next: Option<Request>,
     workspace: Option<Workspace>,
@@ -216,6 +219,7 @@ impl App {
             palette: Palette::new(theme),
             online: false,
             model: None,
+            model_profiles: false,
             busy: true,
             next: None,
             workspace: None,
@@ -445,11 +449,14 @@ impl App {
 
     fn update(&mut self, update: Update) {
         match update {
-            Update::Online { workspace, model } => {
+            Update::Online {
+                workspace,
+                model,
+                model_profiles,
+            } => {
                 self.online = true;
-                self.model = model
-                    .map(|name| clean(&name).replace('\n', " ").trim().to_owned())
-                    .filter(|name| !name.is_empty());
+                self.model = model.and_then(model_label);
+                self.model_profiles = model_profiles;
                 self.activity.clear();
                 self.message.clear();
                 let id = self.workspace.get_or_insert(workspace).id.clone();
@@ -790,12 +797,33 @@ impl App {
             Update::Offline(message) => {
                 self.online = false;
                 self.model = None;
+                self.model_profiles = false;
                 self.activity.clear();
                 self.layer = Layer::None;
                 self.next = None;
                 self.message = message;
             }
             Update::Activity(previews) => self.activity = previews,
+            Update::ModelProfiles(profiles) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.install(profiles);
+                }
+            }
+            Update::ModelSelected(model) => {
+                self.model = model_label(model.model);
+                if let Layer::ModelPicker(picker) = &self.layer {
+                    self.layer = picker.return_layer();
+                }
+                self.message = self
+                    .model
+                    .as_ref()
+                    .map_or_else(String::new, |name| format!("Using {name}"));
+            }
+            Update::ModelProfileError(error) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.error = Some(clean(&error));
+                }
+            }
             Update::Memories {
                 workspace,
                 query,
@@ -941,6 +969,10 @@ impl App {
             self.layer = Layer::Edit(Edit::Task);
             return false;
         }
+        if matches!(self.layer, Layer::ModelPicker(_)) {
+            self.model_picker_key(key, worker);
+            return false;
+        }
         if key.code == KeyCode::Esc && !matches!(self.layer, Layer::None) {
             if !self.start_pending {
                 self.layer = Layer::None;
@@ -1071,6 +1103,14 @@ impl App {
                             if menu.origin != CommandOrigin::Workbench {
                                 self.layer = Layer::Edit(Edit::Task);
                             }
+                        }
+                        return false;
+                    }
+                    CommandAction::ModelProfiles => {
+                        if self.send(worker, Request::ModelProfiles) {
+                            self.layer = Layer::ModelPicker(model_picker::Picker::new(menu.origin));
+                        } else {
+                            self.layer = Layer::Commands(menu);
                         }
                         return false;
                     }
@@ -1471,7 +1511,11 @@ impl App {
                 }
             }
             Layer::None => return self.overview_key(key, worker),
-            Layer::Inbox(..) | Layer::History(..) | Layer::Commands(_) | Layer::Edit(..) => {
+            Layer::Inbox(..)
+            | Layer::History(..)
+            | Layer::Commands(_)
+            | Layer::ModelPicker(_)
+            | Layer::Edit(..) => {
                 unreachable!()
             }
         }
@@ -2000,6 +2044,13 @@ impl App {
                 action: CommandAction::NewConversation,
             });
         }
+        if self.model_profiles && !self.busy {
+            commands.push(Command {
+                label: "Switch model",
+                alias: Some("model"),
+                action: CommandAction::ModelProfiles,
+            });
+        }
         if menu.origin == CommandOrigin::Slash {
             commands.push(Command {
                 label: "Show all commands",
@@ -2412,6 +2463,11 @@ pub fn clean(value: &str) -> String {
             c => Some(c),
         })
         .collect()
+}
+
+fn model_label(model: String) -> Option<String> {
+    let label = clean(&model).replace('\n', " ").trim().to_owned();
+    (!label.is_empty()).then_some(label)
 }
 
 fn step(key: KeyCode, index: &mut usize, len: usize) {
