@@ -1,6 +1,7 @@
 mod editor;
 mod options;
 mod service;
+mod task_browser;
 mod ui;
 
 use crossterm::{

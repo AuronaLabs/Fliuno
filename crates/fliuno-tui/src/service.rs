@@ -1,4 +1,4 @@
-use crate::options::Options;
+use crate::{options::Options, task_browser::PageAction};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use fliuno_client::{Client, Error as ClientError, EventFeed};
 use fliuno_protocol::{
@@ -42,6 +42,7 @@ pub enum Request {
     NewSession(String, String),
     SelectSession(String),
     Task(String),
+    TaskBrowser(fliuno_protocol::TaskSummaryListParams, PageAction),
     Start {
         session: String,
         text: String,
@@ -129,6 +130,12 @@ pub enum Update {
     SessionMetadata(Session),
     Overview(String, WorkSnapshot),
     Detail(Box<Detail>),
+    TaskBrowser {
+        session: String,
+        after: u64,
+        action: PageAction,
+        page: ObjectPage<TaskSummary>,
+    },
     Inbox(WorkspaceInbox),
     Approvals(Vec<ApprovalSummary>, bool),
     Jump(Session, String),
@@ -515,6 +522,27 @@ impl Service {
                 return self.refresh(out, true);
             }
             Request::Task(id) => Update::Detail(Box::new(self.detail(&id)?)),
+            Request::TaskBrowser(mut params, action) => {
+                if !self.supports("sessionTaskSummaryOrdering") {
+                    params.order = None;
+                }
+                let page: ObjectPage<TaskSummary> =
+                    self.rpc("task/listSummaries", json!(params))?;
+                if page.items.iter().any(|item| {
+                    item.session_id != params.session_id
+                        || params.status.is_some_and(|status| status != item.status)
+                }) {
+                    return Err(
+                        "The task list contained an item outside the requested filter".into(),
+                    );
+                }
+                Update::TaskBrowser {
+                    session: params.session_id,
+                    after: params.after,
+                    action,
+                    page,
+                }
+            }
             Request::Start {
                 session,
                 text,

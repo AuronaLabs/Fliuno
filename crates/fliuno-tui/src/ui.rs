@@ -2,6 +2,7 @@ use crate::{
     editor::Editor,
     options::Theme,
     service::{Detail, HistoryPage, Preview, Request, Update, Worker, WorkspaceInbox},
+    task_browser::{PageAction, TaskBrowser},
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use fliuno_protocol::{
@@ -17,6 +18,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 const ACCENT: Color = Color::Cyan;
 use fliuno_protocol::{
@@ -32,6 +34,7 @@ struct Palette {
     label: Style,
     quiet: Style,
     choice: Style,
+    status_colors: Option<[Color; 3]>,
     mono: bool,
 }
 
@@ -67,7 +70,16 @@ impl Palette {
                     label: bold(Style::default().fg(rgb(accent))),
                     quiet: Style::default().fg(rgb(quiet)),
                     choice: bold(base.bg(rgb(selected))),
-                    mono: true,
+                    status_colors: Some(if matches!(theme, Theme::Dark) {
+                        [
+                            rgb((247, 206, 121)),
+                            rgb((244, 145, 145)),
+                            rgb((138, 225, 182)),
+                        ]
+                    } else {
+                        [rgb((124, 76, 16)), rgb((153, 46, 47)), rgb((17, 100, 68))]
+                    }),
+                    mono: false,
                 }
             }
             Theme::Auto | Theme::Mono => {
@@ -79,6 +91,7 @@ impl Palette {
                     label: bold(if mono { base } else { base.fg(Color::Cyan) }),
                     quiet: base.add_modifier(Modifier::DIM),
                     choice: bold(base.add_modifier(Modifier::REVERSED)),
+                    status_colors: None,
                     mono,
                 }
             }
@@ -88,6 +101,14 @@ impl Palette {
     fn status(&self, color: Color) -> Style {
         if self.mono {
             self.label
+        } else if let Some([warning, error, success]) = self.status_colors {
+            match color {
+                Color::Yellow => self.label.fg(warning),
+                Color::Red => self.label.fg(error),
+                Color::Green => self.label.fg(success),
+                Color::Gray => self.quiet,
+                _ => self.label,
+            }
         } else {
             self.label.fg(color)
         }
@@ -98,6 +119,7 @@ enum Layer {
     Commands(usize, String),
     Inbox(usize),
     History(usize),
+    TaskBrowser(TaskBrowser),
     Workspaces(Option<ObjectPage<Workspace>>, usize),
     Sessions(Option<ObjectPage<Session>>, usize),
     Artifacts(usize),
@@ -603,6 +625,18 @@ impl App {
                     }
                 }
             }
+            Update::TaskBrowser {
+                session,
+                after,
+                action,
+                page,
+            } => {
+                if let Layer::TaskBrowser(browser) = &mut self.layer
+                    && browser.session == session
+                {
+                    browser.install(action, after, page);
+                }
+            }
             Update::Detail(detail) => {
                 if self
                     .session
@@ -625,10 +659,13 @@ impl App {
                         &id,
                         self.workspace
                             .as_ref()
-                            .map_or("", |root| root.root.as_str()),
+                            .map(|root| display_path(&root.root))
+                            .as_deref()
+                            .unwrap_or(""),
                         *details,
                     )
                 {
+                    self.message.clear();
                     self.layer = Layer::Approval {
                         task,
                         id,
@@ -1081,6 +1118,40 @@ impl App {
                     }
                 }
             }
+            Layer::TaskBrowser(browser) => {
+                if self.busy {
+                    return false;
+                }
+                step(
+                    key.code,
+                    &mut browser.index,
+                    browser.page.as_ref().map_or(0, |p| p.items.len()),
+                );
+                if pressed {
+                    let action = match key.code {
+                        KeyCode::PageDown => Some(PageAction::Next),
+                        KeyCode::PageUp => Some(PageAction::Previous),
+                        KeyCode::Home | KeyCode::Char('r') => Some(PageAction::First),
+                        KeyCode::Char('f') => Some(PageAction::CycleFilter),
+                        KeyCode::Enter => {
+                            if let Some(id) = browser.selected().map(|task| task.id.clone()) {
+                                self.select_task(id);
+                                self.layer = Layer::None;
+                                self.focus_details = true;
+                                self.sync(worker);
+                                return false;
+                            }
+                            None
+                        }
+                        _ => None,
+                    };
+                    if let Some(action) = action
+                        && let Some(params) = browser.query(action)
+                    {
+                        request = Some(Request::TaskBrowser(params, action));
+                    }
+                }
+            }
             Layer::Artifacts(index) => {
                 if let Some(detail) = &self.detail {
                     step(key.code, index, detail.artifacts.len());
@@ -1433,6 +1504,16 @@ impl App {
                 }
             }
             KeyCode::Char('b') if active && self.session.is_some() => self.draft_fork(None),
+            KeyCode::Char('L') if active => {
+                if let Some(session) = &self.session {
+                    let browser = TaskBrowser::new(session.id.clone());
+                    if let Some(params) = browser.query(PageAction::First)
+                        && self.send(worker, Request::TaskBrowser(params, PageAction::First))
+                    {
+                        self.layer = Layer::TaskBrowser(browser);
+                    }
+                }
+            }
             KeyCode::Char('Q') if active => {
                 if let Some(session) = &self.session
                     && self.send(worker, Request::Queue(session.id.clone()))
@@ -1477,6 +1558,7 @@ impl App {
             commands.push(("Workspaces", KeyCode::Char('w')));
             commands.push(("Sessions", KeyCode::Char('s')));
             if self.session.is_some() {
+                commands.push(("Browse session tasks", KeyCode::Char('L')));
                 commands.push(("Queued prompts", KeyCode::Char('Q')));
                 commands.push(("Branch current session", KeyCode::Char('b')));
                 let label = if self.plan_only {
@@ -1753,7 +1835,10 @@ impl App {
         let area = frame.area();
         frame.render_widget(Block::default().style(self.palette.base), area);
         let expanded = matches!(self.layer, Layer::Edit(Edit::Task));
-        let full_view = matches!(self.layer, Layer::Inbox(_) | Layer::History(_));
+        let full_view = matches!(
+            self.layer,
+            Layer::Inbox(_) | Layer::History(_) | Layer::TaskBrowser(_)
+        );
         let editor_height = if full_view {
             0
         } else if expanded {
@@ -1761,18 +1846,18 @@ impl App {
         } else {
             2
         };
+        let show_status = self.busy || !self.message.is_empty();
         let [top, middle, composer, bottom] = Layout::vertical([
             Constraint::Length(if area.height >= 10 { 2 } else { 1 }),
             Constraint::Min(0),
             Constraint::Length(editor_height),
-            Constraint::Length(1),
+            Constraint::Length(1 + u16::from(show_status && area.height >= 12)),
         ])
         .areas(area);
         let root = self
             .workspace
             .as_ref()
-            .map(|root| clean(&root.root))
-            .unwrap_or_default();
+            .map_or_else(String::new, |root| display_path(&root.root));
         let session = if matches!(self.layer, Layer::Inbox(_)) {
             "Workspace inbox".into()
         } else if matches!(self.layer, Layer::History(_)) {
@@ -1790,27 +1875,33 @@ impl App {
         } else {
             "Local"
         };
+        let title_width = usize::from(area.width).saturating_sub(state.width() + 15);
+        let breadcrumb = self
+            .session
+            .as_ref()
+            .and_then(|session| session.fork_origin.as_ref())
+            .map_or(root.clone(), |origin| {
+                format!(
+                    "Branch of {} · {} inherited turns · {root}",
+                    clean(&origin.session_id)
+                        .chars()
+                        .take(12)
+                        .collect::<String>(),
+                    origin.inherited_turns
+                )
+            });
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(vec![
                     Span::styled(" FLIUNO ", self.palette.label),
-                    Span::raw(format!("  {session}")),
+                    Span::raw(format!("  {}", ellipsis(&session, title_width))),
                     Span::styled(format!("  ·  {state}"), self.palette.quiet),
                 ]),
                 Line::styled(
-                    self.session
-                        .as_ref()
-                        .and_then(|s| s.fork_origin.as_ref())
-                        .map_or_else(
-                            || format!(" {root}"),
-                            |origin| {
-                                format!(
-                                    " Branch of {} · {} inherited turns · {root}",
-                                    clean(&origin.session_id),
-                                    origin.inherited_turns
-                                )
-                            },
-                        ),
+                    format!(
+                        " {}",
+                        path_tail(&breadcrumb, usize::from(area.width).saturating_sub(2))
+                    ),
                     self.palette.quiet,
                 ),
             ])
@@ -1821,6 +1912,8 @@ impl App {
             self.draw_inbox(frame, middle);
         } else if matches!(self.layer, Layer::History(_)) {
             self.draw_history(frame, middle);
+        } else if let Layer::TaskBrowser(browser) = &self.layer {
+            self.draw_task_browser(frame, middle, browser);
         } else if area.width >= 90 {
             let [tasks, details] = Layout::horizontal([
                 Constraint::Length((area.width / 4).clamp(24, 34)),
@@ -1834,28 +1927,100 @@ impl App {
         } else {
             self.draw_tasks(frame, middle, true);
         }
-        if !matches!(self.layer, Layer::Inbox(_) | Layer::History(_)) {
+        if !full_view {
             self.draw_composer(frame, composer, expanded);
         }
         let message = if self.busy { "Working" } else { &self.message };
+        let help = if expanded {
+            if area.width < 65 {
+                " Ctrl+S Submit  Ctrl+E Queue  F2 "
+            } else {
+                " Ctrl+S Submit  Ctrl+E Queue  F2 Mode  Esc Back "
+            }
+        } else if full_view {
+            " Enter Open  Esc Back "
+        } else if matches!(self.layer, Layer::None) {
+            if area.width < 70 {
+                " F1 Commands  Tab View "
+            } else {
+                " F1 Commands  n New  Tab View  Shift+L All tasks "
+            }
+        } else {
+            " Esc Back "
+        };
+        let (help, notice) = if bottom.height >= 2 {
+            (help, Some(message))
+        } else if show_status {
+            (message, None)
+        } else {
+            (help, None)
+        };
+        let max_width = usize::from(area.width);
+        let mut lines = vec![Line::styled(ellipsis(help, max_width), self.palette.label)];
+        if let Some(notice) = notice {
+            let text = format!(" {}", clean(notice).replace('\n', " "));
+            lines.push(Line::styled(ellipsis(&text, max_width), self.palette.quiet));
+        }
+        frame.render_widget(Paragraph::new(lines).style(self.palette.rail), bottom);
+        self.draw_layer(frame, area);
+    }
+
+    fn draw_task_browser(&self, frame: &mut Frame<'_>, area: Rect, browser: &TaskBrowser) {
+        let [title, list] =
+            Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(area);
+        let filter = browser.status().map_or("All states", |s| status(s).0);
         frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(
-                    if matches!(self.layer, Layer::Inbox(_)) {
-                        " Enter Open  Esc Back  H History  "
-                    } else if matches!(self.layer, Layer::History(_)) {
-                        " Enter Open  Esc Back  "
-                    } else {
-                        " F1 Commands  "
-                    },
+            Paragraph::new(vec![
+                Line::styled(
+                    format!(
+                        " Session tasks  ·  {filter}  ·  Page {}",
+                        browser.cursors.len()
+                    ),
                     self.palette.label,
                 ),
-                Span::raw(clean(message).replace('\n', " ")),
-            ]))
+                Line::styled(
+                    " f Filter  PgUp Prev  PgDn Next  r Refresh",
+                    self.palette.quiet,
+                ),
+            ])
             .style(self.palette.rail),
-            bottom,
+            title,
         );
-        self.draw_layer(frame, area);
+        let Some(page) = &browser.page else {
+            render_text(frame, list, "Loading tasks…", 0);
+            return;
+        };
+        if page.items.is_empty() {
+            render_text(frame, list, "No tasks match this filter.", 0);
+            return;
+        }
+        let rows = page
+            .items
+            .iter()
+            .map(|task| {
+                let (label, color) = task_status(task);
+                let prompt = task_preview(task);
+                if area.width < 68 {
+                    ListItem::new(vec![
+                        Line::styled(label, self.palette.status(color)),
+                        Line::raw(prompt),
+                    ])
+                } else {
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("{label:<19}"), self.palette.status(color)),
+                        Span::raw(prompt),
+                    ]))
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut state = ListState::default().with_selected(Some(browser.index));
+        frame.render_stateful_widget(
+            List::new(rows)
+                .highlight_symbol("› ")
+                .highlight_style(self.palette.choice),
+            list,
+            &mut state,
+        );
     }
 
     fn draw_inbox(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -2040,16 +2205,15 @@ impl App {
         } else {
             "Draft · Execution"
         };
-        let mut title = if focused {
-            format!(" {mode}  ·  Ctrl+S submit  ·  Ctrl+E queue  ·  F2 mode ")
-        } else if self.session.is_none() {
+        let title = if self.session.is_none() {
             " No session ".to_owned()
         } else {
-            format!(" {mode}  ·  N edit  ·  F2 mode ")
+            let mut title = format!(" {mode} ");
+            if self.input_artifact.is_some() {
+                title.push_str(" · Attachment ");
+            }
+            title
         };
-        if let Some(artifact) = &self.input_artifact {
-            title.push_str(&format!(" · Attached: {} ", clean(&artifact.artifact_id)));
-        }
         let block = Block::default()
             .borders(Borders::TOP)
             .style(self.palette.rail)
@@ -2061,10 +2225,19 @@ impl App {
             return;
         }
         let (lines, x, y) = self.draft.viewport(body.width, body.height);
-        frame.render_widget(
-            Paragraph::new(lines.into_iter().map(Line::raw).collect::<Vec<_>>()),
-            body,
-        );
+        if self.draft.text().is_empty() && !focused {
+            if self.session.is_some() {
+                frame.render_widget(
+                    Paragraph::new("Press n to write a task").style(self.palette.quiet),
+                    body,
+                );
+            }
+        } else {
+            frame.render_widget(
+                Paragraph::new(lines.into_iter().map(Line::raw).collect::<Vec<_>>()),
+                body,
+            );
+        }
         if focused && !self.start_pending {
             frame.set_cursor_position(Position::new(body.x + x, body.y + y));
         }
@@ -2085,14 +2258,14 @@ impl App {
         let list: Vec<_> = tasks
             .iter()
             .map(|task| {
-                let flag = if task.agent_outcome_unknown || task.model_outcome_unknown {
-                    "Unknown"
-                } else {
-                    status(task.status).0
-                };
+                let (label, color) = task_status(task);
+                let content = ellipsis(
+                    &task_preview(task),
+                    usize::from(area.width).saturating_sub(3),
+                );
                 ListItem::new(vec![
-                    Line::styled(flag, self.palette.status(status(task.status).1)),
-                    Line::raw(clean(&task.input_preview).replace('\n', " ")),
+                    Line::raw(content),
+                    Line::styled(label, self.palette.status(color)),
                     Line::raw(""),
                 ])
             })
@@ -2231,7 +2404,13 @@ impl App {
                 append(&mut lines, output);
             }
         } else {
-            lines.push(Line::raw("No task selected"));
+            lines.push(Line::raw(if self.busy && self.selected.is_some() {
+                "Loading task…"
+            } else if self.tasks().is_empty() {
+                "Press n to start work in this session"
+            } else {
+                "Select a task from the list"
+            }));
         }
         frame.render_widget(
             Paragraph::new(lines)
@@ -2244,18 +2423,31 @@ impl App {
     fn draw_layer(&self, frame: &mut Frame<'_>, area: Rect) {
         if matches!(
             self.layer,
-            Layer::None | Layer::Inbox(_) | Layer::History(_) | Layer::Edit(Edit::Task)
+            Layer::None
+                | Layer::Inbox(_)
+                | Layer::History(_)
+                | Layer::TaskBrowser(_)
+                | Layer::Edit(Edit::Task)
         ) {
             return;
         }
+        let max_width = match self.layer {
+            Layer::Commands(..) => 66,
+            Layer::Edit(_) | Layer::ConfirmCancel(_) => 76,
+            Layer::Approval { .. } => 88,
+            _ => 112,
+        };
         let modal = area.inner(Margin::new(
-            if area.width < 60 { 1 } else { area.width / 12 },
+            (area.width.saturating_sub(max_width) / 2).max(u16::from(area.width >= 24)),
             if area.height < 12 { 0 } else { area.height / 9 },
         ));
         frame.render_widget(Clear, modal);
         let (title, actions) = match &self.layer {
-            Layer::None => return,
-            Layer::Commands(_, query) => (format!("Commands  /  {query}"), ""),
+            Layer::None | Layer::TaskBrowser(_) => return,
+            Layer::Commands(_, query) => (
+                format!("Commands  /  {query}"),
+                "Type to filter  ·  Enter run  ·  Esc back",
+            ),
             Layer::Inbox(_) => (
                 "Workspace inbox".into(),
                 "1 attention / 2 running / 3 recent / Enter open / h history",
@@ -2308,12 +2500,14 @@ impl App {
             Layer::Approval { allow_once, .. } => (
                 "Review operation".into(),
                 if *allow_once {
-                    "Allow once / Deny"
+                    "y Allow once  ·  n Deny  ·  Esc Back"
                 } else {
-                    "Deny"
+                    "n Deny  ·  Esc Back"
                 },
             ),
-            Layer::ConfirmCancel(_) => ("Cancel task?".into(), "Cancel task / Keep running"),
+            Layer::ConfirmCancel(_) => {
+                ("Cancel task?".into(), "y Cancel task  ·  Esc Keep running")
+            }
             Layer::Preview(preview, _) => (
                 "Artifact preview".into(),
                 match (preview.text.is_some(), preview.revision.is_some()) {
@@ -2330,26 +2524,36 @@ impl App {
             .border_style(self.palette.quiet)
             .borders(Borders::ALL)
             .title(Span::styled(format!(" {title} "), self.palette.label));
-        let body = block.inner(modal).inner(Margin::new(1, 0));
+        let inset = u16::from(area.width >= 55 || !matches!(self.layer, Layer::Approval { .. }));
+        let body = block.inner(modal).inner(Margin::new(inset, 0));
         frame.render_widget(block, modal);
         if body.is_empty() {
             return;
         }
-        let [body, footer] = Layout::vertical([
-            Constraint::Min(0),
-            Constraint::Length(u16::from(!actions.is_empty() && body.height > 1)),
-        ])
-        .areas(body);
-        frame.render_widget(Paragraph::new(actions).style(self.palette.label), footer);
+        let footer_height = if actions.is_empty() || body.height < 2 {
+            0
+        } else if body.height >= 4 && actions.width() > usize::from(body.width) {
+            2
+        } else {
+            1
+        };
+        let [body, footer] =
+            Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).areas(body);
+        frame.render_widget(
+            Paragraph::new(actions)
+                .wrap(Wrap { trim: true })
+                .style(self.palette.label),
+            footer,
+        );
         match &self.layer {
             Layer::None => {}
-            Layer::Inbox(_) | Layer::History(_) => {}
+            Layer::Inbox(_) | Layer::History(_) | Layer::TaskBrowser(_) => {}
             Layer::Commands(index, query) => render_list(
                 frame,
                 body,
                 self.filtered_commands(query)
                     .into_iter()
-                    .map(|(label, _)| label.to_owned())
+                    .map(|(label, key)| format!("{:<10}{label}", key_label(key)))
                     .collect(),
                 *index,
                 self.palette.choice,
@@ -2625,8 +2829,83 @@ fn scroll_key(key: KeyCode, scroll: &mut u16) {
     }
 }
 
+fn key_label(key: KeyCode) -> String {
+    match key {
+        KeyCode::Char(c) if c.is_ascii_uppercase() => format!("Shift+{c}"),
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::F(n) => format!("F{n}"),
+        _ => String::new(),
+    }
+}
+
+fn display_path(path: &str) -> String {
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{}", clean(unc))
+    } else {
+        clean(path.strip_prefix(r"\\?\").unwrap_or(path))
+    }
+}
+
+fn ellipsis(text: &str, width: usize) -> String {
+    if text.width() <= width {
+        return text.to_owned();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut remaining = width - 1;
+    for cluster in text.graphemes(true) {
+        let cells = cluster.width();
+        if cells > remaining {
+            break;
+        }
+        out.push_str(cluster);
+        remaining -= cells;
+    }
+    out.push('…');
+    out
+}
+
+fn path_tail(path: &str, width: usize) -> String {
+    if path.width() <= width {
+        return path.to_owned();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut start = path.len();
+    let mut remaining = width - 1;
+    for (index, cluster) in path.grapheme_indices(true).rev() {
+        let cells = cluster.width();
+        if cells > remaining {
+            break;
+        }
+        start = index;
+        remaining -= cells;
+    }
+    format!("…{}", &path[start..])
+}
+
 fn session_name(session: &Session) -> String {
     clean(session.title.as_deref().unwrap_or("Untitled session"))
+}
+
+fn task_status(task: &TaskSummary) -> (&'static str, Color) {
+    if task.agent_outcome_unknown || task.model_outcome_unknown {
+        ("Unknown", Color::Yellow)
+    } else {
+        status(task.status)
+    }
+}
+
+fn task_preview(task: &TaskSummary) -> String {
+    let preview = clean(&task.input_preview).replace('\n', " ");
+    if preview.trim().is_empty() {
+        task.id.clone()
+    } else {
+        preview
+    }
 }
 
 fn status(status: TaskStatus) -> (&'static str, Color) {
@@ -2689,7 +2968,7 @@ fn approval_review(
                 .unwrap_or_default();
             Some((
                 format!(
-                    "{}\nWorkspace: {root}\n\n{arguments}\n\n{review}",
+                    "{}\n\nWorkspace\n{root}\n\nArguments\n{arguments}\n{review}",
                     approval.call.name
                 ),
                 true,
@@ -2807,7 +3086,7 @@ mod tests {
                         row.iter()
                             .map(|cell| cell.symbol())
                             .collect::<String>()
-                            .contains("Allow once / Deny")
+                            .contains("y Allow once")
                     })
                     .expect("approval actions stay visible");
                 let label = footer.iter().find(|cell| cell.symbol() == "A").unwrap();

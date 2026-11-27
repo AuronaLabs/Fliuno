@@ -45,6 +45,10 @@ impl Console {
         command.arg("--db");
         command.arg(root.join("workbench.db"));
         command.env("TERM", "xterm-256color");
+        if let Some(theme) = std::env::var_os("FLIUNO_TEST_THEME") {
+            command.arg("--theme");
+            command.arg(theme);
+        }
         let child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
         let mut reader = pair.master.try_clone_reader().unwrap();
@@ -68,9 +72,17 @@ impl Console {
     }
 
     fn expect(&mut self, expected: &str) {
+        self.wait_for(expected, true);
+    }
+
+    fn expect_absent(&mut self, expected: &str) {
+        self.wait_for(expected, false);
+    }
+
+    fn wait_for(&mut self, expected: &str, present: bool) {
         let deadline = Instant::now() + Duration::from_secs(20);
         let mut transcript = Vec::new();
-        while !self.screen.screen().contents().contains(expected) {
+        while self.screen.screen().contents().contains(expected) != present {
             match self
                 .output
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -82,7 +94,7 @@ impl Console {
                     }
                 }
                 Err(error) => panic!(
-                    "expected {expected:?}: {error}\nchild: {:?}\nscreen: {}\noutput: {:?}",
+                    "expected {expected:?} (present: {present}): {error}\nchild: {:?}\nscreen: {}\noutput: {:?}",
                     self.child.try_wait().unwrap(),
                     self.screen.screen().contents(),
                     String::from_utf8_lossy(&transcript),
@@ -106,9 +118,39 @@ impl Console {
     fn capture(&mut self, name: &str) {
         if let Some(directory) = std::env::var_os("FLIUNO_TUI_CAPTURE") {
             self.ready();
+            let screen = self.screen.screen();
+            let (rows, cols) = screen.size();
+            let color = |color| match color {
+                vt100::Color::Default => serde_json::Value::Null,
+                vt100::Color::Idx(index) => serde_json::json!(index),
+                vt100::Color::Rgb(r, g, b) => serde_json::json!([r, g, b]),
+            };
+            let cells = (0..rows)
+                .map(|row| {
+                    (0..cols)
+                        .map(|col| {
+                            let cell = screen.cell(row, col).expect("cell within viewport");
+                            serde_json::json!([
+                                cell.contents(),
+                                color(cell.fgcolor()),
+                                color(cell.bgcolor()),
+                                cell.bold(),
+                                cell.inverse(),
+                                cell.is_wide_continuation(),
+                            ])
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            let directory = PathBuf::from(directory);
             std::fs::write(
-                PathBuf::from(directory).join(format!("{name}.ansi")),
-                self.screen.screen().contents_formatted(),
+                directory.join(format!("{name}.ansi")),
+                screen.contents_formatted(),
+            )
+            .unwrap();
+            std::fs::write(
+                directory.join(format!("{name}.json")),
+                serde_json::to_vec(&cells).unwrap(),
             )
             .unwrap();
         }
@@ -263,14 +305,17 @@ fn terminal_plan_queue_branch_and_timeline_workflow() {
     console.keys("Q");
     console.expect("Queued prompts (1)");
     console.expect("Draft a release plan");
+    console.capture("prompt-queue");
     console.ready();
     console.keys("\r");
     console.expect("Demo plan ready for review.");
     console.expect("Completed");
+    console.capture("plan-completed");
     console.ready();
     console.keys("t");
     console.expect("Task timeline");
     console.expect("task started");
+    console.capture("timeline");
     console.ready();
     console.keys("\r");
     console.expect("task_started");
@@ -278,10 +323,11 @@ fn terminal_plan_queue_branch_and_timeline_workflow() {
     console.keys("\x1b");
     console.expect("Task timeline");
     console.keys("\x1b");
-    console.expect("Task detail");
+    console.expect_absent("Task timeline");
     console.keys("c");
     console.expect("Context and memory usage");
     console.expect("history turns");
+    console.capture("context");
     console.ready();
     console.keys("\x1b");
     console.expect("Task detail");
@@ -343,8 +389,10 @@ fn terminal_workspace_inbox_and_history_search_cross_sessions() {
     console.expect("Workspace inbox");
     console.expect("Cross session approval");
     console.keys("\r");
-    console.expect("Allow once / Deny");
+    console.expect("y Allow once");
+    console.expect("n Deny");
     console.expect("artifact_create");
+    console.ready();
     console.keys("y");
     console.expect("Completed");
     console.ready();
@@ -372,6 +420,103 @@ fn terminal_workspace_inbox_and_history_search_cross_sessions() {
 
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn task_browser_can_open_a_prompt_outside_the_recent_list() {
+    use fliuno_client::Client;
+    use serde_json::{Value, json};
+    use std::{io::BufReader, process::Stdio};
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            binary().with_file_name(if cfg!(windows) {
+                "fliuno-app-server.exe"
+            } else {
+                "fliuno-app-server"
+            })
+        });
+    let root = tempfile::tempdir().unwrap();
+    let mut child = Command::new(&server)
+        .arg("--db")
+        .arg(root.path().join("workbench.db"))
+        .env("FLIUNO_PROVIDER", "demo")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut client = Client::connect(
+        BufReader::new(child.stdout.take().unwrap()),
+        child.stdin.take().unwrap(),
+        "terminal-browser-test",
+        |_| {},
+    )
+    .unwrap();
+    let workspace: Value = client
+        .call("workspace/open", &json!({"root":root.path()}), |_| {})
+        .unwrap();
+    let session: Value = client
+        .call(
+            "session/create",
+            &json!({"workspaceId":workspace["id"],"title":"工作任务历史"}),
+            |_| {},
+        )
+        .unwrap();
+    for n in 0..41 {
+        let prompt = if n == 0 {
+            "Original prompt".to_owned()
+        } else {
+            format!("Newer prompt {n:02}")
+        };
+        let task: Value = client
+            .call(
+                "task/startSummary",
+                &json!({"sessionId":session["id"], "input":prompt}),
+                |_| {},
+            )
+            .unwrap();
+        let _: Value = client
+            .call("task/cancel", &json!({"taskId":task["id"]}), |_| {})
+            .unwrap();
+    }
+    let (mut output, input) = client.into_parts();
+    drop(input);
+    std::io::copy(&mut output, &mut std::io::sink()).unwrap();
+    assert!(child.wait().unwrap().success());
+    let mut console = Console::launch(Some(&server), root.path());
+    console.expect("工作任务历史");
+    console.expect("Newer prompt 40");
+    console.ready();
+    console.keys("L");
+    console.expect("Page 1");
+    console.expect("Newer prompt 40");
+    console.capture("task-browser-many");
+    console.ready();
+    console.keys("\x1b[6~");
+    console.expect("Page 2");
+    console.expect("Newer prompt 20");
+    console.ready();
+    console.keys("\x1b[5~");
+    console.expect("Page 1");
+    console.ready();
+    console.keys("\x1b[6~");
+    console.expect("Page 2");
+    console.ready();
+    console.keys("\x1b[6~");
+    console.expect("Page 3");
+    console.expect("Original prompt");
+    console.ready();
+    console.resize(18, 48);
+    console.expect("Enter Open");
+    console.expect("r Refresh");
+    console.capture("task-browser-narrow");
+    console.ready();
+    console.keys("\r");
+    console.expect("Task detail");
+    console.expect("Original prompt");
+    console.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn terminal_demo_reviews_and_reopens_one_artifact() {
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
     let root = tempfile::tempdir().unwrap();
@@ -383,6 +528,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     console.ready();
     console.keys("/");
     console.expect("Commands  /");
+    console.capture("command-menu");
     console.keys("new task\r");
     console.expect("New task");
     if cfg!(windows) {
@@ -396,11 +542,21 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     console.expect("Review operation");
     console.ready();
     console.keys("a");
-    console.expect("Allow once / Deny");
+    console.expect("y Allow once");
+    console.expect("n Deny");
     console.expect("artifact_create");
     console.keys("y");
     console.expect("Completed");
     console.ready();
+    console.keys("L");
+    console.expect("All states");
+    console.expect("second line");
+    console.capture("task-browser-wide");
+    console.keys("f");
+    console.expect("No tasks match this filter.");
+    console.ready();
+    console.keys("\x1b");
+    console.expect("Task detail");
     console.keys("v");
     console.expect("text/plain");
     console.keys("\r");
@@ -436,7 +592,8 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     reopened.resize(18, 48);
     reopened.expect("Session tasks");
     reopened.keys("a");
-    reopened.expect("Allow once / Deny");
+    reopened.expect("y Allow once");
+    reopened.expect("n Deny");
     reopened.expect("artifact_create");
     reopened.capture("narrow-approval");
     reopened.keys("n");
@@ -446,6 +603,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     reopened.expect("tool execution denied");
     reopened.ready();
     reopened.resize(28, 110);
+    reopened.expect("Shift+L All tasks");
     reopened.keys("n");
     reopened.expect("New task");
     reopened.keys("Cancel this draft\x13");
