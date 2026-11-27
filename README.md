@@ -15,7 +15,7 @@
 
 **[快速体验](#快速体验)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.10** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.10) · [更新记录](CHANGELOG.md#0010)
+当前版本 **v0.0.11** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.11) · [更新记录](CHANGELOG.md#0011)
 
 ## 快速体验
 
@@ -29,8 +29,9 @@ Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` �
 
 按 `Shift+I` 查看当前工作区各会话的待办，按 `Shift+H` 搜索已完成的历史并跳回原任务。按 `F1` 或 `/` 搜索当前可用的命令。宽屏可以同时看任务队列和详情，窄屏用 `Tab` 切换；运行时加 `--theme dark`、`light` 或 `mono` 可选择显示主题。
 
-| 0.0.10 工作流 | 快捷键 |
+| 工作流 | 快捷键 |
 | --- | --- |
+| 浏览当前会话的任务 | `Shift+L` 打开完整列表，支持按状态筛选及翻页。 |
 | 审阅计划后开始实施 | `F2` 切换计划模式，任务完成后 `Shift+P` 创建实施草稿。 |
 | 安排后续工作 | `Ctrl+E` 入队，`Shift+Q` 查看并启动下一项。 |
 | 探索另一条思路 | `B` 从当前会话分支，`Shift+B` 以所选的已完成任务为边界。 |
