@@ -1,0 +1,39 @@
+# 0.0.17 开发与发布计划
+
+[开发路线图](roadmap.md) · [工作台使用指南](workbench.md) · [工程验收记录](execution-evidence.md)
+
+v0.0.16 是当前稳定基线。下一版应让用户在 Windows 和 Debian 上安装、打开已有工作区、继续任务，并在同一终端工作台找到、审阅和保存团队交付物。此前单独排期的交付物和连接性能改进在本版一起验收。按可审查的功能块提交，完成整版验收后再打标签和发版。
+
+## 调研与取舍
+
+| 资料及本地检出 | 对 Fliuno 的具体影响 |
+| --- | --- |
+| [Codex 发布流程](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/.github/workflows/rust-release.yml) 与[原生 Windows 构建](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/.github/workflows/rust-release-windows.yml)，本地 `D:\Fliuno-References\codex`，提交 `a1604a8` | 核对发布版本与 Cargo 元数据，按平台构建，把 TUI 和它实际启动的 app-server 一起交付并验收。 |
+| [OpenCode 产物核验](https://github.com/anomalyco/opencode/blob/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/.github/release/verify-artifacts.sh)及[发布流程](https://github.com/anomalyco/opencode/blob/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/.github/workflows/release.yml)，本地 `D:\Fliuno-References\opencode`，提交 `d284e7c` | 用相同字节执行验收和发布。发布前核对资产清单和 SHA-256，拒绝缺失或额外产物。 |
+| [Claude Code 安装文档](https://code.claude.com/docs/en/setup)，本地 `D:\Fliuno-References\claude-code`，提交 `2771d55` | 为每个平台提供安装、更新、卸载和诊断入口。首版让 Windows Installer 和 Debian 包管理器处理显式升级，配置继续由用户目录中的文件管理。 |
+| [WiX 主版本升级](https://docs.firegiant.com/wix/schema/wxs/majorupgrade/)与 [Debian 二进制包规范](https://www.debian.org/doc/debian-policy/ch-binary.html) | Windows x64 使用带固定 UpgradeCode 的 MSI，安装两个程序并注册 PATH。Debian 12+ amd64 使用 `.deb`，由包管理器记录 `/usr/bin` 中的程序与文档。ZIP 和 tar.gz 保留给便携用户。 |
+| [GitHub Actions 构建证明](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)与[不可变发布](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases) | 候选构建与验证先以只读工作流运行。启用可落实的构建证明后，正式发布从已验收的候选制品组装草稿，并核对远端资产摘要再公开。Windows 代码签名与 Actions 构建证明分别记录。 |
+
+## 版本范围
+
+| 板块 | 交付内容 | 退出条件 |
+| --- | --- | --- |
+| 跨任务交付物 | 工作区目录、媒体类型筛选和快照分页、来源会话及版本预览、保存回执。 | 双平台真实终端验证跨会话隔离、前后版本切换、重启后浏览、多页文件清单、已存在目标的保留和保存字节的 SHA-256。 |
+| 终端可靠性与性能 | 测量空闲刷新、长历史打开、活动任务与断线追赶。优先合并重复刷新并减少空闲 RPC，保留任务完成、审批、状态变更的及时显示。 | 同机同种子比较 v0.0.16 和候选版本，记录空闲 60 秒请求数、首屏和重连延迟、峰值内存。测试快照与增量切换时的新事件、流量突发、后台任务、终态与审批。发现退化时修复或明确记录原因与影响。 |
+| TUI 布局与回归 | 审阅目录列表、预览、保存输入和提示，与当前会话界面统一。 | 通过 Windows ConPTY 和 Debian PTY 检查约 110、80、48 列，保存真实屏幕截图。核对焦点、主要操作提示、多行路径、中英文和宽字符，输入与滚动时保留正在审阅的位置。 |
+| 安装与发布 | Windows x64 MSI、Debian amd64 `.deb`、两种便携归档、SHA-256 清单与验收记录。优先复用现有配置、服务定位和数据库路径。 | 从安装包运行 `fliuno --version`、`fliuno --doctor` 和真实 TUI 工作流。安装、迁移、升级、卸载与重装均通过，最终资产与已验收资产的摘要一致。 |
+
+## 安装生命周期
+
+1. 在空白环境中安装，使用新终端通过命令名启动。无源码、Cargo、编译器或旧 PATH 条目时，TUI 也能定位同包 app-server。Windows MSI 管理系统 PATH，Debian 包管理器管理 `/usr/bin`。两个平台均以普通用户启动应用。
+2. 用 v0.0.16 的便携版预置一个含会话、历史、审批、记忆和交付物的用户目录。备份后安装候选版，读取相同数据，继续任务，并核对凭据文件和个人配置。测试里只使用本机模型夹具和假的凭据文件。
+3. 用两个不同版本的测试包验证 MSI 主版本更新与 Debian 包更新。确认升级后系统只保留新版本注册，卸载不会手动清理原便携版。检查已运行的程序导致升级被阻止时，安装器能给出可操作的提示及日志。
+4. 通过系统卸载移除注册和应用文件，验证 `~/.fliuno` 及自定义数据库、备份和导出文件仍存在。重新安装并打开已有会话。
+5. 对便携归档执行独立启动与校验，验证包版本及两份二进制版本一致。Debian 12 上实际运行候选资产，避免由较新的构建环境悄悄抬高 glibc 要求。
+
+## 发布门槛
+
+- 先提交计划，分别提交交付物、连接性能、安装与验收。最终版本和更新记录跟随候选来源提交，可独立追溯每个板块。
+- 锁定依赖，运行格式、Clippy、全工作区测试、协议 schema 校验和现有示例。候选验收从干净提交构建，核对安装包中的程序与通过平台测试的程序一致。
+- 安装生命周期与真实 TUI 工作流均通过，记录测试系统、提交 SHA、候选资产 SHA-256、性能对比及终端截图。公开前远端资产必须与验收清单一一匹配。
+- GitHub Actions 先运行可手动触发的候选构建和验证。签名状态、构建证明状态和支持的系统在版本说明中如实标出。候选失败时修复后重新构建和验收，稳定版继续使用原发布。
