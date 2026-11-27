@@ -212,6 +212,66 @@ fn stalled_initialization_cannot_hold_the_terminal_open() {
 
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn terminal_workspace_inbox_and_history_search_cross_sessions() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let mut console = Console::launch(server.as_deref(), root.path());
+    console.expect("New session");
+    console.keys("First session\r");
+    console.expect("First session");
+    console.expect("No tasks");
+    console.ready();
+
+    console.keys("n");
+    console.expect("New task");
+    console.keys("Cross session approval\x13");
+    console.expect("Review operation");
+    console.expect("artifact_create");
+    console.ready();
+
+    console.keys("s");
+    console.expect("Sessions");
+    console.ready();
+    console.keys("n");
+    console.expect("New session");
+    console.keys("Second session\r");
+    console.expect("Second session");
+    console.expect("No tasks");
+    console.ready();
+
+    console.keys("I");
+    console.expect("Workspace inbox");
+    console.expect("Cross session approval");
+    console.keys("\r");
+    console.expect("Allow once / Deny");
+    console.expect("artifact_create");
+    console.keys("y");
+    console.expect("Completed");
+    console.ready();
+
+    console.keys("H");
+    console.expect("Search workspace history");
+    console.keys("Cross session approval\r");
+    console.expect("· all · seq");
+    console.expect("Completed  ·  Cross session approval");
+    console.ready();
+    console.keys("a");
+    console.expect("· assistant · seq");
+    console.expect("No matching history.");
+    console.ready();
+    console.keys("u");
+    console.expect("· user · seq");
+    console.expect("Completed  ·  Cross session approval");
+    console.ready();
+    console.keys("\r");
+    console.expect("Task detail");
+    console.expect("First session");
+    console.expect("Completed");
+    console.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn terminal_demo_reviews_and_reopens_one_artifact() {
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
     let root = tempfile::tempdir().unwrap();

@@ -77,3 +77,21 @@ fn negotiated_preview_rejects_missing_duplicate_foreign_or_wrong_size_rows() {
     let (snapshot, _) = client.work_snapshot(&request(), |_| {}).unwrap();
     assert_eq!(snapshot.recent_tasks.unwrap()[0].id, "t2");
 }
+
+#[test]
+fn workspace_preview_counts_waiting_for_input() {
+    let mut reply = snapshot();
+    reply["taskCounts"]["running"] = json!(0);
+    reply["taskCounts"]["waitingInput"] = json!(1);
+    let mut waiting = task("needs-answer", "s2");
+    waiting["status"] = json!("waiting_input");
+    reply["recentTasks"] = json!([waiting]);
+    let mut client = connect(true, [reply]);
+    let request = WorkSnapshotParams {
+        workspace_id: Some("workspace".into()),
+        session_id: None,
+        ..request()
+    };
+    let result = client.subscribe_work(&request, |_| {}).unwrap();
+    assert_eq!(result.snapshot.recent_tasks.unwrap()[0].id, "needs-answer");
+}

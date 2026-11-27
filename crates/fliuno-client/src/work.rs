@@ -118,6 +118,7 @@ impl<R: BufRead, W: Write> Client<R, W> {
                 let expected = [
                     counts.running,
                     counts.waiting_approval,
+                    counts.waiting_input,
                     counts.interrupted,
                     counts.completed,
                     counts.cancelled,

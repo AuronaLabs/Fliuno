@@ -15,7 +15,7 @@
 
 **[快速体验](#快速体验)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.8** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.8) · [更新记录](CHANGELOG.md#008)
+当前版本 **v0.0.9** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.9) · [更新记录](CHANGELOG.md#009)
 
 ## 快速体验
 
@@ -27,7 +27,7 @@
 
 Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` 写任务、`Ctrl+S` 提交；等到审批出现后，按 `Enter` 查看本次操作，选择允许一次或拒绝。完成后按 `V` 打开交付物目录。[全部快捷键和数据库位置](docs/workbench.md)
 
-按 `F1` 或 `/` 搜索当前可用的命令。宽屏可以同时看任务队列和详情，窄屏用 `Tab` 切换；运行时加 `--theme dark`、`light` 或 `mono` 可选择显示主题。
+按 `Shift+I` 查看当前工作区各会话的待办，按 `Shift+H` 搜索已完成的历史并跳回原任务。按 `F1` 或 `/` 搜索当前可用的命令。宽屏可以同时看任务队列和详情，窄屏用 `Tab` 切换；运行时加 `--theme dark`、`light` 或 `mono` 可选择显示主题。
 
 ## 开始真实工作
 

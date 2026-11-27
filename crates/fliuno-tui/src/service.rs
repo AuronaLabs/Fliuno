@@ -2,9 +2,11 @@ use crate::options::Options;
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use fliuno_client::{Client, Error as ClientError, EventFeed};
 use fliuno_protocol::{
-    ApprovalDecision, ApprovalDetails, ArtifactDigest, ArtifactGetParams, ArtifactRevision,
-    ArtifactSummary, ObjectPage, Session, Task, TaskPlan, TaskResumeDisposition, TaskResumeStatus,
-    TaskStatus, TaskSteeringState, WorkSnapshot, WorkSnapshotParams, Workspace,
+    ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactDigest, ArtifactGetParams,
+    ArtifactRevision, ArtifactSummary, ObjectPage, Session, SessionHistoryRole, Task, TaskPlan,
+    TaskResumeDisposition, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
+    TaskSummaryBatchParams, WorkSnapshot, WorkSnapshotParams, Workspace,
+    WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -48,6 +50,20 @@ pub enum Request {
     Steer(String, String),
     Cancel(String),
     Resume(String),
+    MoreApprovals,
+    WorkspaceInbox(bool),
+    OpenTask {
+        session: String,
+        task: String,
+        approval: Option<String>,
+    },
+    SearchHistory {
+        query: String,
+        role: Option<SessionHistoryRole>,
+        through_sequence: Option<u64>,
+        before_sequence: Option<u64>,
+        append: bool,
+    },
     Preview(ArtifactGetParams),
     Download(ArtifactGetParams, PathBuf),
 }
@@ -66,6 +82,28 @@ pub struct Preview {
     pub text: Option<String>,
 }
 
+#[derive(Clone)]
+pub struct WorkspaceInbox {
+    pub snapshot: WorkSnapshot,
+}
+
+#[derive(Clone)]
+pub struct HistoryItem {
+    pub task: TaskSummary,
+    pub completion_sequence: u64,
+}
+
+#[derive(Clone)]
+pub struct HistoryPage {
+    pub query: String,
+    pub role: Option<SessionHistoryRole>,
+    pub through_sequence: u64,
+    pub next_before_sequence: Option<u64>,
+    pub scanned_turns: u32,
+    pub skipped_oversized_turns: u32,
+    pub items: Vec<HistoryItem>,
+}
+
 pub enum Update {
     Online(Workspace),
     Workspaces(ObjectPage<Workspace>),
@@ -78,6 +116,10 @@ pub enum Update {
     Session(Session),
     Overview(String, WorkSnapshot),
     Detail(Box<Detail>),
+    Inbox(WorkspaceInbox),
+    Approvals(Vec<ApprovalSummary>, bool),
+    Jump(Session, String),
+    History(HistoryPage, bool),
     Approval(String, String, Box<ApprovalDetails>),
     Preview(Box<Preview>),
     Started(String),
@@ -143,7 +185,11 @@ impl Drop for Worker {
 
 struct Service {
     client: Client<BufReader<ChildStdout>, ChildStdin>,
+    workspace: Option<String>,
     session: Option<String>,
+    inbox_visible: bool,
+    approvals: Option<fliuno_client::ApprovalInbox>,
+    approval_ids: Vec<String>,
     feed: Option<EventFeed>,
     watermark: Option<u64>,
 }
@@ -204,7 +250,11 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
     let client = Client::connect(BufReader::new(output), input, "Fliuno Workbench", |_| {})?;
     Ok(Service {
         client,
+        workspace: None,
         session: None,
+        inbox_visible: false,
+        approvals: None,
+        approval_ids: Vec::new(),
         feed: None,
         watermark: None,
     })
@@ -223,7 +273,7 @@ fn disconnected(err: &(dyn std::error::Error + 'static)) -> bool {
 }
 
 fn serve(options: Options, requests: Receiver<Request>, out: Sender<Update>, slot: ProcessSlot) {
-    let root = options.workspace.to_string_lossy().into_owned();
+    let mut root = options.workspace.to_string_lossy().into_owned();
     let mut service = None;
     let mut first = true;
     loop {
@@ -245,7 +295,9 @@ fn serve(options: Options, requests: Receiver<Request>, out: Sender<Update>, slo
             Ok(Request::Reconnect) => {
                 close(&mut service, &slot);
                 match connect(&options, &slot).and_then(|mut server| {
-                    let workspace = server.rpc("workspace/open", json!({"root":root}))?;
+                    let workspace: Workspace =
+                        server.rpc("workspace/open", json!({"root":root}))?;
+                    server.workspace = Some(workspace.id.clone());
                     service = Some(server);
                     out.send(Update::Online(workspace))?;
                     Ok(())
@@ -261,7 +313,7 @@ fn serve(options: Options, requests: Receiver<Request>, out: Sender<Update>, slo
             Ok(request) => service
                 .as_mut()
                 .ok_or_else(|| "Connect to the app-server first".into())
-                .and_then(|server| server.handle(request, &out)),
+                .and_then(|server| server.handle(request, &out, &mut root)),
         };
         if let Err(error) = result {
             let update = if disconnected(error.as_ref()) {
@@ -301,24 +353,29 @@ impl Service {
     }
 
     fn refresh(&mut self, out: &Sender<Update>, force: bool) -> Result<()> {
-        let Some(session) = self.session.clone() else {
+        let (workspace_id, session_id) = if self.inbox_visible {
+            let workspace = self.workspace.clone().ok_or("Open a workspace first")?;
+            (Some(workspace), None)
+        } else if let Some(session) = self.session.clone() {
+            (None, Some(session))
+        } else {
             return Ok(());
         };
         let params = WorkSnapshotParams {
-            workspace_id: None,
-            session_id: Some(session.clone()),
-            approval_limit: 25,
+            workspace_id,
+            session_id: session_id.clone(),
+            approval_limit: if self.inbox_visible { 100 } else { 25 },
             approval_target_bytes: Some(64 * 1024),
             recent_task_limit: Some(50),
             include_actions: self.supports("workNextActions"),
         };
-        let snapshot = if self.watermark.is_none() {
+        let (snapshot, approvals) = if self.watermark.is_none() {
             let sub = self.client.subscribe_work(&params, |_| {})?;
             self.feed = Some(sub.events);
-            sub.snapshot
+            (sub.snapshot, sub.inbox)
         } else {
             let feed = &mut self.feed;
-            let (snapshot, _) = self.client.work_snapshot(&params, |notice| {
+            let (snapshot, approvals) = self.client.work_snapshot(&params, |notice| {
                 if let Some(feed) = feed {
                     feed.observe(notice);
                 }
@@ -328,24 +385,46 @@ impl Service {
                 // without retaining event bodies or replaying client actions.
                 let _ = feed.next_task_changes(&mut self.client, 50, |_| {})?;
             }
-            snapshot
+            (snapshot, approvals)
         };
         let watermark = snapshot.approvals.snapshot.through_sequence;
-        if force || self.watermark != Some(watermark) {
-            out.send(Update::Overview(session, snapshot))?;
+        let approval_ids: Vec<_> = snapshot
+            .approvals
+            .page
+            .items
+            .iter()
+            .map(|approval| approval.id.clone())
+            .collect();
+        let approvals_changed = self.inbox_visible && self.approval_ids != approval_ids;
+        if force || self.watermark != Some(watermark) || approvals_changed {
+            self.approvals = Some(approvals);
+            self.approval_ids = approval_ids;
+            if self.inbox_visible {
+                out.send(Update::Inbox(WorkspaceInbox { snapshot }))?;
+            } else if let Some(session) = session_id {
+                out.send(Update::Overview(session, snapshot))?;
+            }
         }
         self.watermark = Some(watermark);
         Ok(())
     }
 
-    fn handle(&mut self, request: Request, out: &Sender<Update>) -> Result<()> {
+    fn handle(&mut self, request: Request, out: &Sender<Update>, root: &mut String) -> Result<()> {
         let update = match request {
             Request::Reconnect => unreachable!(),
             Request::Workspaces(after) => {
                 Update::Workspaces(self.rpc("workspace/list", json!({"after":after,"limit":30}))?)
             }
-            Request::OpenWorkspace(root) => {
-                Update::Workspace(self.rpc("workspace/open", json!({"root":root}))?)
+            Request::OpenWorkspace(path) => {
+                let workspace: Workspace = self.rpc("workspace/open", json!({"root":path}))?;
+                *root = workspace.root.clone();
+                self.workspace = Some(workspace.id.clone());
+                self.session = None;
+                self.inbox_visible = false;
+                self.approvals = None;
+                self.feed = None;
+                self.watermark = None;
+                Update::Workspace(workspace)
             }
             Request::Sessions {
                 workspace,
@@ -365,6 +444,9 @@ impl Service {
             )?),
             Request::SelectSession(session) => {
                 self.session = Some(session);
+                self.inbox_visible = false;
+                self.approvals = None;
+                self.approval_ids.clear();
                 self.feed = None;
                 self.watermark = None;
                 return self.refresh(out, true);
@@ -418,6 +500,155 @@ impl Service {
                 }
                 let _: Value = self.rpc("task/resume", json!({"taskId":task}))?;
                 return self.changed(&task, out);
+            }
+            Request::MoreApprovals if !self.inbox_visible => {
+                return Err("No workspace approval inbox is open".into());
+            }
+            Request::MoreApprovals => {
+                let Some(inbox) = self.approvals.as_mut() else {
+                    return Err("No workspace approval inbox is open".into());
+                };
+                let feed = &mut self.feed;
+                let Some(page) = inbox.next_page(&mut self.client, |notice| {
+                    if let Some(feed) = feed {
+                        feed.observe(notice);
+                    }
+                })?
+                else {
+                    return Err("No more approval pages are available".into());
+                };
+                Update::Approvals(page.page.items, page.page.has_more)
+            }
+            Request::WorkspaceInbox(visible) => {
+                self.inbox_visible = visible;
+                self.approvals = None;
+                self.approval_ids.clear();
+                self.feed = None;
+                self.watermark = None;
+                return self.refresh(out, true);
+            }
+            Request::OpenTask {
+                session,
+                task,
+                approval,
+            } => {
+                let Some(workspace) = self.workspace.clone() else {
+                    return Err("Open a workspace first".into());
+                };
+                let target: Session = self.rpc("session/get", json!({"sessionId":session}))?;
+                if target.workspace_id != workspace {
+                    return Err("Task session is outside the active workspace".into());
+                }
+                let detail = self.detail(&task)?;
+                if detail.task.session_id != target.id {
+                    return Err("Task is outside the selected session".into());
+                }
+                self.session = Some(target.id.clone());
+                self.inbox_visible = false;
+                self.approvals = None;
+                self.feed = None;
+                self.watermark = None;
+                out.send(Update::Jump(target, task.clone()))?;
+                out.send(Update::Detail(Box::new(detail)))?;
+                if let Some(approval) = approval {
+                    let details: ApprovalDetails =
+                        self.rpc("approval/get", json!({"taskId":task,"approvalId":approval}))?;
+                    out.send(Update::Approval(task, approval, Box::new(details)))?;
+                }
+                return self.refresh(out, true);
+            }
+            Request::SearchHistory {
+                query,
+                role,
+                through_sequence,
+                before_sequence,
+                append,
+            } => {
+                let Some(workspace_id) = self.workspace.clone() else {
+                    return Err("Open a workspace first".into());
+                };
+                if !self.supports("workspaceHistorySearch") {
+                    return Err(
+                        "The connected app-server does not support workspace history search".into(),
+                    );
+                }
+                let scan_limit = self
+                    .client
+                    .info()
+                    .capabilities
+                    .get("maxHistorySearchScanLimit")
+                    .and_then(Value::as_u64)
+                    .map(|limit| limit.min(128) as u32)
+                    .filter(|limit| *limit > 0);
+                let params = WorkspaceHistorySearchParams {
+                    workspace_id: workspace_id.clone(),
+                    query: query.clone(),
+                    role,
+                    through_sequence,
+                    after_sequence: None,
+                    before_sequence,
+                    limit: Some(16),
+                    scan_limit,
+                };
+                let mut search = fliuno_client::HistorySearch::new(
+                    fliuno_client::HistorySearchRequest::Workspace(params),
+                );
+                let feed = &mut self.feed;
+                let Some(result) = search.next_page(&mut self.client, |notice| {
+                    if let Some(feed) = feed {
+                        feed.observe(notice);
+                    }
+                })?
+                else {
+                    return Err("History search produced no page".into());
+                };
+                let ids: Vec<_> = result
+                    .matches
+                    .iter()
+                    .map(|item| item.task_id.clone())
+                    .collect();
+                let summaries = if ids.is_empty() {
+                    Vec::new()
+                } else {
+                    let params = TaskSummaryBatchParams {
+                        task_ids: ids,
+                        workspace_id: Some(workspace_id),
+                        session_id: None,
+                    };
+                    let feed = &mut self.feed;
+                    self.client
+                        .get_task_summaries(&params, |notice| {
+                            if let Some(feed) = feed {
+                                feed.observe(notice);
+                            }
+                        })?
+                        .items
+                };
+                let items = result
+                    .matches
+                    .into_iter()
+                    .zip(summaries)
+                    .filter_map(|(found, summary)| {
+                        summary
+                            .filter(|task| found.session_id.as_ref() == Some(&task.session_id))
+                            .map(|task| HistoryItem {
+                                task,
+                                completion_sequence: found.completion_sequence,
+                            })
+                    })
+                    .collect();
+                Update::History(
+                    HistoryPage {
+                        query,
+                        role,
+                        through_sequence: result.through_sequence,
+                        next_before_sequence: result.next_before_sequence,
+                        scanned_turns: result.scanned_turns,
+                        skipped_oversized_turns: result.skipped_oversized_turns,
+                        items,
+                    },
+                    append,
+                )
             }
             Request::Preview(id) => Update::Preview(Box::new(self.preview(id)?)),
             Request::Download(id, path) => {
