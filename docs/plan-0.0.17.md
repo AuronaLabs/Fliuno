@@ -8,7 +8,7 @@ v0.0.16 是当前稳定基线。下一版应让用户在 Windows 和 Debian 上�
 
 | 资料及本地检出 | 对 Fliuno 的具体影响 |
 | --- | --- |
-| [Codex CLI](https://developers.openai.com/codex/cli)、[认证](https://developers.openai.com/codex/auth)与本地 `codex-rs/tui/src/onboarding`、`chatwidget/empty_state_policy.rs` | 将首次配置放在服务启动前。配置后回到当前工作目录的对话和输入区。Fliuno 使用自己的界面、模型选择和文件配置。 |
+| [Codex CLI](https://developers.openai.com/codex/cli)、[认证](https://developers.openai.com/codex/auth)与本地 `codex-rs/tui/src/onboarding`、`chatwidget/empty_state_policy.rs`、`thread_transcript.rs` | 将首次配置放在服务启动前。配置后回到当前工作目录的对话和输入区，历史和实时回复使用同一套消息组件。Fliuno 使用自己的界面、模型选择和文件配置。 |
 | [Codex 发布流程](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/.github/workflows/rust-release.yml) 与[原生 Windows 构建](https://github.com/openai/codex/blob/a1604a8c0554c09c1be45e5a121bb1889b4d9a50/.github/workflows/rust-release-windows.yml)，本地 `D:\Fliuno-References\codex`，提交 `a1604a8` | 核对发布版本与 Cargo 元数据，按平台构建，把 TUI 和它实际启动的 app-server 一起交付并验收。 |
 | [OpenCode 产物核验](https://github.com/anomalyco/opencode/blob/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/.github/release/verify-artifacts.sh)及[发布流程](https://github.com/anomalyco/opencode/blob/d284e7ce17d0a98c80d0bebd5cc6dce2dbdd5f74/.github/workflows/release.yml)，本地 `D:\Fliuno-References\opencode`，提交 `d284e7c` | 用相同字节执行验收和发布。发布前核对资产清单和 SHA-256，拒绝缺失或额外产物。 |
 | [Claude Code 安装文档](https://code.claude.com/docs/en/setup)与[首次使用指引](https://code.claude.com/docs/en/quickstart)，本地 `D:\Fliuno-References\claude-code`，提交 `2771d55` | 为每个平台提供安装、更新、卸载和诊断入口。首版让 Windows Installer 和 Debian 包管理器处理显式升级，配置继续由用户目录中的文件管理。 |
@@ -19,11 +19,17 @@ v0.0.16 是当前稳定基线。下一版应让用户在 Windows 和 Debian 上�
 
 | 板块 | 交付内容 | 退出条件 |
 | --- | --- | --- |
-| 首次使用与对话 | 裸启动引导选择模型供应商、填写模型 ID 和已有凭据文件。保存后进入当前项目并聚焦输入区。已经配置的工作区直接打开，离线演示通过 `--demo` 启动。 | 实际终端验证首次启动、无效路径、取消不留配置、保存后启动、重启读回、已有配置不覆盖、诊断能定位问题、真实回环模型回复。 |
+| 首次使用与对话 | 裸启动引导选择模型供应商、填写模型 ID 和已有凭据文件。保存后进入当前项目并聚焦输入区。已经配置的工作区直接打开。主屏接续既有会话的多轮消息，审批和单任务详情随当前操作展开。离线演示通过 `--demo` 启动。 | 实际终端验证首次启动、无效路径、取消不留配置、保存后启动、重启读回、已有配置不覆盖、诊断能定位问题、真实回环模型至少完成两轮回复，重启后按原顺序显示历史。 |
 | 跨任务交付物 | 工作区目录、媒体类型筛选和快照分页、来源会话及版本预览、保存回执。 | 双平台真实终端验证跨会话隔离、前后版本切换、重启后浏览、多页文件清单、已存在目标的保留和保存字节的 SHA-256。 |
 | 终端可靠性与性能 | 测量空闲刷新、长历史打开、活动任务与断线追赶。优先合并重复刷新并减少空闲 RPC，保留任务完成、审批、状态变更的及时显示。 | 同机同种子比较 v0.0.16 和候选版本，记录空闲 60 秒请求数、首屏和重连延迟、峰值内存。测试快照与增量切换时的新事件、流量突发、后台任务、终态与审批。发现退化时修复或明确记录原因与影响。 |
 | TUI 布局与回归 | 审阅目录列表、预览、保存输入和提示，与当前会话界面统一。 | 通过 Windows ConPTY 和 Debian PTY 检查约 110、80、48 列，保存真实屏幕截图。核对焦点、主要操作提示、多行路径、中英文和宽字符，输入与滚动时保留正在审阅的位置。 |
 | 安装与发布 | Windows x64 MSI、Debian amd64 `.deb`、两种便携归档、SHA-256 清单与验收记录。优先复用现有配置、服务定位和数据库路径。 | 从安装包运行 `fliuno --version`、`fliuno --doctor` 和真实 TUI 工作流。安装、迁移、升级、卸载与重装均通过，最终资产与已验收资产的摘要一致。 |
+
+## 对话与连接验收
+
+主屏以当前会话的消息为阅读单位。复用 `session/listHistory` 的固定水位和按字节分页加载已完成轮次。新一轮的用户输入、流式回复、待审批和最终回复使用同一视图，完成时用持久轮次替换预览。按任务 ID 去重，向上补页时保持当前阅读位置。任务、工作区收件箱、时间线和交付目录通过 `F1` 等入口按需打开。
+
+首屏只加载最近一页，切换会话或工作区后忽略上一个会话的迟到页。覆盖最早页、超大轮次、提交后断线、重连期间的事件和被跳过的流式预览，核对审批在历史加载期间仍可发现和处理。用同一份数据测量冷开、恢复和静置时的请求数量，再决定轮询和订阅调整的幅度。
 
 ## 安装生命周期
 
