@@ -70,11 +70,18 @@ def sudo(*arguments: str, input_bytes: bytes | None = None, check: bool = True) 
     return result.returncode
 
 
-def cargo_probes(arguments: list[str], environment: dict[str, str], minimum: int = 1) -> int:
+def cargo_probes(
+    arguments: list[str], environment: dict[str, str], runner_group: Path, minimum: int = 1
+) -> int:
     """Stream output and reject a green cargo invocation selecting no probes."""
     passed = 0
     with subprocess.Popen(
-        ["cargo", "test", "--locked", *arguments],
+        [
+            "sh", "-c",
+            'printf "%s\n" "$$" | sudo tee "$1" >/dev/null || exit $?; shift; exec "$@"',
+            "fliuno-cgroup-probe", str(runner_group / "cgroup.procs"),
+            "cargo", "test", "--locked", *arguments,
+        ],
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -100,7 +107,9 @@ def main() -> int:
         return 2
 
     parent = delegated_base() / f"fliuno-ci-{uuid.uuid4()}"
+    runner_group = parent / "runner"
     created = False
+    runner_created = False
     cleanup_errors: list[str] = []
     try:
         sudo("mkdir", str(parent))
@@ -118,6 +127,11 @@ def main() -> int:
             str(parent / "cgroup.subtree_control"),
             input_bytes=b"+cpu +memory +pids\n",
         )
+
+        # Cargo and its descendants start inside the delegation. Leave the
+        # delegation root empty so controllers can apply to its child groups.
+        sudo("mkdir", str(runner_group))
+        runner_created = True
 
         environment = os.environ.copy()
         environment["FLIUNO_REQUIRE_DELEGATED_CGROUP"] = "1"
@@ -139,6 +153,7 @@ def main() -> int:
                     "--nocapture",
                 ],
                 environment,
+                runner_group,
             )
             if result:
                 return result
@@ -149,6 +164,7 @@ def main() -> int:
                 "--nocapture", "--test-threads=1",
             ],
             environment,
+            runner_group,
         )
         if guardian_result:
             return guardian_result
@@ -166,12 +182,15 @@ def main() -> int:
                 "--test-threads=1",
             ],
             environment,
+            runner_group,
             minimum=2,
         )
         if terminal_result:
             return terminal_result
         return 0
     finally:
+        if runner_created and sudo("rmdir", str(runner_group), check=False):
+            cleanup_errors.append("cgroup probe runner still contains processes")
         if created:
             if sudo("rmdir", str(parent), check=False):
                 cleanup_errors.append("temporary cgroup delegation still has child groups")
