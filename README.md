@@ -15,7 +15,7 @@
 
 **[快速体验](#快速体验)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-当前版本 **v0.0.11** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.11) · [更新记录](CHANGELOG.md#0011)
+当前版本 **v0.0.12** · [GitHub 下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.12) · [更新记录](CHANGELOG.md#0012)
 
 ## 快速体验
 
@@ -27,7 +27,7 @@
 
 Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` 写任务、`Ctrl+S` 提交；等到审批出现后，按 `Enter` 查看本次操作，选择允许一次或拒绝。完成后按 `V` 打开交付物目录。[全部快捷键和数据库位置](docs/workbench.md)
 
-按 `Shift+I` 查看当前工作区各会话的待办，按 `Shift+H` 搜索已完成的历史并跳回原任务。按 `F1` 或 `/` 搜索当前可用的命令。宽屏可以同时看任务队列和详情，窄屏用 `Tab` 切换；运行时加 `--theme dark`、`light` 或 `mono` 可选择显示主题。
+按 `Shift+I` 查看当前工作区各会话的待办，按 `Shift+H` 搜索已完成的历史并跳回原任务。按 `F1` 或 `/` 搜索当前可用的命令。主界面显示当前任务对话，按 `Tab` 展开详情，按 `Shift+L` 浏览完整任务列表。主题可在配置文件中选择。
 
 | 工作流 | 快捷键 |
 | --- | --- |
@@ -39,7 +39,7 @@ Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` �
 
 ## 开始真实工作
 
-配置 OpenAI、Anthropic 或 Gemini 对应的模型和密钥，在要工作的文件夹启动 `fliuno`，或通过 `--workspace PATH` 选择文件夹。模型请求发送到所配置的供应商；会话、审批和交付物保存在本机。[模型配置](docs/workbench.md#接入模型)
+先运行 `fliuno --init-config` 生成 `~/.fliuno/config.toml`，再填写 OpenAI、Anthropic 或 Gemini 的模型和密钥文件。在要工作的文件夹启动 `fliuno`，或通过 `--workspace PATH` 选择文件夹。模型请求发送到所配置的供应商；会话、审批和交付物保存在本机。[模型配置](docs/workbench.md#接入模型)
 
 ## 工程能力
 

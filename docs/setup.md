@@ -2,7 +2,7 @@
 
 [项目首页](../README.md) · [文档中心](README.md) › [从这里开始](README.md#从这里开始) · [应用协议](protocol.md)
 
-下文的命令从仓库根目录运行。先运行离线示例，再按需配置模型或外部工具。应用服务使用本机 stdio，宿主通过启动参数和环境变量提供配置。
+下文的命令从仓库根目录运行。先运行离线示例，再按需配置模型或外部工具。应用服务使用本机 stdio，宿主通过启动参数和用户配置文件提供设置。
 
 | 要做什么 | 从这里开始 |
 | --- | --- |
@@ -88,20 +88,24 @@ python examples/agent_demo.py --workspace --deny
 
 ## 真实模型
 
-API key 仅从进程环境读取，不写入任务数据库。模型 ID 由调用方明确指定。
+[工作台配置](workbench.md#接入模型)可直接交给 stdio 应用服务。由宿主启动时传入配置文件和数据库路径。
 
-```powershell
-$env:FLIUNO_PROVIDER = 'openai' # 或 anthropic、gemini；默认 demo
-$env:FLIUNO_MODEL = '<你的模型 ID>'
-$env:OPENAI_API_KEY = '<你的 key>' # anthropic / gemini 分别使用 ANTHROPIC_API_KEY / GEMINI_API_KEY
-cargo run -p fliuno-app-server
+```sh
+fliuno-app-server --config ~/.fliuno/config.toml --db .fliuno/kernel.db
 ```
 
-可同时设置 `FLIUNO_CONTEXT_WINDOW_TOKENS` 和 `FLIUNO_MAX_OUTPUT_TOKENS`，检查输入预算并给供应商设置生成上限。默认按 JSON 字节估算。OpenAI、Anthropic 和 Gemini 可用 `FLIUNO_CONTEXT_COUNT_MODE=provider` 启用供应商输入计数。Gemini 使用 `countTokens` 对 Interactions 请求做预检投影，模型窗口由宿主配置。Anthropic 可用 `FLIUNO_CONTEXT_WINDOW_TOKENS=provider` 在启动时探测模型窗口。[模型请求预算](context.md#模型请求预算)
+模型端点可通过 `[model].base_url` 指定。需要限制模型输入时，可设置以下配置。
 
-可用 `OPENAI_BASE_URL`、`ANTHROPIC_BASE_URL` 或 `GEMINI_BASE_URL` 指定 API 基础地址；Gemini 默认使用 `https://generativelanguage.googleapis.com/v1beta/`。仅允许 HTTPS 和本机回环 HTTP；禁止自动重定向。模型请求使用有超时的 SSE 流式响应，也接受完整 JSON 响应；不会自动重试付费请求。Gemini Interactions 使用 `store:false`，由本地持久化步骤续接函数调用；目前支持文本输出和每轮一个工具调用，已通过回环验收。四个固定 worker 最多并发执行四个独立任务步骤，另有容量 32 的有界队列；并发能力会在 `initialize` 中声明。模型与工具执行期间都可查询和取消任务。取消会通知 provider 或工具并丢弃迟到结果，但供应商可能已收到请求并计费，外部副作用也可能已经发生。
+```toml
+[model.budget]
+window = 131072
+max_output_tokens = 4096
+provider_count = true
+```
 
-支持流式进度的 provider 通过 `notifications/modelProgress` 发送带任务 ID 和步骤号的文本预览。预览不进入 SQLite，完整响应校验后才形成持久任务结果；取消、错误或工具调用会清除预览。客户端需处理 `reset`、`notifications/modelProgressGap` 与迟到增量，具体语义见 [应用协议](protocol.md)。
+`window` 是总窗口，`max_output_tokens` 为输出预留。使用 Anthropic 时，`window = "provider"` 会向服务查询窗口。`provider_count` 启用 Provider 计数。Gemini 使用计数投影，完整归因见[上下文文档](context.md)。Embeddings JSON 可设置 `apiKeyFile`，路径相对于该 JSON 文件。
+
+旧版无界面脚本可通过已有的 Provider 环境变量继续启动，显式 `--config` 时以文件设置为准。
 
 ## MCP
 

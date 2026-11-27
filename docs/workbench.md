@@ -2,7 +2,7 @@
 
 [产品首页](../README.md) · [文档中心](README.md) · [迭代规划](plan-0.0.11-0.0.13.md)
 
-在终端里运行 `fliuno --demo`。工作台和 `fliuno-app-server` 需在同一目录。也可通过 `--server PATH` 指定服务程序。离线演示使用固定模型夹具，审批后把提交的文字保存为交付物。
+在终端里运行 `fliuno --demo`。工作台和 `fliuno-app-server` 需在同一目录。也可通过 `--server PATH` 指定服务程序。离线演示使用固定模型夹具，审批后把提交的文字保存为交付物。主页显示所选任务的对话，底部保留输入区。命令、审批、历史和上下文各自打开独立面板。
 
 | 操作 | 按键 |
 | --- | --- |
@@ -14,33 +14,48 @@
 | 排队提示 | 草稿中 `Ctrl+E` 入队，`Shift+Q` 查看当前会话的队列。`Enter` 启动首项，`Delete` 删除所选待执行项，`G` 查看阻塞任务，`R` 刷新。 |
 | 会话分支 | `B` 从当前会话分支，`Shift+B` 从选中的已完成任务分支。输入名称后按 `Enter` 创建，直接按 `Enter` 可省略名称。分支头部显示来源及继承条数。 |
 | 时间线与预算 | `T` 打开任务事件时间线，`Enter` 预览所选事件，`A` 打开仍待处理的关联审批。`PageDown` 继续读取，`R` 更新水位。`C` 查看上下文及记忆用量。 |
-| 提交或协作 | `N` 新任务，`I` 补充指令。任务草稿中 `Enter` 换行，`Ctrl+S` 提交；其他表单用 `Enter` 提交，`Esc` 返回。 |
-| 查看任务 | 上下键选择近期任务，`Tab` 切换列表和详情。`Shift+L` 打开本会话完整任务目录，`f` 切换状态筛选，`PageUp` / `PageDown` 翻页，`r` 回到最新一页，`Enter` 打开所选任务。 |
+| 提交或协作 | `n` 新任务，`i` 补充指令。没有待处理请求时，`Enter` 也可打开草稿。草稿中 `Enter` 换行，`Ctrl+S` 提交。其他表单用 `Enter` 提交，`Esc` 返回。 |
+| 草稿上下文 | `F3` 查看本次历史。`s` 切换会话与隔离模式，`m` 控制自动记忆，`h` 在完整记录和仅对话之间切换，`p` 固定或解除历史水位，`r` 刷新。`Esc` 返回草稿，选项随提交或入队保存。 |
+| 查看任务 | 上下键滚动对话，`Tab` 展开或收起任务详情。`Shift+L` 打开本会话完整任务目录，`f` 切换状态筛选，`PageUp` / `PageDown` 翻页，`r` 回到最新一页，`Enter` 打开所选任务。 |
 | 处理待办 | `Enter` 或 `A` 打开审批或澄清。审批用 `Y` 允许一次、`N` 拒绝。对于内核只允许拒绝的 Agent 请求，界面只显示拒绝选项。`X` 后按 `Y` 确认取消。 |
 | 查看交付 | `V` 打开目录，`Enter` 查看内容与摘要，`D` 输入目标路径保存。文本预览中 `U` 将该版用作新任务输入，`P` 打开上一版（如有）。 |
 | 恢复或退出 | `R` 重新连接或显式恢复可安全重试的任务。小写 `q` 或 `Ctrl+C` 退出。 |
 
-草稿支持方向键、`Home` / `End` 和组合字符删除。粘贴文字后仍需 `Ctrl+S` 提交。切换会话时，当前运行最多暂存 8 个其他会话的草稿及附件；已入队的提示保存在 SQLite，重开后仍能访问。队列每个会话最多 16 项，手动启动时会检查是否有运行中、待审批、待答或中断的任务。窄窗口按 `Tab` 切换会话任务列表与详情。
+草稿支持方向键、`Home` / `End` 和组合字符删除。粘贴文字后仍需 `Ctrl+S` 提交。切换会话时，当前运行最多暂存 8 个其他会话的草稿及附件；已入队的提示保存在 SQLite，重开后仍能访问。队列每个会话最多 16 项，手动启动时会检查是否有运行中、待审批、待答或中断的任务。会话切换会一并暂存草稿的上下文选项。自动记忆在任务开始时根据输入检索。执行后按 `c` 查看实际归因。
 
-使用 `--theme auto`（默认）跟随终端配色，`--theme dark` 或 `--theme light` 指定配色，`--theme mono` 不使用颜色。任务状态和审批选项都有文字标签。
+在配置文件中设置 `[workbench].theme`。`auto` 跟随终端配色，`dark` 与 `light` 使用固定配色，`mono` 使用单色。`--theme` 可覆盖本次运行。任务状态和审批选项都有文字标签。
 
 关闭工作台会结束它启动的本机服务；重开后可从数据库找回任务和待办。结果未知的外部操作不会自动重发。下载会校验 SHA-256，拒绝覆盖已有文件。文本预览上限 64 KiB，下载上限 32 MiB。
 
 ## 接入模型
 
-| 变量 | 取值 |
-| --- | --- |
-| `FLIUNO_PROVIDER` | `openai`、`anthropic` 或 `gemini` |
-| `FLIUNO_MODEL` | 账户有权使用的模型 ID |
-| 对应密钥 | `OPENAI_API_KEY`、`ANTHROPIC_API_KEY` 或 `GEMINI_API_KEY` |
+运行 `fliuno --init-config` 创建 `~/.fliuno/config.toml`。Windows 下 `~` 指用户主目录。已有文件会保留。修改以下设置后，直接在工作文件夹启动 `fliuno`。
 
-工作台从启动它的终端读取环境。API 密钥应由本机凭据管理方式注入，避免放到任务输入或工作区文件中。模型和接入端点的更多选项见[服务配置](setup.md)。
+```toml
+[workbench]
+theme = "dark"
+
+[model]
+provider = "openai"
+name = "your-model"
+api_key_file = "credentials/openai.key"
+```
+
+`provider` 支持 `demo`、`openai`、`anthropic` 和 `gemini`。`name` 填账户可用的模型 ID。API key 单独保存为一行文本，示例路径为 `~/.fliuno/credentials/openai.key`。建议只让当前系统用户可读取凭据文件。
+
+| 项目 | 默认或覆盖方式 |
+| --- | --- |
+| 用户配置 | `~/.fliuno/config.toml`。`--config PATH` 可使用其他文件。配置里的相对路径均以该文件所在目录为基准。 |
+| 本地状态 | `~/.fliuno/state/workbench.db`。若新路径尚无数据库，已有的 Windows `%LOCALAPPDATA%\fliuno` 或 Linux `$XDG_STATE_HOME/fliuno` 数据库会继续打开。可用 `--db PATH` 或 `[workbench].database` 明确指定。 |
+| 离线演示 | `fliuno --demo` 使用独立的 `demo.db`。可以用 `--db PATH` 指定演示库。 |
+| 服务程序 | 默认使用同目录的 `fliuno-app-server`。可用 `--server PATH` 或 `[workbench].server` 覆盖。 |
+| 其他能力 | `[integrations]` 可以引用 `mcp`、`mcp_oauth`、`mcp_oauth_vault`、`acp`、`a2a`、`execution`、`terminal`、`skills`、`memory_embedding` 的宿主配置或目录。 |
 
 ```sh
 fliuno --workspace ./project
-fliuno --workspace ./project -- --mcp-config ./mcp.json
+fliuno --config ./trusted-config.toml --workspace ./project
 ```
 
-`--db PATH` 选择 SQLite 文件。Windows 默认位于 `%LOCALAPPDATA%\fliuno\workbench.db`，Linux 默认位于 `$XDG_STATE_HOME/fliuno/workbench.db`（未设置时使用 `~/.local/state`）。`--demo` 默认使用同目录下独立的 `demo.db`。
+`[model].base_url` 和 `[model.budget]` 的用法见[服务配置](setup.md#真实模型)。
 
 Linux 启动包面向 x86-64、glibc 2.34 及以上。发布页的 `SHA256SUMS.txt` 可用 `sha256sum -c SHA256SUMS.txt` 校验已下载的文件；只下载其中一个包时可用 `sha256sum -c --ignore-missing SHA256SUMS.txt`。Windows 用 `Get-FileHash` 计算 `.zip` 的 SHA-256 并与清单对照。
