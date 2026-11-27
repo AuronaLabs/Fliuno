@@ -1,3 +1,4 @@
+mod deliverables;
 mod memories;
 mod palette;
 mod panels;
@@ -76,6 +77,7 @@ enum Layer {
     Backup(Option<Box<BackupResult>>),
     Diagnostics(String, u16),
     Memories(Box<memories::MemoryPanel>),
+    Deliverables(Box<deliverables::Catalog>),
     Edit(Edit),
     None,
 }
@@ -637,13 +639,15 @@ impl App {
                 }
             }
             Update::Preview(preview) => {
-                if matches!(self.layer, Layer::Artifacts(_))
-                    && self.pending_preview.take().is_some_and(|expected| {
-                        expected.task_id == preview.id.task_id
-                            && expected.artifact_id == preview.id.artifact_id
-                    })
-                {
-                    self.layer = Layer::Preview(preview, 0);
+                if self.pending_preview.take().is_some_and(|expected| {
+                    expected.task_id == preview.id.task_id
+                        && expected.artifact_id == preview.id.artifact_id
+                }) {
+                    if matches!(self.layer, Layer::Deliverables(_)) {
+                        self.install_catalog_preview(preview);
+                    } else if matches!(self.layer, Layer::Artifacts(_)) {
+                        self.layer = Layer::Preview(preview, 0);
+                    }
                 }
             }
             Update::Timeline(page) => {
@@ -742,6 +746,14 @@ impl App {
                 page,
             } => self.install_memories(&workspace, &query, page),
             Update::MemorySaved(workspace) => self.memory_saved(&workspace),
+            Update::Deliverables { workspace, page } => self.install_deliverables(&workspace, page),
+            Update::Saved { path, sha256 } => {
+                self.message = if matches!(self.layer, Layer::Deliverables(_)) {
+                    format!("Saved {}\nVerified SHA-256: {sha256}", path.display())
+                } else {
+                    format!("Saved {}", path.display())
+                };
+            }
             Update::Diagnostics(text) => {
                 if matches!(self.layer, Layer::Diagnostics(..)) {
                     self.layer = Layer::Diagnostics(text, 0);
@@ -779,6 +791,10 @@ impl App {
             if target.insert(&text, edit_limit(edit)) && matches!(edit, Edit::Task) {
                 self.key = uuid::Uuid::new_v4().to_string();
             }
+        } else if let Layer::Deliverables(catalog) = &self.layer {
+            if !self.busy {
+                catalog.paste(&mut self.input, value);
+            }
         } else if let Layer::Memories(panel) = &mut self.layer {
             if !self.busy {
                 panel.paste(value);
@@ -801,6 +817,10 @@ impl App {
         let pressed = key.kind == KeyEventKind::Press;
         if ctrl && key.code == KeyCode::Char('c') {
             return true;
+        }
+        if matches!(self.layer, Layer::Deliverables(_)) {
+            self.catalog_key(key, worker);
+            return false;
         }
         if matches!(self.layer, Layer::Memories(_)) {
             self.memories_key(key, worker);
@@ -1294,7 +1314,7 @@ impl App {
                 }
             }
             Layer::Diagnostics(_, scroll) => scroll_key(key.code, scroll),
-            Layer::Memories(_) => unreachable!(),
+            Layer::Memories(_) | Layer::Deliverables(_) => unreachable!(),
             Layer::Backup(_) => {
                 let edit = match key.code {
                     KeyCode::Char('c') => Some(Edit::BackupCreate),
@@ -1659,6 +1679,7 @@ impl App {
                 self.scroll = 0;
             }
             KeyCode::F(6) if active => self.open_memories(worker, false),
+            KeyCode::F(7) if active => self.open_deliverables(worker),
             KeyCode::End => self.follow = true,
             KeyCode::Home => {
                 self.follow = false;
@@ -1771,6 +1792,7 @@ impl App {
             commands.push(("Workspaces", KeyCode::Char('w')));
             commands.push(("Sessions", KeyCode::Char('s')));
             commands.push(("Workspace memories", KeyCode::F(6)));
+            commands.push(("Workspace deliverables", KeyCode::F(7)));
             if self.session.is_some() {
                 commands.push(("Browse session tasks", KeyCode::Char('L')));
                 commands.push(("Queued prompts", KeyCode::Char('Q')));

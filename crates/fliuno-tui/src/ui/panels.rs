@@ -398,6 +398,7 @@ impl App {
                 ("Task recovery".into(), actions)
             }
             Layer::Memories(panel) => ("Workspace memories".into(), panel.help()),
+            Layer::Deliverables(catalog) => (catalog.title().into(), catalog.help()),
             Layer::Diagnostics(..) => (
                 "Connection and configuration".into(),
                 "↑/↓ Scroll  ·  Esc Back",
@@ -584,6 +585,7 @@ impl App {
                 }
             }
             Layer::Memories(panel) => self.draw_memories(frame, body, panel),
+            Layer::Deliverables(catalog) => self.draw_deliverables(frame, body, catalog),
             Layer::Diagnostics(text, scroll) => {
                 let state = if self.online {
                     ""

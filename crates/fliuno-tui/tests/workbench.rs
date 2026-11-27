@@ -1237,3 +1237,164 @@ fn terminal_reviews_edits_and_pins_a_workspaces_memory() {
     terminal.expect_absent("rust-notes");
     terminal.quit("\x03");
 }
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn workspace_deliverables_filter_review_versions_and_verify_saved_bytes() {
+    use fliuno_client::Client;
+    use serde_json::{Value, json};
+    use std::{io::BufReader, process::Stdio};
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            binary().with_file_name(format!("fliuno-app-server{}", std::env::consts::EXE_SUFFIX))
+        });
+    let root = tempfile::tempdir().unwrap();
+    let mut child = Command::new(&server)
+        .arg("--demo")
+        .arg("--db")
+        .arg(root.path().join("workbench.db"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut client = Client::connect(
+        BufReader::new(child.stdout.take().unwrap()),
+        child.stdin.take().unwrap(),
+        "deliverable-catalog-test",
+        |_| {},
+    )
+    .unwrap();
+    let workspace: Value = client
+        .call("workspace/open", &json!({"root":root.path()}), |_| {})
+        .unwrap();
+    let first: Value = client
+        .call(
+            "session/create",
+            &json!({"workspaceId":workspace["id"],"title":"Revision work"}),
+            |_| {},
+        )
+        .unwrap();
+    let second: Value = client
+        .call(
+            "session/create",
+            &json!({"workspaceId":workspace["id"],"title":"Another session"}),
+            |_| {},
+        )
+        .unwrap();
+    let mut create = |session: &Value, prompt: &str| {
+        let task: Value = client
+            .call(
+                "task/start",
+                &json!({"sessionId":session["id"],"input":prompt}),
+                |_| {},
+            )
+            .unwrap();
+        let target = json!({"taskId":task["id"]});
+        let until = Instant::now() + Duration::from_secs(15);
+        let approval = loop {
+            let task: Value = client.call("task/get", &target, |_| {}).unwrap();
+            if let Some(id) = task["pendingApproval"]["id"].as_str() {
+                break id.to_owned();
+            }
+            assert!(Instant::now() < until, "no approval appeared");
+            thread::sleep(Duration::from_millis(30));
+        };
+        let _: Value = client
+            .call(
+                "approval/respond",
+                &json!({"taskId":task["id"],"approvalId":approval,"decision":"allow_once"}),
+                |_| {},
+            )
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(15);
+        loop {
+            let task: Value = client.call("task/get", &target, |_| {}).unwrap();
+            if task["status"] == "completed" {
+                break;
+            }
+            assert!(Instant::now() < until, "task did not finish");
+            thread::sleep(Duration::from_millis(30));
+        }
+        let page: Value = client
+            .call("artifacts/listSummaries", &target, |_| {})
+            .unwrap();
+        json!({"taskId":task["id"],"artifactId":page["items"][0]["id"]})
+    };
+    let previous = create(&first, "First version of the report");
+    let current = create(&first, "Second version of the report");
+    create(&second, "Another session deliverable");
+    let _: Value = client
+        .call(
+            "artifacts/linkRevision",
+            &json!({"previous":previous,"current":current}),
+            |_| {},
+        )
+        .unwrap();
+    let (mut output, input) = client.into_parts();
+    drop(input);
+    std::io::copy(&mut output, &mut std::io::sink()).unwrap();
+    assert!(child.wait().unwrap().success());
+
+    let mut console = Console::launch(Some(&server), root.path());
+    console.expect("Another session");
+    console.expect("Another session deliverable");
+    console.ready();
+    console.keys("/");
+    console.expect("Workspace deliverables");
+    console.keys("workspace deliverables\r");
+    console.expect("all types · Page 1");
+    console.expect("Demo artifact");
+    console.ready();
+    console.keys("f");
+    console.expect("text/plain · Page 1");
+    console.ready();
+    console.capture("deliverables-filtered");
+    console.keys("f");
+    console.expect("text/markdown · Page 1");
+    console.expect("No deliverables match");
+    console.ready();
+    console.keys("f");
+    console.expect("application/json · Page 1");
+    console.ready();
+    console.keys("f");
+    console.expect("application/pdf · Page 1");
+    console.ready();
+    console.keys("f");
+    console.expect("all types · Page 1");
+    console.ready();
+    console.keys("\x1b[B\r");
+    console.expect("Deliverable preview");
+    console.expect("Second version of the report");
+    console.expect("Earlier revision:");
+    console.capture("deliverables-revision");
+    console.keys("p");
+    console.expect("First version of the report");
+    console.ready();
+    console.resize(21, 48);
+    console.ready();
+    console.capture("deliverables-narrow");
+    console.resize(28, 110);
+    console.ready();
+    console.keys("d");
+    console.expect("Destination file path");
+    let destination = root.path().join("reviewed report.txt");
+    std::fs::write(&destination, b"existing file").unwrap();
+    console.keys(&format!("{}\r", destination.display()));
+    console.expect("Destination already exists");
+    assert_eq!(std::fs::read(&destination).unwrap(), b"existing file");
+    console.ready();
+    let output = root.path().join("saved report.txt");
+    console.keys("d");
+    console.expect("Destination file path");
+    console.keys(&format!("{}\r", output.display()));
+    console.expect("Verified SHA-256:");
+    console.expect("saved report.txt");
+    assert_eq!(
+        std::fs::read(&output).unwrap(),
+        b"First version of the report"
+    );
+    console.capture("deliverables-save-receipt");
+    console.quit("\x03");
+}

@@ -4,7 +4,8 @@ use crate::{health, options::Options, task_browser::PageAction};
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
 use fliuno_client::{Client, Error as ClientError, EventFeed};
 use fliuno_protocol::{
-    ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactDigest, ArtifactGetParams,
+    ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
+    ArtifactCatalogSnapshotPage, ArtifactCatalogSnapshotParams, ArtifactDigest, ArtifactGetParams,
     ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelUsageSummary, ModelUsageTotals,
     ObjectPage, Session, SessionContextParams, SessionForkParams, SessionHistoryRole,
     SessionListOrder, SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan,
@@ -40,6 +41,7 @@ pub enum Request {
         after: u64,
     },
     SaveMemory(fliuno_protocol::WorkspaceMemoryPutParams),
+    Deliverables(ArtifactCatalogSnapshotParams),
     Backup(BackupRequest),
     Workspaces(u64),
     OpenWorkspace(String),
@@ -108,6 +110,7 @@ pub struct Detail {
 pub struct Preview {
     pub id: ArtifactGetParams,
     pub digest: ArtifactDigest,
+    pub summary: ArtifactSummary,
     pub revision: Option<ArtifactRevision>,
     pub text: Option<String>,
 }
@@ -178,6 +181,14 @@ pub enum Update {
         page: ObjectPage<fliuno_protocol::WorkspaceMemory>,
     },
     MemorySaved(String),
+    Deliverables {
+        workspace: String,
+        page: ArtifactCatalogSnapshotPage,
+    },
+    Saved {
+        path: PathBuf,
+        sha256: String,
+    },
     Finished,
     Error(String),
     Offline(String),
@@ -943,6 +954,21 @@ impl Service {
                     append,
                 )
             }
+            Request::Deliverables(params) => {
+                let ArtifactCatalogScope::Workspace { workspace_id } = &params.scope else {
+                    return Err("Open a workspace deliverable catalog".into());
+                };
+                if self.workspace.as_ref() != Some(workspace_id)
+                    || !self.supports("artifactCatalogSnapshots")
+                {
+                    return Err("Workspace deliverables are unavailable".into());
+                }
+                let page = self.rpc("artifacts/listSnapshot", json!(params))?;
+                Update::Deliverables {
+                    workspace: workspace_id.clone(),
+                    page,
+                }
+            }
             Request::Preview(id) => Update::Preview(Box::new(self.preview(id)?)),
             Request::Download(id, path) => {
                 let digest = self.digest(&id)?;
@@ -957,8 +983,19 @@ impl Service {
                 self.client
                     .download_artifact(&id, &digest, staging.as_file_mut(), |_| {})?;
                 staging.as_file_mut().sync_all()?;
-                staging.persist_noclobber(&path)?;
-                Update::Notice(format!("Saved {}", path.display()))
+                staging.persist_noclobber(&path).map_err(
+                    |failure| -> Box<dyn std::error::Error> {
+                        if failure.error.kind() == std::io::ErrorKind::AlreadyExists {
+                            return format!("Destination already exists: {}", path.display())
+                                .into();
+                        }
+                        failure.into()
+                    },
+                )?;
+                Update::Saved {
+                    path,
+                    sha256: digest.sha256,
+                }
             }
         };
         out.send(update)?;
@@ -1038,6 +1075,7 @@ impl Service {
         Ok(Preview {
             id,
             digest,
+            summary,
             revision,
             text,
         })
