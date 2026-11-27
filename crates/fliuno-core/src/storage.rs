@@ -204,7 +204,51 @@ fn write_transition(
     Ok(sequences)
 }
 
+fn calibrate_model(db: &Connection, provider: &dyn ModelProvider) -> Result<()> {
+    if let Some((provider_id, model)) = provider.model_identity() {
+        let undercount: i64 = db.query_row(
+            "SELECT COALESCE(MAX(CAST(json_extract(data,'$.undercountTokens') AS INTEGER)),0)
+                 FROM events
+                 WHERE json_extract(data,'$.type')='model_preflight_observed'
+                   AND json_extract(data,'$.provider')=?1
+                   AND json_extract(data,'$.model')=?2
+                   AND json_extract(data,'$.usageStatus')='matched'",
+            params![provider_id, model],
+            |row| row.get(0),
+        )?;
+        let calibrated = u32::try_from(undercount.max(0)).unwrap_or(u32::MAX);
+        provider.set_calibrated_safety_margin(&provider_id, &model, calibrated);
+    }
+    Ok(())
+}
+
 impl Kernel {
+    pub fn require_model_switch_ready(&self) -> Result<()> {
+        let awaiting_model: bool = self.db.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM task_summary_status t JOIN task_summaries s ON s.task_id=t.task_id
+                WHERE t.status IN ('running','waiting_approval','waiting_input','interrupted')
+                  AND json_extract(s.data,'$.backend.type')='model'
+            ) OR EXISTS(SELECT 1 FROM runs WHERE status IN ('running','interrupted'))",
+            [],
+            |row| row.get(0),
+        )?;
+        if awaiting_model {
+            return Err(Error::Conflict(
+                "Finish or resolve existing model work before switching profiles".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Change the provider for the next model task after all old work settles.
+    pub fn replace_model_provider(&mut self, provider: Box<dyn ModelProvider>) -> Result<()> {
+        self.require_model_switch_ready()?;
+        calibrate_model(&self.db, provider.as_ref())?;
+        self.provider = Arc::from(provider);
+        Ok(())
+    }
+
     pub(crate) fn commit_run_transition(
         &mut self,
         run_id: &str,
@@ -735,20 +779,7 @@ impl Kernel {
         if version < 76 {
             sessions::migrate_forks(&mut db)?;
         }
-        if let Some((provider_id, model)) = provider.model_identity() {
-            let undercount: i64 = db.query_row(
-                "SELECT COALESCE(MAX(CAST(json_extract(data,'$.undercountTokens') AS INTEGER)),0)
-                 FROM events
-                 WHERE json_extract(data,'$.type')='model_preflight_observed'
-                   AND json_extract(data,'$.provider')=?1
-                   AND json_extract(data,'$.model')=?2
-                   AND json_extract(data,'$.usageStatus')='matched'",
-                params![provider_id, model],
-                |row| row.get(0),
-            )?;
-            let calibrated = u32::try_from(undercount.max(0)).unwrap_or(u32::MAX);
-            provider.set_calibrated_safety_margin(&provider_id, &model, calibrated);
-        }
+        calibrate_model(&db, provider.as_ref())?;
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();
         tools.insert("artifact_create".into(), Arc::new(CreateArtifact));
         for name in [crate::interaction::PLAN, crate::interaction::ASK] {

@@ -665,6 +665,34 @@ pub struct ModelCapabilities {
     pub refreshed_at_ms: u64,
 }
 
+/// A profile configured in the local app-server settings. None refers to [model].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileEntry {
+    pub profile: Option<String>,
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileList {
+    pub active: ModelProfileEntry,
+    pub profiles: Vec<ModelProfileEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileSelectParams {
+    #[schemars(required, schema_with = "nullable_model_profile")]
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub profile: Option<String>,
+}
+
+fn nullable_model_profile(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    generator.subschema_for::<Option<String>>()
+}
+
 /// Token count performed immediately before dispatching one model request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

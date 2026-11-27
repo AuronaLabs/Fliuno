@@ -4570,6 +4570,27 @@
         "taskId"
       ]
     },
+    "modelProfiles/list": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "modelProfiles/select": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileSelectParams",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ]
+    },
     "modelUsage/getSummary": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ModelUsageSummaryParams",
@@ -20032,6 +20053,77 @@
           "enum": [
             "configured",
             "provider_metadata"
+          ]
+        }
+      }
+    },
+    "ModelProfileEntry": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileEntry",
+      "description": "A profile configured in the local app-server settings. None refers to [model].",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model"
+      ]
+    },
+    "ModelProfileList": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileList",
+      "type": "object",
+      "properties": {
+        "active": {
+          "$ref": "#/$defs/ModelProfileEntry"
+        },
+        "profiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelProfileEntry"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "active",
+        "profiles"
+      ],
+      "$defs": {
+        "ModelProfileEntry": {
+          "description": "A profile configured in the local app-server settings. None refers to [model].",
+          "type": "object",
+          "properties": {
+            "profile": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model"
           ]
         }
       }

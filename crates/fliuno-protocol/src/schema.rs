@@ -114,6 +114,8 @@ pub fn schema_bundle() -> Value {
         "approval/cancelRun" => schema::<TaskRequestLookupParams>(),
         "events/get" => schema::<EventGetParams>(),
         "events/list" => schema::<EventsListParams>(),
+        "modelProfiles/list" => serde_json::json!({"type":"object","additionalProperties":false}),
+        "modelProfiles/select" => schema::<ModelProfileSelectParams>(),
         "modelUsage/getSummary" => schema::<ModelUsageSummaryParams>(),
         "modelUsage/getSummaries" => schema::<ModelUsageSummaryBatchParams>(),
         "modelUsage/summarizeRange" => schema::<ModelUsageRangeParams>(),
@@ -250,6 +252,8 @@ pub fn schema_bundle() -> Value {
         "ModelBudget" => schema::<ModelBudget>(),
         "ModelBudgetRejection" => schema::<ModelBudgetRejection>(),
         "ModelCapabilities" => schema::<ModelCapabilities>(),
+        "ModelProfileEntry" => schema::<ModelProfileEntry>(),
+        "ModelProfileList" => schema::<ModelProfileList>(),
         "ModelCapabilitiesSource" => schema::<ModelCapabilitiesSource>(),
         "ModelInputType" => schema::<ModelInputType>(),
         "EventsPage" => schema::<EventsPage>()

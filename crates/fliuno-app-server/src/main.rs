@@ -164,7 +164,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     // Parse every startup file before opening SQLite or allowing an earlier
     // adapter to connect/spawn. Semantic validation remains adapter-owned.
-    let mut user_config = user_config
+    let user_config_path = user_config;
+    let mut user_config = user_config_path
         .as_deref()
         .map(fliuno_config::Settings::load)
         .transpose()?;
@@ -303,7 +304,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
+    let live_model = provider_name != "demo";
     let mut server = RpcServer::with_terminals(kernel, provider_name, terminals);
+    if live_model && let Some(path) = user_config_path {
+        let initial =
+            model_profile.or_else(|| user_config.and_then(|config| config.workbench.model_profile));
+        server.enable_local_model_profiles(path, initial);
+    }
     if let Some(registrations) = agent_terminal_logins {
         server.enable_local_agent_terminal_login(registrations);
     }

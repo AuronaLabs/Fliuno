@@ -3,6 +3,7 @@ mod agent_catalog;
 mod agent_login;
 mod approvals;
 mod memory_embeddings;
+mod model_profiles;
 mod scheduler;
 mod terminal_subscriptions;
 
@@ -39,6 +40,7 @@ pub struct RpcServer {
     progress_stream_gap: bool,
     initialized: bool,
     provider_name: String,
+    model_profiles: Option<model_profiles::Catalog>,
     terminals: Option<fliuno_terminal::Service>,
     terminal_subscriptions: terminal_subscriptions::Subscriptions,
 }
@@ -133,6 +135,7 @@ impl RpcServer {
             progress_stream_gap: false,
             initialized: false,
             provider_name,
+            model_profiles: None,
             terminals,
             terminal_subscriptions: terminal_subscriptions::Subscriptions::new(),
         };
@@ -167,6 +170,7 @@ impl RpcServer {
             progress_stream_gap: false,
             initialized: false,
             provider_name: self.provider_name.clone(),
+            model_profiles: None,
             terminals: self.terminals.clone(),
             terminal_subscriptions: terminal_subscriptions::Subscriptions::new(),
         })
@@ -552,6 +556,10 @@ impl RpcServer {
                 .iter()
                 .any(|spec| matches!(spec.effect, fliuno_core::ToolEffect::ProcessExecution));
             self.initialized = true;
+            let model = self.kernel()?.configured_model_capabilities();
+            let provider_name = model
+                .as_ref()
+                .map_or(self.provider_name.as_str(), |model| model.provider.as_str());
             let mut capabilities = json!({
                 "eventReplay":true, "approvals":true, "artifacts":true,
                 "artifactSummaries":true,
@@ -561,7 +569,7 @@ impl RpcServer {
                 "eventResubscribe":true,
                 "sessionEventReplay":true,
                 "maxBatchItems":MAX_BATCH_ITEMS,
-                "provider":self.provider_name, "liveModels":self.provider_name != "demo",
+                "provider":provider_name, "liveModels":provider_name != "demo",
                 "externalTools":external_tools, "backgroundTasks":true,
                 "externalAgents":!self.kernel()?.agent_specs().is_empty(),
                 "remoteTaskChecks":self.kernel()?.remote_task_check_supported(),
@@ -590,13 +598,13 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["modelProfiles"] = json!(self.model_profiles.is_some());
             capabilities["modelBudgetRejectionEvents"] = json!(true);
             capabilities["durableTaskRuns"] = json!(self.kernel()?.durable_runs_supported());
             capabilities["maxRunNodes"] = json!(MAX_RUN_NODES);
             capabilities["maxRunConcurrency"] = json!(MAX_RUN_CONCURRENCY);
             capabilities["maxRunTimeoutMs"] = json!(MAX_RUN_TIMEOUT_MS);
-            capabilities["modelCapabilities"] =
-                json!(self.kernel()?.configured_model_capabilities());
+            capabilities["modelCapabilities"] = json!(model);
             capabilities["taskStartSummary"] = json!(true);
             capabilities["taskRespondToolInput"] = json!(true);
             capabilities["taskImageInput"] = json!(true);
@@ -764,6 +772,18 @@ impl RpcServer {
             });
         }
         Ok(match method {
+            "modelProfiles/list" => {
+                if !params.as_object().is_some_and(|object| object.is_empty()) {
+                    return Err(
+                        Error::Invalid("modelProfiles/list takes no parameters".into()).into(),
+                    );
+                }
+                json!(self.list_model_profiles()?)
+            }
+            "modelProfiles/select" => {
+                let params: ModelProfileSelectParams = decode(params)?;
+                json!(self.select_model_profile(params.profile)?)
+            }
             "terminal/archiveBatch" => {
                 let p: TerminalArchiveBatchParams = decode(params)?;
                 json!(
