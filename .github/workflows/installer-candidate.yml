@@ -1,0 +1,110 @@
+name: Installer candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Stable release tag used for the upgrade fixture
+        type: string
+        required: true
+        default: v0.0.16
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    env:
+      BASELINE: ${{ inputs.baseline }}
+      DOTNET_ROLL_FORWARD: Major
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Build the Windows x64 candidate
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          dotnet tool install --global wix --version 6.0.2
+          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
+          "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+          cargo build --locked --release -p fliuno-tui -p fliuno-app-server --bins
+          $bin = (Resolve-Path -LiteralPath target/release).Path
+          $version = (& "$bin\fliuno.exe" --version).Split(' ')[1]
+          New-Item -ItemType Directory -Path dist | Out-Null
+          $msi = (Join-Path (Resolve-Path -LiteralPath dist).Path "fliuno-v$version-windows-x64.msi")
+          wix build -arch x64 -d "FliunoVersion=$version" -d "BinDir=$bin" -out $msi packaging/windows/Fliuno.wxs
+          python scripts/package_workbench.py $version --windows-bin $bin --native-package $msi --out dist
+          "CANDIDATE_MSI=$msi" >> $env:GITHUB_ENV
+          git rev-parse HEAD | Set-Content -LiteralPath dist/SOURCE-COMMIT.txt
+      - name: Verify the MSI lifecycle
+        shell: pwsh
+        run: |
+          packaging/windows/verify.ps1 -Candidate $env:CANDIDATE_MSI -CandidateBin (Resolve-Path target/release).Path `
+            -BaselineTag $env:BASELINE -Evidence "$env:RUNNER_TEMP\fliuno-installer"
+      - name: Exercise the installed client in ConPTY
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:FLIUNO_TEST_TUI = "$env:ProgramFiles\Fliuno\fliuno.exe"
+          $env:FLIUNO_TEST_APP_SERVER = "$env:ProgramFiles\Fliuno\fliuno-app-server.exe"
+          cargo test --locked --release -p fliuno-tui --test workbench -- --include-ignored --test-threads=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fliuno-windows-candidate
+          path: |
+            dist/*.msi
+            dist/*.zip
+            dist/*.txt
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installation-logs
+          path: ${{ runner.temp }}/fliuno-installer/*.log
+          if-no-files-found: ignore
+
+  debian:
+    runs-on: ubuntu-24.04
+    container: rust:bookworm
+    timeout-minutes: 35
+    env:
+      BASELINE: ${{ inputs.baseline }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Debian package tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends dpkg-dev python3
+      - name: Build the Debian amd64 candidate
+        run: |
+          cargo build --locked --release -p fliuno-tui -p fliuno-app-server --bins
+          version=$(target/release/fliuno --version | cut -d' ' -f2)
+          export SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          sh packaging/debian/build.sh target/release dist
+          python3 scripts/package_workbench.py "$version" --linux-bin target/release \
+            --native-package "dist/fliuno-v$version-linux-amd64.deb" --out dist
+          git rev-parse HEAD > dist/SOURCE-COMMIT.txt
+      - name: Verify the Debian package lifecycle
+        run: sh packaging/debian/verify.sh dist/*.deb target/release "$BASELINE"
+      - name: Exercise the installed client in a Linux PTY
+        env:
+          FLIUNO_TEST_TUI: /usr/bin/fliuno
+          FLIUNO_TEST_APP_SERVER: /usr/bin/fliuno-app-server
+          TERM: xterm-256color
+        run: cargo test --locked --release -p fliuno-tui --test workbench -- --include-ignored --test-threads=1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fliuno-debian-candidate
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
+            dist/*.txt
+          if-no-files-found: error

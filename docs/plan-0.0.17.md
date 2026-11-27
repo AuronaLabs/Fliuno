@@ -52,7 +52,7 @@ Windows x64 同机对照使用发布的 v0.0.16 和候选版 Release 构建，�
 - 安装生命周期与真实 TUI 工作流均通过，记录测试系统、提交 SHA、候选资产 SHA-256、性能对比及终端截图。公开前远端资产必须与验收清单一一匹配。
 - GitHub Actions 先运行可手动触发的候选构建和验证。签名状态、构建证明状态和支持的系统在版本说明中如实标出。候选失败时修复后重新构建和验收，稳定版继续使用原发布。
 
-## Windows 安装包原型
+## 安装包构建与候选验收
 
 [WiX 定义](../packaging/windows/Fliuno.wxs)把终端客户端和 app-server 安装到同一目录，PATH 条目随包管理。打包使用 WiX 6.0.2。先在同一检出中构建两个程序，用该检出的 Cargo 版本设定 MSI 版本。以下示例将输出放到现有外部构建目录。
 
@@ -65,4 +65,6 @@ wix build -arch x64 -d "FliunoVersion=$version" -d "BinDir=$bin" `
   -out "$env:CARGO_TARGET_DIR\fliuno-v$version-windows-x64.msi" packaging/windows/Fliuno.wxs
 ```
 
-候选工作流需从确认一致的源代码版本与二进制构建。当前原型用于检查 MSI 内容与升级顺序，完整系统安装与升级仍按上方生命周期验证。
+Debian 在 Bookworm amd64 上构建，使用 `sh packaging/debian/build.sh target/release dist` 生成包。`dpkg-shlibdeps` 从构建产物推导系统依赖。`.deb` 由包管理器维护 `/usr/bin/fliuno` 和 `/usr/bin/fliuno-app-server`。
+
+[候选工作流](../.github/workflows/installer-candidate.yml)手动启动，以同一提交构建并验证两平台的原生包和便携包。验收从稳定版压缩包生成升级夹具，检查安装后从 PATH 启动、升级前后的二进制摘要、卸载保留的用户文件、重装续聊，以及使用已安装二进制完成真实终端用例。候选输出包含来源提交与 SHA-256。发布从已验收的文件中选择资产。
