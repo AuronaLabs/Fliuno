@@ -3,6 +3,7 @@ mod backup;
 mod editor;
 mod health;
 mod options;
+mod pipe;
 mod recovery;
 mod service;
 mod task_browser;

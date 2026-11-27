@@ -1241,6 +1241,7 @@ fn terminal_reviews_edits_and_pins_a_workspaces_memory() {
     terminal.ready();
     terminal.keys("w");
     terminal.expect("Workspaces");
+    terminal.ready();
     terminal.keys("o");
     terminal.expect("Open folder");
     terminal.keys(&outside.path().to_string_lossy());

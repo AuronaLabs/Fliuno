@@ -64,6 +64,16 @@ impl EventFeed {
         self.replay.through()
     }
 
+    /// Whether a snapshot consumer has seen a gap or a newer durable watermark.
+    pub fn snapshot_stale(&self, through: u64) -> bool {
+        self.signals.gap || self.signals.through > through
+    }
+
+    /// Whether a snapshot consumer should replace the event subscription.
+    pub fn subscription_lost(&self) -> bool {
+        self.signals.gap
+    }
+
     /// Record event or gap notifications and return other notifications unchanged.
     pub fn observe(&mut self, notification: Notification) -> Option<Notification> {
         self.signals.observe(notification)

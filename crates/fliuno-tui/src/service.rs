@@ -1,7 +1,12 @@
 use crate::activity;
 use crate::backup::{self, BackupRequest, BackupResult};
-use crate::{health, options::Options, task_browser::PageAction};
-use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, bounded};
+use crate::{
+    health,
+    options::Options,
+    pipe::{PipeInbox, PipeReader},
+    task_browser::PageAction,
+};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, bounded, select_biased};
 use fliuno_client::{Client, Error as ClientError, EventFeed, SessionHistory};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
@@ -19,15 +24,16 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::{
     fs,
-    io::BufReader,
     path::PathBuf,
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::{Child, ChildStdin, Command, Stdio},
+    rc::Rc,
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
-const REFRESH: Duration = Duration::from_millis(750);
+const POLL_REFRESH: Duration = Duration::from_millis(750);
+const SUBSCRIPTION_REFRESH: Duration = Duration::from_secs(20);
 const MAX_PREVIEW: u64 = 64 * 1024;
 const MAX_DOWNLOAD: u64 = 32 * 1024 * 1024;
 pub const TRANSCRIPT_PAGE_TURNS: u32 = 12;
@@ -268,7 +274,9 @@ impl Drop for Worker {
 }
 
 struct Service {
-    client: Client<BufReader<ChildStdout>, ChildStdin>,
+    client: Client<PipeReader, ChildStdin>,
+    inbox: Rc<PipeInbox>,
+    next_refresh: Instant,
     workspace: Option<String>,
     session: Option<String>,
     inbox_visible: bool,
@@ -340,9 +348,12 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
     *slot
         .lock()
         .map_err(|_| "app-server process lock unavailable")? = Some(child);
-    let client = Client::connect(BufReader::new(output), input, "Fliuno Workbench", |_| {})?;
+    let (reader, inbox) = PipeReader::open(output)?;
+    let client = Client::connect(reader, input, "Fliuno Workbench", |_| {})?;
     Ok(Service {
         client,
+        inbox,
+        next_refresh: Instant::now() + POLL_REFRESH,
         workspace: None,
         session: None,
         inbox_visible: false,
@@ -367,6 +378,16 @@ fn disconnected(err: &(dyn std::error::Error + 'static)) -> bool {
     )
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Keep the single pending command on the stack"
+)]
+enum Incoming {
+    Command(Request),
+    Notification,
+    Refresh,
+}
+
 fn serve(
     options: Options,
     requests: Receiver<Request>,
@@ -375,25 +396,14 @@ fn serve(
     backup_slot: backup::ProcessSlot,
 ) {
     let mut root = options.workspace.to_string_lossy().into_owned();
-    let mut service = None;
-    let mut first = true;
-    loop {
-        let incoming = if first {
-            first = false;
-            Ok(Request::Reconnect)
-        } else {
-            requests.recv_timeout(REFRESH)
-        };
-        let mut finished = true;
-        let result = match incoming {
-            Err(RecvTimeoutError::Disconnected) => break,
-            Err(RecvTimeoutError::Timeout) => {
-                finished = false;
-                service
-                    .as_mut()
-                    .map_or(Ok(()), |server: &mut Service| server.refresh(&out, false))
-            }
-            Ok(Request::Reconnect) => {
+    let mut service: Option<Service> = None;
+    let mut incoming = Some(Incoming::Command(Request::Reconnect));
+    while let Some(input) = incoming {
+        let finished = matches!(input, Incoming::Command(_));
+        let result = match input {
+            Incoming::Refresh => Ok(()),
+            Incoming::Notification => service.as_mut().map_or(Ok(()), Service::read_notices),
+            Incoming::Command(Request::Reconnect) => {
                 close(&mut service, &slot);
                 match connect(&options, &slot).and_then(|mut server| {
                     let workspace: Workspace =
@@ -411,19 +421,29 @@ fn serve(
                     }
                 }
             }
-            Ok(Request::Diagnostics) => {
+            Incoming::Command(Request::Diagnostics) => {
                 let info = service.as_ref().map(|server| server.client.info());
                 let report = health::inspect(&options, info);
                 out.send(Update::Diagnostics(report.text))
                     .map_err(Into::into)
             }
-            Ok(Request::Backup(request)) => backup::run(&options, request, &backup_slot)
-                .and_then(|result| Ok(out.send(Update::BackupDone(Box::new(result)))?)),
-            Ok(request) => service
+            Incoming::Command(Request::Backup(request)) => {
+                backup::run(&options, request, &backup_slot)
+                    .and_then(|result| Ok(out.send(Update::BackupDone(Box::new(result)))?))
+            }
+            Incoming::Command(request) => service
                 .as_mut()
                 .ok_or_else(|| "Connect to the app-server first".into())
                 .and_then(|server| server.handle(request, &out, &mut root)),
         };
+        let result = result.and_then(|()| {
+            if let Some(server) = &mut service
+                && server.needs_refresh()
+            {
+                server.refresh(&out, false)?;
+            }
+            Ok(())
+        });
         if let Err(error) = result {
             let update = if disconnected(error.as_ref()) {
                 close(&mut service, &slot);
@@ -445,6 +465,10 @@ fn serve(
         if finished && out.send(Update::Finished).is_err() {
             break;
         }
+        incoming = match &service {
+            Some(server) => server.wait(&requests),
+            None => requests.recv().ok().map(Incoming::Command),
+        };
     }
     close(&mut service, &slot);
 }
@@ -464,6 +488,47 @@ fn observe(
 }
 
 impl Service {
+    fn wait(&self, requests: &Receiver<Request>) -> Option<Incoming> {
+        match requests.try_recv() {
+            Ok(request) => return Some(Incoming::Command(request)),
+            Err(TryRecvError::Disconnected) => return None,
+            Err(TryRecvError::Empty) => {}
+        }
+        if self.inbox.buffered.get() {
+            return Some(Incoming::Notification);
+        }
+        let timeout = self.next_refresh.saturating_duration_since(Instant::now());
+        select_biased! {
+            recv(requests) -> request => request.ok().map(Incoming::Command),
+            recv(self.inbox.chunks) -> chunk => {
+                self.inbox.staged.set(chunk.ok());
+                Some(Incoming::Notification)
+            }
+            default(timeout) => Some(Incoming::Refresh),
+        }
+    }
+
+    fn read_notices(&mut self) -> Result<()> {
+        // Let bursts share a single snapshot while keeping commands responsive.
+        for _ in 0..32 {
+            let notice = self.client.read_notification()?;
+            observe(&mut self.feed, &mut self.activity, notice);
+            if !self.inbox.buffered.get() && self.inbox.chunks.is_empty() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn needs_refresh(&self) -> bool {
+        Instant::now() >= self.next_refresh
+            || self.activity.gap
+            || self
+                .feed
+                .as_ref()
+                .is_some_and(|feed| feed.snapshot_stale(self.watermark.unwrap_or_default()))
+    }
+
     fn supports(&self, name: &str) -> bool {
         self.client
             .info()
@@ -482,8 +547,13 @@ impl Service {
     }
 
     fn refresh(&mut self, out: &Sender<Update>, force: bool) -> Result<()> {
-        if self.activity.gap && self.supports("modelProgressResubscribe") {
-            self.activity.gap = false;
+        let interval = if self.supports("eventWatermarkNotifications") {
+            SUBSCRIPTION_REFRESH
+        } else {
+            POLL_REFRESH
+        };
+        self.next_refresh = Instant::now() + interval;
+        if std::mem::take(&mut self.activity.gap) && self.supports("modelProgressResubscribe") {
             let _: Value = self.rpc("modelProgress/resubscribe", json!({}))?;
         }
         let (workspace_id, session_id) = if self.inbox_visible {
@@ -502,7 +572,9 @@ impl Service {
             recent_task_limit: Some(50),
             include_actions: self.supports("workNextActions"),
         };
-        let (snapshot, approvals) = if self.watermark.is_none() {
+        let resubscribe = self.watermark.is_none()
+            || self.feed.as_ref().is_some_and(EventFeed::subscription_lost);
+        let (snapshot, approvals) = if resubscribe {
             let activity = &mut self.activity;
             let sub = self
                 .client
@@ -512,16 +584,9 @@ impl Service {
         } else {
             let feed = &mut self.feed;
             let activity = &mut self.activity;
-            let (snapshot, approvals) = self
-                .client
-                .work_snapshot(&params, |notice| observe(feed, activity, notice))?;
-            if let Some(feed) = self.feed.as_mut() {
-                // Updated summaries come from the snapshot; this cursor closes gaps
-                // without retaining event bodies or replaying client actions.
-                let _ = feed
-                    .next_task_changes(&mut self.client, 50, |notice| activity.observe(notice))?;
-            }
-            (snapshot, approvals)
+            // The snapshot supersedes intermediate events, including approval state.
+            self.client
+                .work_snapshot(&params, |notice| observe(feed, activity, notice))?
         };
         let watermark = snapshot.approvals.snapshot.through_sequence;
         let completed = snapshot.task_counts.completed;
