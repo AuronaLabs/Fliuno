@@ -4,6 +4,7 @@ pub use credentials::PendingApiKey;
 
 use serde::Deserialize;
 use std::{
+    collections::BTreeMap,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -26,6 +27,7 @@ api_key_file = "credentials/openai.key"
 pub struct Settings {
     pub workbench: WorkbenchSettings,
     pub model: ModelSettings,
+    pub models: BTreeMap<String, ModelSettings>,
     pub integrations: Integrations,
 }
 
@@ -35,6 +37,7 @@ pub struct WorkbenchSettings {
     pub theme: Theme,
     pub database: Option<PathBuf>,
     pub server: Option<PathBuf>,
+    pub model_profile: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -148,7 +151,6 @@ impl Settings {
         for path in [
             &mut settings.workbench.database,
             &mut settings.workbench.server,
-            &mut settings.model.api_key_file,
             &mut integrations.mcp,
             &mut integrations.mcp_oauth,
             &mut integrations.mcp_oauth_vault,
@@ -159,11 +161,48 @@ impl Settings {
             &mut integrations.skills,
             &mut integrations.memory_embedding,
         ] {
-            if let Some(relative) = path.as_ref().filter(|path| path.is_relative()) {
-                *path = Some(base.join(relative));
-            }
+            resolve_relative(path, base);
+        }
+        resolve_relative(&mut settings.model.api_key_file, base);
+        for (id, model) in &mut settings.models {
+            validate_profile_id(id)?;
+            resolve_relative(&mut model.api_key_file, base);
         }
         Ok(settings)
+    }
+
+    /// Resolve a startup override, a configured default, or the original single model.
+    pub fn model_for_launch(&self, profile: Option<&str>) -> Result<&ModelSettings, String> {
+        let Some(id) = profile.or(self.workbench.model_profile.as_deref()) else {
+            return Ok(&self.model);
+        };
+        validate_profile_id(id)?;
+        let model = self
+            .models
+            .get(id)
+            .ok_or_else(|| format!("Unknown model profile {id}"))?;
+        if matches!(model.provider, Provider::Demo) {
+            return Err(format!("Model profile {id} requires a live provider"));
+        }
+        Ok(model)
+    }
+}
+
+fn validate_profile_id(id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || id.len() > 48
+        || !id
+            .bytes()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b'-' | b'_'))
+    {
+        return Err("Model profile names use 1–48 letters, digits, hyphens or underscores".into());
+    }
+    Ok(())
+}
+
+fn resolve_relative(path: &mut Option<PathBuf>, base: &Path) {
+    if let Some(relative) = path.as_ref().filter(|path| path.is_relative()) {
+        *path = Some(base.join(relative));
     }
 }
 

@@ -344,6 +344,9 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
         command.arg("--demo");
     } else if let Some(config) = &options.config {
         command.arg("--config").arg(config);
+        if let Some(profile) = &options.model_profile {
+            command.arg("--model-profile").arg(profile);
+        }
     }
     let mut child = command.spawn()?;
     let input = child.stdin.take().expect("piped stdin");

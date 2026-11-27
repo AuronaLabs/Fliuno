@@ -920,6 +920,77 @@ fn model_and_budget_load_from_files_without_provider_environment() {
 }
 
 #[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn named_model_profiles_select_the_actual_server_model_without_rewriting_config() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let settings = r#"
+        [workbench]
+        database = "profiles.db"
+        model_profile = "office"
+        [models.office]
+        provider = "openai"
+        name = "office-fixture"
+        api_key_file = "profiles/office.key"
+        base_url = "http://127.0.0.1:9/v1/"
+        [models.lab]
+        provider = "openai"
+        name = "lab-fixture"
+        api_key_file = "profiles/lab.key"
+        base_url = "http://127.0.0.1:9/v1/"
+    "#;
+    std::fs::create_dir(root.path().join("profiles")).unwrap();
+    std::fs::write(
+        root.path().join("profiles/office.key"),
+        "office-fixture-key\n",
+    )
+    .unwrap();
+    std::fs::write(root.path().join("profiles/lab.key"), "lab-fixture-key\n").unwrap();
+    std::fs::write(&config, settings).unwrap();
+
+    let mut default = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    default.expect("Start a conversation");
+    default.expect("office-fixture");
+    default.quit("\x03");
+
+    let mut alternate = CommandBuilder::new(binary());
+    alternate.arg("--config");
+    alternate.arg(&config);
+    alternate.args(["--model-profile", "lab"]);
+    let mut terminal = Console::spawn(alternate, server.as_deref(), root.path());
+    terminal.expect("Start a conversation");
+    terminal.expect("lab-fixture");
+    terminal.expect_absent("office-fixture");
+    terminal.quit("\x03");
+
+    let mut doctor = Command::new(binary());
+    doctor
+        .arg("--config")
+        .arg(&config)
+        .args(["--model-profile", "lab", "--doctor"]);
+    if let Some(server) = &server {
+        doctor.arg("--server").arg(server);
+    }
+    let report = doctor.output().unwrap();
+    let summary = String::from_utf8(report.stdout).unwrap();
+    assert!(report.status.success(), "{summary}");
+    assert!(summary.contains("Model profile: lab"), "{summary}");
+    assert!(summary.contains("Model: openai / lab-fixture"), "{summary}");
+    assert!(!summary.contains("lab-fixture-key"));
+
+    let unknown = Command::new(binary())
+        .arg("--config")
+        .arg(&config)
+        .args(["--model-profile", "missing", "--doctor"])
+        .output()
+        .unwrap();
+    assert!(!unknown.status.success());
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("Unknown model profile missing"));
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), settings);
+}
+
+#[test]
 fn doctor_checks_local_settings_without_starting_or_disclosing_credentials() {
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");

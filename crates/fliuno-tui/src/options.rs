@@ -9,9 +9,10 @@ pub const HELP: &str = "Fliuno - local AI workbench
 
 Run from a project folder. First launch guides model setup.
 
-Usage: fliuno [--config PATH] [--demo] [--workspace PATH] [--db PATH] [--server PATH] [-- SERVER_ARGS...]
+Usage: fliuno [--config PATH] [--model-profile ID] [--demo] [--workspace PATH] [--db PATH] [--server PATH] [-- SERVER_ARGS...]
 
   --config PATH      Settings file (default: ~/.fliuno/config.toml)
+  --model-profile ID  Select a named model from the settings file
   --init-config      Create an editable settings template and exit
   --doctor           Check local configuration and paths without starting a service
   --demo             Use the offline demonstration provider
@@ -28,6 +29,7 @@ pub struct Options {
     pub settings: Settings,
     pub force_demo: bool,
     pub config: Option<PathBuf>,
+    pub model_profile: Option<String>,
     pub workspace: PathBuf,
     pub database: PathBuf,
     pub server: PathBuf,
@@ -54,6 +56,7 @@ impl Options {
         let (mut force_demo, mut init, mut workspace, mut database, mut server) =
             (false, false, None, None, None);
         let mut config = None;
+        let mut model_profile = None;
         let mut server_args = Vec::new();
         let mut theme = None;
         let mut doctor = false;
@@ -62,6 +65,13 @@ impl Options {
                 Some("--help" | "-h") => return Ok(Entry::Help),
                 Some("--version" | "-V") => return Ok(Entry::Version),
                 Some("--demo") => force_demo = true,
+                Some("--model-profile") => {
+                    model_profile = Some(
+                        args.next()
+                            .and_then(|arg| arg.into_string().ok())
+                            .ok_or("--model-profile requires a profile ID")?,
+                    )
+                }
                 Some("--init-config") => init = true,
                 Some("--doctor") => doctor = true,
                 Some("--workspace") => workspace = Some(read_path(&mut args, "--workspace")?),
@@ -86,6 +96,9 @@ impl Options {
         }
         let directory = user_directory();
         let default_config = directory.as_ref().map(|dir| dir.join("config.toml"));
+        if model_profile.is_some() && (force_demo || init) {
+            return Err("Use --model-profile with an existing live configuration".into());
+        }
         if init && doctor {
             return Err("Choose either --doctor or --init-config".into());
         }
@@ -95,11 +108,13 @@ impl Options {
                 .map(Entry::InitConfig)
                 .ok_or_else(|| "Pass --config to choose a settings file".into());
         }
-        if server_args
-            .iter()
-            .any(|arg| matches!(arg.to_str(), Some("--db" | "--config" | "--demo")))
-        {
-            return Err("Pass --db, --config, and --demo before --".into());
+        if server_args.iter().any(|arg| {
+            matches!(
+                arg.to_str(),
+                Some("--db" | "--config" | "--demo" | "--model-profile")
+            )
+        }) {
+            return Err("Pass --db, --config, --demo, and --model-profile before --".into());
         }
         let explicit_config = config.is_some();
         config = config.or(default_config);
@@ -108,6 +123,9 @@ impl Options {
                 .try_exists()
                 .map_err(|error| format!("Cannot inspect {}: {error}", path.display()))?
         {
+            if model_profile.is_some() {
+                return Err("--model-profile requires an existing settings file".into());
+            }
             if !force_demo && !doctor {
                 return Ok(Entry::Setup(SetupOptions {
                     config: path.clone(),
@@ -126,7 +144,13 @@ impl Options {
             .map(Settings::load)
             .transpose()?
             .unwrap_or_default();
-        let demo = force_demo || matches!(settings.model.provider, Provider::Demo);
+        let demo = force_demo
+            || matches!(
+                settings
+                    .model_for_launch(model_profile.as_deref())?
+                    .provider,
+                Provider::Demo
+            );
         let server = match server.or_else(|| settings.workbench.server.take()) {
             Some(path) => path,
             None => std::env::current_exe()
@@ -150,6 +174,7 @@ impl Options {
             demo,
             force_demo,
             config,
+            model_profile,
             workspace,
             database,
             server,

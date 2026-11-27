@@ -65,6 +65,23 @@ api_key_file = "credentials/openai.key"
 
 `provider` 支持 `demo`、`openai`、`anthropic` 和 `gemini`。`name` 填账户可用的模型 ID。API key 单独保存为一行文本，示例路径为 `~/.fliuno/credentials/openai.key`。建议只让当前系统用户可读取凭据文件。
 
+0.0.18 允许在同一份 TOML 里定义具名模型。配置 `[workbench].model_profile` 作为默认模型，或用 `fliuno --model-profile lab` 为这次启动指定模型。路径仍相对于配置文件。原来的 `[model]` 可继续作为未指定具名模型时的默认值。
+
+```toml
+[workbench]
+model_profile = "office"
+
+[models.office]
+provider = "openai"
+name = "your-office-model"
+api_key_file = "credentials/openai.key"
+
+[models.lab]
+provider = "anthropic"
+name = "your-lab-model"
+api_key_file = "credentials/anthropic.key"
+```
+
 | 项目 | 默认或覆盖方式 |
 | --- | --- |
 | 用户配置 | `~/.fliuno/config.toml`。`--config PATH` 可使用其他文件。配置里的相对路径均以该文件所在目录为基准。 |

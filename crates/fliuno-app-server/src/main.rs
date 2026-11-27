@@ -62,6 +62,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut db: Option<PathBuf> = None;
     let mut user_config: Option<PathBuf> = None;
     let mut demo = false;
+    let mut model_profile = None;
     let mut mcp_config: Option<PathBuf> = None;
     let mut mcp_oauth_config: Option<PathBuf> = None;
     let mut mcp_oauth_vault: Option<PathBuf> = None;
@@ -135,6 +136,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--db" => db = Some(args.next().ok_or("--db requires a path")?.into()),
             "--config" => user_config = Some(args.next().ok_or("--config requires a path")?.into()),
             "--demo" => demo = true,
+            "--model-profile" => {
+                model_profile = Some(args.next().ok_or("--model-profile requires a profile ID")?)
+            }
             "--memory-embedding-config" => {
                 memory_embedding_config = Some(
                     args.next()
@@ -145,7 +149,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--help" | "-h" => {
                 println!("{}", backup::USAGE);
                 println!(
-                    "fliuno-app-server [--config PATH] [--demo] [--db PATH] [--mcp-config PATH] [--mcp-oauth-config PATH] [--mcp-oauth-vault PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--trace-log PATH] [--otlp-endpoint URL] [--schema]\nLocal stdio JSON-RPC. --mcp-oauth-config enables host authorization before initialize. --mcp-oauth-vault persists encrypted grants separately from the kernel database. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. Use --config for model selection and a local API key file."
+                    "fliuno-app-server [--config PATH] [--model-profile ID] [--demo] [--db PATH] [--mcp-config PATH] [--mcp-oauth-config PATH] [--mcp-oauth-vault PATH] [--acp-config PATH] [--a2a-config PATH] [--exec-config PATH] [--terminal-config PATH] [--skills-dir PATH] [--trace-log PATH] [--otlp-endpoint URL] [--schema]\nLocal stdio JSON-RPC. --mcp-oauth-config enables host authorization before initialize. --mcp-oauth-vault persists encrypted grants separately from the kernel database. --a2a-config registers host-selected remote Agents. --exec-config registers host-selected commands. --terminal-config registers persistent trusted-host PTYs. Each invocation or terminal input requires approval. Use --config for model selection and a local API key file."
                 );
                 println!(
                     "--memory-embedding-config PATH enables hybrid memory retrieval for host-selected workspaces."
@@ -154,6 +158,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => return Err(format!("unknown argument: {arg}").into()),
         }
+    }
+    if model_profile.is_some() && (demo || user_config.is_none()) {
+        return Err("--model-profile requires --config with a live model".into());
     }
     // Parse every startup file before opening SQLite or allowing an earlier
     // adapter to connect/spawn. Semantic validation remains adapter-owned.
@@ -258,7 +265,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (provider_name, provider) = if demo {
         fliuno_providers::from_settings(&fliuno_config::ModelSettings::default())?
     } else if let Some(config) = &user_config {
-        fliuno_providers::from_settings(&config.model)?
+        fliuno_providers::from_settings(config.model_for_launch(model_profile.as_deref())?)?
     } else {
         fliuno_providers::from_env()?
     };

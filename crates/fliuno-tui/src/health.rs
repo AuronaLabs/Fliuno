@@ -67,12 +67,22 @@ pub fn inspect(options: &Options, service: Option<&ServerInfo>) -> Report {
         ),
         false,
     );
-    let model = &options.settings.model;
     if options.config.is_none() && !options.force_demo {
         report.healthy = false;
     } else if options.demo {
         report.check("Model", "Offline demo", false);
-    } else {
+    } else if let Ok(model) = options
+        .settings
+        .model_for_launch(options.model_profile.as_deref())
+    {
+        if let Some(profile) = options.model_profile.as_deref().or(options
+            .settings
+            .workbench
+            .model_profile
+            .as_deref())
+        {
+            report.check("Model profile", profile, false);
+        }
         report.check(
             "Model",
             &format!(
