@@ -274,6 +274,17 @@ impl Peer {
         }
     }
     fn request(&mut self, method: &str, params: Value) -> Value {
+        // The first handshake also waits for the process to load and open or
+        // migrate SQLite. Keep the shorter deadline for subsequent requests.
+        let timeout = if method == "initialize" && self.id == 0 {
+            Duration::from_secs(15)
+        } else {
+            Duration::from_secs(5)
+        };
+        self.request_with_timeout(method, params, timeout)
+    }
+
+    fn request_with_timeout(&mut self, method: &str, params: Value, timeout: Duration) -> Value {
         self.id += 1;
         writeln!(
             self.input,
@@ -282,14 +293,7 @@ impl Peer {
         )
         .unwrap();
         self.input.flush().unwrap();
-        // The first handshake also waits for the process to load and open or
-        // migrate SQLite. Keep the shorter deadline for subsequent requests.
-        let response_timeout = if method == "initialize" && self.id == 1 {
-            Duration::from_secs(15)
-        } else {
-            Duration::from_secs(5)
-        };
-        let deadline = Instant::now() + response_timeout;
+        let deadline = Instant::now() + timeout;
         loop {
             let response = self
                 .output
