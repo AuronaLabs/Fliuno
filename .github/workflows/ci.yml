@@ -13,7 +13,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -28,7 +28,9 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: cargo clippy -p fliuno-sandbox --all-targets --no-default-features --locked -- -D warnings
-      - run: cargo test --workspace --all-features --locked
+      - name: Run workspace tests with isolated native fixtures
+        # Process tests start PTYs and servers with wall-clock deadlines.
+        run: cargo test --workspace --all-features --locked -- --test-threads=1
       - run: python scripts/check_linux_cgroup.py
         if: runner.os == 'Linux'
       - run: python scripts/export_schema.py --check
