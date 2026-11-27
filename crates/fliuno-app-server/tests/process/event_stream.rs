@@ -181,14 +181,18 @@ fn exercise_scoped_live_events(workspace_scope: bool) {
     // An unrelated scope can commit more events than fit in the live queue.
     // None of those events should count toward this subscriber's capacity.
     submit_batch(&mut peer, &other);
+    // This request waits behind 72 durable task starts in one stdio batch.
+    // Give those commits their own deadline before measuring the marker RPC.
+    let history = peer.request_with_timeout(
+        "events/listSession",
+        json!({"sessionId":other,"limit":1000}),
+        Duration::from_secs(20),
+    );
+    assert!(history.get("error").is_none(), "{history}");
+    assert!(history["result"]["events"].as_array().unwrap().len() >= 72);
     let selected_task = submit(&mut peer, &selected);
     let event = peer.wait_for_event(&selected_task, "task_started");
     assert!(event["params"]["event"]["sequence"].as_u64().unwrap() > baseline);
-    let history = peer.call(
-        "events/listSession",
-        json!({"sessionId":other,"limit":1000}),
-    );
-    assert!(history["events"].as_array().unwrap().len() >= 72);
     assert!(peer.notifications.iter().all(|frame| {
         if frame["method"] == "notifications/event" {
             let event = &frame["params"]["event"];
