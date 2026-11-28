@@ -4591,6 +4591,27 @@
         "profile"
       ]
     },
+    "models/list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProviderModelListParams",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "description": "Omit for the active profile. Use an explicit profile ID to browse another.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "modelUsage/getSummary": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ModelUsageSummaryParams",
@@ -19941,6 +19962,12 @@
             }
           ]
         },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "automaticContextCompaction": {
           "description": "The kernel can summarize completed history after an input-budget rejection.",
           "type": "boolean"
@@ -20074,6 +20101,12 @@
         },
         "model": {
           "type": "string"
+        },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": false,
@@ -20118,12 +20151,70 @@
             },
             "model": {
               "type": "string"
+            },
+            "reasoningEffort": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "additionalProperties": false,
           "required": [
             "provider",
             "model"
+          ]
+        }
+      }
+    },
+    "ProviderModelPage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProviderModelPage",
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProviderModel"
+          }
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "models",
+        "truncated"
+      ],
+      "$defs": {
+        "ProviderModel": {
+          "description": "A model advertised by the configured provider endpoint.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
           ]
         }
       }

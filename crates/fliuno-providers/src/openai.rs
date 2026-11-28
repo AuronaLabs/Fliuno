@@ -1,6 +1,6 @@
 use crate::{
     ModelContextBudget,
-    http::{Http, header},
+    http::{Http, provider_headers},
 };
 use fliuno_core::{
     CancellationToken, ModelDecision, ModelError, ModelProvider, ModelStreamEvent, ModelTurn,
@@ -8,21 +8,17 @@ use fliuno_core::{
 };
 use fliuno_protocol::{Message, Task, ToolCall};
 use fliuno_protocol::{PDF_MIME_TYPE, UserContentPart};
-use reqwest::header::{AUTHORIZATION, HeaderMap};
 use serde_json::{Value, json};
 
 pub struct OpenAiProvider {
     http: Http,
     model: String,
+    effort: Option<fliuno_config::ReasoningEffort>,
 }
 
 impl OpenAiProvider {
     pub fn new(base: &str, key: &str, model: &str) -> Result<Self, String> {
-        if key.trim().is_empty() {
-            return Err("API key must not be empty".into());
-        }
-        let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, header(&format!("Bearer {key}"))?);
+        let headers = provider_headers(fliuno_config::Provider::OpenAi, key)?;
         Ok(Self {
             http: Http::new(
                 base,
@@ -38,7 +34,13 @@ impl OpenAiProvider {
                 headers,
             )?,
             model: model.into(),
+            effort: None,
         })
+    }
+
+    pub(crate) fn with_effort(mut self, effort: Option<fliuno_config::ReasoningEffort>) -> Self {
+        self.effort = effort;
+        self
     }
 
     pub fn with_context_budget(mut self, budget: ModelContextBudget) -> Self {
@@ -56,6 +58,9 @@ impl OpenAiProvider {
             request(&self.model, task, tools, streaming).map_err(ModelError::NotDispatched)?;
         if let Some(output) = self.http.max_output_tokens() {
             body["max_output_tokens"] = json!(output);
+        }
+        if let Some(effort) = self.effort {
+            body["reasoning"]["effort"] = json!(effort.as_str());
         }
         Ok(body)
     }
@@ -183,6 +188,10 @@ fn model_usage(value: &Value) -> Option<fliuno_protocol::ModelUsage> {
 impl ModelProvider for OpenAiProvider {
     fn configured_budget(&self) -> Option<fliuno_protocol::ModelBudget> {
         self.http.configured_budget()
+    }
+
+    fn reasoning_effort(&self) -> Option<&'static str> {
+        self.effort.map(fliuno_config::ReasoningEffort::as_str)
     }
 
     fn model_identity(&self) -> Option<(String, String)> {

@@ -1,10 +1,12 @@
 //! Model wire formats are isolated here; the kernel knows no HTTP endpoints.
 mod anthropic;
+mod catalog;
 mod gemini;
 mod http;
 mod openai;
 
 pub use anthropic::AnthropicProvider;
+pub use catalog::discover_models;
 use fliuno_core::{DemoProvider, ModelProvider};
 use fliuno_protocol::{
     ModelBudget, ModelBudgetSource, ModelInputCountCoverage, ModelInputCountMode,
@@ -162,13 +164,14 @@ pub fn from_env() -> Result<(String, Box<dyn ModelProvider>), String> {
     let budget = context_budget_from_env()?;
     let key = std::env::var(key_var).map_err(|_| format!("{key_var} is required"))?;
     let base_url = std::env::var(url_var).ok();
-    build_provider(provider, &model, base_url.as_deref(), &key, budget)
+    build_provider(provider, &model, base_url.as_deref(), &key, budget, None)
 }
 
 pub fn from_settings(
     settings: &fliuno_config::ModelSettings,
 ) -> Result<(String, Box<dyn ModelProvider>), String> {
     use fliuno_config::{ContextWindow, Provider};
+    settings.validate_reasoning_effort()?;
     if matches!(settings.provider, Provider::Demo) {
         return Ok(("demo".into(), Box::new(DemoProvider)));
     }
@@ -191,25 +194,36 @@ pub fn from_settings(
         settings.base_url.as_deref(),
         &key,
         budget,
+        settings.reasoning_effort,
     )
 }
 
+fn provider_base(kind: fliuno_config::Provider, configured: Option<&str>) -> &str {
+    use fliuno_config::Provider;
+    configured.unwrap_or(match kind {
+        Provider::Demo => "",
+        Provider::OpenAi => "https://api.openai.com/v1/",
+        Provider::Anthropic => "https://api.anthropic.com/v1/",
+        Provider::Gemini => "https://generativelanguage.googleapis.com/v1beta/",
+    })
+}
 fn build_provider(
     kind: fliuno_config::Provider,
     model: &str,
     base_url: Option<&str>,
     key: &str,
     budget: Option<BudgetConfig>,
+    effort: Option<fliuno_config::ReasoningEffort>,
 ) -> Result<(String, Box<dyn ModelProvider>), String> {
     use fliuno_config::Provider;
     if model.trim().is_empty() {
         return Err("The model name must not be empty".into());
     }
+    let base = provider_base(kind, base_url);
     let provider: Box<dyn ModelProvider> = match kind {
         Provider::Demo => Box::new(DemoProvider),
         Provider::OpenAi => {
-            let provider =
-                OpenAiProvider::new(base_url.unwrap_or("https://api.openai.com/v1/"), key, model)?;
+            let provider = OpenAiProvider::new(base, key, model)?.with_effort(effort);
             let budget = budget
                 .map(|config| {
                     config.resolve(|_| Err("Context window discovery is unsupported for OpenAI; configure a numeric window".into()))
@@ -222,11 +236,7 @@ fn build_provider(
             })
         }
         Provider::Anthropic => {
-            let mut provider = AnthropicProvider::new(
-                base_url.unwrap_or("https://api.anthropic.com/v1/"),
-                key,
-                model,
-            )?;
+            let mut provider = AnthropicProvider::new(base, key, model)?.with_effort(effort);
             let budget = budget
                 .map(|config| config.resolve(|output| provider.discover_context_budget(output)))
                 .transpose()?;
@@ -237,11 +247,7 @@ fn build_provider(
             })
         }
         Provider::Gemini => {
-            let provider = GeminiProvider::new(
-                base_url.unwrap_or("https://generativelanguage.googleapis.com/v1beta/"),
-                key,
-                model,
-            )?;
+            let provider = GeminiProvider::new(base, key, model)?.with_effort(effort);
             if let Some(config) = budget {
                 let budget =
                     config.resolve(|_| Err("Context window discovery is unsupported for Gemini; configure a numeric window".into()))?;

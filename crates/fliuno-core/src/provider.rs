@@ -201,7 +201,16 @@ pub trait ModelProvider: Send + Sync {
     /// Stable, non-secret identity used to keep persisted run plans bound to
     /// the same model implementation after process restart.
     fn persistent_identity(&self) -> Option<(String, String)> {
-        self.model_identity()
+        let (mut provider, model) = self.model_identity()?;
+        if let Some(effort) = self.reasoning_effort() {
+            provider.push_str("@effort=");
+            provider.push_str(effort);
+        }
+        Some((provider, model))
+    }
+
+    fn reasoning_effort(&self) -> Option<&'static str> {
+        None
     }
 
     fn configured_budget(&self) -> Option<ModelBudget> {

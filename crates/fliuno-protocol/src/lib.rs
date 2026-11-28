@@ -658,6 +658,8 @@ pub struct ModelCapabilities {
     pub input_types_source: ModelCapabilitiesSource,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<ModelBudget>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     /// The kernel can summarize completed history after an input-budget rejection.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub automatic_context_compaction: bool,
@@ -672,6 +674,8 @@ pub struct ModelProfileEntry {
     pub profile: Option<String>,
     pub provider: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -691,6 +695,32 @@ pub struct ModelProfileSelectParams {
 
 fn nullable_model_profile(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     generator.subschema_for::<Option<String>>()
+}
+
+/// A model advertised by the configured provider endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderModelPage {
+    pub provider: String,
+    pub models: Vec<ProviderModel>,
+    pub next_cursor: Option<String>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderModelListParams {
+    /// Omit for the active profile. Use an explicit profile ID to browse another.
+    pub profile: Option<String>,
+    pub cursor: Option<String>,
 }
 
 /// Token count performed immediately before dispatching one model request.

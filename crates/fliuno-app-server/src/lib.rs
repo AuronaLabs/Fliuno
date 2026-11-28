@@ -599,6 +599,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["modelProfiles"] = json!(self.model_profiles.is_some());
+            capabilities["providerModelCatalog"] = json!(self.model_profiles.is_some());
             capabilities["modelBudgetRejectionEvents"] = json!(true);
             capabilities["durableTaskRuns"] = json!(self.kernel()?.durable_runs_supported());
             capabilities["maxRunNodes"] = json!(MAX_RUN_NODES);
@@ -772,6 +773,10 @@ impl RpcServer {
             });
         }
         Ok(match method {
+            "models/list" => {
+                let params: ProviderModelListParams = decode(params)?;
+                json!(self.discover_provider_models(params)?)
+            }
             "modelProfiles/list" => {
                 if !params.as_object().is_some_and(|object| object.is_empty()) {
                     return Err(

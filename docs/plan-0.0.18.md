@@ -23,3 +23,13 @@ Windows 凭据使用本机持久范围。核对了 [Windows 凭据规范](https:
 | 安装与验收 | 复用 0.0.17 的 Windows MSI 与 Debian 包验证脚本。用上一正式安装包做升级和卸载保留夹具，从同一候选提交取得安装包及便携包。 | 格式、Clippy、全工作区测试、schema 和示例过关。平台安装/升级/卸载/重装和真实终端用例过关。在 110、80、48 列保存并复核配置、对话、命令、会话切换及代码回复截图。记录版本、SHA、资产及签名状态。 |
 
 计划先按首个可验证交付拆成独立提交。完成输入与导航后用真实终端确认动线，再据实确定模型切换的存储边界，最后完善渲染和打包。记录锁定版本下的首屏时间、长历史重绘时间与目录隔离。遇到权限或服务切换的不确定结果，以可恢复的错误路径结束当前操作。
+
+## 模型控制与发现
+
+配置和执行放在 `fliuno-config`、`fliuno-providers` 与本地应用服务。TUI 复用这些能力，通过 `/model` 选择已配置的 profile。对照本地 Codex `a1604a8` 的 `codex-rs/config/src/config_toml.rs` 与 OpenCode `d284e7c` 的 TUI 模型选择器。Provider 的协议、端点、模型和凭据分别配置。思考强度映射到各自原生字段。未配置时沿用服务端默认值。
+
+- [OpenAI Models API](https://developers.openai.com/api/reference/resources/models/methods/list) 与 [Responses 推理参数](https://developers.openai.com/api/docs/guides/reasoning) 用于核对模型列表与 `reasoning.effort`。
+- [Anthropic Models API](https://platform.claude.com/docs/en/api/models/list) 与 [Effort](https://platform.claude.com/docs/en/build-with-claude/effort) 用于核对分页、停止服务的模型与 `output_config.effort`。
+- [Gemini Models API](https://ai.google.dev/api/models) 与 [Interactions API](https://ai.google.dev/gemini-api/docs/interactions) 用于核对列表过滤、分页与 `generation_config.thinking_level`。
+
+通过本地 HTTP 夹具验收三个原生协议、Base URL、凭据、分页、错误脱敏、请求参数以及对持久 Run 绑定的影响。模型目录供无界面命令和本地 JSON-RPC 使用，允许在填写模型 ID 前查询。手工输入模型 ID 的路径继续保留，兼容只实现生成接口的网关。

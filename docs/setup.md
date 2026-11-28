@@ -94,7 +94,32 @@ python examples/agent_demo.py --workspace --deny
 fliuno-app-server --config ~/.fliuno/config.toml --db .fliuno/kernel.db
 ```
 
-模型端点可通过 `[model].base_url` 指定。需要限制模型输入时，可设置以下配置。
+模型端点可通过 `[model].base_url` 或 `[models.<id>].base_url` 指定。地址填写 API 根路径。例如 `https://gateway.example/v1/`。`provider` 决定请求协议，`openai` 使用 Responses，`anthropic` 使用 Messages，`gemini` 使用 Interactions。配置自定义地址时，网关需要支持所选协议。
+
+在填写 `name` 前可以用已配置的 Provider、Base URL 和凭据拉取目录。命令输出 JSON，支持将返回的 `nextCursor` 传给下一次调用。运行中的可信本地 stdio 客户端也可以调用 `models/list`，可选 `profile` 和 `cursor`。
+
+```sh
+fliuno-app-server --list-models --config ~/.fliuno/config.toml --model-profile lab
+```
+
+`reasoning_effort` 可写在 `[model]` 或某个 `[models.<id>]` 下。省略时使用提供方默认值。具体模型支持的档位由服务端决定。
+
+| Provider | 配置接受的档位 |
+| --- | --- |
+| `openai` | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` |
+| `anthropic` | `low`、`medium`、`high`、`xhigh`、`max` |
+| `gemini` | `minimal`、`low`、`medium`、`high`、`xhigh` |
+
+```toml
+[models.lab]
+provider = "openai"
+base_url = "https://gateway.example/v1/"
+name = "model-id"
+api_key_file = "credentials/lab.key"
+reasoning_effort = "medium"
+```
+
+需要限制模型输入时，可设置以下配置。
 
 ```toml
 [model.budget]

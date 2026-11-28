@@ -118,21 +118,7 @@ impl Http {
         count_fields: &'static [&'static str],
         headers: HeaderMap,
     ) -> Result<Self, String> {
-        let mut base = Url::parse(base).map_err(|_| "invalid provider base URL")?;
-        if !base.username().is_empty()
-            || base.password().is_some()
-            || base.query().is_some()
-            || base.fragment().is_some()
-        {
-            return Err("provider base URL cannot contain credentials, query or fragment".into());
-        }
-        let local = matches!(base.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-        if base.scheme() != "https" && !(base.scheme() == "http" && local) {
-            return Err("provider requires HTTPS (HTTP is allowed only on loopback)".into());
-        }
-        if !base.path().ends_with('/') {
-            base.set_path(&format!("{}/", base.path()));
-        }
+        let base = fliuno_config::provider_api_root(base)?;
         let endpoint = base.join(route).map_err(|_| "invalid provider route")?;
         let count_endpoint = base
             .join(count_route)
@@ -249,6 +235,20 @@ impl Http {
             .pop_if_empty()
             .push("models")
             .push(model);
+        self.read_metadata(endpoint, 64 * 1024)
+    }
+
+    pub fn model_catalog(&self, params: &[(&str, &str)]) -> Result<Value, String> {
+        let mut endpoint = self.endpoint.clone();
+        if !params.is_empty() {
+            endpoint
+                .query_pairs_mut()
+                .extend_pairs(params.iter().copied());
+        }
+        self.read_metadata(endpoint, 2 * 1024 * 1024)
+    }
+
+    fn read_metadata(&self, endpoint: Url, limit: u64) -> Result<Value, String> {
         let cancellation = CancellationToken::new();
         self.runtime
             .block_on(async {
@@ -259,15 +259,14 @@ impl Http {
                         .header(reqwest::header::ACCEPT, "application/json")
                         .send()
                         .await
-                        .map_err(|_| "provider metadata transport failed")?;
-                    Self::read_json(response, &cancellation, 64 * 1024)
+                        .map_err(|_| "provider metadata transport failed".to_owned())?;
+                    Self::read_json(response, &cancellation, limit)
                         .await
-                        .map_err(|_| "provider metadata response was unsuccessful or invalid")
+                        .map_err(|error| error.to_string())
                 })
                 .await
             })
             .map_err(|_| "provider metadata request timed out")?
-            .map_err(str::to_owned)
     }
 
     fn prepare_generation(
@@ -617,7 +616,38 @@ impl SseDecoder {
     }
 }
 
-pub(crate) fn header(value: &str) -> Result<reqwest::header::HeaderValue, String> {
+pub(crate) fn provider_headers(
+    kind: fliuno_config::Provider,
+    key: &str,
+) -> Result<HeaderMap, String> {
+    use fliuno_config::Provider;
+    if key.trim().is_empty() {
+        return Err("API key must not be empty".into());
+    }
+    let mut headers = HeaderMap::new();
+    match kind {
+        Provider::Demo => return Err("Choose a configured live model provider".into()),
+        Provider::OpenAi => {
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                header(&format!("Bearer {key}"))?,
+            );
+        }
+        Provider::Anthropic => {
+            headers.insert("x-api-key", header(key)?);
+            headers.insert(
+                "anthropic-version",
+                reqwest::header::HeaderValue::from_static("2023-06-01"),
+            );
+        }
+        Provider::Gemini => {
+            headers.insert("x-goog-api-key", header(key)?);
+        }
+    }
+    Ok(headers)
+}
+
+fn header(value: &str) -> Result<reqwest::header::HeaderValue, String> {
     let mut header =
         reqwest::header::HeaderValue::from_str(value).map_err(|_| "invalid API credential")?;
     header.set_sensitive(true);

@@ -126,6 +126,7 @@ impl Kernel {
             supported_input_types: self.provider.supported_input_types(),
             input_types_source: self.provider.supported_input_types_source(),
             budget: self.provider.configured_budget(),
+            reasoning_effort: self.provider.reasoning_effort().map(str::to_owned),
             automatic_context_compaction: self.provider.supports_context_compaction()
                 && self.provider.configured_budget().is_some(),
             refreshed_at_ms: SystemTime::now()

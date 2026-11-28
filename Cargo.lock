@@ -989,6 +989,7 @@ dependencies = [
  "serde",
  "tempfile",
  "toml",
+ "url",
  "uuid",
  "windows-native-keyring-store",
 ]

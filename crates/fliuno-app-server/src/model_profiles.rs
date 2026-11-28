@@ -1,7 +1,9 @@
 //! Profiles available to the trusted local stdio host.
 use super::{Error, RpcError, RpcServer};
 use fliuno_config::{ModelSettings, Provider, Settings};
-use fliuno_protocol::{ModelProfileEntry, ModelProfileList};
+use fliuno_protocol::{
+    ModelProfileEntry, ModelProfileList, ProviderModelListParams, ProviderModelPage,
+};
 use std::path::PathBuf;
 
 pub(super) struct Catalog {
@@ -32,6 +34,7 @@ impl RpcServer {
             profile,
             provider: model.provider,
             model: model.model,
+            reasoning_effort: model.reasoning_effort,
         })
     }
 
@@ -56,6 +59,24 @@ impl RpcServer {
             })
             .collect();
         Ok(ModelProfileList { active, profiles })
+    }
+
+    pub(super) fn discover_provider_models(
+        &self,
+        params: ProviderModelListParams,
+    ) -> Result<ProviderModelPage, RpcError> {
+        let catalog = self.model_profile_catalog()?;
+        let settings = Settings::load(&catalog.path).map_err(Error::Invalid)?;
+        let profile = params.profile.as_deref().or(catalog.active.as_deref());
+        let model = if let Some(id) = profile {
+            settings
+                .model_for_launch(Some(id))
+                .map_err(Error::Invalid)?
+        } else {
+            &settings.model
+        };
+        fliuno_providers::discover_models(model, params.cursor.as_deref())
+            .map_err(|error| Error::Invalid(error).into())
     }
 
     pub(super) fn select_model_profile(
@@ -94,6 +115,9 @@ fn entry(id: Option<&str>, model: &ModelSettings) -> ModelProfileEntry {
         profile: id.map(str::to_owned),
         provider: model.provider.name().to_owned(),
         model: model.name.clone().unwrap_or_default(),
+        reasoning_effort: model
+            .reasoning_effort
+            .map(|effort| effort.as_str().to_owned()),
     }
 }
 
@@ -206,6 +230,10 @@ api_key_file = "missing.key"
         let observed = rpc(&mut attached, "initialize", initialize);
         assert_eq!(observed["capabilities"]["modelProfiles"], false);
         assert_eq!(observed["capabilities"]["provider"], "gemini");
+        assert_eq!(
+            failure(&mut attached, "models/list", json!({}))["code"],
+            -32601
+        );
         assert_eq!(
             failure(&mut attached, "modelProfiles/list", json!({}))["code"],
             -32601

@@ -40,7 +40,12 @@ fn read_request(stream: &mut TcpStream) -> (String, Value) {
     assert!(length < 1024 * 1024);
     let mut body = vec![0; length];
     reader.read_exact(&mut body).unwrap();
-    (headers, serde_json::from_slice(&body).unwrap())
+    let value = if body.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&body).unwrap()
+    };
+    (headers, value)
 }
 
 fn fixture(responses: Vec<(u16, Value)>) -> (String, thread::JoinHandle<Vec<(String, Value)>>) {
@@ -1069,4 +1074,145 @@ fn inline_media_is_dispatched_in_order_to_each_model_api() {
         assert_eq!(wire.len(), before + 2);
         assert_eq!(wire[before].body, wire[before + 1].body);
     }
+}
+
+#[test]
+fn configured_reasoning_is_encoded_by_each_native_adapter_and_bound_to_runs() {
+    use fliuno_config::{ModelSettings, Provider, ReasoningEffort};
+
+    let key =
+        std::env::temp_dir().join(format!("fliuno-effort-fixture-{}.key", std::process::id()));
+    std::fs::write(&key, "fixture-key\n").unwrap();
+    let (task, tools) = prepared_model_step();
+    for (provider, path, setting, effort) in [
+        (
+            Provider::OpenAi,
+            "responses",
+            "/reasoning/effort",
+            ReasoningEffort::Max,
+        ),
+        (
+            Provider::Anthropic,
+            "messages",
+            "/output_config/effort",
+            ReasoningEffort::Max,
+        ),
+        (
+            Provider::Gemini,
+            "interactions",
+            "/generation_config/thinking_level",
+            ReasoningEffort::XHigh,
+        ),
+    ] {
+        // The wire input is the assertion here. An error response works for all
+        // three adapters without fabricating a model's capability metadata.
+        let (base, requests) = fixture(vec![(400, json!({})), (400, json!({}))]);
+        let mut settings = ModelSettings {
+            provider,
+            base_url: Some(base),
+            name: Some("fixture-model".into()),
+            api_key_file: Some(key.clone()),
+            reasoning_effort: Some(effort),
+            ..Default::default()
+        };
+        let (_, configured) = fliuno_providers::from_settings(&settings).unwrap();
+        settings.reasoning_effort = None;
+        let (_, default) = fliuno_providers::from_settings(&settings).unwrap();
+        assert_eq!(configured.model_identity(), default.model_identity());
+        assert_ne!(
+            configured.persistent_identity(),
+            default.persistent_identity()
+        );
+        assert_eq!(configured.reasoning_effort(), Some(effort.as_str()));
+        for adapter in [configured, default] {
+            assert!(
+                adapter
+                    .next_classified(&task, &tools, &CancellationToken::new())
+                    .is_err()
+            );
+        }
+        let records = requests.join().unwrap();
+        assert!(records[0].0.starts_with(&format!("POST /v1/{path} ")));
+        assert_eq!(records[0].1.pointer(setting), Some(&json!(effort.as_str())));
+        assert!(records[1].1.pointer(setting).is_none());
+    }
+    std::fs::remove_file(key).unwrap();
+    let invalid = ModelSettings {
+        provider: Provider::Gemini,
+        reasoning_effort: Some(ReasoningEffort::Max),
+        ..Default::default()
+    };
+    assert!(
+        fliuno_providers::from_settings(&invalid)
+            .err()
+            .unwrap()
+            .contains("does not accept reasoning_effort")
+    );
+}
+
+#[test]
+fn discovers_models_using_native_authentication_and_cursors_without_generation() {
+    use fliuno_config::{ModelSettings, Provider};
+    use fliuno_providers::discover_models;
+
+    let key =
+        std::env::temp_dir().join(format!("fliuno-catalog-fixture-{}.key", std::process::id()));
+    std::fs::write(&key, "fixture-key\n").unwrap();
+    let cases = [
+        (
+            Provider::OpenAi,
+            "GET /v1/models ",
+            "authorization: bearer fixture-key",
+            None,
+            json!({"data":[{"id":"fixture"},{"id":"fixture"}]}),
+            None,
+        ),
+        (
+            Provider::Anthropic,
+            "GET /v1/models?limit=100&after_id=older ",
+            "x-api-key: fixture-key",
+            Some("older"),
+            json!({"data":[{"id":"retired","lifecycle":"retired"},{"id":"fixture","display_name":"Fixture"}],"has_more":true,"last_id":"more"}),
+            Some("more"),
+        ),
+        (
+            Provider::Gemini,
+            "GET /v1/models?pageSize=100&pageToken=older%2B%2B ",
+            "x-goog-api-key: fixture-key",
+            Some("older++"),
+            json!({"models":[{"name":"models/embed","supportedGenerationMethods":["embedContent"]},{"name":"models/fixture","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"more"}),
+            Some("more"),
+        ),
+    ];
+    for (provider, route, auth, cursor, response, next) in cases {
+        let (base, handle) = fixture(vec![(200, response)]);
+        let settings = ModelSettings {
+            provider,
+            base_url: Some(base),
+            api_key_file: Some(key.clone()),
+            ..Default::default()
+        };
+        let page = discover_models(&settings, cursor).unwrap();
+        assert_eq!(page.provider, provider.name());
+        assert_eq!(page.models.len(), 1);
+        assert_eq!(page.models[0].id, "fixture");
+        assert_eq!(page.next_cursor.as_deref(), next);
+        assert!(!page.truncated);
+        let requests = handle.join().unwrap();
+        assert!(requests[0].0.starts_with(route), "{}", requests[0].0);
+        assert!(requests[0].0.to_ascii_lowercase().contains(auth));
+        assert!(requests[0].1.is_null());
+    }
+    let (base, handle) = fixture(vec![(401, json!({"error":"sensitive echoed material"}))]);
+    let settings = ModelSettings {
+        provider: Provider::OpenAi,
+        base_url: Some(base),
+        api_key_file: Some(key.clone()),
+        ..Default::default()
+    };
+    let error = discover_models(&settings, None).unwrap_err();
+    assert!(error.contains("401"), "{error}");
+    assert!(!error.contains("sensitive"));
+    handle.join().unwrap();
+    std::fs::remove_file(key).unwrap();
 }

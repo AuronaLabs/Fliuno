@@ -80,6 +80,59 @@ pub struct ModelSettings {
     pub api_key_file: Option<PathBuf>,
     pub api_key_credential: Option<String>,
     pub budget: Option<BudgetSettings>,
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    XHigh,
+    Max,
+}
+
+impl ReasoningEffort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
+impl ModelSettings {
+    pub fn validate_reasoning_effort(&self) -> Result<(), String> {
+        use ReasoningEffort::{High, Low, Max, Medium, Minimal, XHigh};
+        let Some(effort) = self.reasoning_effort else {
+            return Ok(());
+        };
+        let allowed = match self.provider {
+            Provider::Demo => false,
+            Provider::OpenAi => matches!(
+                effort,
+                ReasoningEffort::None | Minimal | Low | Medium | High | XHigh | Max
+            ),
+            Provider::Anthropic => matches!(effort, Low | Medium | High | XHigh | Max),
+            Provider::Gemini => matches!(effort, Minimal | Low | Medium | High | XHigh),
+        };
+        if !allowed {
+            return Err(format!(
+                "{} does not accept reasoning_effort = {:?}",
+                self.provider.name(),
+                effort.as_str()
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,6 +169,27 @@ pub struct Integrations {
     pub terminal: Option<PathBuf>,
     pub skills: Option<PathBuf>,
     pub memory_embedding: Option<PathBuf>,
+}
+
+/// Normalize a provider API root for generation, metadata, and setup.
+pub fn provider_api_root(value: &str) -> Result<url::Url, &'static str> {
+    let mut base = url::Url::parse(value).map_err(|_| "Invalid provider base URL")?;
+    if !base.username().is_empty()
+        || base.password().is_some()
+        || base.query().is_some()
+        || base.fragment().is_some()
+    {
+        return Err("The Base URL cannot contain credentials, a query, or a fragment");
+    }
+    let local = matches!(base.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if base.host_str().is_none() || !(base.scheme() == "https" || base.scheme() == "http" && local)
+    {
+        return Err("The Base URL requires HTTPS (HTTP is allowed on loopback)");
+    }
+    if !base.path().ends_with('/') {
+        base.set_path(&format!("{}/", base.path()));
+    }
+    Ok(base)
 }
 
 pub fn user_directory() -> Option<PathBuf> {
