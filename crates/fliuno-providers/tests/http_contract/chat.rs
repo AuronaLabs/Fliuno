@@ -48,7 +48,7 @@ fn named_suppliers_send_each_profile_to_its_own_endpoint_with_its_own_key() {
     let config = dir.path().join("config.toml");
     std::fs::write(
         &config,
-        &format!(
+        format!(
             r#"
 [providers.office]
 base_url = "{office}"
