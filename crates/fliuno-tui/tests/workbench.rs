@@ -3216,6 +3216,36 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         terminal.expect("Verify");
         terminal.capture(&format!("project-start-{cols}"));
     }
+    // Discovery is read-only: the loopback model still expects a short essay as its first request.
+    terminal.ready();
+    terminal.keys("\x1bOP");
+    terminal.expect("Type to filter");
+    terminal.keys("checks\r");
+    terminal.expect("Project checks");
+    for (rows, cols) in [(16, 48), (24, 80), (28, 110)] {
+        terminal.resize(rows, cols);
+        terminal.ready();
+        terminal.expect("Greeting check");
+        terminal.expect("Present · src/greeting.txt");
+        terminal.expect("R Refresh · Esc Back");
+        terminal.expect_absent("fixture-key");
+        terminal.expect_absent("fliuno-app-exec-fixture");
+        terminal.capture(&format!("project-check-catalog-{cols}"));
+    }
+    terminal.keys("\t");
+    terminal.expect("process_greeting_");
+    terminal.keys("\t");
+    terminal.expect("Present · src/greeting.txt");
+    terminal.expect_absent("process_greeting_");
+    std::fs::rename(&file, file.with_extension("pending")).unwrap();
+    terminal.keys("r");
+    terminal.expect("Missing · src/greeting.txt");
+    std::fs::rename(file.with_extension("pending"), &file).unwrap();
+    terminal.keys("r");
+    terminal.expect("Present · src/greeting.txt");
+    terminal.keys("\x1b");
+    terminal.expect("Enter Send");
+    terminal.ready();
     terminal.keys("写一篇小作文\r");
     terminal.expect("小作文：雨停之后");
     terminal.expect_absent("Review operation");
@@ -3974,6 +4004,14 @@ fn workbench_reviews_project_guide_and_preserves_draft_after_change() {
     let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
     console.expect("Enter Send");
     console.keys("Use the project conventions.");
+    console.keys("\x1bOP");
+    console.expect("Type to filter");
+    console.keys("checks\r");
+    console.expect("No project checks registered.");
+    console.expect("[integrations].execution");
+    console.keys("\x1b");
+    console.expect("Use the project conventions.");
+    console.ready();
     open(&mut console);
     console.expect("Use focused checks.");
     console.expect("Enter Enable");

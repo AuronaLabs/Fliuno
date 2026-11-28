@@ -314,7 +314,7 @@ impl App {
             Layer::Recovery(..) | Layer::Reconcile(_) | Layer::Backup(_) => (88, 19),
             Layer::Approval { .. } => (88, 21),
             Layer::ReadRules(..) => (76, 17),
-            Layer::ProjectGuide(_) => (88, 21),
+            Layer::ProjectChecks(_) | Layer::ProjectGuide(_) => (88, 21),
             Layer::ProjectReview { .. } => (100, u16::MAX),
             _ => (104, u16::MAX),
         };
@@ -399,6 +399,13 @@ impl App {
             ),
             Layer::TimelineEvent { sequence, .. } => (format!("Event #{sequence}"), "Esc timeline"),
             Layer::Context(..) => ("Context and memory usage".into(), "Esc back"),
+            Layer::ProjectChecks(_) => (
+                self.language.text("Project checks", "项目检查").into(),
+                self.language.text(
+                    "↑↓ Scroll · R Refresh · Esc Back",
+                    "↑↓ 滚动 · R 刷新 · Esc 返回",
+                ),
+            ),
             Layer::ProjectGuide(panel) => (
                 self.language
                     .text("Project guide · AGENTS.md", "项目指南 · AGENTS.md")
@@ -718,6 +725,9 @@ impl App {
             Layer::Deliverables(catalog) => self.draw_deliverables(frame, body, catalog),
             Layer::ModelPicker(picker) => picker.draw(frame, body, &self.palette),
             Layer::Language(panel) => panel.draw(frame, body, self.language, &self.palette),
+            Layer::ProjectChecks(panel) => {
+                panel.draw(frame, body, self.language, &self.palette, &self.message)
+            }
             Layer::ProjectGuide(panel) => {
                 panel.draw(frame, body, self.language, &self.palette, &self.message)
             }

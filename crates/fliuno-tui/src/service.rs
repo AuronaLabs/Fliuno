@@ -108,6 +108,7 @@ pub enum Request {
     Decide(String, String, ApprovalDecision),
     RememberRead(String, String, Box<PolicyReadRuleCreateParams>),
     ReadRules,
+    ProjectChecks(String),
     ProjectGuide(String),
     SaveProjectGuide(fliuno_protocol::WorkspaceSetProjectGuideParams),
     RevokeRead(String),
@@ -194,6 +195,7 @@ pub enum Update {
         supplier_settings: bool,
         supplier_catalog: bool,
         read_rules: bool,
+        project_checks: bool,
         project_guide: Option<fliuno_protocol::WorkspaceProjectGuide>,
     },
     ModelProfiles(
@@ -219,6 +221,7 @@ pub enum Update {
     ModelProfileError(String),
     Workspaces(ObjectPage<Workspace>),
     Workspace(Workspace, Option<fliuno_protocol::WorkspaceProjectGuide>),
+    ProjectChecks(fliuno_protocol::WorkspaceProjectChecks),
     ProjectGuide(Box<fliuno_protocol::WorkspaceProjectGuidePreview>),
     Sessions {
         workspace: String,
@@ -530,6 +533,7 @@ fn serve(
                     let supplier_settings = server.supports("modelSupplierSettings");
                     let supplier_catalog = server.supports("modelSupplierCatalog");
                     let read_rules = server.supports("workspaceReadRules");
+                    let project_checks = server.supports("workspaceProjectChecks");
                     let project_guide = server.workspace_project_guide(&workspace.id)?;
                     service = Some(server);
                     out.send(Update::Online {
@@ -539,6 +543,7 @@ fn serve(
                         supplier_settings,
                         supplier_catalog,
                         read_rules,
+                        project_checks,
                         project_guide,
                     })?;
                     Ok(())
@@ -1112,6 +1117,21 @@ impl Service {
                 let _: fliuno_protocol::WorkspaceMemory =
                     self.rpc("workspace/memory/put", json!(record))?;
                 Update::MemorySaved(record.workspace_id)
+            }
+            Request::ProjectChecks(workspace) => {
+                if !self.supports("workspaceProjectChecks")
+                    || self.workspace.as_deref() != Some(&workspace)
+                {
+                    return Err("Project checks are unavailable for this workspace".into());
+                }
+                let checks: fliuno_protocol::WorkspaceProjectChecks = self.rpc(
+                    "workspace/listProjectChecks",
+                    json!({"workspaceId":workspace}),
+                )?;
+                if checks.workspace_id != workspace {
+                    return Err("Project checks belong to a different workspace".into());
+                }
+                Update::ProjectChecks(checks)
             }
             Request::ProjectGuide(workspace) => self.project_guide_preview(&workspace)?,
             Request::SaveProjectGuide(params) => {

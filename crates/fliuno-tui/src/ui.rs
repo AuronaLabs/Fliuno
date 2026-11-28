@@ -10,6 +10,7 @@ mod model_picker;
 mod palette;
 mod panels;
 mod project_activity;
+mod project_checks;
 mod project_guide;
 pub(crate) mod setup;
 mod setup_catalog;
@@ -88,6 +89,7 @@ enum Layer {
         remember: Option<Box<PolicyReadRuleCreateParams>>,
     },
     ReadRules(Option<Vec<PolicyReadRule>>, usize),
+    ProjectChecks(Box<project_checks::Panel>),
     ProjectGuide(Box<project_guide::Panel>),
     ProjectReview {
         return_to_draft: bool,
@@ -199,6 +201,7 @@ pub struct App {
     supplier_settings: bool,
     supplier_catalog: bool,
     read_rules: bool,
+    project_checks: bool,
     project_guide: Option<fliuno_protocol::WorkspaceProjectGuide>,
     busy: bool,
     next: Option<Request>,
@@ -254,6 +257,7 @@ impl App {
             supplier_settings: false,
             supplier_catalog: false,
             read_rules: false,
+            project_checks: false,
             project_guide: None,
             busy: true,
             next: None,
@@ -568,6 +572,7 @@ impl App {
                 supplier_settings,
                 supplier_catalog,
                 read_rules,
+                project_checks,
                 project_guide,
             } => {
                 self.online = true;
@@ -576,6 +581,7 @@ impl App {
                 self.supplier_settings = supplier_settings;
                 self.supplier_catalog = supplier_catalog;
                 self.read_rules = read_rules;
+                self.project_checks = project_checks;
                 self.project_guide = project_guide;
                 self.activity.clear();
                 self.message.clear();
@@ -585,6 +591,7 @@ impl App {
                     None => sessions(id, 0, false),
                 });
             }
+            Update::ProjectChecks(checks) => self.install_project_checks(checks),
             Update::ProjectGuide(preview) => self.install_project_guide(*preview),
             Update::Workspace(workspace, project_guide) => {
                 self.project_guide = project_guide;
@@ -945,6 +952,7 @@ impl App {
                 self.supplier_settings = false;
                 self.supplier_catalog = false;
                 self.read_rules = false;
+                self.project_checks = false;
                 self.project_guide = None;
                 self.activity.clear();
                 self.layer = Layer::None;
@@ -1116,6 +1124,10 @@ impl App {
             return true;
         }
         if key.code == KeyCode::Esc && pressed && self.cancel_deferred_send() {
+            return false;
+        }
+        if matches!(self.layer, Layer::ProjectChecks(_)) {
+            self.project_checks_key(key, worker);
             return false;
         }
         if matches!(self.layer, Layer::ProjectGuide(_)) {
@@ -1379,6 +1391,12 @@ impl App {
                         self.toggle_plan_mode();
                         if menu.origin != CommandOrigin::Workbench {
                             self.layer = Layer::Edit(Edit::Task);
+                        }
+                        return false;
+                    }
+                    CommandAction::ProjectChecks => {
+                        if !self.open_project_checks(menu.origin, worker) {
+                            self.layer = Layer::Commands(menu);
                         }
                         return false;
                     }
@@ -1820,6 +1838,7 @@ impl App {
             | Layer::History(..)
             | Layer::Commands(_)
             | Layer::Language(_)
+            | Layer::ProjectChecks(_)
             | Layer::ProjectGuide(_)
             | Layer::ModelPicker(_)
             | Layer::Edit(..) => {
@@ -2430,6 +2449,14 @@ impl App {
             action: CommandAction::Language,
             search_label: None,
         });
+        if self.online && self.project_checks && self.workspace.is_some() && !self.busy {
+            commands.push(Command {
+                label: self.language.text("List project checks", "查看项目检查"),
+                alias: Some("checks"),
+                action: CommandAction::ProjectChecks,
+                search_label: Some("List project checks"),
+            });
+        }
         if self.online && self.project_guide.is_some() && self.workspace.is_some() && !self.busy {
             commands.push(Command {
                 label: self.language.text("Review project guide", "审阅项目指南"),
@@ -2461,6 +2488,10 @@ impl App {
         }));
         let query = menu.query.to_lowercase();
         commands.retain(|command| command.matches(menu.origin, &query));
+        if !query.is_empty() {
+            // An exact slash name wins over words in unrelated command captions.
+            commands.sort_by_key(|command| command.alias != Some(query.trim_start_matches('/')));
+        }
         commands
     }
 
