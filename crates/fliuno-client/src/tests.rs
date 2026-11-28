@@ -1157,13 +1157,14 @@ fn incremental_history_rejects_legacy_servers_and_out_of_window_pages() {
 #[test]
 fn host_ag_ui_model_step_limit_requires_server_support_before_submitting() {
     use crate::ag_ui::{AgUiModelStepLimit, AgUiRunError, AgUiRunInput, AgUiRunOptions};
+    use fliuno_protocol::MAX_TASK_MODEL_STEPS;
 
     assert!(matches!(
         AgUiModelStepLimit::new(0),
         Err(AgUiRunError::ModelStepLimit)
     ));
     assert!(matches!(
-        AgUiModelStepLimit::new(9),
+        AgUiModelStepLimit::new(MAX_TASK_MODEL_STEPS + 1),
         Err(AgUiRunError::ModelStepLimit)
     ));
     let mut client = fake_client(b"");
@@ -1173,7 +1174,7 @@ fn host_ag_ui_model_step_limit_requires_server_support_before_submitting() {
             "session",
             input,
             AgUiRunOptions {
-                model_step_limit: Some(AgUiModelStepLimit::new(1).unwrap()),
+                model_step_limit: Some(AgUiModelStepLimit::new(MAX_TASK_MODEL_STEPS).unwrap()),
                 ..AgUiRunOptions::default()
             },
             |_| {},
