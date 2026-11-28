@@ -2900,8 +2900,9 @@ api_key_file = "fixture.key"
 }
 
 #[test]
-#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
-fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_workspace_file() {
+#[ignore = "requires a matching app-server and fliuno-app-exec-fixture built with test-fixtures"]
+#[cfg(any(windows, target_os = "linux"))]
+fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     use serde_json::{Value, json};
     use std::net::TcpListener;
 
@@ -2915,7 +2916,7 @@ fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_works
                 "type":"function_call","call_id":id,"name":name,"arguments":args.to_string()
             })
         };
-        for step in 0..6 {
+        for step in 0..7 {
             let (mut socket, request) = streaming_fixture_input(&listener);
             let input = request["input"].as_array().unwrap();
             let result = || {
@@ -2975,7 +2976,32 @@ fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_works
                 }
                 5 => {
                     assert_eq!(result()["content"], "Welcome to Fliuno\n");
-                    complete("已更新问候语，并重新读取核对。")
+                    let read = result();
+                    let spec = request["tools"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|tool| {
+                            tool["name"]
+                                .as_str()
+                                .is_some_and(|name| name.starts_with("process_greeting_"))
+                        })
+                        .expect("configured project check advertised to the model");
+                    assert_eq!(
+                        spec["parameters"]["properties"]["inputs"]["required"],
+                        json!(["src/greeting.txt"])
+                    );
+                    call(
+                        "check",
+                        spec["name"].as_str().unwrap(),
+                        json!({"inputs":{"src/greeting.txt":read["sha256"]}}),
+                    )
+                }
+                6 => {
+                    assert_eq!(result()["exitCode"], 0);
+                    assert_eq!(result()["success"], true);
+                    assert_eq!(result()["stdout"]["data"], "greeting check passed\n");
+                    complete("已更新问候语，并通过项目检查。")
                 }
                 _ => unreachable!(),
             };
@@ -2984,12 +3010,46 @@ fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_works
         }
     });
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let fixture = server
+        .as_deref()
+        .unwrap_or(&binary())
+        .with_file_name(format!(
+            "fliuno-app-exec-fixture{}",
+            std::env::consts::EXE_SUFFIX
+        ));
+    assert!(
+        fixture.is_file(),
+        "build the app-server with test-fixtures: {}",
+        fixture.display()
+    );
     let user = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();
     let config = user.path().join("live.toml");
     std::fs::create_dir(root.path().join("src")).unwrap();
     let file = root.path().join("src/greeting.txt");
     std::fs::write(&file, "Hello world\n").unwrap();
+    std::fs::write(root.path().join("unselected.txt"), "fixture private data").unwrap();
+    let git = |args: &[&str]| {
+        let result = Command::new("git")
+            .args(args)
+            .current_dir(root.path())
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        String::from_utf8(result.stdout).unwrap()
+    };
+    git(&["init", "-q"]);
+    git(&["add", "--", "src/greeting.txt"]);
+    std::fs::write(user.path().join("checks.json"), json!({"programs":[{
+        "id":"greeting", "command":fixture,
+        "isolation":if cfg!(windows) { "windows_app_container" } else { "linux_landlock" },
+        "args":["project-check","src/greeting.txt","Welcome to Fliuno"],
+        "projectCheck":{"label":"Greeting check","description":"Verify the project's greeting","inputs":["src/greeting.txt"]}
+    }]}).to_string()).unwrap();
     std::fs::write(user.path().join("fixture.key"), "fixture-key\n").unwrap();
     std::fs::write(
         &config,
@@ -2997,6 +3057,8 @@ fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_works
             r#"
         [workbench]
         database = "live.db"
+        [integrations]
+        execution = "checks.json"
         [model]
         provider = "openai"
         name = "fixture-project"
@@ -3018,6 +3080,7 @@ fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_works
         ("workspace_read_text", "Read a workspace file"),
         ("workspace_patch_text", "Apply a patch to a workspace file"),
         ("workspace_read_text", "Read a workspace file"),
+        ("process_greeting_", "Run project check: Greeting check"),
     ] {
         terminal.expect(tool);
         terminal.ready();
@@ -3035,6 +3098,14 @@ fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_works
                 terminal.capture(&format!("project-patch-approval-{cols}"));
             }
         }
+        if tool == "process_greeting_" {
+            for cols in [48, 80, 110] {
+                terminal.resize(24, cols);
+                terminal.expect("Run from: private snapshot");
+                terminal.expect("src/greeting.txt");
+                terminal.capture(&format!("project-check-approval-{cols}"));
+            }
+        }
         terminal.keys("y");
         terminal.expect_absent("y Allow once");
     }
@@ -3042,11 +3113,19 @@ fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_works
     for cols in [48, 80, 110] {
         terminal.resize(24, cols);
         terminal.expect("Saved in workspace: src/greeting.txt");
+        terminal.expect("Check passed: Greeting check  ·  exit 0");
         terminal.capture(&format!("project-write-receipt-{cols}"));
     }
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
         "Welcome to Fliuno\n"
+    );
+    assert!(!root.path().join("check-scratch.txt").exists());
+    assert_eq!(git(&["diff", "--name-only"]), "src/greeting.txt\n");
+    let diff = git(&["diff", "--", "src/greeting.txt"]);
+    assert!(
+        diff.contains("-Hello world\n+Welcome to Fliuno\n"),
+        "{diff}"
     );
     terminal.quit("\x03");
     model.join().unwrap();

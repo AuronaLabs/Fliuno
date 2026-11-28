@@ -2770,6 +2770,11 @@ fn approval_review(
             if approval.task_id != task || approval.id != id {
                 return None;
             }
+            if let Some(plan) = approval.execution_plan.as_ref()
+                && let Some(text) = project_check_review(root, plan)
+            {
+                return Some((text, true));
+            }
             let call = &approval.call;
             let (action, consequence, preview_key) = match call.name.as_str() {
                 "artifact_create" => (
@@ -2868,6 +2873,55 @@ fn approval_review(
             ))
         }
     }
+}
+
+fn project_check_review(root: &str, plan: &serde_json::Value) -> Option<String> {
+    if plan["kind"] != "project_check" {
+        return None;
+    }
+    let label = plan["label"].as_str()?;
+    let command = project_check_command(plan)?;
+    let inputs = plan["inputs"].as_object()?;
+    let isolation = match plan["isolation"].as_str()? {
+        "windows_app_container" => "Windows AppContainer",
+        "linux_landlock" => "Linux Landlock",
+        _ => return None,
+    };
+    let mut text = format!(
+        "Run project check: {label}\n\nCommand: {command}\nRun from: private snapshot\nIsolation: {isolation}\n\nCopy from {root}\n"
+    );
+    for path in inputs.keys() {
+        text.push_str(&format!("  {path}\n"));
+    }
+    text.push_str("\nOnly listed copies are checked. Changes in the scratch directory are not written back. Deny skips the check.\n\nExecution details\n");
+    text.push_str(&serde_json::to_string_pretty(plan).ok()?);
+    Some(text)
+}
+
+fn project_check_command(plan: &serde_json::Value) -> Option<String> {
+    let mut words = Vec::new();
+    words.push(plan["program"].as_str()?);
+    for arg in plan["args"].as_array()? {
+        words.push(arg.as_str()?);
+    }
+    // Delimit argv without implying that this text is run by a shell.
+    Some(
+        words
+            .into_iter()
+            .map(|word| {
+                if !word.is_empty()
+                    && word
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "._/-".contains(c))
+                {
+                    word.to_owned()
+                } else {
+                    serde_json::to_string(word).expect("serializing a string is infallible")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
 }
 
 fn render_text(frame: &mut Frame<'_>, area: Rect, text: &str, scroll: u16) {

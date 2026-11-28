@@ -311,6 +311,17 @@ impl App {
                     self.palette.quiet,
                 ));
             }
+            for check in project_check_receipts(task) {
+                let style = self.palette.status(if check.passed {
+                    Color::Green
+                } else {
+                    Color::Red
+                });
+                lines.push(Line::styled(check.summary, style));
+                if let Some(command) = check.command {
+                    lines.push(Line::styled(command, self.palette.quiet));
+                }
+            }
         } else if lines.is_empty() {
             let (title, hint) = if !self.online {
                 if self.busy {
@@ -597,4 +608,56 @@ fn saved_workspace_paths(task: &Task) -> Vec<&str> {
     }
     paths.reverse();
     paths
+}
+
+struct ProjectCheckReceipt {
+    summary: String,
+    passed: bool,
+    command: Option<String>,
+}
+
+fn project_check_receipts(task: &Task) -> Vec<ProjectCheckReceipt> {
+    task.messages
+        .iter()
+        .rev()
+        .filter_map(|message| {
+            let Message::ToolResult { call_id, output } = message else {
+                return None;
+            };
+            let plan = &output["projectCheck"];
+            if plan["kind"] != "project_check" || output["termination"] != "exited" {
+                return None;
+            }
+            let call = task.messages.iter().find_map(|message| match message {
+                Message::ToolCall { call }
+                    if &call.id == call_id && call.name.starts_with("process_") =>
+                {
+                    Some(call)
+                }
+                _ => None,
+            })?;
+            if call.arguments["inputs"] != plan["inputs"] {
+                return None;
+            }
+            let passed = output["success"].as_bool()?;
+            let state = if passed {
+                "Check passed"
+            } else {
+                "Check failed"
+            };
+            let exit = output["exitCode"]
+                .as_i64()
+                .map_or_else(|| "no exit code".into(), |code| format!("exit {code}"));
+            let label = clean(plan["label"].as_str()?).replace('\n', " ");
+            Some(ProjectCheckReceipt {
+                summary: format!("{state}: {label}  ·  {exit}"),
+                passed,
+                command: project_check_command(plan).map(|command| clean(&command)),
+            })
+        })
+        .take(3)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
 }

@@ -31,6 +31,10 @@ jobs:
       - name: Run workspace tests with isolated native fixtures
         # Process tests start PTYs and servers with wall-clock deadlines.
         run: cargo test --workspace --all-features --locked -- --test-threads=1
+      - name: Verify project Agent through a real terminal and native sandbox
+        run: |
+          cargo build --locked -p fliuno-app-server --features test-fixtures --bins
+          cargo test --locked -p fliuno-tui --test workbench live_project_agent_delivers_inline_then_edits_and_runs_a_native_check -- --ignored
       - run: python scripts/check_linux_cgroup.py
         if: runner.os == 'Linux'
       - run: python scripts/export_schema.py --check
