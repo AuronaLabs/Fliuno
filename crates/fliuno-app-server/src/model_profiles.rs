@@ -2,8 +2,8 @@
 use super::{Error, RpcError, RpcServer};
 use fliuno_config::{ModelSettings, Provider, Settings};
 use fliuno_protocol::{
-    ModelConnectionCheck, ModelProfileEntry, ModelProfileList, ProviderModelListParams,
-    ProviderModelPage,
+    ModelConnectionCheck, ModelConnectionCheckParams, ModelProfileEntry, ModelProfileList,
+    ProviderModelListParams, ProviderModelPage,
 };
 use std::path::PathBuf;
 
@@ -78,11 +78,18 @@ impl RpcServer {
 
     pub(super) fn check_provider_model(
         &self,
-        profile: Option<&str>,
+        params: ModelConnectionCheckParams,
     ) -> Result<ModelConnectionCheck, RpcError> {
         let catalog = self.model_profile_catalog()?;
         let settings = Settings::load(&catalog.path).map_err(Error::Invalid)?;
-        let model = catalog.model_for_lookup(&settings, profile)?;
+        let model = if params.base_profile {
+            if params.profile.is_some() {
+                return Err(Error::Invalid("Choose either profile or baseProfile".into()).into());
+            }
+            &settings.model
+        } else {
+            catalog.model_for_lookup(&settings, params.profile.as_deref())?
+        };
         Ok(fliuno_providers::check_model_connection(model))
     }
 
@@ -154,6 +161,51 @@ mod tests {
             .unwrap();
         assert!(reply.get("result").is_none(), "{reply}");
         reply["error"].clone()
+    }
+
+    #[test]
+    fn base_connection_check_can_select_base_when_a_named_profile_is_active() {
+        let root = std::env::temp_dir().join(format!("fliuno-check-base-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let config = root.join("config.toml");
+        std::fs::write(
+            &config,
+            r#"
+            [model]
+            provider = "openai"
+            protocol = "messages"
+            name = "base"
+            [models.named]
+            provider = "openai"
+            name = "named"
+            api_key_file = "missing.key"
+        "#,
+        )
+        .unwrap();
+        let mut server = RpcServer::with_provider(
+            Kernel::in_memory(Box::new(fliuno_core::DemoProvider)).unwrap(),
+            "demo".into(),
+        );
+        server.enable_local_model_profiles(config, Some("named".into()));
+        rpc(
+            &mut server,
+            "initialize",
+            json!({"protocolVersion":"0.1","clientName":"check-test"}),
+        );
+        let active = rpc(&mut server, "models/check", json!({}));
+        assert_eq!(active["configuration"], "ready");
+        assert_eq!(active["credentials"], "unavailable");
+        let base = rpc(&mut server, "models/check", json!({"baseProfile":true}));
+        assert_eq!(base["configuration"], "invalid");
+        assert_eq!(
+            failure(
+                &mut server,
+                "models/check",
+                json!({"baseProfile":true,"profile":"named"})
+            )["code"],
+            -32602
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

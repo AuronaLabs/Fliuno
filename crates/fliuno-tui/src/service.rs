@@ -11,15 +11,15 @@ use fliuno_client::{Client, Error as ClientError, EventFeed, SessionHistory};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
     ArtifactCatalogSnapshotPage, ArtifactCatalogSnapshotParams, ArtifactDigest, ArtifactGetParams,
-    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelProfileEntry, ModelProfileList,
-    ModelProfileSelectParams, ModelUsageSummary, ModelUsageTotals, ObjectPage, Session,
-    SessionContextParams, SessionForkParams, SessionHistoryListPage, SessionHistoryListParams,
-    SessionHistoryRole, SessionListOrder, SessionListParams, Task, TaskContext,
-    TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
-    TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
-    TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
-    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
-    Workspace, WorkspaceHistorySearchParams,
+    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelConnectionCheck,
+    ModelConnectionCheckParams, ModelProfileEntry, ModelProfileList, ModelProfileSelectParams,
+    ModelUsageSummary, ModelUsageTotals, ObjectPage, Session, SessionContextParams,
+    SessionForkParams, SessionHistoryListPage, SessionHistoryListParams, SessionHistoryRole,
+    SessionListOrder, SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan,
+    TaskQueue, TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams,
+    TaskReconciliation, TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus,
+    TaskSteeringState, TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams,
+    WorkSnapshot, WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -46,6 +46,7 @@ pub enum Request {
     Reconnect,
     Diagnostics,
     ModelProfiles,
+    CheckModel(ModelConnectionCheckParams),
     SelectModel(ModelProfileSelectParams),
     Memories {
         workspace: String,
@@ -164,6 +165,10 @@ pub enum Update {
         model_profiles: bool,
     },
     ModelProfiles(ModelProfileList),
+    ModelChecked {
+        profile: Option<String>,
+        check: ModelConnectionCheck,
+    },
     ModelSelected(ModelProfileEntry),
     ModelProfileError(String),
     Workspaces(ObjectPage<Workspace>),
@@ -782,6 +787,16 @@ impl Service {
             Request::Reconnect | Request::Diagnostics | Request::Backup(_) => unreachable!(),
             Request::ModelProfiles => match self.rpc("modelProfiles/list", json!({})) {
                 Ok(profiles) => Update::ModelProfiles(profiles),
+                Err(error) if !disconnected(error.as_ref()) => {
+                    Update::ModelProfileError(profile_error(error.as_ref()))
+                }
+                Err(error) => return Err(error),
+            },
+            Request::CheckModel(params) => match self.rpc("models/check", json!(params)) {
+                Ok(check) => Update::ModelChecked {
+                    profile: params.profile,
+                    check,
+                },
                 Err(error) if !disconnected(error.as_ref()) => {
                     Update::ModelProfileError(profile_error(error.as_ref()))
                 }

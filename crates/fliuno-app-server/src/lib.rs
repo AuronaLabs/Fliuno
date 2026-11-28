@@ -775,7 +775,7 @@ impl RpcServer {
         Ok(match method {
             "models/check" => {
                 let params: ModelConnectionCheckParams = decode(params)?;
-                json!(self.check_provider_model(params.profile.as_deref())?)
+                json!(self.check_provider_model(params)?)
             }
             "models/list" => {
                 let params: ProviderModelListParams = decode(params)?;

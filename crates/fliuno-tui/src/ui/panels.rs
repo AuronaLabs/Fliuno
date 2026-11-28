@@ -333,10 +333,7 @@ impl App {
                 format!("Commands  /  {}", menu.query),
                 "Type to filter  ·  Enter run  ·  Esc back",
             ),
-            Layer::ModelPicker(_) => (
-                "Switch model".into(),
-                "↑/↓ Move  ·  Enter switch  ·  Esc back",
-            ),
+            Layer::ModelPicker(_) => ("Switch model".into(), "↑/↓ Move  ·  Esc back"),
             Layer::Inbox(_) => (
                 "Workspace inbox".into(),
                 "1 attention / 2 running / 3 recent / Enter open / h history",

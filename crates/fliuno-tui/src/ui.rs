@@ -817,6 +817,11 @@ impl App {
                     picker.install(profiles);
                 }
             }
+            Update::ModelChecked { profile, check } => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.checked(profile, check);
+                }
+            }
             Update::ModelSelected(model) => {
                 self.model = model_label(model.model);
                 if let Layer::ModelPicker(picker) = &self.layer {
@@ -829,7 +834,7 @@ impl App {
             }
             Update::ModelProfileError(error) => {
                 if let Layer::ModelPicker(picker) = &mut self.layer {
-                    picker.error = Some(clean(&error));
+                    picker.failed(clean(&error));
                 }
             }
             Update::Memories {

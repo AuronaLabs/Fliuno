@@ -4623,6 +4623,11 @@
             "string",
             "null"
           ]
+        },
+        "baseProfile": {
+          "description": "Check the base [model] even when a named profile is active.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false

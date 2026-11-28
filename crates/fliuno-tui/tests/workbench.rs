@@ -2140,6 +2140,11 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
             }
             let event = json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":answer}]}]}});
             write!(socket, "data: {event}\n\n").unwrap();
+            drop(socket);
+            if answer == "Original model answer" {
+                let listing = read_catalog_request(&listener, "fixture-key");
+                write_catalog_response(listing, 200, r#"{"data":[{"id":"second-model"}]}"#);
+            }
         }
     });
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
@@ -2211,6 +2216,15 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     console.expect("Cannot read the configured");
     console.ready();
     console.capture("model-picker-error-48");
+    console.keys("\x1b[15~");
+    console.expect("Cannot read the configured API key.");
+    console.keys("\x1b[B\x1b[15~");
+    console.expect("This model is listed.");
+    console.capture("model-connection-48");
+    console.resize(24, 80);
+    console.capture("model-connection-80");
+    console.resize(28, 110);
+    console.capture("model-connection-110");
     console.keys("\x1b");
     console.expect_absent("Switch model");
     console.expect("Send this preserved draft");

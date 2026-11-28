@@ -813,6 +813,9 @@ pub enum ModelPresence {
 pub struct ModelConnectionCheckParams {
     /// Omit for the active profile. Use a profile ID to check another one.
     pub profile: Option<String>,
+    /// Check the base [model] even when a named profile is active.
+    #[serde(default)]
+    pub base_profile: bool,
 }
 
 /// Token count performed immediately before dispatching one model request.
