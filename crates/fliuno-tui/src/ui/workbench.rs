@@ -247,7 +247,10 @@ impl App {
             }
             if task.status == TaskStatus::Running {
                 let phase = if let Some(call) = &task.in_flight_tool {
-                    format!("Running tool  ·  {}", clean(&call.name))
+                    project_activity::describe(call, None).map_or_else(
+                        || format!("Running tool  ·  {}", clean(&call.name)),
+                        |action| format!("Running  ·  {action}"),
+                    )
                 } else if task.agent_run.is_some() {
                     "External Agent running".into()
                 } else if task.model_steps > 0 {
@@ -305,23 +308,7 @@ impl App {
                     self.palette.quiet,
                 ));
             }
-            for path in saved_workspace_paths(task) {
-                lines.push(Line::styled(
-                    format!("Saved in workspace: {}", clean(path)),
-                    self.palette.quiet,
-                ));
-            }
-            for check in project_check_receipts(task) {
-                let style = self.palette.status(if check.passed {
-                    Color::Green
-                } else {
-                    Color::Red
-                });
-                lines.push(Line::styled(check.summary, style));
-                if let Some(command) = check.command {
-                    lines.push(Line::styled(command, self.palette.quiet));
-                }
-            }
+            self.append_project_activity(task, &mut lines, area.width);
         } else if lines.is_empty() {
             let (title, hint) = if !self.online {
                 if self.busy {
@@ -339,6 +326,21 @@ impl App {
             lines.push(Line::styled(title, self.palette.label));
             if !hint.is_empty() {
                 lines.push(Line::styled(hint, self.palette.quiet));
+            } else if self.online
+                && !self.demo
+                && self.selected.is_none()
+                && self.snapshot.is_some()
+            {
+                lines.push(Line::raw(""));
+                lines.push(Line::styled("Work in this folder", self.palette.label));
+                lines.push(Line::styled(
+                    "Ask me to find code, propose a patch, or run a configured check.",
+                    self.palette.quiet,
+                ));
+                lines.push(Line::styled(
+                    "Or ask a question without changing files.",
+                    self.palette.quiet,
+                ));
             }
         }
         let header = Paragraph::new(pinned).wrap(Wrap { trim: false });
@@ -392,10 +394,10 @@ impl App {
     fn append_task_actions(&self, detail: &Detail, lines: &mut Vec<Line<'static>>) {
         let task = &detail.task;
         let action = if let Some(approval) = &task.pending_approval {
-            Some(format!(
-                "Review operation  ·  {}  ·  a Open",
-                clean(&approval.call.name)
-            ))
+            let action =
+                project_activity::describe(&approval.call, approval.execution_plan.as_ref())
+                    .unwrap_or_else(|| clean(&approval.call.name));
+            Some(format!("Review operation  ·  a Open\n{action}"))
         } else if pending_approval_id(task).is_some() {
             Some("Review operation  ·  a Open".into())
         } else if let Some(question) = task
@@ -558,7 +560,7 @@ impl App {
                     } else if focused && self.detail.is_some() {
                         "Ask a follow-up…"
                     } else if focused {
-                        "What would you like to do in this folder?"
+                        "Describe a change or ask about the project…"
                     } else {
                         "Press Enter to write a message"
                     })
@@ -576,88 +578,4 @@ impl App {
             frame.set_cursor_position(Position::new(body.x + x, body.y + y));
         }
     }
-}
-
-/// Only pair results emitted by the kernel with the matching workspace write.
-/// Model prose, pending approvals and unknown outcomes cannot create a receipt.
-fn saved_workspace_paths(task: &Task) -> Vec<&str> {
-    let mut paths = Vec::new();
-    for message in task.messages.iter().rev() {
-        let Message::ToolResult { call_id, output } = message else {
-            continue;
-        };
-        if output["bytesWritten"].as_u64().is_none() {
-            continue;
-        }
-        let Some(path) = output["path"].as_str() else {
-            continue;
-        };
-        if !paths.contains(&path)
-            && task.messages.iter().any(|message| {
-                matches!(message, Message::ToolCall { call }
-                if call.id == *call_id && matches!(call.name.as_str(),
-                    "workspace_create_text" | "workspace_replace_text" | "workspace_patch_text")
-                    && call.arguments["path"].as_str() == Some(path))
-            })
-        {
-            paths.push(path);
-            if paths.len() == 5 {
-                break;
-            }
-        }
-    }
-    paths.reverse();
-    paths
-}
-
-struct ProjectCheckReceipt {
-    summary: String,
-    passed: bool,
-    command: Option<String>,
-}
-
-fn project_check_receipts(task: &Task) -> Vec<ProjectCheckReceipt> {
-    task.messages
-        .iter()
-        .rev()
-        .filter_map(|message| {
-            let Message::ToolResult { call_id, output } = message else {
-                return None;
-            };
-            let plan = &output["projectCheck"];
-            if plan["kind"] != "project_check" || output["termination"] != "exited" {
-                return None;
-            }
-            let call = task.messages.iter().find_map(|message| match message {
-                Message::ToolCall { call }
-                    if &call.id == call_id && call.name.starts_with("process_") =>
-                {
-                    Some(call)
-                }
-                _ => None,
-            })?;
-            if call.arguments["inputs"] != plan["inputs"] {
-                return None;
-            }
-            let passed = output["success"].as_bool()?;
-            let state = if passed {
-                "Check passed"
-            } else {
-                "Check failed"
-            };
-            let exit = output["exitCode"]
-                .as_i64()
-                .map_or_else(|| "no exit code".into(), |code| format!("exit {code}"));
-            let label = clean(plan["label"].as_str()?).replace('\n', " ");
-            Some(ProjectCheckReceipt {
-                summary: format!("{state}: {label}  ·  {exit}"),
-                passed,
-                command: project_check_command(plan).map(|command| clean(&command)),
-            })
-        })
-        .take(3)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect()
 }

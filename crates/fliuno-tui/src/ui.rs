@@ -7,6 +7,7 @@ mod model_edit;
 mod model_picker;
 mod palette;
 mod panels;
+mod project_activity;
 pub(crate) mod setup;
 mod setup_catalog;
 mod transcript;

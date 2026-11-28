@@ -3069,25 +3069,35 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     )
     .unwrap();
     let mut terminal = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    terminal.expect("Start a conversation");
+    terminal.expect("Work in this folder");
+    terminal.expect("Describe a change or ask about the project");
+    terminal.capture("project-start-110");
     terminal.keys("写一篇小作文\r");
     terminal.expect("小作文：雨停之后");
     terminal.expect_absent("Review operation");
+    terminal.expect_absent("Project activity");
     terminal.expect("Ask a follow-up");
     terminal.keys("将项目中的 Hello world 改成 Welcome to Fliuno\r");
-    for (tool, label) in [
-        ("workspace_find", "Search project files"),
-        ("workspace_read_text", "Read a workspace file"),
-        ("workspace_patch_text", "Apply a patch to a workspace file"),
-        ("workspace_read_text", "Read a workspace file"),
-        ("process_greeting_", "Run project check: Greeting check"),
+    for (preview, label) in [
+        ("Search project files", "Search project files"),
+        ("Read file: src/greeting.txt", "Read a workspace file"),
+        (
+            "Patch file: src/greeting.txt",
+            "Apply a patch to a workspace file",
+        ),
+        ("Read file: src/greeting.txt", "Read a workspace file"),
+        (
+            "Run project check: Greeting check",
+            "Run project check: Greeting check",
+        ),
     ] {
-        terminal.expect(tool);
+        terminal.expect("a Open");
+        terminal.expect(preview);
         terminal.ready();
         terminal.keys("a");
         terminal.expect(label);
         terminal.expect("y Allow once");
-        if tool == "workspace_patch_text" {
+        if preview.starts_with("Patch file:") {
             assert_eq!(std::fs::read_to_string(&file).unwrap(), "Hello world\n");
             terminal.expect("Path: src/greeting.txt");
             terminal.expect("+Welcome to Fliuno");
@@ -3099,7 +3109,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                 terminal.capture(&format!("project-patch-approval-{cols}"));
             }
         }
-        if tool == "process_greeting_" {
+        if preview.starts_with("Run project check:") {
             for cols in [48, 80, 110] {
                 terminal.resize(24, cols);
                 terminal.ready();
@@ -3115,6 +3125,8 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     terminal.expect("已更新问候语");
     for cols in [48, 80, 110] {
         terminal.resize(24, cols);
+        terminal.expect("Project activity");
+        terminal.expect("Searched project files: 1 match");
         terminal.expect("Saved in workspace: src/greeting.txt");
         terminal.expect("Check passed: Greeting check  ·  exit 0");
         terminal.capture(&format!("project-write-receipt-{cols}"));
