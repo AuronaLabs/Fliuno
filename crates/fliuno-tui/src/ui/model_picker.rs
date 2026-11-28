@@ -87,10 +87,7 @@ impl Picker {
             render_text(frame, body, "Configure a live model in config.toml.", 0);
             return;
         }
-        let mut lines = vec![Line::styled(
-            "Enter Use for now   F5 Check",
-            palette.quiet,
-        )];
+        let mut lines = vec![Line::styled("Enter Use for now   F5 Check", palette.quiet)];
         if let Some(error) = &self.error {
             lines.push(Line::styled(error.as_str(), palette.status(Color::Red)));
         } else if let Some(status) = self.status() {
