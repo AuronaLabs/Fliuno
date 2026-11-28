@@ -43,12 +43,14 @@
 | Windows ConPTY 与模拟模型 | 从临时 Git 项目查看提案、批准修改和隔离检查、审阅最终结果。保留 48、80、110 列的终端单元格；转成 PNG 的图片供排版复核。 |
 | Windows 与真实模型 | `gpt-6.2-sol` 使用一次精确替换和八次模型尝试完成临时项目修复。宿主核对 Git diff 只改了指定实现文件，固定 Node 检查退出码由 1 变为 0。此结果覆盖一个小型回归场景。 |
 | Rust 配置回归 | `cargo test --locked -p fliuno-config`：14 项通过，覆盖两个供应商、共享绑定、旧配置换绑、地址变化拒绝沿用凭据和修订冲突。 |
+| Windows ConPTY 模型设置 | 两个档案共用一套托管凭据，另一个绑定回环无 Key 供应商。修订冲突保留外部改动，重载后可保存；保存后当前模型不变，显式选择后模拟服务核对模型 ID、凭据与思考强度，旧对话与模型标识可重开。核对 48、80、110 列的设置与摘要截图。[设置截图](assets/model-settings-v021.png) |
 
 复用离线项目验收（先构建带测试夹具的服务，且平台需支持配置中的隔离方式）：
 
 ```sh
 cargo build --locked -p fliuno-app-server --features test-fixtures --bins
 cargo test --locked -p fliuno-tui --test workbench live_project_agent_delivers_inline_then_edits_and_runs_a_native_check -- --ignored
+cargo test --locked -p fliuno-tui --test workbench workbench_manages_shared_suppliers_and_applies_only_the_selected_model -- --ignored
 ```
 
 真实模型例程、已记录的失败样本与候选门槛见 [0.0.21 计划](plan-0.0.21.md#真实模型编码验收)。发布还需要同一候选提交通过 Windows/Linux 工程检查和 MSI / Debian 12 的安装、升级、启动与卸载。
