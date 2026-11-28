@@ -437,7 +437,10 @@ pub(crate) fn project_turn(
             Message::UserParts { parts } => Some(ContextMessage::User {
                 text: parts.iter().map(UserContentPart::text_projection).collect(),
             }),
-            Message::Assistant { text } => Some(ContextMessage::Assistant { text: text.clone() }),
+            Message::Assistant { text, identity } => Some(ContextMessage::Assistant {
+                text: text.clone(),
+                identity: identity.clone(),
+            }),
             Message::ToolCall { call } => Some(ContextMessage::ToolCall { call: call.clone() }),
             Message::ToolResult { call_id, output } => Some(ContextMessage::ToolResult {
                 call_id: call_id.clone(),

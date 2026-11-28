@@ -106,7 +106,7 @@ pub(super) fn summarize(task: &Task) -> TaskSummary {
     let input_preview = match task.messages.first() {
         // SQLite substr() used to stop at the first NUL. Preserve that preview
         // for existing clients while limiting allocation to 160 scalars.
-        Some(Message::User { text } | Message::Assistant { text }) => text
+        Some(Message::User { text } | Message::Assistant { text, .. }) => text
             .chars()
             .take(160)
             .take_while(|ch| *ch != '\0')

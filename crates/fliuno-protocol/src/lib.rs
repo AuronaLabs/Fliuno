@@ -453,12 +453,21 @@ pub enum Message {
     },
     Assistant {
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<ReplyIdentity>,
     },
     /// Opaque output needed to replay provider reasoning/tool-use blocks exactly.
     ProviderReplay {
         provider: String,
         data: Value,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReplyIdentity {
+    pub supplier: String,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -482,6 +491,9 @@ pub struct Task {
     /// A restart/timeout can leave the model request result and billing unknown.
     #[serde(default)]
     pub model_outcome_unknown: bool,
+    /// Display identity captured with the latest dispatched model attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_reply_identity: Option<ReplyIdentity>,
     pub output: Option<String>,
     pub model_steps: u32,
     /// A lower attempt limit supplied at task creation. Absent model tasks use 8.

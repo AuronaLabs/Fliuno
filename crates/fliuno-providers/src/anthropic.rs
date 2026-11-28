@@ -36,6 +36,11 @@ impl AnthropicProvider {
         })
     }
 
+    pub(crate) fn with_supplier(mut self, supplier: Option<&str>) -> Self {
+        self.http = self.http.with_supplier(supplier);
+        self
+    }
+
     pub(crate) fn with_effort(mut self, effort: Option<fliuno_config::ReasoningEffort>) -> Self {
         self.effort = effort;
         self
@@ -157,6 +162,10 @@ impl ModelProvider for AnthropicProvider {
 
     fn reasoning_effort(&self) -> Option<&'static str> {
         self.effort.map(fliuno_config::ReasoningEffort::as_str)
+    }
+
+    fn reply_identity(&self) -> Option<fliuno_protocol::ReplyIdentity> {
+        Some(self.http.reply_identity("anthropic", &self.model))
     }
 
     fn model_identity(&self) -> Option<(String, String)> {

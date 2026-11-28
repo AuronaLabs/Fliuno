@@ -229,6 +229,12 @@ pub trait ModelProvider: Send + Sync {
         None
     }
 
+    /// Display attribution is independent of protocol replay and durable run identity.
+    fn reply_identity(&self) -> Option<fliuno_protocol::ReplyIdentity> {
+        let (supplier, model) = self.model_identity()?;
+        Some(fliuno_protocol::ReplyIdentity { supplier, model })
+    }
+
     fn model_identity_source(&self) -> ModelCapabilitiesSource {
         ModelCapabilitiesSource::Configured
     }

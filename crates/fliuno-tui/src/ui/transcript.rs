@@ -1,6 +1,6 @@
 use super::*;
 use crate::service::{TRANSCRIPT_MAX_TURNS, TRANSCRIPT_PAGE_TURNS, TranscriptPage};
-use fliuno_protocol::{SessionHistoryEntry, SessionHistoryListParams};
+use fliuno_protocol::{ReplyIdentity, SessionHistoryEntry, SessionHistoryListParams};
 use std::cell::{Ref, RefCell};
 
 use super::answer::SourcePosition;
@@ -282,8 +282,12 @@ impl Entry {
                             message_lines(&mut lines, "You", text, palette.label);
                             mark_plain(&mut sources, &lines);
                         }
-                        ContextMessage::Assistant { text } => {
-                            message_heading(&mut lines, "Fliuno", palette.label);
+                        ContextMessage::Assistant { text, identity } => {
+                            message_heading(
+                                &mut lines,
+                                reply_label(identity.as_ref(), width),
+                                palette.label,
+                            );
                             mark_plain(&mut sources, &lines);
                             let first_line = sources.last().map_or(0, |last| last.line + 1);
                             for fragment in answer::fragments(text, palette, width) {
@@ -332,7 +336,7 @@ pub(super) fn message_lines(
 
 pub(super) fn response_lines(
     lines: &mut Vec<Line<'static>>,
-    name: &'static str,
+    name: impl Into<String>,
     text: &str,
     palette: &Palette,
     width: u16,
@@ -341,11 +345,19 @@ pub(super) fn response_lines(
     lines.extend(answer::render(text, palette, width));
 }
 
-fn message_heading(lines: &mut Vec<Line<'static>>, name: &'static str, label: Style) {
+pub(super) fn reply_label(identity: Option<&ReplyIdentity>, width: u16) -> String {
+    let Some(identity) = identity else {
+        return "Assistant".into();
+    };
+    let label = clean(&format!("{}/{}", identity.supplier, identity.model)).replace('\n', " ");
+    ellipsis(&label, usize::from(width))
+}
+
+fn message_heading(lines: &mut Vec<Line<'static>>, name: impl Into<String>, label: Style) {
     if !lines.is_empty() {
         lines.push(Line::default());
     }
-    lines.push(Line::styled(name, label));
+    lines.push(Line::styled(name.into(), label));
 }
 
 #[cfg(test)]
@@ -374,6 +386,7 @@ mod tests {
                                     text: format!("Turn {index}: {}", prose.repeat(4)),
                                 },
                                 ContextMessage::Assistant {
+                                    identity: None,
                                     text: format!("```rust\n{}```", code.repeat(24)),
                                 },
                             ],

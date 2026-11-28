@@ -1,7 +1,7 @@
 use fliuno_protocol::TaskPlanStepStatus;
 
 use super::{
-    transcript::{message_lines, response_lines},
+    transcript::{message_lines, reply_label, response_lines},
     *,
 };
 
@@ -264,11 +264,21 @@ impl App {
                     ));
                 }
             }
+            let final_reply = task
+                .output
+                .as_ref()
+                .filter(|_| task.status == TaskStatus::Completed)
+                .and_then(|output| {
+                    task.messages.iter().rposition(|message| {
+                        matches!(message, Message::Assistant { text, .. } if text == output)
+                    })
+                });
             if !active_rendered {
-                for message in task
+                for (index, message) in task
                     .messages
                     .iter()
-                    .filter(|message| {
+                    .enumerate()
+                    .filter(|(_, message)| {
                         matches!(message, Message::User { .. } | Message::Assistant { .. })
                     })
                     .take(16)
@@ -277,8 +287,14 @@ impl App {
                         Message::User { text } => {
                             message_lines(&mut lines, "You", text, self.palette.label)
                         }
-                        Message::Assistant { text } if task.output.as_ref() != Some(text) => {
-                            response_lines(&mut lines, "Fliuno", text, &self.palette, area.width);
+                        Message::Assistant { text, identity } if final_reply != Some(index) => {
+                            response_lines(
+                                &mut lines,
+                                reply_label(identity.as_ref(), area.width),
+                                text,
+                                &self.palette,
+                                area.width,
+                            );
                         }
                         _ => {}
                     }
@@ -305,11 +321,7 @@ impl App {
                             && !preview.text.is_empty()
                     })
                 {
-                    let title = if self.demo || self.show_details {
-                        "Live response"
-                    } else {
-                        "Fliuno"
-                    };
+                    let title = reply_label(task.active_reply_identity.as_ref(), area.width);
                     response_lines(&mut lines, title, &preview.text, &self.palette, area.width);
                     if preview.clipped {
                         lines.push(Line::styled("Preview limit reached", self.palette.quiet));
@@ -320,7 +332,17 @@ impl App {
                 if task.status == TaskStatus::Failed {
                     message_lines(&mut lines, "Failure reason", output, self.palette.label);
                 } else {
-                    response_lines(&mut lines, "Fliuno", output, &self.palette, area.width);
+                    let identity = final_reply.and_then(|index| match &task.messages[index] {
+                        Message::Assistant { identity, .. } => identity.as_ref(),
+                        _ => None,
+                    });
+                    response_lines(
+                        &mut lines,
+                        reply_label(identity, area.width),
+                        output,
+                        &self.palette,
+                        area.width,
+                    );
                 }
             }
             if let Some(usage) = &detail.usage {

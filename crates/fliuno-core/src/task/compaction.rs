@@ -58,6 +58,7 @@ pub fn execute(
         in_flight_tool: None,
         pending_tool_input: None,
         model_outcome_unknown: true,
+        active_reply_identity: None,
         output: None,
         model_steps: task.model_steps,
         max_model_steps: task.max_model_steps,

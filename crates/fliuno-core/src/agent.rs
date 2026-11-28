@@ -658,6 +658,7 @@ impl Kernel {
             match task.status {
                 TaskStatus::Completed => {
                     task.messages.push(Message::Assistant {
+                        identity: None,
                         text: run.text.clone(),
                     });
                     events.push(EventKind::TaskCompleted {

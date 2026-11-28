@@ -56,6 +56,11 @@ impl ChatProvider {
         })
     }
 
+    pub(crate) fn with_supplier(mut self, supplier: Option<&str>) -> Self {
+        self.http = self.http.with_supplier(supplier);
+        self
+    }
+
     fn request(&self, task: &Task, tools: &[ToolSpec], streaming: bool) -> Result<Value, String> {
         let mut messages =
             vec![json!({"role":"system","content":fliuno_core::agent_instructions()})];
@@ -145,6 +150,10 @@ fn content_parts(parts: &[UserContentPart]) -> Result<Vec<Value>, String> {
 impl ModelProvider for ChatProvider {
     fn configured_budget(&self) -> Option<ModelBudget> {
         self.http.configured_budget()
+    }
+
+    fn reply_identity(&self) -> Option<fliuno_protocol::ReplyIdentity> {
+        Some(self.http.reply_identity("openai", &self.model))
     }
 
     fn model_identity(&self) -> Option<(String, String)> {

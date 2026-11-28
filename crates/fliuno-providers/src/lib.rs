@@ -167,7 +167,15 @@ pub fn from_env() -> Result<(String, Box<dyn ModelProvider>), String> {
     let budget = context_budget_from_env()?;
     let key = std::env::var(key_var).map_err(|_| format!("{key_var} is required"))?;
     let base_url = std::env::var(url_var).ok();
-    build_provider(provider, &model, base_url.as_deref(), &key, budget, None)
+    build_provider(
+        provider,
+        &model,
+        base_url.as_deref(),
+        &key,
+        budget,
+        None,
+        None,
+    )
 }
 
 /// Validate a startup profile locally without generation or remote metadata discovery.
@@ -236,7 +244,8 @@ pub fn from_settings(
             model,
             settings.reasoning_effort,
             budget,
-        )?;
+        )?
+        .with_supplier(settings.supplier_id());
         return Ok((settings.runtime_provider_name().into(), Box::new(provider)));
     }
     build_provider(
@@ -247,6 +256,7 @@ pub fn from_settings(
             .ok_or("This model protocol requires an API key")?,
         budget,
         settings.reasoning_effort,
+        settings.supplier_id(),
     )
 }
 
@@ -257,6 +267,7 @@ fn build_provider(
     key: &str,
     budget: Option<BudgetConfig>,
     effort: Option<fliuno_config::ReasoningEffort>,
+    supplier: Option<&str>,
 ) -> Result<(String, Box<dyn ModelProvider>), String> {
     use fliuno_config::Provider;
     if model.trim().is_empty() {
@@ -266,7 +277,9 @@ fn build_provider(
     let provider: Box<dyn ModelProvider> = match kind {
         Provider::Demo => Box::new(DemoProvider),
         Provider::OpenAi => {
-            let provider = OpenAiProvider::new(base, key, model)?.with_effort(effort);
+            let provider = OpenAiProvider::new(base, key, model)?
+                .with_effort(effort)
+                .with_supplier(supplier);
             let budget = budget
                 .map(|config| {
                     config.resolve(|_| Err("Context window discovery is unsupported for OpenAI; configure a numeric window".into()))
@@ -279,7 +292,9 @@ fn build_provider(
             })
         }
         Provider::Anthropic => {
-            let mut provider = AnthropicProvider::new(base, key, model)?.with_effort(effort);
+            let mut provider = AnthropicProvider::new(base, key, model)?
+                .with_effort(effort)
+                .with_supplier(supplier);
             let budget = budget
                 .map(|config| config.resolve(|output| provider.discover_context_budget(output)))
                 .transpose()?;
@@ -290,7 +305,9 @@ fn build_provider(
             })
         }
         Provider::Gemini => {
-            let provider = GeminiProvider::new(base, key, model)?.with_effort(effort);
+            let provider = GeminiProvider::new(base, key, model)?
+                .with_effort(effort)
+                .with_supplier(supplier);
             if let Some(config) = budget {
                 let budget =
                     config.resolve(|_| Err("Context window discovery is unsupported for Gemini; configure a numeric window".into()))?;

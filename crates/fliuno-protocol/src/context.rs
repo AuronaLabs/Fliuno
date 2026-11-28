@@ -157,10 +157,21 @@ impl Default for ContextOptions {
     deny_unknown_fields
 )]
 pub enum ContextMessage {
-    User { text: String },
-    Assistant { text: String },
-    ToolCall { call: ToolCall },
-    ToolResult { call_id: String, output: Value },
+    User {
+        text: String,
+    },
+    Assistant {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identity: Option<crate::ReplyIdentity>,
+    },
+    ToolCall {
+        call: ToolCall,
+    },
+    ToolResult {
+        call_id: String,
+        output: Value,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]

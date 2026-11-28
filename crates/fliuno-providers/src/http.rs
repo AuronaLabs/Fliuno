@@ -124,6 +124,7 @@ pub(crate) struct StreamResponse {
 
 pub(crate) struct Http {
     client: Client,
+    supplier: Option<String>,
     base: Url,
     endpoint: Url,
     count_endpoint: Url,
@@ -176,6 +177,7 @@ impl Http {
             .map_err(|_| "cannot initialize provider runtime")?;
         Ok(Self {
             client,
+            supplier: None,
             base,
             endpoint,
             count_endpoint,
@@ -185,6 +187,18 @@ impl Http {
             context_budget: None,
             calibrated_safety_margin_tokens: AtomicU32::new(0),
         })
+    }
+
+    pub fn with_supplier(mut self, supplier: Option<&str>) -> Self {
+        self.supplier = supplier.map(str::to_owned);
+        self
+    }
+
+    pub fn reply_identity(&self, fallback: &str, model: &str) -> fliuno_protocol::ReplyIdentity {
+        fliuno_protocol::ReplyIdentity {
+            supplier: self.supplier.as_deref().unwrap_or(fallback).to_owned(),
+            model: model.to_owned(),
+        }
     }
 
     pub fn with_count_tokens_field(mut self, field: &'static str) -> Self {

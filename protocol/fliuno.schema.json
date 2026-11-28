@@ -7268,6 +7268,17 @@
           "type": "boolean",
           "default": false
         },
+        "activeReplyIdentity": {
+          "description": "Display identity captured with the latest dispatched model attempt.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplyIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "output": {
           "type": [
             "string",
@@ -7436,6 +7447,16 @@
                 },
                 "text": {
                   "type": "string"
+                },
+                "identity": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ReplyIdentity"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "required": [
@@ -7547,6 +7568,22 @@
             "id",
             "name",
             "arguments"
+          ]
+        },
+        "ReplyIdentity": {
+          "type": "object",
+          "properties": {
+            "supplier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "supplier",
+            "model"
           ]
         },
         "TaskContext": {
@@ -7957,6 +7994,16 @@
                 },
                 "text": {
                   "type": "string"
+                },
+                "identity": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ReplyIdentity"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -13640,6 +13687,16 @@
                 },
                 "text": {
                   "type": "string"
+                },
+                "identity": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ReplyIdentity"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -13684,6 +13741,22 @@
                 "output"
               ]
             }
+          ]
+        },
+        "ReplyIdentity": {
+          "type": "object",
+          "properties": {
+            "supplier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "supplier",
+            "model"
           ]
         },
         "ToolCall": {
@@ -14544,6 +14617,16 @@
                 },
                 "text": {
                   "type": "string"
+                },
+                "identity": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ReplyIdentity"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -14588,6 +14671,22 @@
                 "output"
               ]
             }
+          ]
+        },
+        "ReplyIdentity": {
+          "type": "object",
+          "properties": {
+            "supplier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "supplier",
+            "model"
           ]
         },
         "ToolCall": {
@@ -14823,6 +14922,16 @@
                 },
                 "text": {
                   "type": "string"
+                },
+                "identity": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/ReplyIdentity"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -14867,6 +14976,22 @@
                 "output"
               ]
             }
+          ]
+        },
+        "ReplyIdentity": {
+          "type": "object",
+          "properties": {
+            "supplier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "supplier",
+            "model"
           ]
         },
         "ToolCall": {

@@ -116,6 +116,9 @@ impl Kernel {
             ));
         }
         task.model_steps += 1;
+        if !compaction::pending(&task) {
+            task.active_reply_identity = self.provider.reply_identity();
+        }
         task.model_outcome_unknown = true;
         // Persist the attempt before a paid network call. A crash must not reset
         // the budget and silently submit the same model request indefinitely.
@@ -245,7 +248,10 @@ impl Kernel {
         match turn.decision {
             ModelDecision::Complete(text) => {
                 if !model_step_budget_spent(&task) && self.has_pending_steering(&task.id)? {
-                    task.messages.push(Message::Assistant { text });
+                    task.messages.push(Message::Assistant {
+                        text,
+                        identity: request_task.active_reply_identity,
+                    });
                     events.push(EventKind::TaskDraftSaved {
                         step: task.model_steps,
                     });
@@ -254,8 +260,10 @@ impl Kernel {
                 }
                 task.status = TaskStatus::Completed;
                 task.output = Some(text.clone());
-                task.messages
-                    .push(Message::Assistant { text: text.clone() });
+                task.messages.push(Message::Assistant {
+                    text: text.clone(),
+                    identity: request_task.active_reply_identity,
+                });
                 events.push(EventKind::TaskCompleted { text });
                 self.commit(&task, &events, &[])?;
                 Ok(task)

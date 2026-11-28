@@ -1152,6 +1152,13 @@ fn streaming_fixture_request(listener: &std::net::TcpListener) -> std::net::TcpS
 fn streaming_fixture_input(
     listener: &std::net::TcpListener,
 ) -> (std::net::TcpStream, serde_json::Value) {
+    streaming_fixture_request_with_key(listener, None)
+}
+
+fn streaming_fixture_request_with_key(
+    listener: &std::net::TcpListener,
+    expected_key: Option<&str>,
+) -> (std::net::TcpStream, serde_json::Value) {
     use std::io::{BufRead, BufReader};
 
     let (mut socket, _) = listener.accept().unwrap();
@@ -1161,17 +1168,23 @@ fn streaming_fixture_input(
     let mut input = BufReader::new(&mut socket);
     let mut line = String::new();
     let mut content_length = 0;
+    let mut bearer = None;
     loop {
         line.clear();
         assert!(input.read_line(&mut line).unwrap() > 0);
         if line == "\r\n" {
             break;
         }
-        if let Some((header, value)) = line.split_once(':')
-            && header.eq_ignore_ascii_case("Content-Length")
-        {
-            content_length = value.trim().parse().unwrap();
+        if let Some((header, value)) = line.split_once(':') {
+            if header.eq_ignore_ascii_case("Content-Length") {
+                content_length = value.trim().parse().unwrap();
+            } else if header.eq_ignore_ascii_case("Authorization") {
+                bearer = value.trim().strip_prefix("Bearer ").map(str::to_owned);
+            }
         }
+    }
+    if let Some(expected) = expected_key {
+        assert_eq!(bearer.as_deref(), Some(expected));
     }
     let mut request = vec![0; content_length];
     input.read_exact(&mut request).unwrap();
@@ -2237,6 +2250,8 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
 
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
+    let second_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let second_address = second_listener.local_addr().unwrap();
     let (finish_first, completion) = channel();
     let (observed, requests) = channel();
     let provider = thread::spawn(move || {
@@ -2245,7 +2260,16 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
             "Selected model answer",
             "Saved default answer",
         ] {
-            let (mut socket, request) = streaming_fixture_input(&listener);
+            let first = answer == "Original model answer";
+            let (mut socket, request) = streaming_fixture_request_with_key(
+                if first { &listener } else { &second_listener },
+                Some(if first { "fixture-key" } else { "lab-key" }),
+            );
+            if first {
+                let delta = json!({"type":"response.output_text.delta","delta":"Live first supplier answer"});
+                write!(socket, "data: {delta}\n\n").unwrap();
+                socket.flush().unwrap();
+            }
             observed.send(request).unwrap();
             if answer == "Original model answer" {
                 completion.recv_timeout(Duration::from_secs(25)).unwrap();
@@ -2254,7 +2278,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
             write!(socket, "data: {event}\n\n").unwrap();
             drop(socket);
             if answer == "Original model answer" {
-                let listing = read_catalog_request(&listener, Some("fixture-key"));
+                let listing = read_catalog_request(&second_listener, Some("lab-key"));
                 write_catalog_response(listing, 200, r#"{"data":[{"id":"second-model"}]}"#);
             }
         }
@@ -2263,26 +2287,31 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join("config.toml");
     std::fs::write(root.path().join("fixture.key"), "fixture-key\n").unwrap();
+    std::fs::write(root.path().join("lab.key"), "lab-key\n").unwrap();
     let settings = format!(
         r#"
         [workbench]
         database = "models.db"
-        [model]
-        provider = "openai"
-        name = "first-model"
+        [providers.main]
         api_key_file = "fixture.key"
         base_url = "http://{address}/v1/"
+        [providers.lab]
+        api_key_file = "lab.key"
+        base_url = "http://{second_address}/v1/"
+        [model]
+        supplier = "main"
+        protocol = "openai.responses"
+        name = "first-model"
         [models.broken]
         provider = "openai"
         name = "missing-key-model"
         api_key_file = "missing.key"
         base_url = "http://{address}/v1/"
         [models.lab]
-        provider = "openai"
+        supplier = "lab"
+        protocol = "openai.responses"
         name = "second-model"
         reasoning_effort = "high"
-        api_key_file = "fixture.key"
-        base_url = "http://{address}/v1/"
         "#
     );
     std::fs::write(&config, &settings).unwrap();
@@ -2293,6 +2322,8 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     console.keys("Retain the first prompt\r");
     let first = requests.recv_timeout(Duration::from_secs(12)).unwrap();
     assert_eq!(first["model"], "first-model");
+    console.expect("Live first supplier answer");
+    console.expect("main/first-model");
     console.ready();
     console.keys("\x1bOPmodel");
     console.expect("Commands  /  model");
@@ -2351,6 +2382,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     console.expect("second-model");
     console.expect("Original model answer");
     console.expect("Send this preserved draft");
+    console.expect("main/first-model");
     console.ready();
     console.resize(22, 48);
     console.capture("model-switched-48");
@@ -2362,12 +2394,16 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     assert!(input.contains("Retain the first prompt"), "{input}");
     assert!(input.contains("Send this preserved draft"), "{input}");
     console.expect("Selected model answer");
+    console.expect("lab/second-model");
+    console.expect("main/first-model");
     console.ready();
     console.quit("\x03");
 
     let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
     reopened.expect("first-model");
     reopened.expect("Selected model answer");
+    reopened.expect("main/first-model");
+    reopened.expect("lab/second-model");
     assert_eq!(std::fs::read_to_string(&config).unwrap(), settings);
     reopened.expect("Press Enter to write a message");
     reopened.keys("n");
