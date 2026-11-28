@@ -9,6 +9,7 @@ use fliuno_protocol::{
 
 pub(super) struct Picker {
     origin: CommandOrigin,
+    supplier_settings: Option<Box<super::supplier_settings::Panel>>,
     profiles: Option<ModelProfileList>,
     default: Option<ModelProfileDefault>,
     saved: bool,
@@ -27,6 +28,7 @@ impl Picker {
     pub(super) fn new(origin: CommandOrigin) -> Self {
         Self {
             origin,
+            supplier_settings: None,
             profiles: None,
             default: None,
             saved: false,
@@ -39,6 +41,24 @@ impl Picker {
             error: None,
             pending: None,
             checked: None,
+        }
+    }
+
+    pub(super) fn settings(origin: CommandOrigin) -> Self {
+        let mut picker = Self::new(origin);
+        picker.supplier_settings = Some(Box::new(super::supplier_settings::Panel::default()));
+        picker
+    }
+
+    pub(super) fn supplier_snapshot(&mut self, snapshot: fliuno_protocol::ModelSupplierSnapshot) {
+        if let Some(panel) = &mut self.supplier_settings {
+            panel.install(snapshot);
+        }
+    }
+
+    pub(super) fn supplier_saved(&mut self) {
+        if let Some(panel) = &mut self.supplier_settings {
+            panel.saved();
         }
     }
 
@@ -120,7 +140,9 @@ impl Picker {
     }
 
     pub(super) fn paste(&mut self, value: &str, busy: bool) {
-        if let Some(panel) = &mut self.connection {
+        if let Some(panel) = &mut self.supplier_settings {
+            panel.paste(value, busy);
+        } else if let Some(panel) = &mut self.connection {
             panel.paste(value, busy);
         } else if let Some(editor) = &mut self.editor {
             editor.paste(value, busy);
@@ -128,6 +150,9 @@ impl Picker {
     }
 
     pub(super) fn title(&self) -> &'static str {
+        if let Some(panel) = &self.supplier_settings {
+            return panel.title();
+        }
         if let Some(panel) = &self.connection {
             return panel.title();
         }
@@ -137,7 +162,9 @@ impl Picker {
     }
 
     pub(super) fn actions(&self) -> &'static str {
-        if self.editor.is_some() || self.connection.is_some() {
+        if self.editing_suppliers() {
+            ""
+        } else if self.editor.is_some() || self.connection.is_some() {
             "Esc Back"
         } else {
             "↑/↓ Move  ·  Esc back"
@@ -155,6 +182,10 @@ impl Picker {
     }
 
     pub(super) fn failed(&mut self, error: String) {
+        if let Some(panel) = &mut self.supplier_settings {
+            panel.failed(error);
+            return;
+        }
         if let Some(panel) = &mut self.connection {
             panel.failed(error);
             return;
@@ -195,7 +226,14 @@ impl Picker {
         self.connection.is_some()
     }
 
+    pub(super) fn editing_suppliers(&self) -> bool {
+        self.supplier_settings.is_some()
+    }
+
     pub(super) fn preferred_height(&self) -> u16 {
+        if self.editing_suppliers() {
+            return 15;
+        }
         if let Some(panel) = &self.connection {
             return panel.preferred_height();
         }
@@ -218,6 +256,10 @@ impl Picker {
     }
 
     pub(super) fn draw(&self, frame: &mut Frame<'_>, body: Rect, palette: &Palette) {
+        if let Some(panel) = &self.supplier_settings {
+            panel.draw(frame, body, palette);
+            return;
+        }
         if let Some(panel) = &self.connection {
             panel.draw(frame, body, palette);
             return;
@@ -301,6 +343,22 @@ impl App {
         let Layer::ModelPicker(picker) = &mut self.layer else {
             return;
         };
+        if let Some(panel) = &mut picker.supplier_settings {
+            if self.busy {
+                return;
+            }
+            if key.code == KeyCode::Esc {
+                if panel.back() {
+                    self.layer = picker.return_layer();
+                }
+            } else if let Some(request) = panel.key(key)
+                && !self.send(worker, request)
+                && let Layer::ModelPicker(picker) = &mut self.layer
+            {
+                picker.failed("Connection worker unavailable".into());
+            }
+            return;
+        }
         if let Some(panel) = &mut picker.connection {
             if key.code == KeyCode::Esc {
                 if !self.busy && panel.back() {

@@ -163,6 +163,8 @@ impl App {
         };
         let help = if self.deferred_send.is_some() {
             "Esc Cancel send"
+        } else if matches!(&self.layer, Layer::ModelPicker(picker) if picker.editing_suppliers()) {
+            ""
         } else if editing {
             if !self.demo && area.width < 60 {
                 if self.draft.text().is_empty() {

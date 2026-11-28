@@ -16,7 +16,8 @@ use fliuno_protocol::{
     ModelProfileConnectionPreviewParams, ModelProfileConnectionSaveParams,
     ModelProfileConnectionTarget, ModelProfileConnectionView, ModelProfileCredentialInput,
     ModelProfileDefault, ModelProfileEditGetParams, ModelProfileEditParams, ModelProfileEditView,
-    ModelProfileEntry, ModelProfileList, ModelProfileSelectParams, ModelUsageSummary,
+    ModelProfileEntry, ModelProfileList, ModelProfileSelectParams, ModelSupplierBindingParams,
+    ModelSupplierRevision, ModelSupplierSaveParams, ModelSupplierSnapshot, ModelUsageSummary,
     ModelUsageTotals, ObjectPage, PolicyReadRule, PolicyReadRuleCreateParams,
     PolicyReadRuleRevokeParams, PolicyReadTool, ProviderModelListParams, ProviderModelPage,
     Session, SessionContextParams, SessionForkParams, SessionHistoryListPage,
@@ -52,6 +53,9 @@ pub enum Request {
     Reconnect,
     Diagnostics,
     ModelProfiles,
+    SupplierSettings,
+    SaveSupplier(ModelSupplierSaveParams),
+    BindSupplier(ModelSupplierBindingParams),
     OpenModelConnection(ModelProfileConnectionGetParams),
     PreviewModelConnection(ModelProfileConnectionPreviewParams),
     SaveModelConnection(ModelProfileConnectionSaveParams),
@@ -184,6 +188,7 @@ pub enum Update {
         workspace: Workspace,
         model: Option<String>,
         model_profiles: bool,
+        supplier_settings: bool,
         read_rules: bool,
     },
     ModelProfiles(
@@ -191,6 +196,8 @@ pub enum Update {
         Option<ModelProfileDefault>,
         ModelProfileFeatures,
     ),
+    SupplierSettings(Box<ModelSupplierSnapshot>),
+    SupplierSettingsSaved,
     ModelConnectionOpened(ModelProfileConnectionTarget, ModelProfileConnectionView),
     ModelConnectionPreviewed(ModelCatalogPreview),
     ModelConnectionSaved(ModelProfileEntry),
@@ -513,12 +520,14 @@ fn serve(
                         .as_str()
                         .map(str::to_owned);
                     let model_profiles = server.supports("modelProfiles");
+                    let supplier_settings = server.supports("modelSupplierSettings");
                     let read_rules = server.supports("workspaceReadRules");
                     service = Some(server);
                     out.send(Update::Online {
                         workspace,
                         model,
                         model_profiles,
+                        supplier_settings,
                         read_rules,
                     })?;
                     Ok(())
@@ -667,6 +676,30 @@ impl Service {
         Ok(self.client.call(method, params, |notice| {
             observe(&mut self.feed, &mut self.activity, notice);
         })?)
+    }
+
+    fn supplier_settings(&mut self) -> Result<Update> {
+        let result = self.rpc("modelSuppliers/list", json!({}));
+        model_profile_update(result, |snapshot| {
+            Update::SupplierSettings(Box::new(snapshot))
+        })
+    }
+
+    fn after_supplier_save(
+        &mut self,
+        result: Result<ModelSupplierRevision>,
+        out: &Sender<Update>,
+    ) -> Result<Update> {
+        match result {
+            Ok(_) => {
+                out.send(Update::SupplierSettingsSaved)?;
+                self.supplier_settings()
+            }
+            Err(error) if !disconnected(error.as_ref()) => {
+                Ok(Update::ModelProfileError(profile_error(error.as_ref())))
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn refresh(&mut self, out: &Sender<Update>, force: bool) -> Result<()> {
@@ -890,6 +923,16 @@ impl Service {
                 }
                 Err(error) => return Err(error),
             },
+            Request::SupplierSettings => self.supplier_settings()?,
+            Request::SaveSupplier(mut params) => {
+                let result = self.model_connection_rpc("modelSuppliers/save", &params);
+                clear_model_key(&mut params.credential);
+                self.after_supplier_save(result, out)?
+            }
+            Request::BindSupplier(params) => {
+                let result = self.model_connection_rpc("modelProfiles/bindSupplier", &params);
+                self.after_supplier_save(result, out)?
+            }
             Request::OpenModelConnection(params) => {
                 let result = self.rpc("modelProfiles/getConnection", json!(&params));
                 model_profile_update(result, |view| {

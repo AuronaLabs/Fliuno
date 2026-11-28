@@ -10,6 +10,7 @@ mod panels;
 mod project_activity;
 pub(crate) mod setup;
 mod setup_catalog;
+mod supplier_settings;
 mod transcript;
 mod workbench;
 
@@ -189,6 +190,7 @@ pub struct App {
     online: bool,
     model: Option<String>,
     model_profiles: bool,
+    supplier_settings: bool,
     read_rules: bool,
     busy: bool,
     next: Option<Request>,
@@ -239,6 +241,7 @@ impl App {
             online: false,
             model: None,
             model_profiles: false,
+            supplier_settings: false,
             read_rules: false,
             busy: true,
             next: None,
@@ -550,11 +553,13 @@ impl App {
                 workspace,
                 model,
                 model_profiles,
+                supplier_settings,
                 read_rules,
             } => {
                 self.online = true;
                 self.model = model.and_then(model_label);
                 self.model_profiles = model_profiles;
+                self.supplier_settings = supplier_settings;
                 self.read_rules = read_rules;
                 self.activity.clear();
                 self.message.clear();
@@ -924,6 +929,7 @@ impl App {
                 self.online = false;
                 self.model = None;
                 self.model_profiles = false;
+                self.supplier_settings = false;
                 self.read_rules = false;
                 self.activity.clear();
                 self.layer = Layer::None;
@@ -934,6 +940,16 @@ impl App {
             Update::ModelProfiles(profiles, default, features) => {
                 if let Layer::ModelPicker(picker) = &mut self.layer {
                     picker.install(profiles, default, features);
+                }
+            }
+            Update::SupplierSettings(snapshot) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.supplier_snapshot(*snapshot);
+                }
+            }
+            Update::SupplierSettingsSaved => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.supplier_saved();
                 }
             }
             Update::ModelConnectionOpened(target, view) => {
@@ -1299,6 +1315,16 @@ impl App {
                             self.layer = Layer::ModelPicker(Box::new(model_picker::Picker::new(
                                 menu.origin,
                             )));
+                        } else {
+                            self.layer = Layer::Commands(menu);
+                        }
+                        return false;
+                    }
+                    CommandAction::SupplierSettings => {
+                        if self.send(worker, Request::SupplierSettings) {
+                            self.layer = Layer::ModelPicker(Box::new(
+                                model_picker::Picker::settings(menu.origin),
+                            ));
                         } else {
                             self.layer = Layer::Commands(menu);
                         }
@@ -2311,6 +2337,13 @@ impl App {
                 label: "Switch model",
                 alias: Some("model"),
                 action: CommandAction::ModelProfiles,
+            });
+        }
+        if self.supplier_settings && !self.busy {
+            commands.push(Command {
+                label: "Model settings and suppliers",
+                alias: Some("settings"),
+                action: CommandAction::SupplierSettings,
             });
         }
         if self.online && self.read_rules && self.workspace.is_some() && !self.busy {

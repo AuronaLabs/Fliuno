@@ -482,16 +482,22 @@ impl App {
         if body.is_empty() {
             return;
         }
-        let actions = Paragraph::new(actions)
-            .wrap(Wrap { trim: true })
-            .style(self.palette.label);
-        let footer_height = actions
-            .line_count(body.width)
-            .min(usize::from(body.height.saturating_sub(1)))
-            .min(2) as u16;
-        let [body, footer] =
-            Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).areas(body);
-        frame.render_widget(actions, footer);
+        let body = if actions.is_empty() {
+            body
+        } else {
+            let actions = Paragraph::new(actions)
+                .wrap(Wrap { trim: true })
+                .style(self.palette.label);
+            let footer_height = actions
+                .line_count(body.width)
+                .min(usize::from(body.height.saturating_sub(1)))
+                .min(2) as u16;
+            let [body, footer] =
+                Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)])
+                    .areas(body);
+            frame.render_widget(actions, footer);
+            body
+        };
         match &self.layer {
             Layer::None => {}
             Layer::Inbox(_) | Layer::History(_) | Layer::TaskBrowser(_) => {}

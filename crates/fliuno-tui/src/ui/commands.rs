@@ -29,6 +29,7 @@ pub(super) enum CommandAction {
     Shortcut(KeyCode),
     NewConversation,
     ModelProfiles,
+    SupplierSettings,
     ReadRules,
     ProjectReview,
     TogglePlan,
