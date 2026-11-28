@@ -440,7 +440,9 @@ fn terminal_workspace_inbox_and_history_search_cross_sessions() {
     console.keys("\r");
     console.expect("y Allow once");
     console.expect("n Deny");
-    console.expect("artifact_create");
+    console.expect("Save a text deliverable");
+    console.keys("\t");
+    console.expect("Tool: artifact_create");
     console.ready();
     console.keys("y");
     console.expect("Completed");
@@ -3514,6 +3516,77 @@ fn workbench_keeps_language_draft_and_exact_project_review_at_terminal_widths() 
             .replace("language = \"en\"\n", ""),
         original,
     );
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn workbench_review_keeps_long_preview_and_tool_details_separate() {
+    use serde_json::json;
+    use std::net::{Ipv4Addr, TcpListener};
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(root.path().join("fixture.key"), "fixture-key").unwrap();
+    std::fs::write(&config, format!("[workbench]\ndatabase = 'fixture.db'\n[model]\nprovider = 'openai'\nname = 'fixture-coder'\napi_key_file = 'fixture.key'\nbase_url = 'http://{address}/v1'\n")).unwrap();
+    let model = thread::spawn(move || {
+        let (mut socket, request) = streaming_fixture_input(&listener);
+        assert_eq!(request["model"], "fixture-coder");
+        let arguments = json!({
+            "path":"notes.txt",
+            "content":format!("BEGIN PREVIEW\n{}\tEND PREVIEW\r\n", "long row for review\n".repeat(60))
+        });
+        let event = json!({"type":"response.completed","response":{"status":"completed","output":[{
+            "type":"function_call","name":"workspace_create_text","call_id":"save-note","arguments":arguments.to_string()
+        }]}});
+        write!(socket, "data: {event}\n\n").unwrap();
+    });
+    let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    console.expect("Enter Send");
+    console.resize(22, 48);
+    console.expect("Ctrl+N Line");
+    console.keys("Write these project notes.\r");
+    console.expect("Enter Review");
+    console.keys("\r");
+    console.expect("Preview · Tab Details");
+    console.expect("BEGIN PREVIEW");
+    console.expect("y Allow once");
+    console.expect_absent("workspace_create_text");
+    console.expect_absent("END PREVIEW");
+    console.capture("approval-preview-48");
+    console.keys("\x1b[6~");
+    console.expect_absent("BEGIN PREVIEW");
+    console.expect_absent("END PREVIEW");
+    console.keys("\x1b[F");
+    console.expect("\\tEND PREVIEW\\r");
+    console.expect("n Deny");
+    console.capture("approval-end-48");
+    console.keys("\t");
+    console.expect("Details · Tab Preview");
+    console.expect("Tool: workspace_create_text");
+    console.expect("\"path\": \"notes.txt\"");
+    console.expect_absent("END PREVIEW");
+    console.capture("approval-details-48");
+    console.keys("\t");
+    console.expect("\\tEND PREVIEW\\r");
+    console.resize(26, 80);
+    console.ready();
+    console.expect("\\tEND PREVIEW\\r");
+    console.capture("approval-end-80");
+    console.resize(16, 80);
+    console.ready();
+    console.expect("\\tEND PREVIEW\\r");
+    assert!(!root.path().join("notes.txt").exists());
+    console.keys("\x1b[H");
+    console.expect("BEGIN PREVIEW");
+    console.expect_absent("END PREVIEW");
+    console.keys("n");
+    console.expect("tool execution denied");
+    assert!(!root.path().join("notes.txt").exists());
+    console.quit("\x03");
+    model.join().unwrap();
 }
 
 #[test]
