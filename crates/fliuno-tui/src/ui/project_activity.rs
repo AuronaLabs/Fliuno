@@ -35,11 +35,15 @@ impl App {
         let discovery = last_search(task);
         let paths = saved_workspace_paths(task);
         let checks = project_check_receipts(task);
-        if discovery.is_none() && paths.is_empty() && checks.is_empty() {
+        let correction = tool_receipts(task)
+            .rev()
+            .any(|(call, output)| unapplied_patch(call, output).is_some());
+        let reviewable = correction || !paths.is_empty() || !checks.is_empty();
+        if discovery.is_none() && !reviewable {
             return;
         }
         lines.push(Line::raw(""));
-        let review = if paths.is_empty() && checks.is_empty() {
+        let review = if !reviewable {
             "Project activity"
         } else if matches!(self.layer, Layer::Edit(Edit::Task)) {
             "Project activity  ·  F1 changes"
@@ -52,6 +56,12 @@ impl App {
             let matches = if count == 1 { "match" } else { "matches" };
             lines.push(Line::styled(
                 format!("Searched project files: {count} {matches}{coverage}"),
+                self.palette.quiet,
+            ));
+        }
+        if correction && paths.is_empty() {
+            lines.push(Line::styled(
+                "Patch rejected; no file written",
                 self.palette.quiet,
             ));
         }
@@ -157,6 +167,21 @@ fn workspace_write_path<'a>(call: &ToolCall, output: &'a Value) -> Option<&'a st
     .then_some(path)
 }
 
+/// Show a bounded rejection receipt without showing the rejected patch as a change.
+fn unapplied_patch<'a>(call: &'a ToolCall, output: &Value) -> Option<(&'a str, &'static str)> {
+    if call.name != "workspace_patch_text" || output["status"] != "not_applied" {
+        return None;
+    }
+    let reason = match output["code"].as_str()? {
+        "workspace_patch_format" => "Invalid diff format",
+        "workspace_patch_mismatch" => "Diff did not match the file",
+        "workspace_patch_no_change" => "Diff did not change the file",
+        "workspace_base_changed" => "File changed after the proposal",
+        _ => return None,
+    };
+    Some((call.arguments["path"].as_str()?, reason))
+}
+
 struct ProjectCheckReceipt {
     summary: String,
     passed: bool,
@@ -232,6 +257,13 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
                     Line::styled(line.to_owned(), style)
                 }));
             }
+            lines.push(Line::default());
+        } else if let Some((path, reason)) = unapplied_patch(call, output) {
+            lines.push(Line::styled(
+                format!("Patch not applied: {}", one_line(path)),
+                palette.status(Color::Yellow),
+            ));
+            lines.push(Line::styled(reason, palette.quiet));
             lines.push(Line::default());
         } else if let Some(check) = project_check_receipt(call, output) {
             let color = if check.passed {

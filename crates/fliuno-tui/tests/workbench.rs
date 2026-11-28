@@ -3250,8 +3250,15 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             terminal.expect_absent("Review pending operation");
             terminal.keys("d");
             terminal.expect("Project changes & checks");
-            terminal.expect("No recorded writes or checks for this turn.");
+            terminal.expect("Patch not applied: src/greeting.txt");
+            terminal.expect("Invalid diff format");
             terminal.expect_absent("Applied patch");
+            for cols in [48, 80, 110] {
+                terminal.resize(24, cols);
+                terminal.ready();
+                terminal.expect("Patch not applied: src/greeting.txt");
+                terminal.capture(&format!("project-patch-correction-{cols}"));
+            }
             terminal.keys("\x1b");
             terminal.expect_absent("Project changes & checks");
             for cols in [48, 80, 110] {
