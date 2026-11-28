@@ -11,22 +11,23 @@ use fliuno_client::{Client, Error as ClientError, EventFeed, SessionHistory};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
     ArtifactCatalogSnapshotPage, ArtifactCatalogSnapshotParams, ArtifactDigest, ArtifactGetParams,
-    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelCatalogPreview,
-    ModelConnectionCheck, ModelConnectionCheckParams, ModelProfileConnectionGetParams,
-    ModelProfileConnectionPreviewParams, ModelProfileConnectionSaveParams,
-    ModelProfileConnectionTarget, ModelProfileConnectionView, ModelProfileCredentialInput,
-    ModelProfileDefault, ModelProfileEditGetParams, ModelProfileEditParams, ModelProfileEditView,
-    ModelProfileEntry, ModelProfileList, ModelProfileSelectParams, ModelSupplierBindingParams,
-    ModelSupplierCatalogParams, ModelSupplierRevision, ModelSupplierSaveParams,
-    ModelSupplierSnapshot, ModelUsageSummary, ModelUsageTotals, ObjectPage, PolicyReadRule,
-    PolicyReadRuleCreateParams, PolicyReadRuleRevokeParams, PolicyReadTool,
-    ProviderModelListParams, ProviderModelPage, Session, SessionContextParams, SessionForkParams,
-    SessionHistoryListPage, SessionHistoryListParams, SessionHistoryRole, SessionListOrder,
-    SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan, TaskQueue,
-    TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams, TaskReconciliation,
-    TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState,
-    TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot,
-    WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
+    ArtifactRevision, ArtifactSummary, ContextOptions, DraftContextParams, DraftContextReport,
+    Event, ModelCatalogPreview, ModelConnectionCheck, ModelConnectionCheckParams,
+    ModelProfileConnectionGetParams, ModelProfileConnectionPreviewParams,
+    ModelProfileConnectionSaveParams, ModelProfileConnectionTarget, ModelProfileConnectionView,
+    ModelProfileCredentialInput, ModelProfileDefault, ModelProfileEditGetParams,
+    ModelProfileEditParams, ModelProfileEditView, ModelProfileEntry, ModelProfileList,
+    ModelProfileSelectParams, ModelSupplierBindingParams, ModelSupplierCatalogParams,
+    ModelSupplierRevision, ModelSupplierSaveParams, ModelSupplierSnapshot, ModelUsageSummary,
+    ModelUsageTotals, ObjectPage, PolicyReadRule, PolicyReadRuleCreateParams,
+    PolicyReadRuleRevokeParams, PolicyReadTool, ProviderModelListParams, ProviderModelPage,
+    Session, SessionContextParams, SessionForkParams, SessionHistoryListPage,
+    SessionHistoryListParams, SessionHistoryRole, SessionListOrder, SessionListParams, Task,
+    TaskContext, TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
+    TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
+    TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
+    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
+    Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -48,6 +49,11 @@ pub const TRANSCRIPT_PAGE_TURNS: u32 = 12;
 pub const TRANSCRIPT_MAX_TURNS: usize = 96;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type ProcessSlot = Arc<Mutex<Option<Child>>>;
+
+pub struct DraftContextView {
+    pub history: TaskContext,
+    pub report: Option<DraftContextReport>,
+}
 
 pub enum Request {
     Reconnect,
@@ -101,7 +107,7 @@ pub enum Request {
     Timeline(TaskTimelineParams),
     Event(String, u64),
     ContextAttribution(String),
-    DraftContext(Box<SessionContextParams>),
+    DraftContext(Box<DraftContextParams>),
     StartQueued(TaskQueueItemParams),
     CancelQueued(TaskQueueItemParams),
     Approval(String, String),
@@ -257,7 +263,7 @@ pub enum Update {
     Timeline(TaskTimelinePage),
     Event(u64, String),
     ContextAttribution(Box<TaskContextAttribution>),
-    DraftContext(String, Box<TaskContext>),
+    DraftContext(String, Box<DraftContextView>),
     StartedQueued(String),
     Notice(String),
     Reconciled(String),
@@ -1293,13 +1299,37 @@ impl Service {
                 }
                 Update::Event(sequence, serde_json::to_string_pretty(&event.data)?)
             }
-            Request::DraftContext(params) => {
+            Request::DraftContext(mut params) => {
                 if !self.supports("sessionContext") {
                     return Err("This app-server does not support context preview".into());
                 }
+                params.options.enable_interaction =
+                    !params.options.plan_only && self.supports("taskInteraction");
+                let report: Option<DraftContextReport> = if self.supports("draftContextInspection")
+                {
+                    Some(self.rpc(
+                        "session/inspectDraftContext",
+                        serde_json::to_value(&params)?,
+                    )?)
+                } else {
+                    None
+                };
+                let history = self.rpc(
+                    "session/context",
+                    serde_json::to_value(SessionContextParams {
+                        session_id: params.session_id.clone(),
+                        through_sequence: report
+                            .as_ref()
+                            .map(|report| report.through_sequence)
+                            .filter(|_| {
+                                params.options.mode == fliuno_protocol::ContextMode::Session
+                            }),
+                        options: params.options,
+                    })?,
+                )?;
                 Update::DraftContext(
-                    params.session_id.clone(),
-                    Box::new(self.rpc("session/context", serde_json::to_value(params)?)?),
+                    params.session_id,
+                    Box::new(DraftContextView { history, report }),
                 )
             }
             Request::ContextAttribution(task) => {

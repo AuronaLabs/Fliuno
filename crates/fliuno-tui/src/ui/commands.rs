@@ -51,6 +51,7 @@ impl Command {
     pub fn shortcut(label: &'static str, key: KeyCode) -> Self {
         let alias = match key {
             KeyCode::Char('s') => Some("resume"),
+            KeyCode::F(3) => Some("context"),
             KeyCode::F(5) => Some("status"),
             KeyCode::F(7) => Some("deliverables"),
             _ => None,

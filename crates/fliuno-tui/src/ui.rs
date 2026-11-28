@@ -2,6 +2,7 @@ mod answer;
 mod approval;
 mod commands;
 mod deliverables;
+mod draft_budget;
 mod language;
 mod memories;
 mod model_connection;
@@ -51,7 +52,7 @@ use unicode_width::UnicodeWidthStr;
 
 const ACCENT: Color = Color::Cyan;
 use fliuno_protocol::{
-    ContextDetail, ContextMessage, ContextMode, ContextOptions, EventKind, SessionContextParams,
+    ContextDetail, ContextMessage, ContextMode, ContextOptions, DraftContextParams, EventKind,
     SessionForkParams, SessionListOrder, SessionListParams, TaskContext, TaskContextAttribution,
     TaskQueue, TaskQueueItemParams, TaskQueueState, TaskTimelinePage, TaskTimelineParams,
 };
@@ -79,7 +80,7 @@ enum Layer {
     },
     Context(String, u16),
     DraftContext {
-        preview: Option<Box<TaskContext>>,
+        preview: Option<Box<crate::service::DraftContextView>>,
         scroll: u16,
     },
     Approval {
@@ -1270,7 +1271,8 @@ impl App {
                 self.toggle_plan_mode();
                 return false;
             }
-            if matches!(edit, Edit::Task) && pressed && key.code == KeyCode::F(3) && !self.busy {
+            if matches!(edit, Edit::Task) && pressed && key.code == KeyCode::F(3) {
+                self.cancel_deferred_send();
                 self.open_draft_context(worker);
                 return false;
             }
@@ -1886,12 +1888,21 @@ impl App {
 
     fn fetch_draft_context(&mut self, worker: &Worker) {
         if let Some(session) = &self.session {
-            let params = SessionContextParams {
+            let mut options = self.project_context_options();
+            options.plan_only = self.plan_only;
+            let params = DraftContextParams {
                 session_id: session.id.clone(),
-                through_sequence: None,
-                options: self.project_context_options(),
+                input: self.draft.text().trim().to_owned(),
+                options,
             };
-            self.send(worker, Request::DraftContext(Box::new(params)));
+            if self.send(worker, Request::DraftContext(Box::new(params))) {
+                self.message.clear();
+            } else {
+                self.message = self
+                    .language
+                    .text("Press R to refresh when ready.", "就绪后按 R 刷新。")
+                    .into();
+            }
         }
     }
 
@@ -1899,7 +1910,11 @@ impl App {
         let Layer::DraftContext { preview, scroll } = &mut self.layer else {
             return;
         };
-        scroll_key(key.code, scroll);
+        if key.code == KeyCode::Home {
+            *scroll = 0;
+        } else {
+            scroll_key(key.code, scroll);
+        }
         if self.busy || !self.online || key.kind != KeyEventKind::Press {
             return;
         }
@@ -1931,7 +1946,7 @@ impl App {
             KeyCode::Char('p') if options.mode == ContextMode::Session => {
                 options.through_sequence = match options.through_sequence {
                     Some(_) => None,
-                    None => preview.as_ref().map(|value| value.through_sequence),
+                    None => preview.as_ref().map(|value| value.history.through_sequence),
                 };
             }
             KeyCode::Char('r') => {}
@@ -2276,7 +2291,7 @@ impl App {
                 }
             }
             KeyCode::F(2) if active && self.session.is_some() => self.toggle_plan_mode(),
-            KeyCode::F(3) if active => self.open_draft_context(worker),
+            KeyCode::F(3) if pressed => self.open_draft_context(worker),
             KeyCode::Char('H') if active => {
                 self.input.clear();
                 self.layer = Layer::Edit(Edit::HistorySearch);
@@ -2757,28 +2772,47 @@ fn format_draft_context(
     busy: bool,
     message: &str,
     width: usize,
+    lang: Language,
 ) -> String {
     let Some(preview) = preview else {
         return if busy {
-            "Reading session history…"
+            lang.text("Checking draft context…", "正在检查草稿上下文…")
         } else {
             message
         }
         .to_owned();
     };
     if preview.options.mode == ContextMode::Isolated {
-        return "This prompt starts without session history or workspace memory.".into();
+        return lang
+            .text(
+                "This prompt starts without session history or workspace memory.",
+                "本轮不使用会话历史或工作区记忆。",
+            )
+            .into();
     }
     let mut lines = vec![format!(
-        "{} completed turns · {} omitted · through #{}",
+        "{} {} · {} {} · {} #{}",
         preview.turns.len(),
+        lang.text("completed turns", "条历史"),
         preview.omitted_turns,
+        lang.text("omitted", "条省略"),
+        lang.text("through", "截至"),
         preview.through_sequence,
     )];
     if let Some(picks) = &preview.options.memory_selection {
-        lines.push(format!("Pinned memory revisions: {}", picks.len()));
+        lines.push(format!(
+            "{}: {}",
+            lang.text("Pinned memory revisions", "已固定的记忆版本"),
+            picks.len()
+        ));
     } else if !preview.options.disable_memory {
-        lines.push("Automatic memory is selected when the task starts.".into());
+        lines.push(
+            lang.text(
+                "Automatic memory is selected when the task starts.",
+                "开始任务时自动选择记忆。",
+            )
+            .into(),
+        );
     }
     lines.push(String::new());
     for turn in preview.turns.iter().rev() {
@@ -2787,7 +2821,7 @@ fn format_draft_context(
             _ => None,
         });
         let title = prompt.map_or_else(
-            || "Completed task".to_owned(),
+            || lang.text("Completed task", "已完成任务").to_owned(),
             |text| clean(text).split_whitespace().collect::<Vec<_>>().join(" "),
         );
         lines.push(ellipsis(

@@ -239,52 +239,85 @@ impl App {
         &self,
         frame: &mut Frame<'_>,
         area: Rect,
-        preview: Option<&TaskContext>,
+        preview: Option<&crate::service::DraftContextView>,
         scroll: u16,
     ) {
         let options = &self.draft_context;
         let isolated = options.mode == ContextMode::Isolated;
+        let lang = self.language;
         let scope = if isolated {
-            "Isolated prompt"
+            lang.text("Isolated prompt", "隔离提示")
         } else {
-            "Session history"
+            lang.text("Session history", "会话历史")
         };
+        let scope_label = lang.text("Scope   ", "范围");
         let mut settings = vec![Line::styled(
-            format!("s  Scope    {scope}"),
+            format!("s  {scope_label} {scope}"),
             self.palette.label,
         )];
         if !isolated {
             let memory = if options.disable_memory {
-                "Off".into()
+                lang.text("Off", "关闭").into()
             } else if let Some(picks) = &options.memory_selection {
-                format!("Pinned ({})", picks.len())
+                format!("{} ({})", lang.text("Pinned", "已固定"), picks.len())
             } else {
-                "Automatic".into()
+                lang.text("Automatic", "自动").into()
             };
             let history = match options.detail {
-                ContextDetail::Full => "Full records",
-                ContextDetail::Conversation => "Conversation only",
+                ContextDetail::Full => lang.text("Full records", "完整记录"),
+                ContextDetail::Conversation => lang.text("Conversation only", "仅对话"),
             };
             let pin = options.through_sequence.map_or_else(
-                || "Live".into(),
-                |sequence| format!("Pinned at #{sequence}"),
+                || lang.text("Live", "最新").into(),
+                |sequence| format!("{} #{sequence}", lang.text("Pinned at", "固定至")),
             );
+            let memory_label = lang.text("Memory  ", "记忆");
+            let history_label = lang.text("History ", "历史");
+            let preview_label = lang.text("Preview ", "水位");
+            let choose = lang.text("Choose", "选择");
             settings.extend([
-                Line::raw(format!("m  Memory   {memory}  ·  v Choose")),
-                Line::raw(format!("h  History  {history}")),
-                Line::raw(format!("p  Preview  {pin}")),
+                Line::raw(format!("m  {memory_label} {memory}  ·  v {choose}")),
+                Line::raw(format!("h  {history_label} {history}")),
+                Line::raw(format!("p  {preview_label} {pin}")),
             ]);
         }
-        settings.push(Line::styled("r  Refresh", self.palette.quiet));
+        settings.push(Line::styled(
+            lang.text("r  Refresh", "r  刷新"),
+            self.palette.quiet,
+        ));
+        let report = preview.and_then(|view| view.report.as_ref());
+        if let Some(report) = report {
+            let summary = super::draft_budget::summary(report, lang)
+                .into_iter()
+                .map(|line| Line::styled(line, self.palette.label));
+            settings = summary.chain([Line::raw("")]).chain(settings).collect();
+        }
         let [controls, result] = Layout::vertical([
-            Constraint::Length(settings.len() as u16 + 1),
+            Constraint::Length((settings.len() as u16 + 1).min(area.height.saturating_sub(2))),
             Constraint::Min(0),
         ])
         .areas(area);
         frame.render_widget(Paragraph::new(settings), controls);
-        let text =
-            format_draft_context(preview, self.busy, &self.message, usize::from(result.width));
-        render_text(frame, result, &text, scroll);
+        let mut text = format_draft_context(
+            preview.map(|view| &view.history),
+            self.busy,
+            &self.message,
+            usize::from(result.width),
+            self.language,
+        );
+        if let Some(report) = report {
+            text = format!(
+                "{}\n{text}",
+                super::draft_budget::details(report, self.language, self.input_artifact.is_some())
+            );
+        }
+        if !result.is_empty() {
+            let paragraph = Paragraph::new(clean(&text)).wrap(Wrap { trim: false });
+            let bottom = paragraph
+                .line_count(result.width)
+                .saturating_sub(usize::from(result.height));
+            frame.render_widget(paragraph.scroll((scroll.min(bottom as u16), 0)), result);
+        }
     }
 
     pub(super) fn draw_layer(&self, frame: &mut Frame<'_>, area: Rect) {
@@ -310,7 +343,7 @@ impl App {
             ),
             Layer::Edit(Edit::Answer(..)) => (76, 15),
             Layer::Edit(_) | Layer::ConfirmCancel(_) => (64, 6),
-            Layer::DraftContext { .. } => (76, 19),
+            Layer::DraftContext { .. } => (76, 22),
             Layer::Recovery(..) | Layer::Reconcile(_) | Layer::Backup(_) => (88, 19),
             Layer::Approval { .. } => (88, 21),
             Layer::ReadRules(..) => (76, 17),
@@ -412,7 +445,11 @@ impl App {
                     .into(),
                 panel.actions(self.language),
             ),
-            Layer::DraftContext { .. } => ("Draft context".into(), "Esc Return to draft"),
+            Layer::DraftContext { .. } => (
+                self.language.text("Draft context", "草稿上下文").into(),
+                self.language
+                    .text("↑↓ Scroll · Esc Return to draft", "↑↓ 滚动 · Esc 返回草稿"),
+            ),
             Layer::Queue(queue, _) => (
                 queue.as_ref().map_or_else(
                     || "Queued prompts".into(),

@@ -23,6 +23,7 @@
 | 配置多个供应商、查询目录和切换模型 | [设置操作和截图](workbench.md#命名供应商) → [本地 RPC](protocol.md#命名供应商设置) |
 | 查看项目可运行哪些检查 | [`/checks`](workbench.md#查看项目检查) · [登记检查](setup.md#在隔离环境里运行项目检查0021) |
 | 让 Agent 参考项目指南 | [预览和启用 `AGENTS.md`](workbench.md#审阅项目指南) · [请求与归因](protocol.md#项目指南) |
+| 发送前查看上下文（开发版） | [预算面板](workbench.md#发送前查看上下文) · [计量口径](context.md#发送前检查草稿) |
 | 切换英文或简体中文 | [工作台语言](workbench.md#切换界面语言) |
 | 查看发布范围和证据 | [更新记录](../CHANGELOG.md) · [0.0.22 工程计划](plan-0.0.22.md) · [安装包验收](execution-evidence.md#0022-安装包验收) |
 

@@ -200,17 +200,20 @@ impl Console {
         loop {
             match self.output.recv_timeout(Duration::from_millis(140)) {
                 Ok(bytes) => self.observe(&bytes),
-                Err(_)
-                    if !self.screen.screen().contents().contains("Working")
-                        && !self
-                            .screen
-                            .screen()
-                            .contents()
-                            .contains("Opening conversation…") =>
-                {
-                    return;
+                Err(_) => {
+                    let screen = self.screen.screen().contents();
+                    if ![
+                        "Working",
+                        "Opening conversation…",
+                        "处理中",
+                        "正在打开会话…",
+                    ]
+                    .iter()
+                    .any(|label| screen.contains(label))
+                    {
+                        return;
+                    }
                 }
-                Err(_) => {}
             }
             assert!(Instant::now() < deadline, "workbench never became ready");
         }
@@ -712,7 +715,9 @@ fn draft_context_controls_survive_queue_restart() {
     console.expect("Isolated prompt");
     console.capture("draft-context-isolated");
     console.keys("s");
-    console.expect("1 completed turns");
+    console.ready();
+    console.keys("\x1b[6~");
+    console.expect("#10  Review the work history");
     console.ready();
     console.keys("m");
     console.expect("Memory   Off");
@@ -4106,4 +4111,68 @@ fn workbench_reviews_project_guide_and_preserves_draft_after_change() {
     reopened.expect("Guide disabled.");
     reopened.quit("\x03");
     model.join().unwrap();
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn draft_context_reaches_bilingual_budget_from_slash_and_keeps_draft() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(
+        &config,
+        format!(
+            r#"
+        [workbench]
+        database = "draft.db"
+        language = "zh-CN"
+        [model]
+        provider = "openai"
+        protocol = "openai.compatible"
+        name = "fixture-context"
+        base_url = "http://{}/v1/"
+        auth = "none"
+        [model.budget]
+        window = 8192
+        max_output_tokens = 128
+    "#,
+            listener.local_addr().unwrap()
+        ),
+    )
+    .unwrap();
+    let mut console =
+        Console::launch_with_config_at(server.as_deref(), root.path(), Some(&config), (20, 48));
+    console.expect("fixture-context");
+    console.expect("Enter 发送");
+    console.ready();
+    console.keys("/context");
+    console.expect("/context");
+    console.keys("\t");
+    console.expect("草稿上下文");
+    console.expect("8064 B");
+    for (rows, cols) in [(20, 48), (24, 80), (28, 110)] {
+        console.resize(rows, cols);
+        console.ready();
+        console.expect("本地输入上限");
+        console.expect("工具");
+        console.expect("Esc 返回草稿");
+        console.capture(&format!("draft-budget-zh-{cols}"));
+    }
+    console.keys("\x1b");
+    console.expect_absent("草稿上下文");
+    console.keys("Check the project\x1bOR");
+    console.expect("19 B");
+    console.ready();
+    console.keys("s");
+    console.expect("隔离提示");
+    console.ready();
+    console.keys("\x1b");
+    console.expect("Check the project");
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    console.quit("\x03");
 }

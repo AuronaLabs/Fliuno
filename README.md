@@ -79,6 +79,8 @@ cargo build --locked -p fliuno-tui -p fliuno-app-server
 pwsh -NoProfile -File scripts/check.ps1
 ```
 
+下一版的实测基线、开发顺序和发布门槛见[0.0.23 上下文与工具范围计划](docs/plan-0.0.23.md)。
+
 工程检查覆盖格式、Clippy、工作区测试、应用协议 Schema 和离线演示。调试、发布或验收可复用同一个专用构建缓存；在空间紧张时按[构建缓存说明](docs/setup.md#检查与演示)清理。实际终端验收和安装包门槛见[当前迭代计划](docs/plan-0.0.22.md#验收门槛)。
 
 [架构与模块](docs/architecture.md) · [验收记录](docs/execution-evidence.md) · [数据库升级验证](docs/setup.md#版本升级验证) · [开发路线图](docs/roadmap.md)
