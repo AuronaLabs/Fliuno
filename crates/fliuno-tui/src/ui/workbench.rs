@@ -618,9 +618,10 @@ impl App {
                         WorkActionKind::Reconcile => {
                             "External result needs verification  ·  r Review"
                         }
-                        WorkActionKind::ReviewBudget { .. } => {
-                            "Context budget reached  ·  c Review"
-                        }
+                        WorkActionKind::ReviewBudget { .. } => self.language.text(
+                            "Context budget reached  ·  c Review",
+                            "上下文超限  ·  c 查看",
+                        ),
                     }
                     .into()
                 })

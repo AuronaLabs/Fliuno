@@ -1167,9 +1167,16 @@ fn streaming_fixture_request_with_key(
     listener: &std::net::TcpListener,
     expected_key: Option<&str>,
 ) -> (std::net::TcpStream, serde_json::Value) {
+    let (socket, _) = listener.accept().unwrap();
+    read_streaming_fixture_request(socket, expected_key)
+}
+
+fn read_streaming_fixture_request(
+    mut socket: std::net::TcpStream,
+    expected_key: Option<&str>,
+) -> (std::net::TcpStream, serde_json::Value) {
     use std::io::{BufRead, BufReader};
 
-    let (mut socket, _) = listener.accept().unwrap();
     socket
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
@@ -4229,6 +4236,69 @@ fn draft_context_reaches_bilingual_budget_from_slash_and_keeps_draft() {
     console.ready();
     console.keys("\x1b");
     console.expect("Check the project");
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    // Choose all tools and trigger a real local budget rejection. No model gets the prompt.
+    console.keys("\x1bOR");
+    console.expect("t  工具 无");
+    console.ready();
+    console.keys("t");
+    console.expect("超出字节上限");
+    console.keys("\x1b");
+    console.expect("Check the project");
+    console.keys("\r");
+    console.expect("c 查看");
+    console.ready();
+    console.keys("c");
+    console.expect("e 复制为新草稿");
+    console.expect("该模型步骤未发出");
+    console.resize(20, 48);
+    console.expect("e 复制为新草稿");
+    console.capture("draft-budget-rejection-zh-48");
+    console.keys("e");
+    console.expect("草稿上下文");
+    console.expect("超出字节上限");
+    console.ready();
+    console.keys("t");
+    console.expect("t  工具 项目");
+    console.expect("工具： 7");
+    console.expect_absent("超出字节上限");
+    console.keys("\x1b");
+    console.expect("Check the project");
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+
+    console.keys("\r");
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while Instant::now() < deadline {
+        match listener.accept() {
+            Ok((socket, _)) => {
+                socket.set_nonblocking(false).unwrap();
+                let (mut stream, request) = read_streaming_fixture_request(socket, None);
+                assert_eq!(request["tools"].as_array().unwrap().len(), 7);
+                assert!(
+                    request["messages"]
+                        .to_string()
+                        .contains("Check the project")
+                );
+                stream.write_all(concat!(
+                    "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Recovered draft.\"},\"finish_reason\":null}]}\n\n",
+                    "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+                    "data: [DONE]\n\n",
+                ).as_bytes()).unwrap();
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(15))
+            }
+            Err(error) => panic!("model fixture: {error}"),
+        }
+    }
+    console.expect("Recovered draft.");
     assert_eq!(
         listener.accept().unwrap_err().kind(),
         std::io::ErrorKind::WouldBlock

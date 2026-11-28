@@ -443,7 +443,23 @@ impl App {
                 "Enter details / a approval / PgDn more / Home first / r refresh",
             ),
             Layer::TimelineEvent { sequence, .. } => (format!("Event #{sequence}"), "Esc timeline"),
-            Layer::Context(..) => ("Context and memory usage".into(), "Esc back"),
+            Layer::Context { rejected_task, .. } => (
+                self.language
+                    .text("Context and memory usage", "上下文与记忆用量")
+                    .into(),
+                if rejected_task
+                    .as_deref()
+                    .and_then(|id| self.rejected_draft_text(id))
+                    .is_some()
+                {
+                    self.language.text(
+                        "e Edit as new draft · Esc Back",
+                        "e 复制为新草稿 · Esc 返回",
+                    )
+                } else {
+                    self.language.text("Esc Back", "Esc 返回")
+                },
+            ),
             Layer::ProjectChecks(_) => (
                 self.language.text("Project checks", "项目检查").into(),
                 self.language.text(
@@ -662,7 +678,7 @@ impl App {
                 *index,
                 self.palette.choice,
             ),
-            Layer::TimelineEvent { text, scroll, .. } | Layer::Context(text, scroll) => {
+            Layer::TimelineEvent { text, scroll, .. } | Layer::Context { text, scroll, .. } => {
                 render_text(frame, body, text, *scroll)
             }
             Layer::Queue(queue, index) => render_list(

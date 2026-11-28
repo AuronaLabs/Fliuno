@@ -79,7 +79,11 @@ enum Layer {
         text: String,
         scroll: u16,
     },
-    Context(String, u16),
+    Context {
+        text: String,
+        scroll: u16,
+        rejected_task: Option<String>,
+    },
     DraftContext {
         preview: Option<Box<crate::service::DraftContextView>>,
         scroll: u16,
@@ -898,9 +902,24 @@ impl App {
             }
             Update::ContextAttribution(attribution) => {
                 if self.selected.as_deref() == Some(&attribution.task_id)
-                    && matches!(self.layer, Layer::Context(..))
+                    && matches!(self.layer, Layer::Context { .. })
                 {
-                    self.layer = Layer::Context(format_context_attribution(&attribution), 0);
+                    let first_request = matches!(
+                        attribution
+                            .latest_budget_rejection
+                            .as_ref()
+                            .map(|event| &event.data),
+                        Some(EventKind::ModelBudgetRejected {
+                            step: 1,
+                            summarization: false,
+                            ..
+                        })
+                    ) && attribution.model_steps == 1;
+                    self.layer = Layer::Context {
+                        text: format_context_attribution(&attribution, self.language),
+                        scroll: 0,
+                        rejected_task: first_request.then_some(attribution.task_id),
+                    };
                 }
             }
             Update::Queue(queue) => {
@@ -1197,6 +1216,21 @@ impl App {
                 self.layer = Layer::Edit(Edit::Task);
             } else {
                 self.draft_context_key(key, worker);
+            }
+            return false;
+        }
+        if pressed
+            && key.code == KeyCode::Char('e')
+            && let Layer::Context {
+                rejected_task: Some(id),
+                ..
+            } = &self.layer
+        {
+            if let Some(text) = self.rejected_draft_text(id).map(str::to_owned)
+                && self.draft.insert(&text, DRAFT_LIMIT)
+            {
+                self.key = uuid::Uuid::new_v4().to_string();
+                self.open_draft_context(worker);
             }
             return false;
         }
@@ -1637,7 +1671,7 @@ impl App {
                 }
             }
             Layer::DraftContext { .. } => {}
-            Layer::Context(_, scroll) | Layer::TimelineEvent { scroll, .. } => {
+            Layer::Context { scroll, .. } | Layer::TimelineEvent { scroll, .. } => {
                 scroll_key(key.code, scroll)
             }
             Layer::ProjectReview { scroll, .. } => {
@@ -1881,6 +1915,35 @@ impl App {
             self.layer = Layer::None;
         }
         false
+    }
+
+    // Only copy a text-only first attempt with positive evidence of pre-dispatch
+    // rejection. Do not restore a stale authorization, guide revision, or history pin.
+    fn rejected_draft_text(&self, id: &str) -> Option<&str> {
+        if !self.online
+            || self.start_pending
+            || self.input_artifact.is_some()
+            || !self.draft.text().is_empty()
+            || !self.can_compose()
+        {
+            return None;
+        }
+        let task = &self.detail.as_ref()?.task;
+        if self.selected.as_deref() != Some(id)
+            || task.id != id
+            || self.session.as_ref()?.id != task.session_id
+            || task.backend != fliuno_protocol::TaskBackend::Model
+            || task.status != TaskStatus::Failed
+            || task.model_steps != 1
+            || task.model_outcome_unknown
+            || task.in_flight_tool.is_some()
+        {
+            return None;
+        }
+        match task.messages.as_slice() {
+            [Message::User { text }] if !text.is_empty() && text.len() <= DRAFT_LIMIT => Some(text),
+            _ => None,
+        }
     }
 
     fn open_draft_context(&mut self, worker: &Worker) {
@@ -2598,7 +2661,11 @@ impl App {
             }
             KeyCode::Char('c') => {
                 if self.send(worker, Request::ContextAttribution(task.id.clone())) {
-                    self.layer = Layer::Context(String::new(), 0);
+                    self.layer = Layer::Context {
+                        text: String::new(),
+                        scroll: 0,
+                        rejected_task: None,
+                    };
                 }
             }
             KeyCode::Char('B') if task.status == TaskStatus::Completed => {
@@ -2850,7 +2917,7 @@ fn format_draft_context(
     )
 }
 
-fn format_context_attribution(report: &TaskContextAttribution) -> String {
+fn format_context_attribution(report: &TaskContextAttribution, lang: Language) -> String {
     let mut lines = vec![
         format!("{} model attempts", report.model_steps),
         format!(
@@ -2900,10 +2967,39 @@ fn format_context_attribution(report: &TaskContextAttribution) -> String {
         .as_ref()
         .map(|event| &event.data)
     {
-        lines.push(format!(
-            "\nBudget rejection · {:?} · observed {} · limit {}",
-            report.kind, report.observed, report.limit
-        ));
+        use fliuno_protocol::ModelBudgetLimit;
+        let (name, unit) = match report.kind {
+            ModelBudgetLimit::LocalJsonBytes => {
+                (lang.text("Local input limit", "本地输入上限"), "B")
+            }
+            ModelBudgetLimit::ProviderInputTokens => (
+                lang.text("Provider input limit", "供应商输入上限"),
+                "tokens",
+            ),
+            ModelBudgetLimit::GenerationRequestBytes => {
+                (lang.text("Generation request limit", "生成请求上限"), "B")
+            }
+            ModelBudgetLimit::CountRequestBytes => {
+                (lang.text("Count request limit", "计数请求上限"), "B")
+            }
+        };
+        let minimum = if report.observed_is_lower_bound {
+            "≥"
+        } else {
+            ""
+        };
+        lines.splice(
+            0..0,
+            [
+                format!(
+                    "{name}: {minimum}{} / {} {unit}",
+                    report.observed, report.limit
+                ),
+                lang.text("This model step was not sent.", "该模型步骤未发出。")
+                    .into(),
+                String::new(),
+            ],
+        );
     }
     if !report.memories.is_empty() {
         lines.push("\nMemory sources".into());
