@@ -171,6 +171,11 @@ struct ParkedDraft {
     plan_only: bool,
 }
 
+struct DeferredSend {
+    session: String,
+    key: String,
+}
+
 pub struct App {
     demo: bool,
     palette: Palette,
@@ -179,6 +184,8 @@ pub struct App {
     model_profiles: bool,
     busy: bool,
     next: Option<Request>,
+    reopening: Option<String>,
+    deferred_send: Option<DeferredSend>,
     workspace: Option<Workspace>,
     session: Option<Session>,
     session_query: Option<String>,
@@ -226,6 +233,8 @@ impl App {
             model_profiles: false,
             busy: true,
             next: None,
+            reopening: None,
+            deferred_send: None,
             workspace: None,
             session: None,
             session_query: None,
@@ -272,19 +281,86 @@ impl App {
     }
 
     fn send(&mut self, worker: &Worker, request: Request) -> bool {
-        if self.busy || !worker.send(request) {
+        if self.busy {
             return false;
         }
+        let reopening = match &request {
+            Request::SelectSession(id) => Some(id.clone()),
+            // The snapshot can schedule a detail read before the composer is ready.
+            Request::Task(_) => self.reopening.clone(),
+            _ => None,
+        };
+        if !worker.send(request) {
+            return false;
+        }
+        self.reopening = reopening;
         self.busy = true;
         true
     }
 
     fn sync(&mut self, worker: &Worker) {
-        if !self.busy
-            && let Some(next) = self.next.take()
-            && !self.send(worker, next)
+        if self.busy {
+            return;
+        }
+        if let Some(next) = self.next.take() {
+            if !matches!(next, Request::Task(_)) {
+                self.cancel_deferred_send();
+            }
+            if !self.send(worker, next) {
+                self.reopening = None;
+                self.deferred_send = None;
+                self.message = "Connection worker unavailable".into();
+            }
+            return;
+        }
+        self.reopening = None;
+        if let Some(intent) = self.deferred_send.take()
+            && self.online
+            && matches!(self.layer, Layer::Edit(Edit::Task))
+            && self
+                .session
+                .as_ref()
+                .is_some_and(|session| session.id == intent.session)
+            && self.key == intent.key
         {
-            self.message = "Connection worker unavailable".into();
+            if !self.can_compose() {
+                self.message = "Review the pending request before sending. Draft kept.".into();
+                return;
+            }
+            let text = self.draft.text().trim().to_owned();
+            self.start_draft(worker, intent.session, text, false);
+        }
+    }
+
+    fn can_compose(&self) -> bool {
+        self.detail.as_ref().is_none_or(|detail| {
+            pending_approval_id(&detail.task).is_none() && detail.task.pending_tool_input.is_none()
+        })
+    }
+
+    fn cancel_deferred_send(&mut self) -> bool {
+        if self.deferred_send.take().is_some() {
+            self.message = "Send cancelled. Draft kept.".into();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn start_draft(&mut self, worker: &Worker, session: String, text: String, enqueue: bool) {
+        let request = Request::Start {
+            session,
+            text,
+            key: self.key.clone(),
+            input: self.input_artifact.clone(),
+            plan_only: self.plan_only,
+            context: Box::new(self.draft_context.clone()),
+            enqueue,
+        };
+        if self.send(worker, request) {
+            self.start_pending = true;
+        } else {
+            self.message = "Connection worker unavailable. Draft kept.".into();
         }
     }
 
@@ -302,6 +378,8 @@ impl App {
     }
 
     fn install_session(&mut self, session: Session) {
+        self.cancel_deferred_send();
+        self.reopening = None;
         if self.session.as_ref().map(|current| &current.id) != Some(&session.id) {
             self.park_draft();
             if let Some(i) = self
@@ -476,6 +554,8 @@ impl App {
                 });
             }
             Update::Workspace(workspace) => {
+                self.cancel_deferred_send();
+                self.reopening = None;
                 self.park_draft();
                 self.inbox = None;
                 self.inbox_approvals.clear();
@@ -612,13 +692,14 @@ impl App {
                     .map(|snap| snap.approvals.snapshot.through_sequence);
                 let current = snapshot.approvals.snapshot.through_sequence;
                 self.snapshot = Some(snapshot);
-                if matches!(self.layer, Layer::None) {
-                    if self.selected.is_none()
-                        && let Some(task) = self.tasks().first()
-                    {
-                        self.select_task(task.id.clone());
-                        self.follow = !self.demo;
-                    } else if previous != Some(current)
+                if (matches!(self.layer, Layer::None) || self.reopening.as_ref() == Some(&session))
+                    && self.selected.is_none()
+                    && let Some(task) = self.tasks().first()
+                {
+                    self.select_task(task.id.clone());
+                    self.follow = !self.demo;
+                } else if matches!(self.layer, Layer::None) {
+                    if previous != Some(current)
                         && let Some(id) = &self.selected
                     {
                         self.next = Some(Request::Task(id.clone()));
@@ -803,8 +884,15 @@ impl App {
                     String::new()
                 };
             }
-            Update::Notice(message) | Update::Error(message) => self.message = message,
+            Update::Notice(message) => self.message = message,
+            Update::Error(message) => {
+                self.deferred_send = None;
+                self.reopening = None;
+                self.message = message;
+            }
             Update::Offline(message) => {
+                self.deferred_send = None;
+                self.reopening = None;
                 self.online = false;
                 self.model = None;
                 self.model_profiles = false;
@@ -924,6 +1012,7 @@ impl App {
             };
             if target.insert(&text, edit_limit(edit)) && matches!(edit, Edit::Task) {
                 self.key = uuid::Uuid::new_v4().to_string();
+                self.cancel_deferred_send();
             }
         } else if let Layer::ModelPicker(picker) = &mut self.layer {
             picker.paste(value, self.busy);
@@ -958,7 +1047,11 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let pressed = key.kind == KeyEventKind::Press;
         if ctrl && key.code == KeyCode::Char('c') {
+            self.cancel_deferred_send();
             return true;
+        }
+        if key.code == KeyCode::Esc && pressed && self.cancel_deferred_send() {
+            return false;
         }
         if matches!(self.layer, Layer::Deliverables(_)) {
             self.catalog_key(key, worker);
@@ -1038,6 +1131,7 @@ impl App {
             let edit = edit.clone();
             let composing = matches!(edit, Edit::Task);
             if composing && pressed && key.code == KeyCode::F(1) {
+                self.cancel_deferred_send();
                 self.layer = Layer::Commands(CommandMenu::new(CommandOrigin::Composer));
                 return false;
             }
@@ -1097,6 +1191,7 @@ impl App {
             };
             if changed && matches!(edit, Edit::Task) {
                 self.key = uuid::Uuid::new_v4().to_string();
+                self.cancel_deferred_send();
             }
             return false;
         }
@@ -1990,12 +2085,9 @@ impl App {
                 self.layer = Layer::Edit(Edit::HistorySearch);
             }
             KeyCode::Enter
-                if active
+                if (active || (!self.demo && pressed && self.reopening.is_some()))
                     && self.session.is_some()
-                    && self.detail.as_ref().is_none_or(|detail| {
-                        pending_approval_id(&detail.task).is_none()
-                            && detail.task.pending_tool_input.is_none()
-                    }) =>
+                    && self.can_compose() =>
             {
                 self.layer = Layer::Edit(Edit::Task)
             }
@@ -2240,6 +2332,20 @@ impl App {
         if value.is_empty() && !matches!(edit, Edit::Fork(_) | Edit::SessionSearch) {
             return;
         }
+        if matches!(edit, Edit::Task) {
+            let Some(session) = &self.session else { return };
+            if !self.busy {
+                self.start_draft(worker, session.id.clone(), value.to_owned(), enqueue);
+                return;
+            }
+            if !enqueue && !self.demo && self.reopening.as_ref() == Some(&session.id) {
+                self.deferred_send.get_or_insert_with(|| DeferredSend {
+                    session: session.id.clone(),
+                    key: self.key.clone(),
+                });
+                return;
+            }
+        }
         if self.busy {
             self.message = "Submit again when the current request finishes".into();
             return;
@@ -2254,24 +2360,12 @@ impl App {
             edit,
             Edit::BackupCreate | Edit::BackupVerify | Edit::BackupRestoreDestination(_)
         );
-        let starts = matches!(edit, Edit::Task);
         let history_search = matches!(edit, Edit::HistorySearch);
         let session_browse = matches!(edit, Edit::SessionSearch | Edit::RenameSession(_));
         let fork = matches!(edit, Edit::Fork(_));
         let history_query = history_search.then(|| value.clone());
         let request = match edit {
-            Edit::Task => {
-                let Some(session) = &self.session else { return };
-                Request::Start {
-                    session: session.id.clone(),
-                    text: value,
-                    key: self.key.clone(),
-                    input: self.input_artifact.clone(),
-                    plan_only: self.plan_only,
-                    context: Box::new(self.draft_context.clone()),
-                    enqueue,
-                }
-            }
+            Edit::Task => unreachable!(),
             Edit::Workspace => Request::OpenWorkspace(value),
             Edit::Session => {
                 let Some(workspace) = &self.workspace else {
@@ -2327,9 +2421,7 @@ impl App {
             }),
         };
         if self.send(worker, request) {
-            if starts {
-                self.start_pending = true;
-            } else if history_search {
+            if history_search {
                 self.history_query = history_query.unwrap_or_default();
                 self.history_role = None;
                 self.history_page = None;

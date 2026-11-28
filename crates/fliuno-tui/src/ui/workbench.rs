@@ -133,8 +133,18 @@ impl App {
     }
 
     fn draw_status_line(&self, frame: &mut Frame<'_>, area: Rect, editing: bool, full_page: bool) {
-        let message = if self.busy { "Working" } else { &self.message };
-        let help = if editing {
+        let message = if self.deferred_send.is_some() {
+            "Will send when conversation opens"
+        } else if self.reopening.is_some() {
+            "Opening conversation…"
+        } else if self.busy {
+            "Working"
+        } else {
+            &self.message
+        };
+        let help = if self.deferred_send.is_some() {
+            "Esc Cancel send"
+        } else if editing {
             if !self.demo && area.width < 60 {
                 if self.draft.text().is_empty() {
                     "Enter Send  Ctrl+N Line  / Menu  Esc Back"
@@ -174,7 +184,7 @@ impl App {
             let notice = clean(message).replace('\n', " ");
             lines.push(Line::styled(ellipsis(&notice, width), self.palette.label));
         } else if self.busy && area.height == 1 {
-            lines[0] = Line::styled("Working", self.palette.label);
+            lines[0] = Line::styled(ellipsis(message, width), self.palette.label);
         }
         frame.render_widget(Paragraph::new(lines), area);
     }

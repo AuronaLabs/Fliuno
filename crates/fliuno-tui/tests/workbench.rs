@@ -200,7 +200,16 @@ impl Console {
         loop {
             match self.output.recv_timeout(Duration::from_millis(140)) {
                 Ok(bytes) => self.observe(&bytes),
-                Err(_) if !self.screen.screen().contents().contains("Working") => return,
+                Err(_)
+                    if !self.screen.screen().contents().contains("Working")
+                        && !self
+                            .screen
+                            .screen()
+                            .contents()
+                            .contains("Opening conversation…") =>
+                {
+                    return;
+                }
                 Err(_) => {}
             }
             assert!(Instant::now() < deadline, "workbench never became ready");
@@ -2682,4 +2691,199 @@ fn manage_connection_at_width(viewport: (u16, u16)) {
     );
     console.quit("\x03");
     provider.join().unwrap();
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn reopening_waits_for_history_and_honors_one_cancellable_send() {
+    use fliuno_client::Client;
+    use serde_json::{Value, json};
+    use std::{fs, io::BufReader, process::Stdio};
+
+    let root = tempfile::tempdir().unwrap();
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            binary().with_file_name(format!("fliuno-app-server{}", std::env::consts::EXE_SUFFIX))
+        });
+    let relay = root
+        .path()
+        .join(format!("relay{}", std::env::consts::EXE_SUFFIX));
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let compile = Command::new(compiler)
+        .args(["--edition=2024", "-o"])
+        .arg(&relay)
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/slow_history.rs"))
+        .output()
+        .unwrap();
+    assert!(
+        compile.status.success(),
+        "{}",
+        String::from_utf8_lossy(&compile.stderr)
+    );
+
+    let config = root.path().join("config.toml");
+    let database = root.path().join("history.db");
+    fs::write(root.path().join("fixture.key"), "test-only\n").unwrap();
+    fs::write(
+        &config,
+        r#"
+[workbench]
+database = "history.db"
+[model]
+provider = "openai"
+name = "fixture-model"
+base_url = "http://127.0.0.1:9/v1/"
+api_key_file = "fixture.key"
+"#,
+    )
+    .unwrap();
+    let mut seed = Command::new(&server)
+        .arg("--db")
+        .arg(&database)
+        .arg("--demo")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut client = Client::connect(
+        BufReader::new(seed.stdout.take().unwrap()),
+        seed.stdin.take().unwrap(),
+        "reopen-fixture",
+        |_| {},
+    )
+    .unwrap();
+    let workspace: Value = client
+        .call("workspace/open", &json!({"root":root.path()}), |_| {})
+        .unwrap();
+    let mut sessions = Vec::new();
+    for title in ["Other conversation", "Saved conversation"] {
+        let session: Value = client
+            .call(
+                "session/create",
+                &json!({"workspaceId":workspace["id"],"title":title}),
+                |_| {},
+            )
+            .unwrap();
+        sessions.push(session);
+    }
+    let current = &sessions[1]["id"];
+    let task: Value = client
+        .call(
+            "task/start",
+            &json!({"sessionId":current,"input":"Previous turn","context":{"planOnly":true}}),
+            |_| {},
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let task: Value = client
+            .call("task/get", &json!({"taskId":task["id"]}), |_| {})
+            .unwrap();
+        if task["status"] == "completed" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "previous turn did not complete: {task}"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+    drop(client);
+    assert!(seed.wait().unwrap().success());
+
+    for (action, viewport, delay) in [
+        ("exit", (28, 110), "session/listHistory"),
+        ("disconnect", (24, 80), "session/listHistory"),
+        ("cancel", (24, 80), "task/get"),
+        ("switch", (28, 110), "session/listHistory"),
+        ("send", (22, 48), "session/listHistory"),
+    ] {
+        let log = root.path().join(action);
+        fs::create_dir(&log).unwrap();
+        let mut command = CommandBuilder::new(binary());
+        command.arg("--config");
+        command.arg(&config);
+        command.env("FLIUNO_RELAY_DIR", &log);
+        command.env("FLIUNO_RELAY_SERVER", &server);
+        command.env("FLIUNO_RELAY_DELAY", delay);
+        let mut console = Console::spawn_at(command, Some(&relay), root.path(), viewport);
+        console.expect("Opening conversation");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !log.join("paused").exists() {
+            assert!(Instant::now() < deadline, "{delay} was not paused");
+            thread::sleep(Duration::from_millis(10));
+        }
+        console.keys("\rFollow-up while loading\r\r");
+        console.expect("Will send when conversation opens");
+        console.expect("Esc Cancel send");
+        console.capture(&format!("reopening-{action}-{}", viewport.1));
+        assert!(!log.join("starts.jsonl").exists());
+
+        match action {
+            "exit" => {
+                console.quit("\x03");
+                assert!(!log.join("starts.jsonl").exists());
+                continue;
+            }
+            "cancel" => {
+                console.keys("\x1b");
+                console.expect_absent("Will send when conversation opens");
+            }
+            "switch" => {
+                console.keys("\x1bOP");
+                console.expect("Type to filter");
+            }
+            _ => {}
+        }
+        if action == "disconnect" {
+            fs::write(log.join("disconnect"), []).unwrap();
+        }
+        fs::write(log.join("continue"), []).unwrap();
+        match action {
+            "disconnect" => {
+                console.expect("Connection lost");
+                console.expect("Follow-up while loading");
+            }
+            "send" => {
+                console.expect("Previous turn");
+                console.expect_absent("Will send when conversation opens");
+                console.ready();
+            }
+            "cancel" => {
+                console.expect("Send cancelled. Draft kept.");
+                console.expect("Follow-up while loading");
+            }
+            "switch" => {
+                console.expect("Previous turn");
+                console.ready();
+                console.keys("resume\r");
+                console.expect("Other conversation");
+                console.ready();
+                console.keys("\x1b[B\r");
+                console.expect_absent("Sessions");
+                console.expect_absent("Follow-up while loading");
+                console.ready();
+            }
+            _ => unreachable!(),
+        }
+        console.quit("\x03");
+        if action == "send" {
+            let sent = fs::read_to_string(log.join("starts.jsonl")).unwrap();
+            let requests = sent
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(requests.len(), 1, "{sent}");
+            let params = &requests[0]["params"];
+            assert_eq!(params["sessionId"], *current);
+            assert_eq!(params["input"], "Follow-up while loading");
+            assert!(uuid::Uuid::parse_str(params["clientRequestId"].as_str().unwrap()).is_ok());
+        } else {
+            assert!(
+                !log.join("starts.jsonl").exists(),
+                "unexpected send after {action}"
+            );
+        }
+    }
 }
