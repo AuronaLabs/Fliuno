@@ -18,6 +18,48 @@ impl Drop for Project {
 }
 
 #[test]
+fn upgrades_existing_v76_workspace_and_preserves_consent_on_reentry() {
+    let project = Project::new();
+    fs::write(project.0.join(PROJECT_GUIDE_PATH), "Review changes.").unwrap();
+    let db = project.0.join("v76.db");
+    let root = {
+        let mut kernel = Kernel::open(&db, Box::new(DemoProvider)).unwrap();
+        kernel.open_workspace(project.0.to_str().unwrap()).unwrap()
+    };
+    let mark_old = || {
+        let connection = Connection::open(&db).unwrap();
+        connection.pragma_update(None, "user_version", 76).unwrap();
+    };
+    Connection::open(&db)
+        .unwrap()
+        .execute("DROP TABLE workspace_project_guides", [])
+        .unwrap();
+    mark_old();
+    let enabled = {
+        let mut kernel = Kernel::open(&db, Box::new(DemoProvider)).unwrap();
+        let preview = kernel.preview_project_guide(&root.id).unwrap();
+        assert_eq!(preview.state.revision, 0);
+        kernel
+            .set_project_guide(WorkspaceSetProjectGuideParams {
+                workspace_id: root.id.clone(),
+                expected_revision: 0,
+                sha256: Some(preview.guide.unwrap().sha256),
+            })
+            .unwrap()
+    };
+    mark_old();
+    let kernel = Kernel::open(&db, Box::new(DemoProvider)).unwrap();
+    assert_eq!(kernel.workspace_project_guide(&root.id).unwrap(), enabled);
+    assert_eq!(
+        kernel
+            .db
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .unwrap(),
+        crate::storage::SCHEMA_VERSION
+    );
+}
+
+#[test]
 fn consent_is_workspace_scoped_frozen_and_revocable() {
     let project = Project::new();
     let other = Project::new();

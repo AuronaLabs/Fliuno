@@ -15,7 +15,7 @@ use std::{
 pub(crate) fn migrate(db: &Connection) -> Result<()> {
     db.execute_batch(
         "BEGIN IMMEDIATE;
-        CREATE TABLE workspace_project_guides(
+        CREATE TABLE IF NOT EXISTS workspace_project_guides(
             workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
             revision INTEGER NOT NULL CHECK(revision > 0),
             enabled_sha256 TEXT CHECK(length(enabled_sha256) = 64)

@@ -322,7 +322,7 @@ fn workspace_memory_schema_migrates_from_v54() {
         .unwrap()
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, 77);
     drop(peer);
     fs::remove_dir_all(root).unwrap();
 }
