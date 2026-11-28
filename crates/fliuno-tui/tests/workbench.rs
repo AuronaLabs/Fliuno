@@ -622,7 +622,8 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     console.keys("d");
     console.expect("Save artifact to");
     console.keys(&format!("{}\r", saved.display()));
-    console.expect("Saved ");
+    // The conversation already says "Saved in Deliverables" before export.
+    console.expect(&format!("Saved {}", saved.display()));
     assert_eq!(
         std::fs::read_to_string(&saved).unwrap(),
         "交付报告\nsecond line"
