@@ -102,7 +102,7 @@ fn check_cancelled(cancellation: &CancellationToken) -> Result<(), ToolError> {
     Ok(())
 }
 
-fn search_file(
+pub(super) fn search_file(
     directory: &Dir,
     path: &str,
     query: &str,

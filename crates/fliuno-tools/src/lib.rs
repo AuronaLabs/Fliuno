@@ -3,6 +3,7 @@
 mod batch_paths;
 mod directory_page;
 mod file_io;
+mod find;
 mod hash;
 mod import_artifact;
 mod search;
@@ -99,6 +100,7 @@ pub fn register(kernel: &mut Kernel) -> fliuno_core::Result<()> {
     tools.push(Box::new(hash::HashBatch));
     tools.push(Box::new(import_artifact::ImportArtifact));
     tools.push(Box::new(search::Search));
+    tools.push(Box::new(find::Find));
     kernel.register_tools(tools)
 }
 
