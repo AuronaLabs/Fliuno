@@ -3093,6 +3093,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             terminal.expect("+Welcome to Fliuno");
             for cols in [110, 80, 48] {
                 terminal.resize(24, cols);
+                terminal.ready();
                 terminal.expect("y Allow once");
                 terminal.expect("Path: src/greeting.txt");
                 terminal.capture(&format!("project-patch-approval-{cols}"));
@@ -3101,6 +3102,8 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         if tool == "process_greeting_" {
             for cols in [48, 80, 110] {
                 terminal.resize(24, cols);
+                terminal.ready();
+                terminal.expect("y Allow once");
                 terminal.expect("Run from: private snapshot");
                 terminal.expect("src/greeting.txt");
                 terminal.capture(&format!("project-check-approval-{cols}"));

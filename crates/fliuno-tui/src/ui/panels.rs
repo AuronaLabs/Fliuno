@@ -397,7 +397,9 @@ impl App {
             ),
             Layer::Approval { allow_once, .. } => (
                 "Review operation".into(),
-                if *allow_once {
+                if self.busy {
+                    "Loading review…  ·  Esc Back"
+                } else if *allow_once {
                     "y Allow once  ·  n Deny  ·  Esc Back"
                 } else {
                     "n Deny  ·  Esc Back"
