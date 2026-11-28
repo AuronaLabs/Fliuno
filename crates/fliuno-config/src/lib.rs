@@ -1,7 +1,9 @@
 //! User-owned startup settings shared by the terminal client and app-server.
 mod credentials;
 mod model_default;
+mod model_setup;
 pub use credentials::PendingApiKey;
+pub use model_setup::{ModelSetup, ModelSetupCredential};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -68,6 +70,17 @@ impl Provider {
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
             Self::Gemini => "gemini",
+        }
+    }
+
+    /// Values understood by Fliuno's adapter, independent of a specific model.
+    pub fn reasoning_efforts(self) -> &'static [ReasoningEffort] {
+        use ReasoningEffort::{High, Low, Max, Medium, Minimal, None, XHigh};
+        match self {
+            Self::Demo => &[],
+            Self::OpenAi => &[None, Minimal, Low, Medium, High, XHigh, Max],
+            Self::Anthropic => &[Low, Medium, High, XHigh, Max],
+            Self::Gemini => &[Minimal, Low, Medium, High, XHigh],
         }
     }
 }
@@ -205,20 +218,10 @@ impl ModelSettings {
     }
 
     pub fn validate_reasoning_effort(&self) -> Result<(), String> {
-        use ReasoningEffort::{High, Low, Max, Medium, Minimal, XHigh};
         let Some(effort) = self.reasoning_effort else {
             return Ok(());
         };
-        let allowed = match self.provider {
-            Provider::Demo => false,
-            Provider::OpenAi => matches!(
-                effort,
-                ReasoningEffort::None | Minimal | Low | Medium | High | XHigh | Max
-            ),
-            Provider::Anthropic => matches!(effort, Low | Medium | High | XHigh | Max),
-            Provider::Gemini => matches!(effort, Minimal | Low | Medium | High | XHigh),
-        };
-        if !allowed {
+        if !self.provider.reasoning_efforts().contains(&effort) {
             return Err(format!(
                 "{} does not accept reasoning_effort = {:?}",
                 self.provider.name(),
