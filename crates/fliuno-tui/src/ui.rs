@@ -2880,6 +2880,27 @@ fn pending_approval_id(task: &Task) -> Option<&str> {
         })
 }
 
+/// Keep exact edit reviews legible without hiding changes to line endings or tabs.
+fn exact_edit_text(text: &str) -> String {
+    use std::fmt::Write as _;
+    let mut visible = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\n' => visible.push_str("\\n\n"),
+            '\r' | '\t' | '\\' => {
+                let _ = write!(visible, "{}", c.escape_default());
+            }
+            c if c.is_control()
+                || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}') =>
+            {
+                let _ = write!(visible, "{}", c.escape_unicode());
+            }
+            _ => visible.push(c),
+        }
+    }
+    visible
+}
+
 fn approval_review(
     task: &str,
     id: &str,
@@ -2897,6 +2918,23 @@ fn approval_review(
                 return Some((text, true));
             }
             let call = &approval.call;
+            if call.name == "workspace_edit_text" {
+                let path = clean(call.arguments["path"].as_str()?);
+                let base = call.arguments["baseSha256"].as_str()?;
+                let before = exact_edit_text(call.arguments["oldText"].as_str()?);
+                let replacement = call.arguments["newText"].as_str()?;
+                let after = if replacement.is_empty() {
+                    "(remove text)".into()
+                } else {
+                    exact_edit_text(replacement)
+                };
+                return Some((
+                    format!(
+                        "Replace an exact text match\nPath: {path}\n\nBefore\n{before}\n\nAfter\n{after}\n\nRequires one match and an unchanged file.\n\nWorkspace: {root}\nBase SHA-256: {base}",
+                    ),
+                    true,
+                ));
+            }
             let (action, consequence, preview_key) = match call.name.as_str() {
                 "artifact_create" => (
                     "Save a text deliverable",

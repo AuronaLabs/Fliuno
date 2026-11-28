@@ -12,6 +12,7 @@ pub(super) fn describe(call: &ToolCall, plan: Option<&Value>) -> Option<String> 
         },
         "workspace_read_text" | "workspace_read_bytes" => format!("Read file: {}", path()?),
         "workspace_patch_text" => format!("Patch file: {}", path()?),
+        "workspace_edit_text" => format!("Edit file: {}", path()?),
         "workspace_create_text" | "workspace_replace_text" => format!("Write file: {}", path()?),
         name if name.starts_with("process_") => {
             let plan = plan.filter(|plan| plan["kind"] == "project_check")?;
@@ -37,7 +38,7 @@ impl App {
         let checks = project_check_receipts(task);
         let correction = tool_receipts(task)
             .rev()
-            .any(|(call, output)| unapplied_patch(call, output).is_some());
+            .any(|(call, output)| unapplied_edit(call, output).is_some());
         let reviewable = correction || !paths.is_empty() || !checks.is_empty();
         if discovery.is_none() && !reviewable {
             return;
@@ -61,7 +62,7 @@ impl App {
         }
         if correction && paths.is_empty() {
             lines.push(Line::styled(
-                "Patch rejected; no file written",
+                "Edit rejected; no file written",
                 self.palette.quiet,
             ));
         }
@@ -161,15 +162,22 @@ fn workspace_write_path<'a>(call: &ToolCall, output: &'a Value) -> Option<&'a st
     let path = output["path"].as_str()?;
     (matches!(
         call.name.as_str(),
-        "workspace_create_text" | "workspace_replace_text" | "workspace_patch_text"
+        "workspace_create_text"
+            | "workspace_replace_text"
+            | "workspace_patch_text"
+            | "workspace_edit_text"
     ) && call.arguments["path"].as_str() == Some(path)
         && output["bytesWritten"].as_u64().is_some())
     .then_some(path)
 }
 
-/// Show a bounded rejection receipt without showing the rejected patch as a change.
-fn unapplied_patch<'a>(call: &'a ToolCall, output: &Value) -> Option<(&'a str, &'static str)> {
-    if call.name != "workspace_patch_text" || output["status"] != "not_applied" {
+/// Show why a proposal was rejected without presenting it as a change.
+fn unapplied_edit<'a>(call: &'a ToolCall, output: &Value) -> Option<(&'a str, &'static str)> {
+    if !matches!(
+        call.name.as_str(),
+        "workspace_patch_text" | "workspace_edit_text"
+    ) || output["status"] != "not_applied"
+    {
         return None;
     }
     let reason = match output["code"].as_str()? {
@@ -177,6 +185,8 @@ fn unapplied_patch<'a>(call: &'a ToolCall, output: &Value) -> Option<(&'a str, &
         "workspace_patch_mismatch" => "Diff did not match the file",
         "workspace_patch_no_change" => "Diff did not change the file",
         "workspace_base_changed" => "File changed after the proposal",
+        "workspace_edit_not_found" => "Original text did not match",
+        "workspace_edit_ambiguous" => "Original text matched more than once",
         _ => return None,
     };
     Some((call.arguments["path"].as_str()?, reason))
@@ -237,10 +247,10 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
             let patch = call.arguments["patch"]
                 .as_str()
                 .filter(|_| call.name == "workspace_patch_text");
-            let operation = if patch.is_some() {
-                "Applied patch"
-            } else {
-                "Wrote file"
+            let operation = match call.name.as_str() {
+                "workspace_patch_text" => "Applied patch",
+                "workspace_edit_text" => "Replaced text",
+                _ => "Wrote file",
             };
             lines.push(Line::styled(
                 format!("{operation}: {}", one_line(path)),
@@ -257,10 +267,37 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
                     Line::styled(line.to_owned(), style)
                 }));
             }
+            if call.name == "workspace_edit_text" {
+                for (key, label, prefix, color) in [
+                    ("oldText", "Before", '-', Color::Red),
+                    ("newText", "After", '+', Color::Green),
+                ] {
+                    if let Some(text) = call.arguments[key].as_str() {
+                        lines.push(Line::styled(label, palette.quiet));
+                        if text.is_empty() {
+                            lines.push(Line::styled("(removed)", palette.quiet));
+                        } else {
+                            lines.extend(exact_edit_text(text).split_terminator('\n').map(
+                                |line| {
+                                    Line::styled(format!("{prefix} {line}"), palette.status(color))
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
             lines.push(Line::default());
-        } else if let Some((path, reason)) = unapplied_patch(call, output) {
+        } else if let Some((path, reason)) = unapplied_edit(call, output) {
             lines.push(Line::styled(
-                format!("Patch not applied: {}", one_line(path)),
+                format!(
+                    "{} not applied: {}",
+                    if call.name == "workspace_patch_text" {
+                        "Patch"
+                    } else {
+                        "Edit"
+                    },
+                    one_line(path)
+                ),
                 palette.status(Color::Yellow),
             ));
             lines.push(Line::styled(reason, palette.quiet));

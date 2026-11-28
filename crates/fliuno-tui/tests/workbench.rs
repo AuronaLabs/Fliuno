@@ -3069,9 +3069,9 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                         })
                         .expect("the read result is retained for the patch");
                     call(
-                        "patch",
-                        "workspace_patch_text",
-                        json!({"path":before["path"],"baseSha256":before["sha256"],"patch":"--- a/src/greeting.txt\n+++ b/src/greeting.txt\n@@ -1 +1 @@\n-Hello world\n+Welcome to Fliuno\n"}),
+                        "edit",
+                        "workspace_edit_text",
+                        json!({"path":before["path"],"baseSha256":before["sha256"],"oldText":"Hello world","newText":"Welcome to Fliuno"}),
                     )
                 }
                 7 => {
@@ -3220,10 +3220,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     for (preview, label) in [
         ("Search project files", "Search project files"),
         ("Read file: src/greeting.txt", "Read a workspace file"),
-        (
-            "Patch file: src/greeting.txt",
-            "Apply a patch to a workspace file",
-        ),
+        ("Edit file: src/greeting.txt", "Replace an exact text match"),
         (
             "Run project check: Greeting check",
             "Run project check: Greeting check",
@@ -3233,7 +3230,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         terminal.expect(preview);
         if preview == "Search project files" {
             terminal.expect("Plan · 0/3 complete");
-        } else if preview.starts_with("Patch file:") {
+        } else if preview.starts_with("Edit file:") {
             terminal.expect("Plan · 1/3 complete");
             terminal.expect("Now: Update the greeting");
             terminal.expect("Enter Review");
@@ -3252,7 +3249,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             terminal.expect("Project changes & checks");
             terminal.expect("Patch not applied: src/greeting.txt");
             terminal.expect("Invalid diff format");
-            terminal.expect_absent("Applied patch");
+            terminal.expect_absent("Replaced text");
             for cols in [48, 80, 110] {
                 terminal.resize(24, cols);
                 terminal.ready();
@@ -3272,16 +3269,18 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         terminal.keys("a");
         terminal.expect(label);
         terminal.expect("y Allow once");
-        if preview.starts_with("Patch file:") {
+        if preview.starts_with("Edit file:") {
             assert_eq!(std::fs::read_to_string(&file).unwrap(), "Hello world\n");
             terminal.expect("Path: src/greeting.txt");
-            terminal.expect("+Welcome to Fliuno");
+            terminal.expect("Before");
+            terminal.expect("After");
+            terminal.expect("Welcome to Fliuno");
             for cols in [110, 80, 48] {
                 terminal.resize(24, cols);
                 terminal.ready();
                 terminal.expect("y Allow once");
                 terminal.expect("Path: src/greeting.txt");
-                terminal.capture(&format!("project-patch-approval-{cols}"));
+                terminal.capture(&format!("project-edit-approval-{cols}"));
             }
         }
         if preview.starts_with("Run project check:") {
@@ -3338,9 +3337,9 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         terminal.resize(24, cols);
         terminal.ready();
         terminal.expect("Project changes & checks");
-        terminal.expect("Applied patch: src/greeting.txt");
-        terminal.expect("-Hello world");
-        terminal.expect("+Welcome to Fliuno");
+        terminal.expect("Replaced text: src/greeting.txt");
+        terminal.expect("- Hello world");
+        terminal.expect("+ Welcome to Fliuno");
         terminal.expect("Check passed: Greeting check");
         terminal.expect("greeting check passed");
         terminal.expect_absent("unselected.txt");
