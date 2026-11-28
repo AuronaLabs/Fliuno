@@ -79,7 +79,11 @@ impl Picker {
                     ""
                 };
                 let model = clean(&entry.model).replace('\n', " ");
-                format!("{id}{active}  ·  {} / {model}", entry.provider)
+                let effort = entry
+                    .reasoning_effort
+                    .as_deref()
+                    .map_or_else(String::new, |effort| format!("  ·  {}", clean(effort)));
+                format!("{id}{active}  ·  {} / {model}{effort}", entry.provider)
             })
             .collect();
         render_list(frame, list, labels, self.index, palette.choice);

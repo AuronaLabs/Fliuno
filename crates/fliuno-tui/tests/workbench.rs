@@ -1546,6 +1546,13 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.keys("fixture-model");
     console.expect("fixture-model");
     console.keys("\r");
+    console.expect("Set a Base URL");
+    console.capture("setup-base-url-80");
+    console.keys("http://example.invalid/v1\r");
+    console.expect("requires HTTPS");
+    console.keys("\x1b[H");
+    console.keys(&"\x1b[3~".repeat("http://example.invalid/v1".len()));
+    console.keys("http://127.0.0.1:9/v1\r");
     console.expect("Connect your API key");
     console.keys("\x1bOQ");
     console.expect("Connect an API key file");
@@ -1574,6 +1581,7 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.capture("conversation-first-launch-48");
     let profile_text = std::fs::read_to_string(&config).unwrap();
     assert!(profile_text.contains("provider = \"openai\""));
+    assert!(profile_text.contains("base_url = \"http://127.0.0.1:9/v1/\""));
     assert!(profile_text.contains("api_key_file = \"fixture key.txt\""));
     assert!(!profile_text.contains("fixture-secret-value"));
     assert!(data.is_file());
@@ -1598,6 +1606,8 @@ fn first_launch_stores_a_pasted_key_without_exposing_it() {
     terminal.keys("\r");
     terminal.expect("Enter a model ID");
     terminal.keys("fixture-managed\r");
+    terminal.expect("Set a Base URL");
+    terminal.keys("\r");
     terminal.expect("Connect your API key");
     terminal.resize(21, 48);
     terminal.ready();
@@ -2020,6 +2030,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
         [models.lab]
         provider = "openai"
         name = "second-model"
+        reasoning_effort = "high"
         api_key_file = "fixture.key"
         base_url = "http://{address}/v1/"
         "#
@@ -2086,6 +2097,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     console.keys("\r");
     let second = requests.recv_timeout(Duration::from_secs(12)).unwrap();
     assert_eq!(second["model"], "second-model");
+    assert_eq!(second["reasoning"]["effort"], "high");
     let input = second["input"].to_string();
     assert!(input.contains("Retain the first prompt"), "{input}");
     assert!(input.contains("Send this preserved draft"), "{input}");

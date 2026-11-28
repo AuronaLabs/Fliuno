@@ -45,6 +45,14 @@ pub fn inspect(
                 model.profile.as_deref().unwrap_or("[model]"),
                 false,
             );
+            report.check(
+                "Active reasoning effort",
+                model
+                    .reasoning_effort
+                    .as_deref()
+                    .unwrap_or("Provider default"),
+                false,
+            );
         } else if let Some(provider) = capabilities
             .get("provider")
             .and_then(serde_json::Value::as_str)
@@ -125,6 +133,26 @@ pub fn inspect(
             .is_none_or(|name| name.trim().is_empty())
         {
             report.check("Model settings", "[model].name is required", true);
+        }
+        if let Some(value) = &model.base_url {
+            match fliuno_config::provider_api_root(value) {
+                Ok(base) => report.check("Base URL", base.as_str(), false),
+                Err(error) => report.check("Base URL", error, true),
+            }
+        }
+        if let Some(effort) = model.reasoning_effort {
+            match model.validate_reasoning_effort() {
+                Ok(()) => report.check(
+                    if selected_model.is_some() {
+                        "Launch reasoning effort"
+                    } else {
+                        "Reasoning effort"
+                    },
+                    effort.as_str(),
+                    false,
+                ),
+                Err(error) => report.check("Reasoning effort", &error, true),
+            }
         }
         match model.read_api_key() {
             Ok(_) if model.api_key_file.is_some() => {

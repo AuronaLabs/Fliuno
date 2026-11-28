@@ -1,7 +1,7 @@
 use super::{clean, palette::Palette};
 use crate::{Screen, editor::Editor, options::SetupOptions};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use fliuno_config::{PendingApiKey, Provider, read_api_key};
+use fliuno_config::{PendingApiKey, Provider, provider_api_root, read_api_key};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Position, Rect},
@@ -27,6 +27,7 @@ enum Step {
     #[default]
     Provider,
     Model,
+    Endpoint,
     Credential,
 }
 
@@ -35,6 +36,7 @@ struct Form {
     step: Step,
     provider: usize,
     model: Editor,
+    endpoint: Editor,
     key_file: Editor,
     use_key_file: bool,
     api_key: Zeroizing<String>,
@@ -61,7 +63,8 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                         form.step = match form.step {
                             Step::Provider => return Ok(false),
                             Step::Model => Step::Provider,
-                            Step::Credential => Step::Model,
+                            Step::Endpoint => Step::Model,
+                            Step::Credential => Step::Endpoint,
                         };
                     }
                     KeyCode::F(2) if matches!(form.step, Step::Credential) => {
@@ -76,7 +79,17 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                             Step::Model if form.model.text().trim().is_empty() => {
                                 form.error = "Enter a model ID available on your account.".into();
                             }
-                            Step::Model => form.step = Step::Credential,
+                            Step::Model => form.step = Step::Endpoint,
+                            Step::Endpoint => {
+                                let endpoint = form.endpoint.text().trim();
+                                if !endpoint.is_empty()
+                                    && let Err(error) = provider_api_root(endpoint)
+                                {
+                                    form.error = error.into();
+                                } else {
+                                    form.step = Step::Credential;
+                                }
+                            }
                             Step::Credential => match form.save(&options.config) {
                                 Ok(()) => return Ok(true),
                                 Err(error) => form.error = error,
@@ -98,6 +111,7 @@ impl Form {
     fn field(&mut self) -> Option<&mut Editor> {
         match self.step {
             Step::Model => Some(&mut self.model),
+            Step::Endpoint => Some(&mut self.endpoint),
             Step::Credential if self.use_key_file => Some(&mut self.key_file),
             _ => None,
         }
@@ -159,6 +173,14 @@ impl Form {
         let provider = PROVIDERS[self.provider].0.name();
         // JSON and TOML use the same string escapes for these single-line, control-free inputs.
         let model = serde_json::to_string(self.model.text().trim()).map_err(|e| e.to_string())?;
+        let endpoint = self.endpoint.text().trim();
+        let endpoint = if endpoint.is_empty() {
+            String::new()
+        } else {
+            let normalized = provider_api_root(endpoint)?;
+            let value = serde_json::to_string(normalized.as_str()).map_err(|e| e.to_string())?;
+            format!("base_url = {value}\n")
+        };
         let mut pending = None;
         let credential = if self.use_key_file {
             let key_file = self.key_file.text().trim();
@@ -177,7 +199,8 @@ impl Form {
             pending = Some(key);
             setting
         };
-        let content = format!("[model]\nprovider = \"{provider}\"\nname = {model}\n{credential}\n");
+        let content =
+            format!("[model]\nprovider = \"{provider}\"\nname = {model}\n{endpoint}{credential}\n");
         let write = || -> io::Result<()> {
             fs::create_dir_all(parent)?;
             let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
@@ -226,14 +249,20 @@ impl Form {
                 "Use a model ID from your provider account.",
                 "Enter Continue   Esc Back",
             ),
-            Step::Credential if self.use_key_file => (
+            Step::Endpoint => (
                 3,
+                "Set a Base URL",
+                "Leave blank for the provider default, or enter your gateway's API root.",
+                "Enter Continue   Esc Back",
+            ),
+            Step::Credential if self.use_key_file => (
+                4,
                 "Connect an API key file",
                 "Enter an absolute path or one relative to the profile. Use a file with one API key.",
                 "Enter Save   F2 Paste key   Esc Back",
             ),
             Step::Credential => (
-                3,
+                4,
                 "Connect your API key",
                 if cfg!(windows) {
                     "Paste a key from your model provider. Windows Credential Manager stores it for your account."
@@ -244,7 +273,7 @@ impl Form {
             ),
         };
         let header = Paragraph::new(vec![
-            Line::styled(format!("Fliuno  /  Set up  ·  {step} of 3"), palette.label),
+            Line::styled(format!("Fliuno  /  Set up  ·  {step} of 4"), palette.label),
             Line::raw(""),
             Line::styled(heading, palette.label),
             Line::styled(description, palette.quiet),
@@ -254,7 +283,7 @@ impl Form {
             Constraint::Length(header.line_count(area.width).min(7) as u16 + 1),
             Constraint::Length(match self.step {
                 Step::Provider => 4,
-                Step::Model => 3,
+                Step::Model | Step::Endpoint => 3,
                 Step::Credential => 5,
             }),
             Constraint::Length(4),
@@ -277,19 +306,21 @@ impl Form {
                     .collect();
                 frame.render_widget(Paragraph::new(lines), body);
             }
-            Step::Model | Step::Credential if body.width > 2 && body.height > 0 => {
-                let (editor, placeholder, hint) = if matches!(self.step, Step::Model) {
-                    (
+            Step::Model | Step::Endpoint | Step::Credential
+                if body.width > 2 && body.height > 0 =>
+            {
+                let (editor, placeholder, hint) = match self.step {
+                    Step::Model => (
                         &self.model,
                         "Model ID",
                         PROVIDERS[self.provider].1.to_owned(),
-                    )
-                } else {
-                    (
+                    ),
+                    Step::Endpoint => (&self.endpoint, "Provider default", String::new()),
+                    _ => (
                         &self.key_file,
                         "Path to API key file",
                         format!("Profile  {}", clean(&config.to_string_lossy())),
-                    )
+                    ),
                 };
                 let [row, context] =
                     Layout::vertical([Constraint::Length(1), Constraint::Min(0)]).areas(body);

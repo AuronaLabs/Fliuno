@@ -314,7 +314,8 @@ impl App {
         let top_gap = u16::from(area.height >= 22);
         let width = area.width.min(max_width);
         let height = area.height.saturating_sub(top_gap).min(max_height);
-        let y = if matches!(&self.layer, Layer::Commands(menu) if menu.origin != CommandOrigin::Workbench)
+        let y = if matches!(&self.layer, Layer::ModelPicker(_))
+            || matches!(&self.layer, Layer::Commands(menu) if menu.origin != CommandOrigin::Workbench)
         {
             area.bottom().saturating_sub(height)
         } else {
