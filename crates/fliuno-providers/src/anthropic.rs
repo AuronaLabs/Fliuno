@@ -10,6 +10,7 @@ use fliuno_protocol::{Message, Task, ToolCall};
 use fliuno_protocol::{PDF_MIME_TYPE, UserContentPart};
 use serde_json::{Value, json};
 mod metadata;
+pub(crate) use metadata::validate_metadata_model;
 mod stream;
 mod usage;
 

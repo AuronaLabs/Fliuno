@@ -178,15 +178,7 @@ impl Http {
     }
 
     pub fn with_count_model_route(mut self, model: &str) -> Result<Self, String> {
-        let model = model.strip_prefix("models/").unwrap_or(model);
-        if model.is_empty()
-            || model.len() > 256
-            || !model
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-        {
-            return Err("invalid model identifier for provider token counting".into());
-        }
+        let model = count_route_model_id(model)?;
         let mut endpoint = self.base.clone();
         endpoint
             .path_segments_mut()
@@ -670,6 +662,19 @@ impl SseDecoder {
         self.data.clear();
         on_event(event)
     }
+}
+
+pub(crate) fn count_route_model_id(model: &str) -> Result<&str, String> {
+    let model = model.strip_prefix("models/").unwrap_or(model);
+    if model.is_empty()
+        || model.len() > 256
+        || !model
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err("invalid model identifier for provider token counting".into());
+    }
+    Ok(model)
 }
 
 pub(crate) fn provider_headers(

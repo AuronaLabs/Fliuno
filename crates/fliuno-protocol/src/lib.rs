@@ -693,6 +693,16 @@ pub struct ModelProfileSelectParams {
     pub profile: Option<String>,
 }
 
+/// The startup preference from the settings file, independent of the active provider.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileDefault {
+    /// Null selects the base [model] at startup.
+    #[schemars(required, schema_with = "nullable_model_profile")]
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub profile: Option<String>,
+}
+
 fn nullable_model_profile(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     generator.subschema_for::<Option<String>>()
 }

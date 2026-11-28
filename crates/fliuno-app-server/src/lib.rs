@@ -599,6 +599,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["modelProfiles"] = json!(self.model_profiles.is_some());
+            capabilities["modelProfileDefaults"] = json!(self.model_profiles.is_some());
             capabilities["providerModelCatalog"] = json!(self.model_profiles.is_some());
             capabilities["modelBudgetRejectionEvents"] = json!(true);
             capabilities["durableTaskRuns"] = json!(self.kernel()?.durable_runs_supported());
@@ -788,6 +789,19 @@ impl RpcServer {
                     );
                 }
                 json!(self.list_model_profiles()?)
+            }
+            "modelProfiles/getDefault" => {
+                if !params.as_object().is_some_and(|object| object.is_empty()) {
+                    return Err(Error::Invalid(
+                        "modelProfiles/getDefault takes no parameters".into(),
+                    )
+                    .into());
+                }
+                json!(self.get_default_model_profile()?)
+            }
+            "modelProfiles/setDefault" => {
+                let selection: ModelProfileDefault = decode(params)?;
+                json!(self.set_default_model_profile(selection)?)
             }
             "modelProfiles/select" => {
                 let params: ModelProfileSelectParams = decode(params)?;

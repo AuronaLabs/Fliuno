@@ -168,6 +168,42 @@ pub fn from_env() -> Result<(String, Box<dyn ModelProvider>), String> {
     build_provider(provider, &model, base_url.as_deref(), &key, budget, None)
 }
 
+/// Validate a startup profile locally without generation or remote metadata discovery.
+pub fn validate_live_profile(settings: &fliuno_config::ModelSettings) -> Result<(), String> {
+    use fliuno_config::{ContextWindow, Provider};
+    if matches!(settings.provider, Provider::Demo) {
+        return Err("Choose a configured live model".into());
+    }
+    settings.effective_protocol()?;
+    settings.validate_reasoning_effort()?;
+    settings.validate_budget()?;
+    let model = settings
+        .name
+        .as_deref()
+        .filter(|model| !model.trim().is_empty())
+        .ok_or("[model] name is required for a live provider")?;
+    fliuno_config::provider_api_root(provider_base(
+        settings.provider,
+        settings.base_url.as_deref(),
+    ))?;
+    match settings.provider {
+        Provider::Gemini => {
+            http::count_route_model_id(model)?;
+        }
+        Provider::Anthropic
+            if settings
+                .budget
+                .as_ref()
+                .is_some_and(|b| matches!(b.window, ContextWindow::Discovery(_))) =>
+        {
+            anthropic::validate_metadata_model(model)?;
+        }
+        _ => {}
+    }
+    http::provider_headers(settings.provider, &settings.read_api_key()?)?;
+    Ok(())
+}
+
 pub fn from_settings(
     settings: &fliuno_config::ModelSettings,
 ) -> Result<(String, Box<dyn ModelProvider>), String> {

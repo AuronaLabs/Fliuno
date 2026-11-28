@@ -2,8 +2,8 @@
 use super::{Error, RpcError, RpcServer};
 use fliuno_config::{ModelSettings, Provider, Settings};
 use fliuno_protocol::{
-    ModelConnectionCheck, ModelConnectionCheckParams, ModelProfileEntry, ModelProfileList,
-    ProviderModelListParams, ProviderModelPage,
+    ModelConnectionCheck, ModelConnectionCheckParams, ModelProfileDefault, ModelProfileEntry,
+    ModelProfileList, ProviderModelListParams, ProviderModelPage,
 };
 use std::path::PathBuf;
 
@@ -102,6 +102,28 @@ impl RpcServer {
         let model = catalog.model_for_lookup(&settings, params.profile.as_deref())?;
         fliuno_providers::discover_models(model, params.cursor.as_deref())
             .map_err(|error| Error::Invalid(error).into())
+    }
+
+    pub(super) fn get_default_model_profile(&self) -> Result<ModelProfileDefault, RpcError> {
+        let catalog = self.model_profile_catalog()?;
+        let settings = Settings::load(&catalog.path).map_err(Error::Invalid)?;
+        Ok(ModelProfileDefault {
+            profile: settings.workbench.model_profile,
+        })
+    }
+
+    pub(super) fn set_default_model_profile(
+        &self,
+        selection: ModelProfileDefault,
+    ) -> Result<ModelProfileDefault, RpcError> {
+        let catalog = self.model_profile_catalog()?;
+        Settings::save_default_model(
+            &catalog.path,
+            selection.profile.as_deref(),
+            fliuno_providers::validate_live_profile,
+        )
+        .map_err(Error::Invalid)?;
+        Ok(selection)
     }
 
     pub(super) fn select_model_profile(
@@ -241,6 +263,7 @@ api_key_file = "missing.key"
         let initialize = json!({"protocolVersion":"0.1","clientName":"profile-contract-test"});
         let info = rpc(&mut server, "initialize", initialize.clone());
         assert_eq!(info["capabilities"]["modelProfiles"], true);
+        assert_eq!(info["capabilities"]["modelProfileDefaults"], true);
         let mut attached = server.attach_connection().unwrap();
         rpc(&mut server, "workspace/open", json!({"root":original}));
         let task = {
@@ -286,6 +309,35 @@ api_key_file = "missing.key"
             rpc(&mut server, "modelProfiles/list", json!({}))["active"]["model"],
             "default-model"
         );
+        assert_eq!(
+            rpc(&mut server, "modelProfiles/getDefault", json!({}))["profile"],
+            Value::Null
+        );
+        failure(
+            &mut server,
+            "modelProfiles/setDefault",
+            json!({"profile":"invalid"}),
+        );
+        assert_eq!(
+            rpc(&mut server, "modelProfiles/getDefault", json!({}))["profile"],
+            Value::Null
+        );
+        assert_eq!(
+            rpc(
+                &mut server,
+                "modelProfiles/setDefault",
+                json!({"profile":"gemini"})
+            )["profile"],
+            "gemini"
+        );
+        assert_eq!(
+            rpc(&mut server, "modelProfiles/getDefault", json!({}))["profile"],
+            "gemini"
+        );
+        assert_eq!(
+            rpc(&mut server, "modelProfiles/list", json!({}))["active"]["model"],
+            "default-model"
+        );
         let selected = rpc(
             &mut server,
             "modelProfiles/select",
@@ -302,6 +354,15 @@ api_key_file = "missing.key"
         );
         let observed = rpc(&mut attached, "initialize", initialize);
         assert_eq!(observed["capabilities"]["modelProfiles"], false);
+        assert_eq!(observed["capabilities"]["modelProfileDefaults"], false);
+        assert_eq!(
+            failure(
+                &mut attached,
+                "modelProfiles/setDefault",
+                json!({"profile":null})
+            )["code"],
+            -32601
+        );
         assert_eq!(observed["capabilities"]["provider"], "gemini");
         assert_eq!(
             failure(&mut attached, "models/list", json!({}))["code"],

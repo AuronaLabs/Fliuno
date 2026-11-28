@@ -1,5 +1,6 @@
 //! User-owned startup settings shared by the terminal client and app-server.
 mod credentials;
+mod model_default;
 pub use credentials::PendingApiKey;
 
 use serde::{Deserialize, Serialize};
@@ -306,7 +307,11 @@ impl Settings {
     pub fn load(path: &Path) -> Result<Self, String> {
         let text = read_file(path, 64 * 1024)
             .map_err(|error| format!("Cannot read configuration {}: {error}", path.display()))?;
-        let mut settings: Self = toml::from_str(&text).map_err(|error| {
+        Self::parse(path, &text)
+    }
+
+    fn parse(path: &Path, text: &str) -> Result<Self, String> {
+        let mut settings: Self = toml::from_str(text).map_err(|error| {
             format!(
                 "Invalid configuration {}: {}",
                 path.display(),
@@ -343,6 +348,10 @@ impl Settings {
         let Some(id) = profile.or(self.workbench.model_profile.as_deref()) else {
             return Ok(&self.model);
         };
+        self.named_model(id)
+    }
+
+    pub fn named_model(&self, id: &str) -> Result<&ModelSettings, String> {
         validate_profile_id(id)?;
         let model = self
             .models

@@ -9,6 +9,7 @@
 | [OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create) | 实现独立请求和响应适配，覆盖 `max_completion_tokens`、按索引拼接的 `tool_calls`、结束原因、使用量与可选思考档位。Responses 配置沿用现有协议。 |
 | [Ollama OpenAI 兼容接口](https://docs.ollama.com/api/openai-compatibility) 与 [llama.cpp 服务文档](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) | 分别验证模型列表与对话。把官方契约、兼容接口和特定网关的可选字段作为独立测试用例，记录通过的模型能力。 |
 | 本地 OpenCode `d284e7c` 的 `packages/ai/src/protocols/openai-chat.ts`、`openai-compatible-chat.ts` | 兼容网关复用 Chat 请求、流式解码与历史转译。测试缺失用量、并行工具分片、空分片和提前断开。 |
+| 本地 Codex `a1604a8` 的 `codex-rs/core/src/config/edit.rs` | 用保留格式的 TOML 编辑器和同目录暂存文件更新单个设置。活动模型与启动默认值分别操作。 |
 | 本地 Codex `a1604a8` 的 `codex-rs/model-provider-info/src/lib.rs` | 分离供应商 ID、端点、线上协议与能力。如同一主机提供多种协议，给用户明确选择。保持现有 `provider = "openai"` 的解释和已有配置文件可读。 |
 
 本地 OpenCode 的 `packages/core/src/modal/models.ts` 也把远端目录解码留在 Provider 层。Fliuno 首启通过本机子进程读取草稿目录，不需要先写入配置、密钥或数据库。UI 仅负责搜索、翻页和手填。

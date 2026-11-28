@@ -4591,6 +4591,29 @@
         "profile"
       ]
     },
+    "modelProfiles/getDefault": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "modelProfiles/setDefault": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileDefault",
+      "description": "The startup preference from the settings file, independent of the active provider.",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "description": "Null selects the base [model] at startup.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ]
+    },
     "models/list": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ProviderModelListParams",
@@ -20186,6 +20209,25 @@
           ]
         }
       }
+    },
+    "ModelProfileDefault": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileDefault",
+      "description": "The startup preference from the settings file, independent of the active provider.",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "description": "Null selects the base [model] at startup.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ]
     },
     "ProviderModelPage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
