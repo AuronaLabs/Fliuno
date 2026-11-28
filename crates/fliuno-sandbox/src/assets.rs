@@ -75,28 +75,43 @@ fn key(path: &str) -> io::Result<String> {
     Ok(key)
 }
 
-/// Validate the complete manifest before creating files or launching processes.
-/// Source metadata is advisory; the copy loop separately enforces byte bounds.
-pub fn validate_staged_files(files: &[StagedFile]) -> io::Result<()> {
-    if files.len() > MAX_BUNDLE_FILES {
-        return Err(invalid("too many staged files"));
-    }
-    let mut paths = BTreeSet::new();
+/// Validate portable names and file/directory collisions independently of IO.
+pub fn validate_staged_file_paths<'a>(paths: impl IntoIterator<Item = &'a str>) -> io::Result<()> {
+    let mut unique = BTreeSet::new();
     let mut directories = BTreeMap::new();
-    let mut bytes = 0u64;
-    for file in files {
-        let path = key(&file.path)?;
-        for (index, _) in file.path.match_indices('/') {
-            let spelling = &file.path[..index];
+    for path in paths {
+        if unique.len() == MAX_BUNDLE_FILES {
+            return Err(invalid("too many staged files"));
+        }
+        let normalized = key(path)?;
+        for (index, _) in path.match_indices('/') {
+            let spelling = &path[..index];
             if let Some(previous) = directories.insert(spelling.to_ascii_lowercase(), spelling)
                 && previous != spelling
             {
                 return Err(invalid("staged directories have inconsistent case"));
             }
         }
-        if !paths.insert(path) {
+        if !unique.insert(normalized) {
             return Err(invalid("duplicate staged file path"));
         }
+    }
+    for path in &unique {
+        for (index, _) in path.match_indices('/') {
+            if unique.contains(&path[..index]) {
+                return Err(invalid("staged file conflicts with a parent directory"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate the complete manifest before creating files or launching processes.
+/// Source metadata is advisory; the copy loop separately enforces byte bounds.
+pub fn validate_staged_files(files: &[StagedFile]) -> io::Result<()> {
+    validate_staged_file_paths(files.iter().map(|file| file.path.as_str()))?;
+    let mut bytes = 0u64;
+    for file in files {
         if file.sha256.len() != 64
             || !file
                 .sha256
@@ -121,13 +136,6 @@ pub fn validate_staged_files(files: &[StagedFile]) -> io::Result<()> {
             .ok_or_else(|| invalid("staged size overflow"))?;
         if bytes > MAX_BUNDLE_BYTES {
             return Err(invalid("staged bundle exceeds 512 MiB"));
-        }
-    }
-    for path in &paths {
-        for (index, _) in path.match_indices('/') {
-            if paths.contains(&path[..index]) {
-                return Err(invalid("staged file conflicts with a parent directory"));
-            }
         }
     }
     Ok(())

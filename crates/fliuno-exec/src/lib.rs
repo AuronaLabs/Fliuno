@@ -4,11 +4,13 @@ mod capture;
 mod config;
 #[cfg(feature = "test-fixtures")]
 pub mod fixture;
+mod project_check;
 mod runner;
 mod skill;
 pub mod supervisor;
 pub use capture::CapturedOutput;
 pub use config::{Config, ProcessIsolation, ProgramConfig};
+pub use project_check::ProjectCheckConfig;
 pub use runner::{
     ProcessEvidence, ProcessFault, ProcessOperation, ProcessReport, ProcessStopCause, Termination,
 };
@@ -31,12 +33,28 @@ struct Arguments {
     stdin: String,
     timeout_ms: Option<u64>,
     output_bytes: Option<usize>,
+    inputs: Option<std::collections::BTreeMap<String, String>>,
 }
 
 impl Program {
     fn arguments(&self, value: &Value) -> Result<Arguments, String> {
         let args: Arguments =
             serde_json::from_value(value.clone()).map_err(|_| "invalid process arguments")?;
+        if let Some(check) = &self.config.project_check {
+            if !value
+                .as_object()
+                .is_some_and(|object| object.len() == 1 && object.contains_key("inputs"))
+            {
+                return Err("project checks accept only the configured input hashes".into());
+            }
+            check.validate_hashes(
+                args.inputs
+                    .as_ref()
+                    .ok_or("project check inputs are required")?,
+            )?;
+        } else if value.get("inputs").is_some() {
+            return Err("only project checks take workspace input hashes".into());
+        }
         if self.config.skill.is_some() {
             skill::validate_input(value, &args.stdin)?;
         }
@@ -77,6 +95,9 @@ impl Tool for Program {
         if self.config.skill.is_some() {
             return skill::spec(self);
         }
+        if let Some(check) = &self.config.project_check {
+            return check.spec(self);
+        }
         ToolSpec {
             name: self.tool_name.clone(),
             description: format!(
@@ -98,6 +119,10 @@ impl Tool for Program {
         self.arguments(arguments).map(|_| ())
     }
     fn execution_plan(&self, arguments: &Value) -> Option<Value> {
+        if let Some(check) = &self.config.project_check {
+            let args = self.arguments(arguments).ok()?;
+            return Some(check.plan(self, &args.inputs?));
+        }
         self.config
             .skill
             .as_ref()

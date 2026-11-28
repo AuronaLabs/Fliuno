@@ -152,6 +152,7 @@ impl Process {
         program: &Program,
         context: &ToolContext<'_>,
         args: &Arguments,
+        inputs: &[fliuno_sandbox::StagedFile],
     ) -> Result<Self, ToolError> {
         let argv = program
             .config
@@ -164,7 +165,13 @@ impl Process {
             ProcessIsolation::WindowsAppContainer | ProcessIsolation::LinuxLandlock => {
                 let spec = fliuno_sandbox::LaunchSpec {
                     program_sha256: Some(program.executable_digest.clone()),
-                    assets: program.config.assets.clone(),
+                    assets: program
+                        .config
+                        .assets
+                        .iter()
+                        .chain(inputs)
+                        .cloned()
+                        .collect(),
                     program: program.config.command.clone(),
                     args: argv,
                     env: program.environment.clone(),

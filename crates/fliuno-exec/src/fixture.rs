@@ -6,6 +6,17 @@ use std::{
 pub fn main() -> io::Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     match args.first().map(String::as_str) {
+        Some("project-check") => {
+            assert!(fliuno_sandbox::current_process_is_isolated()?);
+            let input = std::fs::read_to_string(&args[1])?;
+            std::fs::write("check-scratch.txt", b"only in scratch")?;
+            assert!(!std::path::Path::new("unselected.txt").exists());
+            if input.trim() != args[2] {
+                eprintln!("greeting check failed");
+                std::process::exit(9);
+            }
+            println!("greeting check passed");
+        }
         Some("skill-script") => {
             assert!(fliuno_sandbox::current_process_is_isolated()?);
             assert!(std::env::var_os("FLIUNO_EXEC_SECRET").is_none());

@@ -80,6 +80,7 @@ impl ProcessControl for NativeObservation {
 fn program() -> Program {
     Program::resolve(ProgramConfig {
         skill: None,
+        project_check: None,
         assets: vec![],
         id: "scheduling_probe".into(),
         command: std::env::current_exe().unwrap(),
@@ -99,6 +100,7 @@ fn arguments() -> Arguments {
         stdin: "must not be written after stop".into(),
         timeout_ms: None,
         output_bytes: None,
+        inputs: None,
     }
 }
 fn observations(

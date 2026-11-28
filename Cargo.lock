@@ -1020,6 +1020,8 @@ name = "fliuno-exec"
 version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
+ "cap-fs-ext",
+ "cap-std",
  "fliuno-core",
  "fliuno-protocol",
  "fliuno-sandbox",
@@ -1028,6 +1030,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "tokio",
  "uuid",
 ]

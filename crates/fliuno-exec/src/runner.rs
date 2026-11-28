@@ -40,6 +40,8 @@ pub struct ProcessReport {
     pub stdout: CapturedOutput,
     pub stderr: CapturedOutput,
     pub evidence: ProcessEvidence,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_check: Option<serde_json::Value>,
 }
 
 pub(crate) async fn run(
@@ -52,7 +54,22 @@ pub(crate) async fn run(
     let started = tokio::time::Instant::now();
     let timeout = args.timeout_ms.unwrap_or(program.config.timeout_ms);
     let deadline = started + Duration::from_millis(timeout);
-    let mut process = match Process::spawn(program, context, &args).await {
+    let snapshot = args
+        .inputs
+        .as_ref()
+        .map(|hashes| {
+            crate::project_check::prepare(
+                std::path::Path::new(&context.workspace.root),
+                hashes,
+                cancellation,
+                deadline,
+            )
+        })
+        .transpose()?;
+    let inputs = snapshot
+        .as_ref()
+        .map_or(&[][..], |snapshot| snapshot.files.as_slice());
+    let mut process = match Process::spawn(program, context, &args, inputs).await {
         Ok(process) => process,
         Err(error) => {
             if let Some(span) = &mut span {
@@ -65,11 +82,19 @@ pub(crate) async fn run(
             return Err(error);
         }
     };
+    drop(snapshot);
     let containment = process.containment();
+    let check_report = program
+        .config
+        .project_check
+        .as_ref()
+        .zip(args.inputs.as_ref())
+        .map(|(check, hashes)| check.plan(program, hashes));
     let result = drive(program, args, cancellation, &mut process, started, deadline)
         .await
         .map(|mut report| {
             report.containment = containment;
+            report.project_check = check_report;
             report
         });
     if let Some(span) = &mut span {
@@ -214,6 +239,7 @@ async fn drive(
         stdout: output.finish(),
         stderr: errors.finish(),
         evidence,
+        project_check: None,
     })
 }
 

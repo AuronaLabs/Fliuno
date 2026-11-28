@@ -2,6 +2,8 @@
 #![cfg(feature = "test-fixtures")]
 #[cfg(any(windows, target_os = "linux"))]
 mod assets;
+#[cfg(any(windows, target_os = "linux"))]
+mod project_check;
 use fliuno_core::{
     ApprovalOutcome, CancellationToken, DemoProvider, Kernel, ModelDecision, ModelProvider,
     ModelTurn, ToolEffect, ToolError, ToolSpec,
@@ -71,6 +73,7 @@ impl ModelProvider for Provider {
 fn config(isolation: ProcessIsolation) -> ProgramConfig {
     ProgramConfig {
         skill: None,
+        project_check: None,
         assets: vec![],
         id: "probe".into(),
         command: env!("CARGO_BIN_EXE_fliuno-exec-probe").into(),

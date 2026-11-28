@@ -11,7 +11,7 @@ mod program;
 mod state;
 pub use assets::{
     MAX_ASSET_BYTES, MAX_BUNDLE_BYTES, MAX_BUNDLE_FILES, StagedFile, staged_files_digest,
-    validate_staged_files,
+    validate_staged_file_paths, validate_staged_files,
 };
 pub use program::{
     MAX_PROGRAM_BYTES, MAX_TRUSTED_PROGRAM_BYTES, program_digest, trusted_program_digest,

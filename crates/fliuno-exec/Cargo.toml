@@ -16,6 +16,9 @@ serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
 base64 = "0.22"
+cap-std = "4.0.3"
+cap-fs-ext = "4.0.3"
+tempfile = "3"
 uuid.workspace = true
 tokio = { version = "1", features = ["rt", "io-util", "process", "time", "fs"] }
 

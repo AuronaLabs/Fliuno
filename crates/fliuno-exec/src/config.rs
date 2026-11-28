@@ -36,6 +36,8 @@ pub struct ProgramConfig {
     pub output_bytes: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill: Option<crate::skill::SkillExecution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_check: Option<crate::ProjectCheckConfig>,
 }
 
 pub(crate) const MAX_OUTPUT: usize = 64 * 1024;
@@ -127,6 +129,7 @@ impl Program {
         }
         validate_args(&config.args)?;
         crate::skill::validate(&config)?;
+        crate::project_check::validate(&config)?;
         if !(100..=300_000).contains(&config.timeout_ms)
             || !(1024..=MAX_OUTPUT).contains(&config.output_bytes)
         {
@@ -199,6 +202,9 @@ impl Program {
         };
         if let Some(skill) = &program.config.skill {
             skill.validate_approval_plan(&program)?;
+        }
+        if let Some(check) = &program.config.project_check {
+            check.validate_approval_plan(&program)?;
         }
         Ok(program)
     }
