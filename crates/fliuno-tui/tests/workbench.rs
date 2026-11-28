@@ -4228,7 +4228,10 @@ fn draft_context_reaches_bilingual_budget_from_slash_and_keeps_draft() {
     console.keys("\x1b");
     console.expect_absent("草稿上下文");
     console.expect("无工具");
-    console.keys("Check the project\x1bOR");
+    console.ready();
+    console.keys("Check the project");
+    console.expect("Check the project");
+    console.keys("\x1bOR");
     console.expect("19 B");
     console.ready();
     console.keys("s");
