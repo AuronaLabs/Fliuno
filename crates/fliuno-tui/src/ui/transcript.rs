@@ -1,7 +1,9 @@
 use super::*;
 use crate::service::{TRANSCRIPT_MAX_TURNS, TRANSCRIPT_PAGE_TURNS, TranscriptPage};
 use fliuno_protocol::{SessionHistoryEntry, SessionHistoryListParams};
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
+
+use super::answer::SourcePosition;
 
 struct Entry {
     value: SessionHistoryEntry,
@@ -11,6 +13,116 @@ struct Entry {
 struct Rendered {
     width: u16,
     lines: Vec<Line<'static>>,
+    positions: Vec<LineStart>,
+    rows: usize,
+}
+
+struct LineStart {
+    source: SourcePosition,
+    row: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct Anchor {
+    sequence: u64,
+    source: Option<SourcePosition>,
+    wrapped_cells: usize,
+}
+
+struct TurnLayout<'a> {
+    sequence: u64,
+    start: usize,
+    rendered: Ref<'a, Rendered>,
+}
+
+#[derive(Default)]
+pub(super) struct LayoutAtWidth<'a> {
+    turns: Vec<TurnLayout<'a>>,
+    rows: usize,
+}
+
+impl LayoutAtWidth<'_> {
+    pub(super) fn anchor_at(&self, row: u16) -> Option<Anchor> {
+        let row = usize::from(row);
+        if row >= self.rows {
+            return None;
+        }
+        let index = self
+            .turns
+            .partition_point(|turn| turn.start + turn.rendered.rows <= row);
+        let turn = self.turns.get(index)?;
+        let line = row.checked_sub(turn.start).and_then(|offset| {
+            let starts = &turn.rendered.positions;
+            let index = starts.partition_point(|line| line.row <= offset);
+            index.checked_sub(1).map(|index| (&starts[index], offset))
+        });
+        Some(Anchor {
+            sequence: turn.sequence,
+            source: line.map(|(line, _)| line.source),
+            wrapped_cells: line.map_or(0, |(line, offset)| {
+                (offset - line.row) * usize::from(turn.rendered.width)
+            }),
+        })
+    }
+
+    pub(super) fn resolve(&self, anchor: Anchor) -> Option<u16> {
+        let index = self
+            .turns
+            .partition_point(|turn| turn.sequence < anchor.sequence);
+        let turn = self.turns.get(index).or_else(|| self.turns.last())?;
+        let row = match anchor.source {
+            Some(source) if turn.sequence == anchor.sequence => {
+                let starts = &turn.rendered.positions;
+                let index = starts
+                    .partition_point(|line| line.source <= source)
+                    .saturating_sub(1);
+                let row = starts[index].row;
+                let end = starts
+                    .get(index + 1)
+                    .map_or(turn.rendered.rows, |line| line.row);
+                let subrow = anchor.wrapped_cells / usize::from(turn.rendered.width.max(1));
+                turn.start + (row + subrow).min(end.saturating_sub(1))
+            }
+            None if turn.sequence == anchor.sequence => turn.start.saturating_sub(1),
+            _ => turn.start,
+        };
+        Some(row.min(usize::from(u16::MAX)) as u16)
+    }
+}
+
+impl Rendered {
+    fn new(width: u16, lines: Vec<Line<'static>>, sources: Vec<SourcePosition>) -> Self {
+        debug_assert_eq!(lines.len(), sources.len());
+        let mut rows = 0;
+        let positions = lines
+            .iter()
+            .zip(sources)
+            .map(|(line, source)| {
+                let start = LineStart { source, row: rows };
+                rows += if line.width() <= usize::from(width) {
+                    1
+                } else {
+                    Paragraph::new(line.clone())
+                        .wrap(Wrap { trim: false })
+                        .line_count(width)
+                        .max(1)
+                };
+                start
+            })
+            .collect();
+        Self {
+            width,
+            lines,
+            positions,
+            rows,
+        }
+    }
+}
+
+fn mark_plain(sources: &mut Vec<SourcePosition>, lines: &[Line<'static>]) {
+    let count = lines.len() - sources.len();
+    let next = sources.last().map_or(0, |last| last.line + 1);
+    sources.extend((next..next + count).map(|line| SourcePosition { line, byte: 0 }));
 }
 
 impl From<SessionHistoryEntry> for Entry {
@@ -26,7 +138,6 @@ impl From<SessionHistoryEntry> for Entry {
 pub(super) struct Transcript {
     entries: Vec<Entry>,
     oldest: Option<(u64, u64)>,
-    prepended: Cell<usize>,
 }
 
 impl Transcript {
@@ -54,7 +165,6 @@ impl Transcript {
                     .next_before_sequence
                     .map(|before| (page.through_sequence, before));
                 self.entries = page.entries.into_iter().rev().map(Entry::from).collect();
-                self.prepended.set(0);
                 true
             }
             TranscriptPage::Newer(page) => {
@@ -78,7 +188,6 @@ impl Transcript {
                     self.oldest = page
                         .next_before_sequence
                         .map(|before| (page.through_sequence, before));
-                    self.prepended.set(page.entries.len());
                     self.entries
                         .splice(..0, page.entries.into_iter().rev().map(Entry::from));
                 }
@@ -92,59 +201,88 @@ impl Transcript {
         palette: &Palette,
         width: u16,
         active: Option<&str>,
-    ) -> (Vec<Line<'static>>, usize, bool) {
-        let prepended = self.prepended.replace(0);
-        let mut prefix_lines = 0;
+    ) -> (Vec<Line<'static>>, LayoutAtWidth<'_>, bool) {
+        let mut layout = LayoutAtWidth::default();
         let mut active_rendered = false;
         let mut lines = Vec::new();
-        for (index, entry) in self.entries.iter().enumerate() {
+        for entry in &self.entries {
             match &entry.value {
                 SessionHistoryEntry::Turn { turn } => {
-                    active_rendered |= active == Some(&turn.task_id);
-                    let mut cached = entry.cached.borrow_mut();
-                    if cached.as_ref().is_none_or(|entry| entry.width != width) {
-                        let mut rendered = Vec::new();
-                        for message in &turn.messages {
-                            match message {
-                                ContextMessage::User { text } => {
-                                    message_lines(&mut rendered, "You", text, palette.label);
-                                }
-                                ContextMessage::Assistant { text } => {
-                                    response_lines(&mut rendered, "Fliuno", text, palette, width);
-                                }
-                                _ => {}
-                            }
-                        }
-                        *cached = Some(Rendered {
-                            width,
-                            lines: rendered,
-                        });
-                    }
-                    if let Some(rendered) = &*cached
-                        && !rendered.lines.is_empty()
-                    {
-                        if !lines.is_empty() {
-                            lines.push(Line::default());
-                        }
-                        lines.extend(rendered.lines.iter().cloned());
-                    }
+                    active_rendered |= active == Some(&turn.task_id)
                 }
-                SessionHistoryEntry::Oversized { task_id, .. } if active != Some(task_id) => {
-                    if !lines.is_empty() {
-                        lines.push(Line::raw(""));
-                    }
-                    lines.push(Line::styled(
-                        "A previous turn is too large to display. Open history to review it.",
-                        palette.quiet,
-                    ));
+                SessionHistoryEntry::Oversized { task_id, .. } if active == Some(task_id) => {
+                    continue;
                 }
                 _ => {}
             }
-            if index < prepended {
-                prefix_lines = lines.len();
+            let mut cache = entry.cached.borrow_mut();
+            if cache
+                .as_ref()
+                .is_none_or(|rendered| rendered.width != width)
+            {
+                *cache = Some(entry.render_at(palette, width));
+            }
+            drop(cache);
+            let rendered = Ref::map(entry.cached.borrow(), |cache| {
+                cache.as_ref().expect("turn is laid out")
+            });
+            if rendered.lines.is_empty() {
+                continue;
+            }
+            if !lines.is_empty() {
+                lines.push(Line::default());
+                layout.rows += 1;
+            }
+            lines.extend(rendered.lines.iter().cloned());
+            let start = layout.rows;
+            layout.rows += rendered.rows;
+            layout.turns.push(TurnLayout {
+                sequence: sequence(&entry.value),
+                start,
+                rendered,
+            });
+        }
+        (lines, layout, active_rendered)
+    }
+}
+
+impl Entry {
+    fn render_at(&self, palette: &Palette, width: u16) -> Rendered {
+        let mut lines = Vec::new();
+        let mut sources = Vec::new();
+        match &self.value {
+            SessionHistoryEntry::Turn { turn } => {
+                for message in &turn.messages {
+                    match message {
+                        ContextMessage::User { text } => {
+                            message_lines(&mut lines, "You", text, palette.label);
+                            mark_plain(&mut sources, &lines);
+                        }
+                        ContextMessage::Assistant { text } => {
+                            message_heading(&mut lines, "Fliuno", palette.label);
+                            mark_plain(&mut sources, &lines);
+                            let first_line = sources.last().map_or(0, |last| last.line + 1);
+                            for fragment in answer::fragments(text, palette, width) {
+                                lines.push(fragment.contents);
+                                sources.push(SourcePosition {
+                                    line: fragment.source.line + first_line,
+                                    byte: fragment.source.byte,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            SessionHistoryEntry::Oversized { .. } => {
+                lines.push(Line::styled(
+                    "A previous turn is too large to display. Open history to review it.",
+                    palette.quiet,
+                ));
+                mark_plain(&mut sources, &lines);
             }
         }
-        (lines, prefix_lines, active_rendered)
+        Rendered::new(width, lines, sources)
     }
 }
 

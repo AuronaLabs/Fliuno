@@ -180,8 +180,8 @@ impl App {
     }
 
     fn draw_conversation(&self, frame: &mut Frame<'_>, area: Rect) {
-        let (mut lines, prefix_lines, active_rendered) = if self.demo || self.show_details {
-            (Vec::new(), 0, false)
+        let (mut lines, history, active_rendered) = if self.demo || self.show_details {
+            (Vec::new(), transcript::LayoutAtWidth::default(), false)
         } else {
             self.transcript
                 .render(&self.palette, area.width, self.selected.as_deref())
@@ -315,23 +315,24 @@ impl App {
         let [heading, conversation] =
             Layout::vertical([Constraint::Length(header_height), Constraint::Min(0)]).areas(area);
         frame.render_widget(header, heading);
-        if prefix_lines > 0 && !self.follow {
-            let rows = Paragraph::new(lines[..prefix_lines].to_vec())
-                .wrap(Wrap { trim: false })
-                .line_count(conversation.width)
-                .min(usize::from(u16::MAX)) as u16;
-            self.scroll
-                .set(self.scroll.get().saturating_add(rows.saturating_add(1)));
-        }
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         let max_scroll = paragraph
             .line_count(conversation.width)
             .saturating_sub(usize::from(conversation.height))
             .min(usize::from(u16::MAX)) as u16;
+        let saved = self
+            .scroll_anchor
+            .get()
+            .and_then(|anchor| history.resolve(anchor));
         let scroll = if self.follow {
+            self.scroll_anchor.set(None);
             max_scroll
         } else {
-            self.scroll.get().min(max_scroll)
+            let row = saved.unwrap_or_else(|| self.scroll.get()).min(max_scroll);
+            if saved.is_none() {
+                self.scroll_anchor.set(history.anchor_at(row));
+            }
+            row
         };
         self.rendered_scroll.set(scroll);
         frame.render_widget(paragraph.scroll((scroll, 0)), conversation);

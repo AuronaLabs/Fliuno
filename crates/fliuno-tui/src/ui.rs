@@ -194,6 +194,7 @@ pub struct App {
     detail: Option<Box<Detail>>,
     activity: Vec<activity::Preview>,
     scroll: Cell<u16>,
+    scroll_anchor: Cell<Option<transcript::Anchor>>,
     transcript: Transcript,
     rendered_scroll: Cell<u16>,
     follow: bool,
@@ -240,6 +241,7 @@ impl App {
             detail: None,
             activity: Vec::new(),
             scroll: Cell::new(0),
+            scroll_anchor: Cell::new(None),
             transcript: Transcript::default(),
             rendered_scroll: Cell::new(0),
             follow: false,
@@ -318,7 +320,7 @@ impl App {
         self.selected = None;
         self.detail = None;
         self.transcript = Transcript::default();
-        self.scroll.set(0);
+        self.set_conversation_scroll(0);
         self.follow = !self.demo;
         self.show_details = false;
         self.layer = Layer::None;
@@ -438,11 +440,16 @@ impl App {
         .into();
     }
 
+    fn set_conversation_scroll(&self, row: u16) {
+        self.scroll.set(row);
+        self.scroll_anchor.set(None);
+    }
+
     fn select_task(&mut self, id: String) {
         self.next = Some(Request::Task(id.clone()));
         self.selected = Some(id);
         self.detail = None;
-        self.scroll.set(0);
+        self.set_conversation_scroll(0);
         self.follow = false;
         self.show_details = false;
     }
@@ -626,7 +633,7 @@ impl App {
                     && self.transcript.install(page)
                     && !self.show_details
                 {
-                    self.scroll.set(0);
+                    self.set_conversation_scroll(0);
                     if caught_up && !self.follow {
                         self.message = "Conversation updated. PageUp loads older turns.".into();
                     }
@@ -786,7 +793,7 @@ impl App {
                 self.input_artifact = None;
                 self.key = uuid::Uuid::new_v4().to_string();
                 self.layer = Layer::None;
-                self.scroll.set(0);
+                self.set_conversation_scroll(0);
                 self.message = if self.demo {
                     "Task submitted".into()
                 } else {
@@ -1840,7 +1847,7 @@ impl App {
         match key.code {
             KeyCode::Tab | KeyCode::Esc if pressed && self.show_details => {
                 self.show_details = false;
-                self.scroll.set(0);
+                self.set_conversation_scroll(0);
                 if !self.demo {
                     if let Some(latest) = self.tasks().first()
                         && self.selected.as_deref() != Some(&latest.id)
@@ -1852,14 +1859,14 @@ impl App {
             }
             KeyCode::Tab if pressed => {
                 self.show_details = true;
-                self.scroll.set(0);
+                self.set_conversation_scroll(0);
             }
             KeyCode::F(6) if active => self.open_memories(worker, false),
             KeyCode::F(7) if active => self.open_deliverables(worker),
             KeyCode::End => self.follow = true,
             KeyCode::Home => {
                 self.follow = false;
-                self.scroll.set(0);
+                self.set_conversation_scroll(0);
             }
             KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
                 self.follow = false;
@@ -1875,9 +1882,10 @@ impl App {
                     && self.send(worker, Request::OlderTranscript(params))
                 {
                     self.message.clear();
+                    return false;
                 }
                 scroll_key(key.code, &mut scroll);
-                self.scroll.set(scroll);
+                self.set_conversation_scroll(scroll);
             }
             KeyCode::Char('w') if active => {
                 if self.send(worker, Request::Workspaces(0)) {

@@ -4,7 +4,25 @@ use ratatui::style::Modifier;
 
 const SOURCE_LINE_LIMIT: usize = 500;
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct SourcePosition {
+    pub line: usize,
+    pub byte: usize,
+}
+
+pub(super) struct Fragment {
+    pub contents: Line<'static>,
+    pub source: SourcePosition,
+}
+
 pub(super) fn render(text: &str, palette: &Palette, width: u16) -> Vec<Line<'static>> {
+    fragments(text, palette, width)
+        .into_iter()
+        .map(|fragment| fragment.contents)
+        .collect()
+}
+
+pub(super) fn fragments(text: &str, palette: &Palette, width: u16) -> Vec<Fragment> {
     let end = text
         .match_indices('\n')
         .nth(SOURCE_LINE_LIMIT - 1)
@@ -15,19 +33,22 @@ pub(super) fn render(text: &str, palette: &Palette, width: u16) -> Vec<Line<'sta
         answer.push(event);
     }
     answer.flush();
-    while answer.lines.last().is_some_and(|line| line.width() == 0) {
+    while answer
+        .lines
+        .last()
+        .is_some_and(|line| line.contents.width() == 0)
+    {
         answer.lines.pop();
     }
     if end.is_some_and(|offset| offset + 1 < text.len()) {
-        answer
-            .lines
-            .push(Line::styled("Reply continues in history", palette.quiet));
+        answer.line(Line::styled("Reply continues in history", palette.quiet));
     }
     answer.lines
 }
 
 struct Answer<'a> {
-    lines: Vec<Line<'static>>,
+    lines: Vec<Fragment>,
+    source_line: usize,
     spans: Vec<Span<'static>>,
     lists: Vec<Option<u64>>,
     code: Option<String>,
@@ -42,6 +63,7 @@ impl<'a> Answer<'a> {
     fn new(palette: &'a Palette, width: usize) -> Self {
         Self {
             lines: Vec::new(),
+            source_line: 0,
             spans: Vec::new(),
             lists: Vec::new(),
             code: None,
@@ -53,16 +75,32 @@ impl<'a> Answer<'a> {
         }
     }
 
+    fn line(&mut self, contents: Line<'static>) {
+        self.lines.push(Fragment {
+            contents,
+            source: SourcePosition {
+                line: self.source_line,
+                byte: 0,
+            },
+        });
+        self.source_line += 1;
+    }
+
     fn flush(&mut self) {
         if !self.spans.is_empty() {
-            self.lines.push(Line::from(std::mem::take(&mut self.spans)));
+            let spans = std::mem::take(&mut self.spans);
+            self.line(Line::from(spans));
         }
     }
 
     fn separate(&mut self) {
         self.flush();
-        if self.lines.last().is_some_and(|line| line.width() > 0) {
-            self.lines.push(Line::default());
+        if self
+            .lines
+            .last()
+            .is_some_and(|line| line.contents.width() > 0)
+        {
+            self.line(Line::default());
         }
     }
 
@@ -148,7 +186,7 @@ impl<'a> Answer<'a> {
                     CodeBlockKind::Fenced(info) => info.split_whitespace().next().unwrap_or("Code"),
                     CodeBlockKind::Indented => "Code",
                 };
-                self.lines.push(Line::styled(
+                self.line(Line::styled(
                     ellipsis(&clean(language), self.width),
                     self.palette.label,
                 ));
@@ -173,22 +211,29 @@ impl<'a> Answer<'a> {
             for (offset, grapheme) in source.grapheme_indices(true) {
                 let next = grapheme.width();
                 if cells > 0 && cells + next > available {
-                    self.code_line(prefix, &source[start..offset]);
+                    self.code_line(prefix, &source[start..offset], start);
                     start = offset;
                     cells = 0;
                 }
                 cells += next;
             }
-            self.code_line(prefix, &source[start..]);
+            self.code_line(prefix, &source[start..], start);
+            self.source_line += 1;
         }
         self.separate();
     }
 
-    fn code_line(&mut self, prefix: &str, source: &str) {
-        self.lines.push(Line::from(vec![
-            Span::styled(prefix.to_owned(), self.palette.quiet),
-            Span::styled(source.to_owned(), self.palette.rail),
-        ]));
+    fn code_line(&mut self, prefix: &str, source: &str, byte: usize) {
+        self.lines.push(Fragment {
+            contents: Line::from(vec![
+                Span::styled(prefix.to_owned(), self.palette.quiet),
+                Span::styled(source.to_owned(), self.palette.rail),
+            ]),
+            source: SourcePosition {
+                line: self.source_line,
+                byte,
+            },
+        });
     }
 }
 

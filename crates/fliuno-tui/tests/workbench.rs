@@ -1715,7 +1715,17 @@ fn conversation_keeps_order_loads_older_turns_and_reopens_with_live_responses() 
         )
         .unwrap();
     for index in 1..=15 {
-        let task: Value = client.call("task/start", &json!({"sessionId":session["id"],"input":format!("Earlier prompt {index:02}"),"context":{"planOnly":true}}), |_| {}).unwrap();
+        let mut input = format!("Earlier prompt {index:02}");
+        if index == 1 {
+            input.push_str(&" The discussion includes a longer paragraph for reflow.".repeat(9));
+        }
+        let task: Value = client
+            .call(
+                "task/start",
+                &json!({"sessionId":session["id"],"input":input,"context":{"planOnly":true}}),
+                |_| {},
+            )
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let current: Value = client
@@ -1776,6 +1786,31 @@ fn conversation_keeps_order_loads_older_turns_and_reopens_with_live_responses() 
     terminal.expect_absent("Earlier prompt 01");
     terminal.keys("\x1b[H");
     terminal.expect("Earlier prompt 01");
+    let top_line = |console: &Console| {
+        let screen = console.screen.screen();
+        screen
+            .rows(0, screen.size().1)
+            .nth(3)
+            .unwrap()
+            .trim()
+            .to_owned()
+    };
+    for _ in 0..24 {
+        if top_line(&terminal) == "Earlier prompt 02" {
+            break;
+        }
+        terminal.keys("\x1b[B");
+        terminal.ready();
+    }
+    assert_eq!(top_line(&terminal), "Earlier prompt 02");
+    terminal.capture("conversation-anchor-110");
+    terminal.resize(22, 48);
+    terminal.ready();
+    assert_eq!(top_line(&terminal), "Earlier prompt 02");
+    terminal.capture("conversation-anchor-48");
+    terminal.resize(28, 110);
+    terminal.ready();
+    assert_eq!(top_line(&terminal), "Earlier prompt 02");
     terminal.keys("\x1b[F");
     terminal.expect("Earlier prompt 15");
     terminal.keys("\r");

@@ -10,6 +10,7 @@
 | [Claude Code 交互模式](https://code.claude.com/docs/en/interactive-mode)，本地 `D:\Fliuno-References\claude-code` `2771d55` 的 `examples/settings/README.md` | 主要操作留在对话输入区，工作区配置和用户配置的来源明确可查。保留 Fliuno 的 TOML 和已有密钥文件。 |
 | [OpenCode TUI](https://opencode.ai/docs/cli/tui/)，本地 `D:\Fliuno-References\opencode` `d284e7c` 的 `packages/tui/src/component/dialog-session-list.tsx`、`dialog-model.tsx` | `/resume` 聚焦当前目录下的可搜索会话。会话与模型切换都要标出当前位置，短暂连接失败时能回到当前对话。 |
 | Codex `a1604a8` 的 `markdown_render.rs`、`history_cell/markdown_render_cache.rs` | 让实时与重启后的回答共享排版。缓存已完成消息在当前宽度下的渲染结果，用长历史重绘和窄屏截图检验收益。 |
+| [Ratatui Paragraph 0.30.2](https://docs.rs/ratatui/0.30.2/ratatui/widgets/struct.Paragraph.html)，Codex `a1604a8` 的 `codex-rs/tui/src/transcript_view.rs` 与 `codex-rs/tui/tests/suite/resize_reflow.rs` | 用回合完成序号和内容行记住阅读位置。折行代码记录源代码行内偏移，重新计算屏幕行号。ConPTY 夹具加载上一页历史后在 110 列与 48 列间往返，检查视口顶行。 |
 
 Windows 凭据使用本机持久范围。核对了 [Windows 凭据规范](https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw) 和本地 Codex `a1604a8` 的 `codex-rs/keyring-store/src/lib.rs`。Debian 安装包面向普通终端与无桌面的机器，所以在当前用户配置目录创建 `0600` 密钥文件。两个平台都先保存独立凭据，再写入只含引用的 TOML。并发配置写入失败时撤回本次凭据，继续兼容 `api_key_file`。
 
