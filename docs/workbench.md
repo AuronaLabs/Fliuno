@@ -81,13 +81,43 @@ language = "zh-CN"
 
 ## 安装
 
-从[发布页](https://github.com/AuronaLabs/Fliuno/releases/latest)下载对应版本。
+从[发布页](https://github.com/AuronaLabs/Fliuno/releases/latest)下载对应平台的一份安装包或便携包，并下载同一版本的 `SHA256SUMS.txt`。校验后再运行安装程序。
 
 - **Windows x64**。打开 `.msi` 并按安装器提示操作。安装会注册系统 PATH。完成后打开新的 PowerShell，在项目目录运行 `fliuno`。
 - **Debian amd64**。在下载目录将实际文件名传给 `apt install`，例如 `sudo apt install ./fliuno-v0.0.20-linux-amd64.deb`。完成后进入项目目录，再运行 `fliuno`。
 - **便携包**。解压 ZIP 或 tar.gz，在解压目录运行 `fliuno` 或 `fliuno.exe`。可通过 `--workspace PATH` 指定项目目录。
 
-安装后可运行 `fliuno --version` 检查版本。原生包通过系统卸载时会保留用户主目录中的 `~/.fliuno`。从 v0.0.16 升级可继续使用原来的配置和数据库。
+安装后运行 `fliuno --version` 确认版本。如果仍显示旧版本，在 PowerShell 中用 `Get-Command fliuno -All`，在 Debian 中用 `command -v fliuno` 检查当前终端实际找到的文件。便携版用解压目录里的程序路径启动。通过系统卸载原生包会保留用户主目录里的 `~/.fliuno`。
+
+### 校验下载
+
+在下载目录检查 SHA-256。以下使用 v0.0.20 文件名举例；下载其他版本时替换名称。
+
+Windows PowerShell：
+
+```powershell
+$asset = 'fliuno-v0.0.20-windows-x64.msi'
+Get-FileHash -Algorithm SHA256 -LiteralPath $asset
+Select-String -Path SHA256SUMS.txt -Pattern ('  ' + [regex]::Escape($asset) + '$')
+```
+
+Debian：
+
+```sh
+asset='fliuno-v0.0.20-linux-amd64.deb'
+sha256sum -- "$asset"
+grep -F -- "  $asset" SHA256SUMS.txt
+```
+
+第一条结果是本地文件的摘要，第二条是清单里的记录。应找到一条同名记录，且 64 位十六进制摘要逐位相同（大小写不影响比较）。找不到匹配项或摘要不同时，核对发布版本并重新下载。
+
+### 从旧版升级
+
+1. 在旧版打开 `F4` 备份面板，创建并校验数据库备份。若改过数据库路径，先按 `F5` 确认实际位置。数据库备份包含对话和托管交付物；项目文件、`config.toml` 与系统凭据另行保管。跨机器迁移时，按新机的凭据存储方式重新绑定密钥。
+2. 关闭工作台后安装新版，回到原项目目录运行 `fliuno`，检查模型和已有会话。便携版解压到新目录，两份程序使用同一版本。
+3. 旧审批如果因工具权限摘要变化而失效，先核对项目文件与已有回执，再把仍需要的操作重新提交。结果未知的远端操作先核对实际状态，避免重复执行。
+
+如果需要回退，按[备份与还原](backup.md#校验与还原)把升级前快照恢复到新路径，再让旧版打开该路径。
 
 ## 接入模型
 
