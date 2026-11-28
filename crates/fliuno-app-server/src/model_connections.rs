@@ -88,7 +88,7 @@ impl RpcServer {
     }
 }
 
-fn with_credential<T>(
+pub(super) fn with_credential<T>(
     input: &mut ModelProfileCredentialInput,
     callback: impl FnOnce(ConnectionCredential<'_>) -> Result<T, RpcError>,
 ) -> Result<T, RpcError> {
@@ -136,7 +136,9 @@ fn connection_snapshot(
         .map_err(|error| Error::Invalid(error).into())
 }
 
-fn connection_target(target: &ModelProfileConnectionTarget) -> ModelConnectionTarget<'_> {
+pub(super) fn connection_target(
+    target: &ModelProfileConnectionTarget,
+) -> ModelConnectionTarget<'_> {
     match target {
         ModelProfileConnectionTarget::Base => ModelConnectionTarget::Base,
         ModelProfileConnectionTarget::Existing { profile } => {

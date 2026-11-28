@@ -5074,6 +5074,257 @@
         }
       }
     },
+    "modelSuppliers/list": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "modelSuppliers/save": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelSupplierSaveParams",
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ModelSupplierTarget"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelSupplierPreset"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseUrl": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4096
+        },
+        "credential": {
+          "$ref": "#/$defs/ModelProfileCredentialInput"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "revision",
+        "credential"
+      ],
+      "$defs": {
+        "ModelSupplierTarget": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "new"
+                },
+                "supplier": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "supplier"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "existing"
+                },
+                "supplier": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "supplier"
+              ]
+            }
+          ]
+        },
+        "ModelSupplierPreset": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "custom"
+          ]
+        },
+        "ModelProfileCredentialInput": {
+          "description": "The API key is write-only. Credential references never appear in views.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "keep"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "managed"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "key"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "file"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "path"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "none"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
+    "modelProfiles/bindSupplier": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelSupplierBindingParams",
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ModelProfileConnectionTarget"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "supplier": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "revision",
+        "supplier",
+        "protocol",
+        "model"
+      ],
+      "$defs": {
+        "ModelProfileConnectionTarget": {
+          "description": "Which user-owned profile a trusted local client is managing.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "base"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "existing"
+                },
+                "profile": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "profile"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "new"
+                },
+                "profile": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "profile"
+              ]
+            }
+          ]
+        }
+      }
+    },
     "modelProfiles/getDefault": {
       "type": "object",
       "additionalProperties": false
@@ -21021,6 +21272,136 @@
           ]
         }
       }
+    },
+    "ModelSupplierSnapshot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelSupplierSnapshot",
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "string"
+        },
+        "suppliers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelSupplierEntry"
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelSupplierProfile"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "suppliers",
+        "models"
+      ],
+      "$defs": {
+        "ModelSupplierEntry": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "preset": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ModelSupplierPreset"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "baseUrl": {
+              "description": "Effective API root, including the default from the preset if used.",
+              "type": "string"
+            },
+            "credential": {
+              "$ref": "#/$defs/ModelProfileCredentialStatus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "baseUrl",
+            "credential"
+          ]
+        },
+        "ModelSupplierPreset": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini",
+            "custom"
+          ]
+        },
+        "ModelProfileCredentialStatus": {
+          "type": "string",
+          "enum": [
+            "unconfigured",
+            "configured",
+            "keyless"
+          ]
+        },
+        "ModelSupplierProfile": {
+          "type": "object",
+          "properties": {
+            "profile": {
+              "description": "Null denotes the original [model] table.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "supplier": {
+              "description": "Null denotes a legacy inline connection or an unconfigured base model.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "protocol": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "reasoningEffort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "ModelSupplierRevision": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelSupplierRevision",
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "revision"
+      ]
     },
     "ModelCatalogPreview": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

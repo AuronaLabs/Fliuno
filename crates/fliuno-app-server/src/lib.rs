@@ -5,6 +5,7 @@ mod approvals;
 mod memory_embeddings;
 mod model_connections;
 mod model_profiles;
+mod model_suppliers;
 mod scheduler;
 mod terminal_subscriptions;
 
@@ -610,6 +611,7 @@ impl RpcServer {
             capabilities["modelProfiles"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileEditing"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileConnections"] = json!(self.model_profiles.is_some());
+            capabilities["modelSupplierSettings"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileDefaults"] = json!(self.model_profiles.is_some());
             capabilities["providerModelCatalog"] = json!(self.model_profiles.is_some());
             capabilities["modelBudgetRejectionEvents"] = json!(true);
@@ -833,6 +835,23 @@ impl RpcServer {
             "modelProfiles/saveConnection" => {
                 self.local_model_config()?;
                 json!(self.save_model_connection(decode_connection(params)?)?)
+            }
+            "modelSuppliers/list" => {
+                self.local_model_config()?;
+                if !params.as_object().is_some_and(|object| object.is_empty()) {
+                    return Err(
+                        Error::Invalid("modelSuppliers/list takes no parameters".into()).into(),
+                    );
+                }
+                json!(self.list_model_suppliers()?)
+            }
+            "modelSuppliers/save" => {
+                self.local_model_config()?;
+                json!(self.save_model_supplier(decode_connection(params)?)?)
+            }
+            "modelProfiles/bindSupplier" => {
+                self.local_model_config()?;
+                json!(self.bind_model_supplier(decode_connection(params)?)?)
             }
             "modelProfiles/select" => {
                 let params: ModelProfileSelectParams = decode(params)?;

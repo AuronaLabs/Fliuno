@@ -330,6 +330,18 @@ Windows 和 Linux 上，Run 子任务通过 `--exec-config` 注册的进程工�
 
 任务创建时把已解码的文本或媒体内容写入任务快照。同一 `clientRequestId` 使用同一份输入和有序引用时，重试直接返回原任务。更换引用、改变顺序或改用内嵌字节会产生请求键冲突。不存在或不属于目标会话的交付物返回 `-32004`。格式或大小不符合约定时返回 `-32602`。[通过 AG-UI 引用交付物](ag-ui.md#引用已有交付物)
 
+### 命名供应商设置
+
+0.0.21 开发版在 `initialize.capabilities.modelSupplierSettings` 为 `true` 时提供以下本地配置方法。服务只能访问启动时由宿主选定的配置文件；附加的连接不能读写这些设置。
+
+| 方法 | 参数和结果 |
+| --- | --- |
+| `modelSuppliers/list` | 发送 `{}`。返回同一配置快照下的 `revision`、`suppliers` 和 `models`。供应商包含 ID、预设、有效 Base URL 和凭据状态；模型条目包含档案 ID、绑定、协议、模型与思考强度。`profile: null` 指 `[model]`，`supplier: null` 表示尚未绑定。 |
+| `modelSuppliers/save` | 发送 `{target,revision,preset,baseUrl,credential}`。`target` 为 `{"type":"new","supplier":"lab"}` 或 `{"type":"existing","supplier":"lab"}`。省略 Base URL 时使用预设地址；自定义连接必须提供地址。凭据结构与 `modelProfiles/saveConnection` 相同。更换有效地址时不能使用 `keep`。返回新 `revision`。 |
+| `modelProfiles/bindSupplier` | 发送 `{target,revision,supplier,protocol,model,reasoningEffort}`。档案目标与 `modelProfiles/saveConnection` 相同。可新建档案，或显式以命名供应商替换原连接；保存时保留预算及启动默认档案。返回新 `revision`。 |
+
+过期的 `revision` 会拒绝写入；客户端需重新获取设置，供用户核对后再提交。列表和回执不会返回密钥内容、密钥文件路径或托管凭据的引用。更新供应商或档案并不会立即替换正在使用的模型；要应用到当前档案需显式调用 `modelProfiles/select` 并传 `reload: true`。已保存的回复身份不变。配置示例见[工作台指南](workbench.md#命名供应商0021-开发版)。
+
 ### 模型尝试次数
 
 `initialize.capabilities.maxTaskModelSteps` 表示 `task/start` 和 `task/startSummary` 接受 `maxModelSteps`，取值为 `1..=32`。省略或显式填 `8` 都使用默认上限，重试时视为同一请求。外部 Agent 任务不接受该字段。显式指定非默认上限时，任务快照保留 `maxModelSteps`；已使用的次数见 `modelSteps`。

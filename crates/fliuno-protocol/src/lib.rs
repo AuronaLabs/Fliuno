@@ -11,6 +11,8 @@ pub use context::*;
 pub use context_attribution::*;
 mod policy;
 pub use policy::*;
+mod model_suppliers;
+pub use model_suppliers::*;
 mod model_usage;
 pub use model_usage::*;
 mod schema;
