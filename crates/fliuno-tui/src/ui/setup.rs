@@ -1,4 +1,9 @@
-use super::{clean, palette::Palette, setup_catalog::Catalog};
+use super::{
+    clean,
+    language::{Language, LanguageText},
+    palette::Palette,
+    setup_catalog::Catalog,
+};
 use crate::{Screen, editor::Editor, options::SetupOptions};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use fliuno_config::{
@@ -57,6 +62,7 @@ enum Step {
 
 #[derive(Default)]
 struct Form {
+    language: Language,
     step: Step,
     catalog: Catalog,
     route: usize,
@@ -95,6 +101,13 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                 let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
                 match key.code {
                     KeyCode::Char('c') if ctrl => return Ok(false),
+                    KeyCode::F(8) if key.kind == KeyEventKind::Press => {
+                        form.language = match form.language {
+                            Language::English => Language::SimplifiedChinese,
+                            Language::SimplifiedChinese => Language::English,
+                        };
+                        form.error.clear();
+                    }
                     KeyCode::Esc => {
                         form.error.clear();
                         form.step = match form.step {
@@ -179,7 +192,7 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                                 if !endpoint.is_empty()
                                     && let Err(error) = provider_api_root(endpoint)
                                 {
-                                    form.error = error.into();
+                                    form.error = form.report("地址无效", error);
                                 } else {
                                     form.keyless &= form.can_use_keyless();
                                     form.step = Step::Credential;
@@ -191,11 +204,17 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                                 }
                             }
                             Step::Model if form.model.text().trim().is_empty() => {
-                                form.error = "Choose a catalog model or enter a model ID.".into();
+                                form.error = form
+                                    .language
+                                    .text(
+                                        "Choose a catalog model or enter a model ID.",
+                                        "从目录选择模型，或输入模型 ID。",
+                                    )
+                                    .into();
                             }
                             Step::Model => match form.save(&options.config) {
                                 Ok(()) => return Ok(true),
-                                Err(error) => form.error = error,
+                                Err(error) => form.error = form.report("无法保存配置", &error),
                             },
                         }
                     }
@@ -211,6 +230,13 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
 }
 
 impl Form {
+    fn report(&self, zh: &str, detail: &str) -> String {
+        match self.language {
+            Language::English => detail.to_owned(),
+            Language::SimplifiedChinese => format!("{zh}：{detail}"),
+        }
+    }
+
     fn efforts(&self) -> &'static [ReasoningEffort] {
         MODEL_ROUTES[self.route].provider.reasoning_efforts()
     }
@@ -227,7 +253,10 @@ impl Form {
         } else if self.use_key_file {
             self.key_path().map(ConnectionCredential::File)
         } else if self.api_key.is_empty() {
-            Err("Paste your API key or press F2 to use a key file.")
+            Err(self.language.text(
+                "Paste your API key or press F2 to use a key file.",
+                "请粘贴 API 密钥，或按 F2 使用密钥文件。",
+            ))
         } else {
             Ok(ConnectionCredential::Managed(&self.api_key))
         };
@@ -249,7 +278,7 @@ impl Form {
         let (settings, key) = match draft.for_preview(&options.config, None) {
             Ok((settings, key)) => (settings, Zeroizing::new(key.unwrap_or_default())),
             Err(error) => {
-                self.error = error;
+                self.error = self.report("无法使用此连接", &error);
                 return false;
             }
         };
@@ -268,7 +297,10 @@ impl Form {
     fn key_path(&self) -> Result<&str, &'static str> {
         let path = self.key_file.text().trim();
         if path.is_empty() {
-            return Err("Enter the path to your API key file.");
+            return Err(self.language.text(
+                "Enter the path to your API key file.",
+                "请输入 API 密钥文件的路径。",
+            ));
         }
         Ok(path)
     }
@@ -291,7 +323,13 @@ impl Form {
             if self.api_key.len() + text.len() > 8192
                 || text.chars().any(|ch| ch.is_whitespace() || ch.is_control())
             {
-                self.error = "Paste a single API key without whitespace.".into();
+                self.error = self
+                    .language
+                    .text(
+                        "Paste a single API key without whitespace.",
+                        "请粘贴一个不含空白字符的 API 密钥。",
+                    )
+                    .into();
             } else {
                 self.api_key.push_str(text);
                 self.error.clear();
@@ -359,6 +397,7 @@ impl Form {
                 base_url: (!endpoint.is_empty()).then_some(endpoint),
                 reasoning_effort: self.effort,
                 credential,
+                language: self.language,
             },
         )
     }
@@ -377,74 +416,130 @@ impl Form {
             u16::from(width > 16) * 2,
             u16::from(viewport.height > 12),
         ));
+        let t = |en, zh| self.language.text(en, zh);
         let (step, heading, description, help) = match self.step {
             Step::Provider => (
                 1,
-                "Choose your model provider",
-                "Match the API offered by your provider or gateway.",
-                "↑ ↓ Select   Enter Continue   Esc Exit",
+                t("Choose your model provider", "选择模型连接协议"),
+                t(
+                    "Match the API offered by your provider or gateway.",
+                    "选择供应商或网关支持的 API。",
+                ),
+                t(
+                    "↑ ↓ Select   Enter Continue   Esc Exit",
+                    "↑ ↓ 选择   Enter 继续   Esc 退出",
+                ),
             ),
             Step::Model => (
                 4,
-                "Choose a model",
-                "Type a model ID or search the catalog.",
-                "↑ ↓ Browse   Tab Use model   Enter Save ID",
+                t("Choose a model", "选择模型"),
+                t(
+                    "Type a model ID or search the catalog.",
+                    "输入模型 ID，或从目录中搜索。",
+                ),
+                t(
+                    "↑ ↓ Browse   Tab Use model   Enter Save ID",
+                    "↑ ↓ 浏览   Tab 选用   Enter 保存",
+                ),
             ),
             Step::Reasoning => (
                 4,
-                "Set reasoning effort",
-                "Use the provider default unless you know your model supports a specific level.",
-                "↑ ↓ Select   Enter Apply   Esc Back",
+                t("Set reasoning effort", "设置推理强度"),
+                t(
+                    "Use the provider default unless you know your model supports a specific level.",
+                    "不确定模型支持哪些等级时，使用供应商默认值。",
+                ),
+                t(
+                    "↑ ↓ Select   Enter Apply   Esc Back",
+                    "↑ ↓ 选择   Enter 应用   Esc 返回",
+                ),
             ),
             Step::Endpoint => (
                 2,
-                "Set a Base URL",
-                "Leave blank for the provider default, or enter your gateway's API root.",
-                "Enter Continue   Esc Back",
+                t("Set a Base URL", "设置 Base URL"),
+                t(
+                    "Leave blank for the provider default, or enter your gateway's API root.",
+                    "留空使用默认地址，也可输入网关的 API 根地址。",
+                ),
+                t("Enter Continue   Esc Back", "Enter 继续   Esc 返回"),
             ),
             Step::Credential if self.keyless => (
                 3,
-                "Connect without a key",
-                "Fliuno will connect directly to this computer. No API key will be sent.",
-                "Enter Continue   F4 Use key   Esc Back",
+                t("Connect without a key", "不使用密钥"),
+                t(
+                    "Fliuno will connect directly to this computer. No API key will be sent.",
+                    "Fliuno 将直接连接本机，不发送 API 密钥。",
+                ),
+                t(
+                    "Enter Continue   F4 Use key   Esc Back",
+                    "Enter 继续   F4 使用密钥   Esc 返回",
+                ),
             ),
             Step::Credential if self.use_key_file => (
                 3,
-                "Connect an API key file",
-                "Enter an absolute path or one relative to the profile. Use a file with one API key.",
-                "Enter Continue   F2 Paste key   Esc Back",
+                t("Connect an API key file", "使用 API 密钥文件"),
+                t(
+                    "Enter an absolute path or one relative to the profile. Use a file with one API key.",
+                    "输入绝对路径或相对于配置文件的路径。文件中只放一个 API 密钥。",
+                ),
+                t(
+                    "Enter Continue   F2 Paste key   Esc Back",
+                    "Enter 继续   F2 粘贴密钥   Esc 返回",
+                ),
             ),
             Step::Credential => (
                 3,
-                "Connect your API key",
+                t("Connect your API key", "连接 API 密钥"),
                 if cfg!(windows) {
-                    "Paste a key from your model provider. Windows Credential Manager stores it for your account."
+                    t(
+                        "Paste a key from your model provider. Windows Credential Manager stores it for your account.",
+                        "粘贴供应商提供的密钥。Windows 凭据管理器会为你的账户保存它。",
+                    )
                 } else {
-                    "Paste a key from your model provider. Fliuno stores it in a private file next to your profile."
+                    t(
+                        "Paste a key from your model provider. Fliuno stores it in a private file next to your profile.",
+                        "粘贴供应商提供的密钥。Fliuno 会把它保存在配置旁的私有文件中。",
+                    )
                 },
                 if self.can_use_keyless() {
-                    "Enter Continue   F2 Key file   F4 No key   Esc Back"
+                    t(
+                        "Enter Continue   F2 Key file   F4 No key   Esc Back",
+                        "Enter 继续   F2 密钥文件   F4 无密钥   Esc 返回",
+                    )
                 } else {
-                    "Enter Continue   F2 Key file   Esc Back"
+                    t(
+                        "Enter Continue   F2 Key file   Esc Back",
+                        "Enter 继续   F2 密钥文件   Esc 返回",
+                    )
                 },
             ),
         };
         let header = Paragraph::new(vec![
-            Line::styled(format!("Fliuno  /  Set up  ·  {step} of 4"), palette.label),
+            Line::styled(
+                match self.language {
+                    Language::English => format!("Fliuno  /  Set up  ·  {step} of 4"),
+                    Language::SimplifiedChinese => format!("Fliuno  /  首次连接  ·  {step}/4"),
+                },
+                palette.label,
+            ),
             Line::raw(""),
             Line::styled(heading, palette.label),
             Line::styled(description, palette.quiet),
         ])
         .wrap(Wrap { trim: false });
         let catalog_status = Paragraph::new(if matches!(self.step, Step::Model) {
-            self.catalog.status(self.model.text())
+            self.catalog
+                .localized_status(self.model.text(), self.language)
         } else {
             ""
         })
         .style(palette.label)
         .wrap(Wrap { trim: false });
         let status_rows = if matches!(self.step, Step::Model)
-            && !self.catalog.status(self.model.text()).is_empty()
+            && !self
+                .catalog
+                .localized_status(self.model.text(), self.language)
+                .is_empty()
         {
             catalog_status.line_count(area.width).min(3) as u16
         } else {
@@ -453,21 +548,28 @@ impl Form {
         let mut footer_lines = vec![Line::raw(""), Line::styled(help, palette.quiet)];
         if matches!(self.step, Step::Model) {
             let more = if self.catalog.cursor().is_some() {
-                "   F6 More"
+                t("   F6 More", "   F6 更多")
             } else {
                 ""
             };
             footer_lines.push(Line::styled(
-                format!("F5 Reload{more}   Esc Back"),
+                format!(
+                    "{}{more}   {}",
+                    t("F5 Reload", "F5 刷新"),
+                    t("Esc Back", "Esc 返回")
+                ),
                 palette.quiet,
             ));
             let effort = self
                 .effort
-                .map_or("provider default", ReasoningEffort::as_str);
+                .map_or(t("provider default", "默认"), ReasoningEffort::as_str);
             footer_lines.push(Line::styled(
-                format!("F3 Reasoning: {effort}"),
+                format!("{}{effort}", t("F3 Reasoning: ", "F3 推理强度：")),
                 palette.quiet,
             ));
+        }
+        if matches!(self.step, Step::Provider) {
+            footer_lines.push(Line::styled(t("F8 简体中文", "F8 English"), palette.quiet));
         }
         if !self.error.is_empty() {
             footer_lines.push(Line::styled(clean(&self.error), palette.status(Color::Red)));
@@ -504,7 +606,7 @@ impl Form {
                 frame.render_widget(Paragraph::new(lines), body);
             }
             Step::Reasoning => {
-                let labels = std::iter::once("Provider default")
+                let labels = std::iter::once(t("Provider default", "供应商默认"))
                     .chain(self.efforts().iter().map(|effort| effort.as_str()))
                     .map(str::to_owned)
                     .collect();
@@ -522,12 +624,24 @@ impl Form {
                 if body.width > 2 && body.height > 0 =>
             {
                 let (editor, placeholder, hint) = match self.step {
-                    Step::Model => (&self.model, "Model ID or search", String::new()),
-                    Step::Endpoint => (&self.endpoint, "Provider default", String::new()),
+                    Step::Model => (
+                        &self.model,
+                        t("Model ID or search", "模型 ID 或搜索"),
+                        String::new(),
+                    ),
+                    Step::Endpoint => (
+                        &self.endpoint,
+                        t("Provider default", "供应商默认"),
+                        String::new(),
+                    ),
                     _ => (
                         &self.key_file,
-                        "Path to API key file",
-                        format!("Profile  {}", clean(&config.to_string_lossy())),
+                        t("Path to API key file", "API 密钥文件路径"),
+                        format!(
+                            "{}  {}",
+                            t("Profile", "配置"),
+                            clean(&config.to_string_lossy())
+                        ),
                     ),
                 };
                 let [row, context] =
@@ -539,7 +653,7 @@ impl Form {
                     let max = usize::from(input.width.saturating_sub(1));
                     let cells = self.api_key.chars().count().min(max);
                     let value = if self.api_key.is_empty() {
-                        Line::styled("Paste API key", palette.quiet)
+                        Line::styled(t("Paste API key", "粘贴 API 密钥"), palette.quiet)
                     } else {
                         Line::raw("•".repeat(cells))
                     };

@@ -1814,6 +1814,51 @@ fn first_launch_guides_keyless_loopback_and_persists_the_profile() {
 
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn first_launch_switches_and_persists_chinese() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join(".fliuno/config.toml");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let model_service = thread::spawn(move || {
+        let unauthorized = read_catalog_request(&listener, Some("fixture-chinese-key"));
+        write_catalog_response(unauthorized, 401, r#"{"error":"fixture-chinese-key"}"#);
+    });
+    let mut console = Console::launch_unconfigured(server.as_deref(), root.path());
+    console.expect("F8 简体中文");
+    console.keys("\x1b[19~");
+    console.expect("选择模型连接协议");
+    for (rows, cols) in [(16, 48), (24, 80), (28, 110)] {
+        console.resize(rows, cols);
+        console.ready();
+        console.expect("选择模型连接协议");
+        console.expect("F8 English");
+        console.capture(&format!("setup-zh-provider-{cols}"));
+    }
+    console.keys("\x1b[B\r");
+    console.expect("设置 Base URL");
+    console.keys(&format!("{base}\r"));
+    console.expect("连接 API 密钥");
+    console.keys("fixture-chinese-key\r");
+    console.expect("选择模型");
+    console.expect("凭据");
+    console.expect_absent("fixture-chinese-key");
+    assert!(!config.exists());
+    console.keys("zh-model\r");
+    console.expect("Enter 发送");
+    console.quit("\x03");
+    model_service.join().unwrap();
+    let saved = std::fs::read_to_string(&config).unwrap();
+    assert!(saved.contains("language = \"zh-CN\""));
+    assert!(!saved.contains("fixture-chinese-key"));
+    let mut reopened = Console::launch_unconfigured(server.as_deref(), root.path());
+    reopened.expect("Enter 发送");
+    reopened.expect_absent("选择模型连接协议");
+    reopened.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn first_launch_stores_a_pasted_key_without_exposing_it() {
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
     let root = tempfile::tempdir().unwrap();

@@ -1,6 +1,7 @@
 //! Persistence for the first live profile, shared by all local clients.
 use super::{
-    ConnectionCredential, ModelConnectionDraft, ModelProtocol, Provider, ReasoningEffort, Settings,
+    ConnectionCredential, Language, ModelConnectionDraft, ModelProtocol, Provider, ReasoningEffort,
+    Settings,
 };
 use std::{fs, io, io::Write, path::Path};
 use toml_edit::{DocumentMut, Item, Table, value};
@@ -12,6 +13,7 @@ pub struct ModelSetup<'a> {
     pub base_url: Option<&'a str>,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub credential: ModelSetupCredential<'a>,
+    pub language: Language,
 }
 
 pub enum ModelSetupCredential<'a> {
@@ -51,6 +53,11 @@ impl Settings {
             profile.insert("reasoning_effort", value(effort.as_str()));
         }
         let mut document = DocumentMut::new();
+        if setup.language != Language::default() {
+            let mut workbench = Table::new();
+            workbench.insert("language", value(setup.language.id()));
+            document.insert("workbench", Item::Table(workbench));
+        }
         document.insert("model", Item::Table(profile));
         let write = || -> io::Result<()> {
             fs::create_dir_all(parent)?;
@@ -91,11 +98,14 @@ mod tests {
             base_url: Some("http://127.0.0.1:1234/v1"),
             reasoning_effort: Some(ReasoningEffort::High),
             credential: ModelSetupCredential::File("test.key"),
+            language: Language::SimplifiedChinese,
         };
         Settings::create_live_model(&path, setup()).unwrap();
         let saved = fs::read_to_string(&path).unwrap();
         assert!(!saved.contains("fixture-key"));
-        let model = Settings::load(&path).unwrap().model;
+        let settings = Settings::load(&path).unwrap();
+        assert_eq!(settings.workbench.language, Language::SimplifiedChinese);
+        let model = settings.model;
         assert_eq!(model.name.as_deref(), Some(setup().model));
         assert_eq!(model.base_url.as_deref(), Some("http://127.0.0.1:1234/v1/"));
         assert_eq!(
