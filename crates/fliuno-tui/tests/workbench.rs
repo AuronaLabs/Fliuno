@@ -1505,6 +1505,41 @@ fn workspace_deliverables_filter_review_versions_and_verify_saved_bytes() {
     console.quit("\x03");
 }
 
+fn read_catalog_request(listener: &std::net::TcpListener, key: &str) -> std::net::TcpStream {
+    use std::io::{BufRead, BufReader};
+
+    let (mut socket, _) = listener.accept().unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut reader = BufReader::new(&mut socket);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    assert!(line.starts_with("GET /v1/models HTTP/1.1"), "{line}");
+    let mut authenticated = false;
+    loop {
+        line.clear();
+        assert!(reader.read_line(&mut line).unwrap() > 0);
+        if line == "\r\n" {
+            break;
+        }
+        if let Some((header, value)) = line.split_once(':')
+            && header.eq_ignore_ascii_case("authorization")
+        {
+            authenticated = value.trim().strip_prefix("Bearer ") == Some(key);
+        }
+    }
+    assert!(
+        authenticated,
+        "catalog request must carry the selected credential"
+    );
+    socket
+}
+
+fn write_catalog_response(mut socket: std::net::TcpStream, code: u16, body: &str) {
+    write!(socket, "HTTP/1.1 {code} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+}
+
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn first_launch_guides_live_setup_and_reopens_the_profile() {
@@ -1527,6 +1562,7 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     assert!(!profile.exists());
 
     let mut cancelled = Console::launch_unconfigured(server.as_deref(), root.path());
+    cancelled.resize(28, 110);
     cancelled.expect("Choose your model provider");
     cancelled.expect("Google Gemini Interactions");
     cancelled.capture("setup-provider-110");
@@ -1540,36 +1576,76 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
         "opening and cancelling must leave no profile"
     );
 
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let (release_catalog, wait_for_filter) = channel();
+    let model_service = thread::spawn(move || {
+        let rejected = read_catalog_request(&listener, "fixture-rejected-key");
+        write_catalog_response(rejected, 401, r#"{"error":"fixture-rejected-key"}"#);
+        let catalog = read_catalog_request(&listener, "fixture-secret-value");
+        wait_for_filter
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        write_catalog_response(
+            catalog,
+            200,
+            r#"{"data":[{"id":"alpha-model"},{"id":"fixture-catalog-model"}]}"#,
+        );
+        let (mut stream, request) = streaming_fixture_input(&listener);
+        assert_eq!(request["model"], "fixture-catalog-model");
+        stream.write_all(concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Connected from the catalog.\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ).as_bytes()).unwrap();
+    });
+
     let mut console = Console::launch_unconfigured(server.as_deref(), root.path());
     console.expect("Choose your model provider");
     console.keys("\x1b[B\r");
-    console.expect("Enter a model ID");
-    console.expect("OpenAI-compatible Chat Completions");
-    console.resize(24, 80);
-    console.ready();
-    console.capture("setup-model-80");
-    console.keys("fixture-model");
-    console.expect("fixture-model");
-    console.keys("\r");
     console.expect("Set a Base URL");
+    console.resize(24, 80);
     console.capture("setup-base-url-80");
     console.keys("http://example.invalid/v1\r");
     console.expect("requires HTTPS");
     console.keys("\x1b[H");
     console.keys(&"\x1b[3~".repeat("http://example.invalid/v1".len()));
-    console.keys("http://127.0.0.1:9/v1\r");
+    console.keys(&format!("{base}\r"));
     console.expect("Connect your API key");
     console.keys("\x1bOQ");
     console.expect("Connect an API key file");
     console.resize(21, 48);
-    console.ready();
     console.keys("fixture key.txt\r");
     console.expect("Cannot read the configured API key file");
     console.capture("setup-key-file-48");
     assert!(!config.exists());
     assert!(!data.exists());
     std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("fixture key.txt"), "fixture-secret-value\n").unwrap();
+    let key_file = profile.join("fixture key.txt");
+    std::fs::write(&key_file, "fixture-rejected-key\n").unwrap();
+    console.keys("\r");
+    console.expect("API key rejected");
+    console.expect_absent("fixture-rejected-key");
+    console.capture("setup-auth-rejected-48");
+    assert!(!config.exists());
+    assert!(!data.exists());
+    std::fs::write(key_file, "fixture-secret-value\n").unwrap();
+    console.keys("\x1b[15~");
+    console.expect("Loading the model catalog");
+    console.keys("catalog");
+    console.expect("› catalog");
+    console.capture("setup-catalog-loading-48");
+    release_catalog.send(()).unwrap();
+    console.expect("fixture-catalog-model");
+    console.expect_absent("alpha-model");
+    console.capture("setup-catalog-result-48");
+    console.resize(24, 80);
+    console.capture("setup-catalog-result-80");
+    console.resize(28, 110);
+    console.capture("setup-catalog-result-110");
+    console.keys("\t");
+    console.expect("› fixture-catalog-model");
+
     std::fs::write(&config, "concurrent profile").unwrap();
     console.keys("\r");
     console.expect("A profile already exists.");
@@ -1583,18 +1659,24 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.expect("Message Fliuno");
     console.expect_absent("Offline demo");
     console.expect_absent("fixture-secret-value");
+    console.resize(21, 48);
     console.capture("conversation-first-launch-48");
     let profile_text = std::fs::read_to_string(&config).unwrap();
     assert!(profile_text.contains("provider = \"openai\""));
     assert!(profile_text.contains("protocol = \"chat_completions\""));
-    assert!(profile_text.contains("base_url = \"http://127.0.0.1:9/v1/\""));
+    assert!(profile_text.contains(&format!("base_url = \"{base}\"")));
+    assert!(profile_text.contains("name = \"fixture-catalog-model\""));
     assert!(profile_text.contains("api_key_file = \"fixture key.txt\""));
     assert!(!profile_text.contains("fixture-secret-value"));
     assert!(data.is_file());
+    console.keys("Use the catalog model.\r");
+    console.expect("Connected from the catalog.");
+    console.resize(28, 110);
+    console.capture("setup-catalog-conversation-110");
+    model_service.join().unwrap();
     console.quit("\x03");
 
     let mut reopened = Console::launch_unconfigured(server.as_deref(), root.path());
-    reopened.expect("Start a conversation");
     reopened.expect("Message Fliuno");
     reopened.expect_absent("Choose your model provider");
     reopened.quit("\x03");
@@ -1607,13 +1689,17 @@ fn first_launch_stores_a_pasted_key_without_exposing_it() {
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
     let root = tempfile::tempdir().unwrap();
     let config = root.path().join(".fliuno/config.toml");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let catalog = thread::spawn(move || {
+        let stream = read_catalog_request(&listener, "fixture-managed-secret-value");
+        write_catalog_response(stream, 200, r#"{"data":[]}"#);
+    });
     let mut terminal = Console::launch_unconfigured(server.as_deref(), root.path());
     terminal.expect("Choose your model provider");
     terminal.keys("\r");
-    terminal.expect("Enter a model ID");
-    terminal.keys("fixture-managed\r");
     terminal.expect("Set a Base URL");
-    terminal.keys("\r");
+    terminal.keys(&format!("{base}\r"));
     terminal.expect("Connect your API key");
     terminal.resize(21, 48);
     terminal.ready();
@@ -1624,6 +1710,12 @@ fn first_launch_stores_a_pasted_key_without_exposing_it() {
     terminal.expect_absent("fixture-managed-secret-value");
     terminal.capture("setup-managed-key-48");
     terminal.keys("\r");
+    terminal.expect("The catalog is empty");
+    terminal.expect_absent("fixture-managed-secret-value");
+    assert!(!config.parent().unwrap().exists());
+    terminal.capture("setup-catalog-empty-48");
+    terminal.keys("fixture-managed\r");
+    catalog.join().unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(10);
     while !config.is_file() && Instant::now() < deadline {

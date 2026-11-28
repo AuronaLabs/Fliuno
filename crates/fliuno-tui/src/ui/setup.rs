@@ -1,7 +1,10 @@
-use super::{clean, palette::Palette};
+use super::{clean, palette::Palette, setup_catalog::Catalog};
 use crate::{Screen, editor::Editor, options::SetupOptions};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use fliuno_config::{ModelProtocol, PendingApiKey, Provider, provider_api_root, read_api_key};
+use fliuno_config::{
+    ModelCatalogDraft, ModelProtocol, PendingApiKey, Provider, provider_api_root, read_api_key,
+    validate_api_key,
+};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Position, Rect},
@@ -13,6 +16,7 @@ use std::{
     fs,
     io::{self, Write},
     path::Path,
+    time::Duration,
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -57,6 +61,7 @@ enum Step {
 #[derive(Default)]
 struct Form {
     step: Step,
+    catalog: Catalog,
     route: usize,
     model: Editor,
     endpoint: Editor,
@@ -70,7 +75,11 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
     let mut form = Form::default();
     let palette = Palette::new(options.theme);
     loop {
+        form.catalog.poll();
         screen.draw(|frame| form.draw(frame, &options.config, &palette))?;
+        if form.catalog.loading() && !event::poll(Duration::from_millis(50))? {
+            continue;
+        }
         match event::read()? {
             Event::Paste(mut text) => {
                 form.insert(&text);
@@ -82,12 +91,17 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                     KeyCode::Char('c') if ctrl => return Ok(false),
                     KeyCode::Esc => {
                         form.error.clear();
-                        form.api_key.zeroize();
                         form.step = match form.step {
                             Step::Provider => return Ok(false),
-                            Step::Model => Step::Provider,
-                            Step::Endpoint => Step::Model,
-                            Step::Credential => Step::Endpoint,
+                            Step::Endpoint => Step::Provider,
+                            Step::Credential => {
+                                form.api_key.zeroize();
+                                Step::Endpoint
+                            }
+                            Step::Model => {
+                                form.catalog = Catalog::default();
+                                Step::Credential
+                            }
                         };
                     }
                     KeyCode::F(2) if matches!(form.step, Step::Credential) => {
@@ -95,14 +109,30 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                         form.api_key.zeroize();
                         form.error.clear();
                     }
+                    KeyCode::F(5)
+                        if matches!(form.step, Step::Model) && !form.catalog.loading() =>
+                    {
+                        form.refresh_catalog(&options, None);
+                    }
+                    KeyCode::F(6)
+                        if matches!(form.step, Step::Model) && !form.catalog.loading() =>
+                    {
+                        if let Some(cursor) = form.catalog.cursor().map(str::to_owned) {
+                            form.refresh_catalog(&options, Some(cursor));
+                        }
+                    }
+                    KeyCode::Tab if matches!(form.step, Step::Model) => {
+                        if let Some(id) =
+                            form.catalog.selected(form.model.text()).map(str::to_owned)
+                        {
+                            form.model.clear();
+                            form.insert(&id);
+                        }
+                    }
                     KeyCode::Enter if key.kind == KeyEventKind::Press => {
                         form.error.clear();
                         match form.step {
-                            Step::Provider => form.step = Step::Model,
-                            Step::Model if form.model.text().trim().is_empty() => {
-                                form.error = "Enter a model ID available on your account.".into();
-                            }
-                            Step::Model => form.step = Step::Endpoint,
+                            Step::Provider => form.step = Step::Endpoint,
                             Step::Endpoint => {
                                 let endpoint = form.endpoint.text().trim();
                                 if !endpoint.is_empty()
@@ -113,7 +143,15 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                                     form.step = Step::Credential;
                                 }
                             }
-                            Step::Credential => match form.save(&options.config) {
+                            Step::Credential => {
+                                if form.refresh_catalog(&options, None) {
+                                    form.step = Step::Model;
+                                }
+                            }
+                            Step::Model if form.model.text().trim().is_empty() => {
+                                form.error = "Choose a catalog model or enter a model ID.".into();
+                            }
+                            Step::Model => match form.save(&options.config) {
                                 Ok(()) => return Ok(true),
                                 Err(error) => form.error = error,
                             },
@@ -131,6 +169,43 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
 }
 
 impl Form {
+    fn refresh_catalog(&mut self, options: &SetupOptions, cursor: Option<String>) -> bool {
+        let key = if self.use_key_file {
+            self.key_path()
+                .and_then(|path| read_api_key(&profile_parent(&options.config).join(path)))
+        } else if self.api_key.is_empty() {
+            Err("Paste your API key or press F2 to use a key file.")
+        } else {
+            validate_api_key(&self.api_key).map(|()| self.api_key.to_string())
+        };
+        let key = match key {
+            Ok(key) => Zeroizing::new(key),
+            Err(error) => {
+                self.error = error.into();
+                return false;
+            }
+        };
+        self.error.clear();
+        let route = &MODEL_ROUTES[self.route];
+        let endpoint = self.endpoint.text().trim();
+        let draft = ModelCatalogDraft {
+            provider: route.provider,
+            protocol: route.protocol,
+            base_url: (!endpoint.is_empty()).then(|| endpoint.to_owned()),
+            cursor,
+        };
+        self.catalog.request(&options.server, draft, key);
+        true
+    }
+
+    fn key_path(&self) -> Result<&str, &'static str> {
+        let path = self.key_file.text().trim();
+        if path.is_empty() {
+            return Err("Enter the path to your API key file.");
+        }
+        Ok(path)
+    }
+
     fn field(&mut self) -> Option<&mut Editor> {
         match self.step {
             Step::Model => Some(&mut self.model),
@@ -164,13 +239,17 @@ impl Form {
             && field.insert(text, limit)
         {
             self.error.clear();
+            self.catalog.reset_selection();
         }
     }
 
     fn navigate(&mut self, key: KeyCode) {
-        if let Some(field) = self.field() {
+        if matches!(self.step, Step::Model) && matches!(key, KeyCode::Up | KeyCode::Down) {
+            self.catalog.navigate(key, self.model.text());
+        } else if let Some(field) = self.field() {
             if field.key(key) {
                 self.error.clear();
+                self.catalog.reset_selection();
             }
         } else if matches!(self.step, Step::Credential) {
             if key == KeyCode::Backspace {
@@ -189,10 +268,7 @@ impl Form {
     }
 
     fn save(&self, config: &Path) -> Result<(), String> {
-        let parent = config
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
+        let parent = profile_parent(config);
         let route = &MODEL_ROUTES[self.route];
         let provider = route.provider.name();
         let protocol = route.protocol.as_str();
@@ -208,10 +284,7 @@ impl Form {
         };
         let mut pending = None;
         let credential = if self.use_key_file {
-            let key_file = self.key_file.text().trim();
-            if key_file.is_empty() {
-                return Err("Enter the path to your API key file.".into());
-            }
+            let key_file = self.key_path()?;
             read_api_key(&parent.join(key_file))?;
             let file = serde_json::to_string(key_file).map_err(|e| e.to_string())?;
             format!("api_key_file = {file}")
@@ -270,32 +343,32 @@ impl Form {
                 "↑ ↓ Select   Enter Continue   Esc Exit",
             ),
             Step::Model => (
-                2,
-                "Enter a model ID",
-                "Use a model ID from your provider account.",
-                "Enter Continue   Esc Back",
+                4,
+                "Choose a model",
+                "Type a model ID or search the catalog.",
+                "↑ ↓ Browse   Tab Use model   Enter Save ID",
             ),
             Step::Endpoint => (
-                3,
+                2,
                 "Set a Base URL",
                 "Leave blank for the provider default, or enter your gateway's API root.",
                 "Enter Continue   Esc Back",
             ),
             Step::Credential if self.use_key_file => (
-                4,
+                3,
                 "Connect an API key file",
                 "Enter an absolute path or one relative to the profile. Use a file with one API key.",
-                "Enter Save   F2 Paste key   Esc Back",
+                "Enter Continue   F2 Paste key   Esc Back",
             ),
             Step::Credential => (
-                4,
+                3,
                 "Connect your API key",
                 if cfg!(windows) {
                     "Paste a key from your model provider. Windows Credential Manager stores it for your account."
                 } else {
                     "Paste a key from your model provider. Fliuno stores it in a private file next to your profile."
                 },
-                "Enter Save   F2 Key file   Esc Back",
+                "Enter Continue   F2 Key file   Esc Back",
             ),
         };
         let header = Paragraph::new(vec![
@@ -305,14 +378,45 @@ impl Form {
             Line::styled(description, palette.quiet),
         ])
         .wrap(Wrap { trim: false });
+        let catalog_status = Paragraph::new(if matches!(self.step, Step::Model) {
+            self.catalog.status(self.model.text())
+        } else {
+            ""
+        })
+        .style(palette.label)
+        .wrap(Wrap { trim: false });
+        let status_rows = if matches!(self.step, Step::Model)
+            && !self.catalog.status(self.model.text()).is_empty()
+        {
+            catalog_status.line_count(area.width).min(3) as u16
+        } else {
+            0
+        };
+        let mut footer_lines = vec![Line::raw(""), Line::styled(help, palette.quiet)];
+        if matches!(self.step, Step::Model) {
+            let more = if self.catalog.cursor().is_some() {
+                "   F6 More"
+            } else {
+                ""
+            };
+            footer_lines.push(Line::styled(
+                format!("F5 Reload{more}   Esc Back"),
+                palette.quiet,
+            ));
+        }
+        if !self.error.is_empty() {
+            footer_lines.push(Line::styled(clean(&self.error), palette.status(Color::Red)));
+        }
+        let footer = Paragraph::new(footer_lines).wrap(Wrap { trim: false });
         let [header_area, body, footer_area, _] = Layout::vertical([
             Constraint::Length(header.line_count(area.width).min(7) as u16 + 1),
             Constraint::Length(match self.step {
-                Step::Provider => MODEL_ROUTES.len() as u16 + 1,
-                Step::Model | Step::Endpoint => 3,
+                Step::Provider => MODEL_ROUTES.len() as u16,
+                Step::Model => 1 + status_rows + self.catalog.visible_rows(self.model.text()),
+                Step::Endpoint => 3,
                 Step::Credential => 5,
             }),
-            Constraint::Length(4),
+            Constraint::Length(footer.line_count(area.width).min(7) as u16),
             Constraint::Min(0),
         ])
         .areas(area);
@@ -337,11 +441,7 @@ impl Form {
                 if body.width > 2 && body.height > 0 =>
             {
                 let (editor, placeholder, hint) = match self.step {
-                    Step::Model => (
-                        &self.model,
-                        "Model ID",
-                        MODEL_ROUTES[self.route].label.to_owned(),
-                    ),
+                    Step::Model => (&self.model, "Model ID or search", String::new()),
                     Step::Endpoint => (&self.endpoint, "Provider default", String::new()),
                     _ => (
                         &self.key_file,
@@ -376,20 +476,30 @@ impl Form {
                 frame.render_widget(Line::styled("›", palette.label), marker);
                 frame.render_widget(value, input);
                 frame.set_cursor_position(Position::new(input.x + x, input.y));
-                frame.render_widget(
-                    Paragraph::new(hint)
-                        .style(palette.quiet)
-                        .wrap(Wrap { trim: false }),
-                    context,
-                );
+                if matches!(self.step, Step::Model) {
+                    let [status, rows] =
+                        Layout::vertical([Constraint::Length(status_rows), Constraint::Min(0)])
+                            .areas(context);
+                    frame.render_widget(catalog_status, status);
+                    self.catalog
+                        .draw(frame, rows, self.model.text(), palette.choice);
+                } else {
+                    frame.render_widget(
+                        Paragraph::new(hint)
+                            .style(palette.quiet)
+                            .wrap(Wrap { trim: false }),
+                        context,
+                    );
+                }
             }
             _ => {}
         }
-        let footer = Paragraph::new(vec![
-            Line::styled(help, palette.quiet),
-            Line::styled(clean(&self.error), palette.status(Color::Red)),
-        ])
-        .wrap(Wrap { trim: false });
         frame.render_widget(footer, footer_area);
     }
+}
+
+fn profile_parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
 }

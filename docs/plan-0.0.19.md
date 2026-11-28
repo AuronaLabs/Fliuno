@@ -11,6 +11,8 @@
 | 本地 OpenCode `d284e7c` 的 `packages/ai/src/protocols/openai-chat.ts`、`openai-compatible-chat.ts` | 兼容网关复用 Chat 请求、流式解码与历史转译。测试缺失用量、并行工具分片、空分片和提前断开。 |
 | 本地 Codex `a1604a8` 的 `codex-rs/model-provider-info/src/lib.rs` | 分离供应商 ID、端点、线上协议与能力。如同一主机提供多种协议，给用户明确选择。保持现有 `provider = "openai"` 的解释和已有配置文件可读。 |
 
+本地 OpenCode 的 `packages/core/src/modal/models.ts` 也把远端目录解码留在 Provider 层。Fliuno 首启通过本机子进程读取草稿目录，不需要先写入配置、密钥或数据库。UI 仅负责搜索、翻页和手填。
+
 ## 交付与验收
 
 | 板块 | 实现 | 验收 |
@@ -23,4 +25,4 @@
 ## 开发验证
 
 - Windows 使用 llama.cpp `b12821` 和 SmolLM2-135M-Instruct Q4_K_M，完成了带 Bearer 凭据的 `/v1/models` 查询、`--check-model` 和 stdio 对话。连接检查通过时模型在目录中，启动对话前数据库文件未创建。对话完成后保留 `openai-chat` 续接身份。
-- Windows ConPTY 在 110、80 和 48 列抓取首启画面，检查协议选项、模型 ID、Base URL 和凭据错误提示。用 Chat Completions 完成设置并重新打开已保存的配置。远端目录选择和 Debian PTY 验收仍待完成。
+- Windows ConPTY 在 110、80 和 48 列抓取首启画面，检查协议选项、模型 ID、Base URL 和凭据错误提示。用 Chat Completions 完成设置并重新打开已保存的配置。首启目录能在后台加载，Windows 已验证查询期间编辑、401 重试、空目录手填和所选 Chat 模型进入真实 HTTP 请求。工作台内管理与 Debian PTY 验收仍待完成。

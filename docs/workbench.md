@@ -2,7 +2,7 @@
 
 [产品首页](../README.md) · [文档中心](README.md) · [迭代规划](roadmap.md)
 
-从项目目录在终端里运行 `fliuno`。首次启动会引导你选择接口、填写模型 ID 和可选的 Base URL，再连接 API 密钥。OpenAI 官方接口选 Responses，使用兼容网关或本机服务时按该服务提供的接口选择 Chat Completions。Anthropic 和 Google Gemini 也有各自的原生选项。保存后可直接输入第一条消息，按 `Enter` 发送。`F1` 打开命令搜索，`Esc` 返回对话。用 `Ctrl+N` 或粘贴输入多行。
+从项目目录在终端里运行 `fliuno`。首次启动会引导你选择接口、填写可选的 Base URL 并连接 API 密钥。随后可在后台加载的目录里搜索模型：用 `↑` / `↓` 浏览，`Tab` 填入所选模型，`Enter` 保存当前输入的模型 ID。目录不可用时仍可手填。OpenAI 官方接口选 Responses，使用兼容网关或本机服务时按该服务提供的接口选择 Chat Completions。Anthropic 和 Google Gemini 也有各自的原生选项。保存后可直接输入第一条消息，按 `Enter` 发送。`F1` 打开命令搜索，`Esc` 返回对话。用 `Ctrl+N` 或粘贴输入多行。
 
 0.0.18 起，在空输入框键入 `/` 会打开常用命令。继续输入以筛选，按 `↑` 或 `↓` 选择，再按 `Tab` 运行。`/new` 开启当前文件夹的新对话，`/resume` 查看该文件夹的已有会话，`/help` 打开完整命令。`Enter` 会把当前输入留在草稿里，可以继续编辑路径或文本。有草稿时按 `F1` 打开命令，按 `Esc` 回到原草稿。
 

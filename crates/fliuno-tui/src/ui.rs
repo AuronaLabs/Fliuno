@@ -6,6 +6,7 @@ mod model_picker;
 mod palette;
 mod panels;
 pub(crate) mod setup;
+mod setup_catalog;
 mod transcript;
 mod workbench;
 

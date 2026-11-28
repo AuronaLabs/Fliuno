@@ -39,6 +39,7 @@ pub struct Options {
 
 pub struct SetupOptions {
     pub config: PathBuf,
+    pub server: PathBuf,
     pub theme: Theme,
 }
 
@@ -129,6 +130,7 @@ impl Options {
             if !force_demo && !doctor {
                 return Ok(Entry::Setup(SetupOptions {
                     config: path.clone(),
+                    server: server_or_default(server)?,
                     theme: theme.unwrap_or_default(),
                 }));
             }
@@ -151,12 +153,7 @@ impl Options {
                     .provider,
                 Provider::Demo
             );
-        let server = match server.or_else(|| settings.workbench.server.take()) {
-            Some(path) => path,
-            None => std::env::current_exe()
-                .map_err(|error| error.to_string())?
-                .with_file_name(format!("fliuno-app-server{}", std::env::consts::EXE_SUFFIX)),
-        };
+        let server = server_or_default(server.or_else(|| settings.workbench.server.take()))?;
         let workspace = match workspace {
             Some(path) => path,
             None => std::env::current_dir().map_err(|error| error.to_string())?,
@@ -187,6 +184,15 @@ impl Options {
         } else {
             Entry::Run(options)
         })
+    }
+}
+
+fn server_or_default(server: Option<PathBuf>) -> Result<PathBuf, String> {
+    match server {
+        Some(path) => Ok(path),
+        None => Ok(std::env::current_exe()
+            .map_err(|error| error.to_string())?
+            .with_file_name(format!("fliuno-app-server{}", std::env::consts::EXE_SUFFIX))),
     }
 }
 
