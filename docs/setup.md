@@ -105,6 +105,8 @@ name = "local-model-id"
 api_key_file = "credentials/local.key"
 ```
 
+本机兼容服务不要求 Key 时，可将该档案的 `api_key_file` 替换为 `auth = "none"`。此选项只接受显式的 Chat Completions 回环地址（`localhost`、`127.0.0.1` 或 `[::1]`），目录和生成会直接连接，不发送认证头。`models/check` 会把凭据状态标记为 `not_required`。未设置 `auth` 的旧档案仍需要凭据。
+
 Chat Completions 支持文本、图像和每步一次函数调用，具体能力取决于服务器和模型。预算可配置数值窗口与 `max_output_tokens`，`provider_count` 须省略或为 `false`。使用同一模型 ID 的 Responses 和 Chat Completions 仍有不同的内核身份，以保留持久 Run 和续接的协议范围。
 
 在填写 `name` 前可以用已配置的 Provider、Base URL 和凭据拉取目录。命令输出 JSON，支持将返回的 `nextCursor` 传给下一次调用。运行中的可信本地 stdio 客户端也可以调用 `models/list`，可选 `profile` 和 `cursor`。 设置 `baseProfile: true` 可显式查询 `[model]`。编辑器可携带 `revision`，防止意外查询已被外部修改的配置。

@@ -31,11 +31,10 @@ pub fn discover_models(
     if matches!(provider, Provider::Demo) {
         return Err("Choose a configured live model provider".into());
     }
-    let key = settings.read_api_key()?;
-    let headers = provider_headers(provider, &key)?;
-    let http = catalog_http(settings, headers)?;
+    let key = settings.read_model_key()?;
+    let http = catalog_http(settings, catalog_headers(provider, key.as_deref())?)?;
     read_page(provider, &http, cursor, CATALOG_TIMEOUT)
-        .map(|page| filter_credential_echo(page, &key))
+        .map(|page| filter_credential_echo(page, key.as_deref()))
         .map_err(|error| error.to_string())
 }
 
@@ -52,7 +51,7 @@ pub fn preview_model_catalog(
     };
     validate_configuration(&settings)?;
     validate_api_key(key)?;
-    let headers = provider_headers(settings.provider, key)?;
+    let headers = catalog_headers(settings.provider, Some(key))?;
     let http = catalog_http(&settings, headers)?;
     Ok(
         match read_page(
@@ -65,7 +64,7 @@ pub fn preview_model_catalog(
                 catalog: ModelCatalogStatus::Available,
                 catalog_access: ModelCatalogAccess::Accepted,
                 http_status: None,
-                page: Some(filter_credential_echo(page, key)),
+                page: Some(filter_credential_echo(page, Some(key))),
             },
             Err(error @ CatalogError::Input(_)) => return Err(error.to_string()),
             Err(error) => {
@@ -81,7 +80,8 @@ pub fn preview_model_catalog(
     )
 }
 
-fn filter_credential_echo(mut page: ProviderModelPage, key: &str) -> ProviderModelPage {
+fn filter_credential_echo(mut page: ProviderModelPage, key: Option<&str>) -> ProviderModelPage {
+    let Some(key) = key else { return page };
     // A compatibility gateway can echo supplied credentials in catalog fields.
     let echoes_key = |value: &str| value == key || (key.len() >= 8 && value.contains(key));
     page.models.retain(|entry| !echoes_key(&entry.id));
@@ -127,15 +127,19 @@ pub fn check_model_connection(settings: &ModelSettings) -> ModelConnectionCheck 
         check.configuration = ModelConfigurationStatus::MissingModel;
     }
     let provider = settings.provider;
-    let headers = settings
-        .read_api_key()
-        .map_err(str::to_owned)
-        .and_then(|key| provider_headers(provider, &key));
-    let Ok(headers) = headers else {
+    let Ok(key) = settings.read_model_key() else {
         check.credentials = ModelCredentialsStatus::Unavailable;
         return check;
     };
-    check.credentials = ModelCredentialsStatus::Ready;
+    let Ok(headers) = catalog_headers(provider, key.as_deref()) else {
+        check.credentials = ModelCredentialsStatus::Unavailable;
+        return check;
+    };
+    check.credentials = if key.is_some() {
+        ModelCredentialsStatus::Ready
+    } else {
+        ModelCredentialsStatus::NotRequired
+    };
     let Ok(http) = catalog_http(settings, headers) else {
         check.catalog = ModelCatalogStatus::TransportError;
         return check;
@@ -150,7 +154,7 @@ pub fn check_model_connection(settings: &ModelSettings) -> ModelConnectionCheck 
             break;
         }
         let page = match read_page(provider, &http, cursor.as_deref(), timeout) {
-            Ok(page) => page,
+            Ok(page) => filter_credential_echo(page, key.as_deref()),
             Err(error) => {
                 record_failure(&mut check, error);
                 break;
@@ -216,6 +220,7 @@ fn validate_configuration(settings: &ModelSettings) -> Result<(), String> {
     }
     settings.validate_reasoning_effort()?;
     settings.validate_budget()?;
+    settings.validate_model_auth()?;
     provider_api_root(provider_base(
         settings.provider,
         settings.base_url.as_deref(),
@@ -255,11 +260,18 @@ fn classify_failure(error: CatalogError) -> (ModelCatalogStatus, ModelCatalogAcc
     (status, ModelCatalogAccess::Unverified, None)
 }
 
+fn catalog_headers(
+    provider: Provider,
+    key: Option<&str>,
+) -> Result<Option<reqwest::header::HeaderMap>, String> {
+    key.map(|key| provider_headers(provider, key)).transpose()
+}
+
 fn catalog_http(
     settings: &ModelSettings,
-    headers: reqwest::header::HeaderMap,
+    headers: Option<reqwest::header::HeaderMap>,
 ) -> Result<Http, String> {
-    Http::new(
+    Http::new_with_auth(
         provider_base(settings.provider, settings.base_url.as_deref()),
         "models",
         "models",

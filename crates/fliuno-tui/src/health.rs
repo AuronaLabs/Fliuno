@@ -156,8 +156,9 @@ pub fn inspect(
                 Err(error) => report.check("Reasoning effort", &error, true),
             }
         }
-        match model.read_api_key() {
-            Ok(_) if model.api_key_file.is_some() => {
+        match model.read_model_key() {
+            Ok(None) => report.check("Credentials", "Keyless loopback connection", false),
+            Ok(Some(_)) if model.api_key_file.is_some() => {
                 report.check("Credentials", "Configured key file is readable", false);
             }
             Ok(_) => report.check(

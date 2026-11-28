@@ -142,13 +142,28 @@ impl Http {
         count_fields: &'static [&'static str],
         headers: HeaderMap,
     ) -> Result<Self, String> {
+        Self::new_with_auth(base, route, count_route, count_fields, Some(headers))
+    }
+
+    /// Omitted headers are allowed only for a direct connection to loopback.
+    pub fn new_with_auth(
+        base: &str,
+        route: &str,
+        count_route: &str,
+        count_fields: &'static [&'static str],
+        headers: Option<HeaderMap>,
+    ) -> Result<Self, String> {
         let base = fliuno_config::provider_api_root(base)?;
+        let client = match headers {
+            Some(headers) => Client::builder().default_headers(headers),
+            None if fliuno_config::is_local_provider_root(&base) => Client::builder().no_proxy(),
+            None => return Err("Keyless model connections require a loopback Base URL".into()),
+        };
         let endpoint = base.join(route).map_err(|_| "invalid provider route")?;
         let count_endpoint = base
             .join(count_route)
             .map_err(|_| "invalid provider count route")?;
-        let client = Client::builder()
-            .default_headers(headers)
+        let client = client
             .timeout(Duration::from_secs(45))
             .connect_timeout(Duration::from_secs(10))
             .redirect(Policy::none())

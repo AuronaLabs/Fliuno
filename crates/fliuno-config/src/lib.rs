@@ -95,10 +95,19 @@ pub struct ModelSettings {
     pub protocol: Option<ModelProtocol>,
     pub name: Option<String>,
     pub base_url: Option<String>,
+    pub auth: ModelAuth,
     pub api_key_file: Option<PathBuf>,
     pub api_key_credential: Option<String>,
     pub budget: Option<BudgetSettings>,
     pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelAuth {
+    #[default]
+    ApiKey,
+    None,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -281,7 +290,7 @@ pub fn provider_api_root(value: &str) -> Result<url::Url, &'static str> {
     {
         return Err("The Base URL cannot contain credentials, a query, or a fragment");
     }
-    let local = matches!(base.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    let local = is_local_provider_root(&base);
     if base.host_str().is_none() || !(base.scheme() == "https" || base.scheme() == "http" && local)
     {
         return Err("The Base URL requires HTTPS (HTTP is allowed on loopback)");
@@ -290,6 +299,10 @@ pub fn provider_api_root(value: &str) -> Result<url::Url, &'static str> {
         base.set_path(&format!("{}/", base.path()));
     }
     Ok(base)
+}
+
+pub fn is_local_provider_root(base: &url::Url) -> bool {
+    matches!(base.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
 }
 
 pub fn user_directory() -> Option<PathBuf> {

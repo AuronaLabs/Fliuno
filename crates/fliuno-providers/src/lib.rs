@@ -200,7 +200,9 @@ pub fn validate_live_profile(settings: &fliuno_config::ModelSettings) -> Result<
         }
         _ => {}
     }
-    http::provider_headers(settings.provider, &settings.read_api_key()?)?;
+    if let Some(key) = settings.read_model_key()? {
+        http::provider_headers(settings.provider, &key)?;
+    }
     Ok(())
 }
 
@@ -210,6 +212,7 @@ pub fn from_settings(
     use fliuno_config::{ContextWindow, ModelProtocol, Provider};
     let protocol = settings.effective_protocol()?;
     settings.validate_reasoning_effort()?;
+    settings.validate_model_auth()?;
     if matches!(settings.provider, Provider::Demo) {
         return Ok(("demo".into(), Box::new(DemoProvider)));
     }
@@ -218,7 +221,7 @@ pub fn from_settings(
         .name
         .as_deref()
         .ok_or("[model] name is required for a live provider")?;
-    let key = settings.read_api_key()?;
+    let key = settings.read_model_key()?;
     let budget = settings.budget.as_ref().map(|budget| BudgetConfig {
         window: match budget.window {
             ContextWindow::Tokens(window) => BudgetWindow::Tokens(window),
@@ -230,7 +233,7 @@ pub fn from_settings(
     if protocol == Some(ModelProtocol::ChatCompletions) {
         let provider = openai_chat::ChatProvider::new(
             provider_base(settings.provider, settings.base_url.as_deref()),
-            &key,
+            key.as_deref(),
             model,
             settings.reasoning_effort,
             budget,
@@ -241,7 +244,8 @@ pub fn from_settings(
         settings.provider,
         model,
         settings.base_url.as_deref(),
-        &key,
+        key.as_deref()
+            .ok_or("This model protocol requires an API key")?,
         budget,
         settings.reasoning_effort,
     )

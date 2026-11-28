@@ -20515,6 +20515,7 @@
           "enum": [
             "not_checked",
             "ready",
+            "not_required",
             "unavailable"
           ]
         },

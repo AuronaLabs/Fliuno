@@ -79,6 +79,58 @@ fn chat_sends_native_request_and_reads_json_usage() {
 }
 
 #[test]
+fn keyless_loopback_chat_discovers_checks_and_generates_without_authentication() {
+    use fliuno_protocol::{ModelCredentialsStatus, ModelPresence};
+    use fliuno_providers::{check_model_connection, discover_models, from_settings};
+
+    let catalog = json!({"data":[{"id":"fixture-model"}]});
+    let (base, wire) = fixture(vec![
+        (200, catalog.clone()),
+        (200, catalog),
+        (200, plain_reply()),
+    ]);
+    let config = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(
+        config.path(),
+        format!(
+            r#"
+[model]
+provider = "openai"
+protocol = "chat_completions"
+base_url = "{base}"
+name = "fixture-model"
+auth = "none"
+"#
+        ),
+    )
+    .unwrap();
+    let settings = Settings::load(config.path()).unwrap();
+    let page = discover_models(&settings.model, None).unwrap();
+    assert_eq!(page.models[0].id, "fixture-model");
+    let check = check_model_connection(&settings.model);
+    assert_eq!(check.credentials, ModelCredentialsStatus::NotRequired);
+    assert_eq!(check.model_presence, ModelPresence::Present);
+    let (_, provider) = from_settings(&settings.model).unwrap();
+    let (task, _) = prepared_model_step();
+    let result = provider
+        .next_classified(&task, &[], &CancellationToken::new())
+        .unwrap();
+    assert!(
+        matches!(result.decision, ModelDecision::Complete(text) if text == "The report is ready.")
+    );
+
+    let requests = wire.join().unwrap();
+    for ((headers, _), route) in requests.iter().zip([
+        "GET /v1/models ",
+        "GET /v1/models ",
+        "POST /v1/chat/completions ",
+    ]) {
+        assert!(headers.starts_with(route));
+        assert!(!headers.to_ascii_lowercase().contains("authorization:"));
+    }
+}
+
+#[test]
 fn chat_assembles_streamed_function_and_replays_approved_result() {
     let events = [
         chunk(

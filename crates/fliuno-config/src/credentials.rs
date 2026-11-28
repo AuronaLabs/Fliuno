@@ -1,9 +1,40 @@
-use super::{ModelSettings, read_api_key, validate_api_key};
+use super::{
+    ModelAuth, ModelProtocol, ModelSettings, is_local_provider_root, provider_api_root,
+    read_api_key, validate_api_key,
+};
 use std::path::Path;
 
 const NO_SOURCE: &str = "Set [model].api_key_file or configure a managed credential";
 
 impl ModelSettings {
+    pub fn validate_model_auth(&self) -> Result<(), &'static str> {
+        if self.auth == ModelAuth::ApiKey {
+            return Ok(());
+        }
+        if self.api_key_file.is_some() || self.api_key_credential.is_some() {
+            return Err("Remove API key references when auth = \"none\"");
+        }
+        if self.effective_protocol()? != Some(ModelProtocol::ChatCompletions) {
+            return Err("Keyless model connections require Chat Completions");
+        }
+        let base = self
+            .base_url
+            .as_deref()
+            .ok_or("Keyless model connections require an explicit loopback Base URL")?;
+        if !is_local_provider_root(&provider_api_root(base)?) {
+            return Err("Keyless model connections require a loopback Base URL");
+        }
+        Ok(())
+    }
+
+    pub fn read_model_key(&self) -> Result<Option<String>, &'static str> {
+        self.validate_model_auth()?;
+        match self.auth {
+            ModelAuth::ApiKey => self.read_api_key().map(Some),
+            ModelAuth::None => Ok(None),
+        }
+    }
+
     pub fn read_api_key(&self) -> Result<String, &'static str> {
         match (&self.api_key_file, &self.api_key_credential) {
             (Some(file), None) => read_api_key(file),
@@ -12,6 +43,47 @@ impl ModelSettings {
             (Some(_), Some(_)) => Err("Choose one API key source in [model]"),
         }
     }
+}
+
+#[cfg(test)]
+#[test]
+fn keyless_mode_rejects_implicit_nonloopback_or_credentialed_profiles() {
+    use super::Provider;
+    use std::path::PathBuf;
+
+    let mut settings = ModelSettings {
+        provider: Provider::OpenAi,
+        protocol: Some(ModelProtocol::ChatCompletions),
+        auth: ModelAuth::None,
+        ..Default::default()
+    };
+    assert!(settings.read_model_key().is_err());
+    for url in [
+        "https://example.com/v1/",
+        "http://192.168.1.5:11434/v1/",
+        "https://localhost.example.com/v1/",
+    ] {
+        settings.base_url = Some(url.into());
+        assert!(settings.read_model_key().is_err(), "{url}");
+    }
+    for url in [
+        "http://localhost:11434/v1/",
+        "http://127.0.0.1:11434/v1/",
+        "http://[::1]:11434/v1/",
+    ] {
+        settings.base_url = Some(url.into());
+        assert!(settings.read_model_key().unwrap().is_none(), "{url}");
+    }
+    settings.api_key_file = Some(PathBuf::from("unused.key"));
+    assert!(settings.read_model_key().is_err());
+    settings.api_key_file = None;
+    settings.api_key_credential = Some("unused".into());
+    assert!(settings.read_model_key().is_err());
+    settings.api_key_credential = None;
+    settings.protocol = Some(ModelProtocol::Responses);
+    assert!(settings.read_model_key().is_err());
+    settings.auth = ModelAuth::ApiKey;
+    assert!(settings.read_model_key().is_err());
 }
 
 /// A new credential is provisional until the referencing configuration is saved.

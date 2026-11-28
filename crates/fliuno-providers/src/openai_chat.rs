@@ -26,7 +26,7 @@ pub(crate) struct ChatProvider {
 impl ChatProvider {
     pub(crate) fn new(
         base: &str,
-        key: &str,
+        key: Option<&str>,
         model: &str,
         effort: Option<ReasoningEffort>,
         budget: Option<BudgetConfig>,
@@ -40,12 +40,13 @@ impl ChatProvider {
             }
             config.resolve(|_| Err("Chat Completions needs a numeric context window".into()))
         }).transpose()?;
-        let mut http = Http::new(
+        let mut http = Http::new_with_auth(
             base,
             "chat/completions",
             "chat/completions",
             &[],
-            provider_headers(Provider::OpenAi, key)?,
+            key.map(|key| provider_headers(Provider::OpenAi, key))
+                .transpose()?,
         )?;
         if let Some(budget) = budget {
             http = http.with_context_budget(budget);

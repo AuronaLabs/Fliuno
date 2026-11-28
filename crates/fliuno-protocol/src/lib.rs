@@ -848,6 +848,7 @@ pub enum ModelConfigurationStatus {
 pub enum ModelCredentialsStatus {
     NotChecked,
     Ready,
+    NotRequired,
     Unavailable,
 }
 
