@@ -48,6 +48,10 @@ pub struct ToolOutput {
 pub enum ToolError {
     #[error("{0}")]
     Failed(String),
+    /// The tool confirmed it made no changes and can explain how to correct the input.
+    /// The model may propose a fresh call; this never replays the approved call.
+    #[error("{message}")]
+    NeedsCorrection { code: &'static str, message: String },
     #[error("tool requires user input")]
     InputRequired {
         requests: Value,

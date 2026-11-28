@@ -1,6 +1,6 @@
 //! Approval binding and durable preparation for tool execution.
 use super::*;
-use serde_json::Value;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -608,6 +608,13 @@ impl Kernel {
             }) => {
                 return self.pause_tool_for_input(task, execution, requests, request_state);
             }
+            Err(ToolError::NeedsCorrection { code, message }) => ToolOutput {
+                output: json!({
+                    "status":"not_applied", "code":code,
+                    "message":message.chars().take(1024).collect::<String>()
+                }),
+                artifacts: Vec::new(),
+            },
             Err(error) => return self.fail(task, error.to_string()),
         };
 

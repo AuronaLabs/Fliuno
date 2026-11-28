@@ -66,7 +66,9 @@ impl Report {
     fn from_result(result: std::result::Result<ToolOutput, ToolError>) -> Self {
         match result {
             Ok(output) if output.artifacts.is_empty() => Self::Completed(output.output),
-            Err(ToolError::Failed(message)) => Self::Failed(message.chars().take(1024).collect()),
+            Err(ToolError::Failed(message) | ToolError::NeedsCorrection { message, .. }) => {
+                Self::Failed(message.chars().take(1024).collect())
+            }
             Err(ToolError::OutcomeUnknown(message)) => {
                 Self::Unknown(message.chars().take(1024).collect(), None)
             }

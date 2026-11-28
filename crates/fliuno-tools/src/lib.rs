@@ -421,10 +421,10 @@ impl Tool for WorkspaceTool {
                 }
                 let bytes = file_io::read(&mut file, cancellation)?;
                 if sha256(&bytes) != args.base_sha256 {
-                    return Err(ToolError::Failed(
-                        "workspace file changed since proposal; reread it and prepare a new patch"
-                            .into(),
-                    ));
+                    return Err(ToolError::NeedsCorrection {
+                        code: "workspace_base_changed",
+                        message: "workspace file changed since proposal; reread it and prepare a new patch".into(),
+                    });
                 }
                 let current =
                     String::from_utf8(bytes).map_err(|_| "patch target is not UTF-8 text")?;

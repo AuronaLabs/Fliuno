@@ -205,3 +205,100 @@ fn agent_can_discover_read_patch_and_verify_a_previously_unknown_file() {
     assert_eq!(fs::read_to_string(&file).unwrap(), "你好，世界\n");
     assert!(task.output.unwrap().contains("src/greeting.txt"));
 }
+
+struct ConflictAgent;
+
+impl ModelProvider for ConflictAgent {
+    fn next(
+        &self,
+        task: &Task,
+        _: &[ToolSpec],
+        _: &CancellationToken,
+    ) -> Result<ModelTurn, String> {
+        let last = task
+            .messages
+            .iter()
+            .rev()
+            .find_map(|message| match message {
+                Message::ToolResult { output, .. } => Some(output),
+                _ => None,
+            });
+        let (name, arguments) = match task.model_steps {
+            1 => ("workspace_read_text", json!({"path":"greeting.txt"})),
+            2 | 4 => (
+                "workspace_patch_text",
+                json!({
+                    "path":"greeting.txt","baseSha256":last.unwrap()["sha256"],
+                    "patch":"--- a/greeting.txt\n+++ b/greeting.txt\n@@ -1 +1 @@\n-Hello world\n+你好，世界\n"
+                }),
+            ),
+            3 => {
+                assert_eq!(last.unwrap()["status"], "not_applied");
+                assert_eq!(last.unwrap()["code"], "workspace_base_changed");
+                ("workspace_read_text", json!({"path":"greeting.txt"}))
+            }
+            5 => {
+                assert!(last.unwrap()["bytesWritten"].as_u64().is_some());
+                return Ok(ModelDecision::Complete(
+                    "已更新 greeting.txt，并保留用户追加的内容".into(),
+                )
+                .into());
+            }
+            step => panic!("unexpected model step {step}"),
+        };
+        Ok(ModelDecision::Call(ToolCall {
+            id: format!("conflict-{}", task.model_steps),
+            name: name.into(),
+            arguments,
+        })
+        .into())
+    }
+}
+
+#[test]
+fn stale_reviewed_patch_returns_a_known_rejection_and_requires_fresh_approval() {
+    let project = Project::new();
+    let file = project.0.join("greeting.txt");
+    fs::write(&file, "Hello world\n").unwrap();
+    let mut kernel = Kernel::in_memory(Box::new(ConflictAgent)).unwrap();
+    register(&mut kernel).unwrap();
+    let workspace = kernel.open_workspace(project.0.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let task = kernel.start_task(&session.id, "更新问候语").unwrap();
+    let mut approve = |task: &Task| {
+        kernel
+            .respond_approval(
+                &task.id,
+                &task.pending_approval.as_ref().unwrap().id,
+                ApprovalDecision::AllowOnce,
+            )
+            .unwrap()
+    };
+    let first_patch = approve(&task);
+    assert_eq!(
+        first_patch.pending_approval.as_ref().unwrap().call.name,
+        "workspace_patch_text"
+    );
+    let changed = "Hello world\nUser edit\n";
+    fs::write(&file, changed).unwrap();
+    let read_latest = approve(&first_patch);
+    assert_eq!(fs::read_to_string(&file).unwrap(), changed);
+    assert_eq!(
+        read_latest.pending_approval.as_ref().unwrap().call.name,
+        "workspace_read_text"
+    );
+    let fresh_patch = approve(&read_latest);
+    let old = first_patch.pending_approval.as_ref().unwrap();
+    let fresh = fresh_patch.pending_approval.as_ref().unwrap();
+    assert_ne!(old.id, fresh.id);
+    assert_ne!(
+        old.call.arguments["baseSha256"],
+        fresh.call.arguments["baseSha256"]
+    );
+    assert_eq!(fs::read_to_string(&file).unwrap(), changed);
+    assert_eq!(approve(&fresh_patch).status, TaskStatus::Completed);
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        "你好，世界\nUser edit\n"
+    );
+}

@@ -187,7 +187,9 @@ impl Kernel {
                     }
                     Err(error) => {
                         operation.status = match &error {
-                            ToolError::Failed(_) => AgentHostToolStatus::Failed,
+                            ToolError::Failed(_) | ToolError::NeedsCorrection { .. } => {
+                                AgentHostToolStatus::Failed
+                            }
                             ToolError::InputRequired { .. } => AgentHostToolStatus::Failed,
                             ToolError::OutcomeUnknown(_)
                             | ToolError::OutcomeUnknownWithOutput { .. } => {

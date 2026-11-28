@@ -114,7 +114,11 @@ pub(crate) fn execute_replace(
             .map_err(|_| "cannot open workspace target for replacement")?;
         let current = read_snapshot(&mut file, cancellation)?;
         if sha256(current.as_bytes()) != *base {
-            return Err("workspace file changed since proposal; prepare a new write".into());
+            return Err(ToolError::NeedsCorrection {
+                code: "workspace_base_changed",
+                message: "workspace file changed since proposal; reread it and prepare a new write"
+                    .into(),
+            });
         }
         file
     } else {

@@ -77,7 +77,10 @@ fn full_text_proposals_create_nothing_before_execution_and_reject_changed_bases(
     fs::write(root.join("new.txt"), "changed after review").unwrap();
     assert!(matches!(
         tool.execute(&context, &proposal.call, &cancel),
-        Err(ToolError::Failed(_))
+        Err(ToolError::NeedsCorrection {
+            code: "workspace_base_changed",
+            ..
+        })
     ));
     assert_eq!(
         fs::read_to_string(root.join("new.txt")).unwrap(),
