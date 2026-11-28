@@ -5,6 +5,7 @@ mod model_connection;
 mod model_default;
 mod model_edit;
 mod model_setup;
+mod supplier_edit;
 mod suppliers;
 pub use credentials::PendingApiKey;
 pub use model_connection::{
@@ -12,6 +13,7 @@ pub use model_connection::{
 };
 pub use model_edit::ModelEdit;
 pub use model_setup::{ModelSetup, ModelSetupCredential};
+pub use supplier_edit::{ModelSupplierEdit, SupplierEdit, SupplierTarget};
 pub use suppliers::{SupplierPreset, SupplierSettings};
 
 use serde::{Deserialize, Serialize};

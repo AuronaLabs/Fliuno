@@ -20,7 +20,16 @@ pub enum SupplierPreset {
 }
 
 impl SupplierPreset {
-    fn default_root(self) -> Option<&'static str> {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Gemini => "gemini",
+            Self::Custom => "custom",
+        }
+    }
+
+    pub fn default_root(self) -> Option<&'static str> {
         Some(match self {
             Self::OpenAi => Provider::OpenAi.api_root(None),
             Self::Anthropic => Provider::Anthropic.api_root(None),
@@ -44,15 +53,9 @@ pub(super) fn resolve(settings: &mut Settings, base: &Path) -> Result<(), String
     for (id, supplier) in &mut settings.providers {
         validate_profile_id(id)
             .map_err(|_| "Supplier IDs use 1–48 letters, digits, hyphens or underscores")?;
-        let url = supplier
-            .base_url
-            .as_deref()
-            .or_else(|| supplier.preset.and_then(SupplierPreset::default_root))
-            .ok_or_else(|| format!("Supplier {id} requires a Base URL or a built-in preset"))?;
         supplier.base_url = Some(
-            provider_api_root(url)
-                .map_err(|e| format!("Supplier {id}: {e}"))?
-                .into(),
+            resolved_root(supplier.preset, supplier.base_url.as_deref())
+                .map_err(|error| format!("Supplier {id}: {error}"))?,
         );
         if supplier.api_key_file.is_some() && supplier.api_key_credential.is_some()
             || supplier.auth == ModelAuth::None
@@ -67,6 +70,16 @@ pub(super) fn resolve(settings: &mut Settings, base: &Path) -> Result<(), String
         resolve_model(model, &settings.providers)?;
     }
     Ok(())
+}
+
+pub(super) fn resolved_root(
+    preset: Option<SupplierPreset>,
+    base_url: Option<&str>,
+) -> Result<String, &'static str> {
+    let root = base_url
+        .or_else(|| preset.and_then(SupplierPreset::default_root))
+        .ok_or("Choose a Base URL or a built-in preset")?;
+    Ok(provider_api_root(root)?.into())
 }
 
 fn resolve_model(

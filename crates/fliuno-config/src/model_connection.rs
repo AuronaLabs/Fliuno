@@ -15,6 +15,7 @@ pub struct ModelConnectionDraft<'a> {
     pub credential: ConnectionCredential<'a>,
 }
 
+#[derive(Clone, Copy)]
 pub enum ConnectionCredential<'a> {
     Keep,
     Managed(&'a str),
@@ -30,6 +31,7 @@ pub struct ModelConnectionEdit<'a> {
     pub connection: ModelConnectionDraft<'a>,
 }
 
+#[derive(Clone, Copy)]
 pub enum ModelConnectionTarget<'a> {
     Base,
     Existing(&'a str),
@@ -108,7 +110,17 @@ impl ModelConnectionDraft<'_> {
         } else {
             table.remove("base_url");
         }
-        match self.credential {
+        self.credential.stage(path, table)
+    }
+}
+
+impl ConnectionCredential<'_> {
+    pub(super) fn stage(
+        self,
+        path: &Path,
+        table: &mut dyn TableLike,
+    ) -> Result<Option<PendingApiKey>, String> {
+        match self {
             ConnectionCredential::Keep => Ok(None),
             ConnectionCredential::None => {
                 table.remove("api_key_file");
@@ -140,6 +152,55 @@ impl ModelConnectionDraft<'_> {
                 Ok(Some(pending))
             }
         }
+    }
+}
+
+impl<'a> ModelConnectionTarget<'a> {
+    pub(super) fn profile_id(self) -> Option<&'a str> {
+        match self {
+            Self::Base => None,
+            Self::Existing(id) | Self::New(id) => Some(id),
+        }
+    }
+
+    pub(super) fn current(self, settings: &Settings) -> Result<Option<&ModelSettings>, String> {
+        match self {
+            Self::Base => Ok(Some(&settings.model)),
+            Self::New(id) => {
+                validate_profile_id(id)?;
+                if settings.models.contains_key(id) {
+                    return Err("A model profile already uses this name".into());
+                }
+                Ok(None)
+            }
+            Self::Existing(id) => {
+                validate_profile_id(id)?;
+                Ok(Some(
+                    settings.models.get(id).ok_or("Model profile is missing")?,
+                ))
+            }
+        }
+    }
+
+    pub(super) fn table(self, doc: &mut DocumentMut) -> Result<&mut dyn TableLike, String> {
+        match self {
+            Self::New(id) => {
+                let models = doc
+                    .entry("models")
+                    .or_insert(Item::Table(Table::new()))
+                    .as_table_like_mut()
+                    .ok_or("Invalid model profiles")?;
+                models.insert(id, Item::Table(Table::new()));
+                models.get_mut(id)
+            }
+            Self::Existing(id) => doc
+                .get_mut("models")
+                .and_then(Item::as_table_like_mut)
+                .and_then(|models| models.get_mut(id)),
+            Self::Base => Some(doc.entry("model").or_insert(Item::Table(Table::new()))),
+        }
+        .and_then(Item::as_table_like_mut)
+        .ok_or_else(|| "Model profile is missing".into())
     }
 }
 
@@ -187,45 +248,10 @@ impl Settings {
         let edit = ConfigEdit::open(path)?;
         edit.require_revision(change.revision)?;
         let settings = edit.settings()?;
-        let (id, old) = match change.target {
-            ModelConnectionTarget::New(id) => {
-                validate_profile_id(id)?;
-                if settings.models.contains_key(id) {
-                    return Err("A model profile already uses this name".into());
-                }
-                (Some(id), None)
-            }
-            ModelConnectionTarget::Existing(id) => {
-                validate_profile_id(id)?;
-                (
-                    Some(id),
-                    Some(settings.models.get(id).ok_or("Model profile is missing")?),
-                )
-            }
-            ModelConnectionTarget::Base => (None, Some(&settings.model)),
-        };
+        let old = change.target.current(&settings)?;
         let model_name = validate_model_name(change.model)?;
         let mut doc = edit.document()?;
-        let table = match change.target {
-            ModelConnectionTarget::New(id) => {
-                let models = doc
-                    .entry("models")
-                    .or_insert(Item::Table(Table::new()))
-                    .as_table_like_mut()
-                    .ok_or("Invalid model profiles")?;
-                models.insert(id, Item::Table(Table::new()));
-                models.get_mut(id)
-            }
-            ModelConnectionTarget::Existing(id) => doc
-                .get_mut("models")
-                .and_then(Item::as_table_like_mut)
-                .and_then(|models| models.get_mut(id)),
-            ModelConnectionTarget::Base => {
-                Some(doc.entry("model").or_insert(Item::Table(Table::new())))
-            }
-        }
-        .and_then(Item::as_table_like_mut)
-        .ok_or("Model profile is missing")?;
+        let table = change.target.table(&mut doc)?;
         let pending = if let Some(bound) = old.filter(|model| model.supplier.is_some()) {
             if !matches!(change.connection.credential, ConnectionCredential::Keep) {
                 return Err(
@@ -247,7 +273,7 @@ impl Settings {
         }
         let output = doc.to_string();
         let mut settings = edit.parse(&output)?;
-        let model = match id {
+        let model = match change.target.profile_id() {
             Some(id) => settings
                 .models
                 .remove(id)
