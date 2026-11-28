@@ -1,13 +1,15 @@
 use super::*;
 use fliuno_protocol::{
     ModelCatalogAccess, ModelCatalogStatus, ModelConfigurationStatus, ModelConnectionCheck,
-    ModelConnectionCheckParams, ModelCredentialsStatus, ModelPresence, ModelProfileList,
-    ModelProfileSelectParams,
+    ModelConnectionCheckParams, ModelCredentialsStatus, ModelPresence, ModelProfileDefault,
+    ModelProfileList, ModelProfileSelectParams,
 };
 
 pub(super) struct Picker {
     origin: CommandOrigin,
     profiles: Option<ModelProfileList>,
+    default: Option<ModelProfileDefault>,
+    saved: bool,
     index: usize,
     error: Option<String>,
     pending: Option<Option<String>>,
@@ -19,6 +21,8 @@ impl Picker {
         Self {
             origin,
             profiles: None,
+            default: None,
+            saved: false,
             index: 0,
             error: None,
             pending: None,
@@ -26,7 +30,12 @@ impl Picker {
         }
     }
 
-    pub(super) fn install(&mut self, profiles: ModelProfileList) {
+    pub(super) fn install(
+        &mut self,
+        profiles: ModelProfileList,
+        default: Option<ModelProfileDefault>,
+    ) {
+        self.default = default;
         self.index = profiles
             .profiles
             .iter()
@@ -34,6 +43,11 @@ impl Picker {
             .unwrap_or(0);
         self.profiles = Some(profiles);
         self.error = None;
+    }
+
+    pub(super) fn saved(&mut self, default: ModelProfileDefault) {
+        self.default = Some(default);
+        self.saved = true;
     }
 
     pub(super) fn checked(&mut self, profile: Option<String>, check: ModelConnectionCheck) {
@@ -44,9 +58,13 @@ impl Picker {
     pub(super) fn failed(&mut self, error: String) {
         self.pending = None;
         self.error = Some(error);
+        self.saved = false;
     }
 
     fn status(&self) -> Option<String> {
+        if self.saved {
+            return Some("Startup default saved. Active model unchanged.".into());
+        }
         let profile = &self.profiles.as_ref()?.profiles.get(self.index)?.profile;
         if self.pending.as_ref() == Some(profile) {
             return Some("Checking the model connection…".into());
@@ -87,7 +105,12 @@ impl Picker {
             render_text(frame, body, "Configure a live model in config.toml.", 0);
             return;
         }
-        let mut lines = vec![Line::styled("Enter Use for now   F5 Check", palette.quiet)];
+        let help = if self.default.is_some() {
+            "Enter Use now   F5 Check   Ctrl+S Default"
+        } else {
+            "Enter Use now   F5 Check"
+        };
+        let mut lines = vec![Line::styled(help, palette.quiet)];
         if let Some(error) = &self.error {
             lines.push(Line::styled(error.as_str(), palette.status(Color::Red)));
         } else if let Some(status) = self.status() {
@@ -102,17 +125,24 @@ impl Picker {
             .iter()
             .map(|entry| {
                 let id = entry.profile.as_deref().unwrap_or("[model]");
-                let active = if profiles.active.profile == entry.profile {
-                    " (active)"
-                } else {
-                    ""
+                let active = profiles.active.profile == entry.profile;
+                let default = self
+                    .default
+                    .as_ref()
+                    .is_some_and(|default| default.profile == entry.profile);
+                let role = match (active, default) {
+                    (true, true) => " [now/default]",
+                    (true, false) => " [now]",
+                    (false, true) => " [default]",
+                    _ => "",
                 };
                 let model = clean(&entry.model).replace('\n', " ");
                 let effort = entry
                     .reasoning_effort
                     .as_deref()
                     .map_or_else(String::new, |effort| format!("  ·  {}", clean(effort)));
-                format!("{id}{active}  ·  {} / {model}{effort}", entry.provider)
+                // Keep the model ID visible on narrow terminals; the profile state still leads.
+                format!("{id}{role}  ·  {model}{effort}")
             })
             .collect();
         render_list(frame, list, labels, self.index, palette.choice);
@@ -137,6 +167,7 @@ impl App {
             step(key.code, &mut picker.index, profiles.profiles.len());
             if before != picker.index {
                 picker.error = None;
+                picker.saved = false;
             }
             if self.busy || key.kind != KeyEventKind::Press {
                 return;
@@ -144,8 +175,25 @@ impl App {
             let Some(profile) = profiles.profiles.get(picker.index) else {
                 return;
             };
+            if key.code == KeyCode::Char('s')
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+                && picker.default.is_some()
+            {
+                picker.error = None;
+                picker.saved = false;
+                let default = ModelProfileDefault {
+                    profile: profile.profile.clone(),
+                };
+                if !self.send(worker, Request::SaveModelDefault(default))
+                    && let Layer::ModelPicker(picker) = &mut self.layer
+                {
+                    picker.failed("Connection worker unavailable".into());
+                }
+                return;
+            }
             if key.code == KeyCode::F(5) {
                 picker.error = None;
+                picker.saved = false;
                 let id = profile.profile.clone();
                 let params = ModelConnectionCheckParams {
                     base_profile: id.is_none(),

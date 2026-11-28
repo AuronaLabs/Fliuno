@@ -12,14 +12,15 @@ use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
     ArtifactCatalogSnapshotPage, ArtifactCatalogSnapshotParams, ArtifactDigest, ArtifactGetParams,
     ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelConnectionCheck,
-    ModelConnectionCheckParams, ModelProfileEntry, ModelProfileList, ModelProfileSelectParams,
-    ModelUsageSummary, ModelUsageTotals, ObjectPage, Session, SessionContextParams,
-    SessionForkParams, SessionHistoryListPage, SessionHistoryListParams, SessionHistoryRole,
-    SessionListOrder, SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan,
-    TaskQueue, TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams,
-    TaskReconciliation, TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus,
-    TaskSteeringState, TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams,
-    WorkSnapshot, WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
+    ModelConnectionCheckParams, ModelProfileDefault, ModelProfileEntry, ModelProfileList,
+    ModelProfileSelectParams, ModelUsageSummary, ModelUsageTotals, ObjectPage, Session,
+    SessionContextParams, SessionForkParams, SessionHistoryListPage, SessionHistoryListParams,
+    SessionHistoryRole, SessionListOrder, SessionListParams, Task, TaskContext,
+    TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
+    TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
+    TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
+    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
+    Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -47,6 +48,7 @@ pub enum Request {
     Diagnostics,
     ModelProfiles,
     CheckModel(ModelConnectionCheckParams),
+    SaveModelDefault(ModelProfileDefault),
     SelectModel(ModelProfileSelectParams),
     Memories {
         workspace: String,
@@ -164,7 +166,8 @@ pub enum Update {
         model: Option<String>,
         model_profiles: bool,
     },
-    ModelProfiles(ModelProfileList),
+    ModelProfiles(ModelProfileList, Option<ModelProfileDefault>),
+    ModelDefaultSaved(ModelProfileDefault),
     ModelChecked {
         profile: Option<String>,
         check: ModelConnectionCheck,
@@ -786,12 +789,32 @@ impl Service {
         let update = match request {
             Request::Reconnect | Request::Diagnostics | Request::Backup(_) => unreachable!(),
             Request::ModelProfiles => match self.rpc("modelProfiles/list", json!({})) {
-                Ok(profiles) => Update::ModelProfiles(profiles),
+                Ok(profiles) => {
+                    let default = if self.supports("modelProfileDefaults") {
+                        match self.rpc("modelProfiles/getDefault", json!({})) {
+                            Ok(default) => Some(default),
+                            Err(error) if !disconnected(error.as_ref()) => None,
+                            Err(error) => return Err(error),
+                        }
+                    } else {
+                        None
+                    };
+                    Update::ModelProfiles(profiles, default)
+                }
                 Err(error) if !disconnected(error.as_ref()) => {
                     Update::ModelProfileError(profile_error(error.as_ref()))
                 }
                 Err(error) => return Err(error),
             },
+            Request::SaveModelDefault(default) => {
+                match self.rpc("modelProfiles/setDefault", json!(default)) {
+                    Ok(saved) => Update::ModelDefaultSaved(saved),
+                    Err(error) if !disconnected(error.as_ref()) => {
+                        Update::ModelProfileError(profile_error(error.as_ref()))
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
             Request::CheckModel(params) => match self.rpc("models/check", json!(params)) {
                 Ok(check) => Update::ModelChecked {
                     profile: params.profile,

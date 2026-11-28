@@ -2132,7 +2132,11 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     let (finish_first, completion) = channel();
     let (observed, requests) = channel();
     let provider = thread::spawn(move || {
-        for answer in ["Original model answer", "Selected model answer"] {
+        for answer in [
+            "Original model answer",
+            "Selected model answer",
+            "Saved default answer",
+        ] {
             let (mut socket, request) = streaming_fixture_input(&listener);
             observed.send(request).unwrap();
             if answer == "Original model answer" {
@@ -2240,6 +2244,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     console.expect("Original model answer");
     console.expect("Send this preserved draft");
     console.ready();
+    console.resize(22, 48);
     console.capture("model-switched-48");
     console.keys("\r");
     let second = requests.recv_timeout(Duration::from_secs(12)).unwrap();
@@ -2251,11 +2256,57 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     console.expect("Selected model answer");
     console.ready();
     console.quit("\x03");
-    provider.join().unwrap();
 
     let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
     reopened.expect("first-model");
     reopened.expect("Selected model answer");
-    reopened.quit("\x03");
     assert_eq!(std::fs::read_to_string(&config).unwrap(), settings);
+    reopened.expect("Press Enter to write a message");
+    reopened.keys("n");
+    reopened.expect("Enter Send");
+    reopened.keys("Save without switching");
+    reopened.expect("Save without switching");
+    reopened.keys("\x1bOPmodel");
+    reopened.expect("Commands  /  model");
+    reopened.ready();
+    reopened.keys("\r");
+    reopened.expect("Ctrl+S Default");
+    reopened.ready();
+    reopened.resize(22, 48);
+    reopened.keys("\x1b[B\x1b[B\x13");
+    reopened.expect("Startup default saved.");
+    reopened.expect("lab [default]");
+    reopened.expect("[model] [now]");
+    reopened.capture("model-default-saved-48");
+    reopened.resize(24, 80);
+    reopened.capture("model-default-saved-80");
+    reopened.resize(28, 110);
+    reopened.capture("model-default-saved-110");
+    reopened.keys("\x1b");
+    reopened.expect_absent("Switch model");
+    reopened.expect("Save without switching");
+    reopened.expect("Conversation  ·  first-model");
+    reopened.quit("\x03");
+    let updated = std::fs::read_to_string(&config).unwrap();
+    assert_eq!(
+        updated
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("model_profile"))
+            .collect::<Vec<_>>(),
+        settings.lines().collect::<Vec<_>>()
+    );
+    let mut using_default =
+        Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    using_default.expect("Conversation  ·  second-model");
+    using_default.expect("Selected model answer");
+    using_default.expect("Press Enter to write a message");
+    using_default.keys("n");
+    using_default.expect("Enter Send");
+    using_default.keys("Use the saved default.\r");
+    let third = requests.recv_timeout(Duration::from_secs(12)).unwrap();
+    assert_eq!(third["model"], "second-model");
+    assert_eq!(third["reasoning"]["effort"], "high");
+    using_default.expect("Saved default answer");
+    using_default.quit("\x03");
+    provider.join().unwrap();
 }

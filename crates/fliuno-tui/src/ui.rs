@@ -812,9 +812,14 @@ impl App {
                 self.message = message;
             }
             Update::Activity(previews) => self.activity = previews,
-            Update::ModelProfiles(profiles) => {
+            Update::ModelProfiles(profiles, default) => {
                 if let Layer::ModelPicker(picker) = &mut self.layer {
-                    picker.install(profiles);
+                    picker.install(profiles, default);
+                }
+            }
+            Update::ModelDefaultSaved(default) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.saved(default);
                 }
             }
             Update::ModelChecked { profile, check } => {
