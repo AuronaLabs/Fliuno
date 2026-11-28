@@ -7,7 +7,7 @@ use std::{path::Path, time::Duration};
 
 // Output floods can hold the rollback journal through a slow disk flush.
 // Keep independent readers bounded without interrupting the writer's commit.
-const READ_BUSY_TIMEOUT: Duration = Duration::from_millis(750);
+const READ_BUSY_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) struct Spool {
     db: Connection,

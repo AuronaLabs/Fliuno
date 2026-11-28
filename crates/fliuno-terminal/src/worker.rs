@@ -7,6 +7,7 @@ use interprocess::local_socket::{
     ListenerOptions,
     tokio::{Listener, prelude::*},
 };
+use pty::IoEvent;
 use serde_json::Value;
 use std::{
     fs::OpenOptions,
@@ -115,6 +116,7 @@ async fn serve(mut launch: Launch) -> Result<(), String> {
     let capacity = std::sync::Arc::new(tokio::sync::Semaphore::new(16));
     let mut tick = tokio::time::interval(Duration::from_millis(20));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut pending_event = None;
     loop {
         tokio::select! {
             connection=listener.accept()=>{
@@ -125,7 +127,12 @@ async fn serve(mut launch: Launch) -> Result<(), String> {
                 }
             },
             Some(command)=requests.recv()=>actor.command(command)?,
-            Some(event)=events.recv()=>actor.event(event)?,
+            // Coalesce adjacent output already waiting in the bounded pipe.
+            // One durable commit for the batch reduces lock pressure and disk
+            // flushes without delaying isolated interactive output.
+            Some(event)=next_event(&mut pending_event, &mut events)=>{
+                actor.event(batch_output(event, &mut events, &mut pending_event))?;
+            },
             _=tick.tick()=>if actor.tick()?{break;}
         }
         // Publish only committed state changes. In particular, reading output
@@ -137,6 +144,42 @@ async fn serve(mut launch: Launch) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+async fn next_event(
+    pending: &mut Option<IoEvent>,
+    events: &mut mpsc::Receiver<IoEvent>,
+) -> Option<IoEvent> {
+    match pending.take() {
+        Some(event) => Some(event),
+        None => events.recv().await,
+    }
+}
+
+fn batch_output(
+    event: IoEvent,
+    events: &mut mpsc::Receiver<IoEvent>,
+    pending: &mut Option<IoEvent>,
+) -> IoEvent {
+    let IoEvent::Output(mut bytes) = event else {
+        return event;
+    };
+    const BATCH_BYTES: usize = 64 * 1024;
+    const BATCH_EVENTS: usize = 16;
+    for _ in 1..BATCH_EVENTS {
+        let Ok(next) = events.try_recv() else { break };
+        match next {
+            IoEvent::Output(more) if bytes.len() + more.len() <= BATCH_BYTES => bytes.extend(more),
+            other => {
+                *pending = Some(other);
+                break;
+            }
+        }
+        if bytes.len() == BATCH_BYTES {
+            break;
+        }
+    }
+    IoEvent::Output(bytes)
 }
 
 /// Everything here precedes native PTY launch and can be reported as a known
