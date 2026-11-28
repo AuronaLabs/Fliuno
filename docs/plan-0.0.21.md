@@ -27,6 +27,14 @@
 
 `artifact_create` 的工具描述参与权限摘要。升级前待处理的旧审批如果与新注册摘要不符，需要重新提交；不能沿用旧审批执行。发布前会用 v0.0.20 存量数据核对这一路径。
 
+## 项目检查：执行边界
+
+本地 Codex `a1604a8` 的 `codex-rs/core/src/tools/approvals.rs` 区分命令范围、审批和沙箱执行；OpenCode `d284e7c` 的 `services/site/src/docs/content/permissions.mdx` 将权限与具体命令或资源匹配。[Claude Code 权限](https://code.claude.com/docs/en/permissions)、[Windows AppContainer](https://learn.microsoft.com/en-us/windows/win32/secauthz/appcontainer-isolation) 与 [Linux Landlock](https://docs.kernel.org/userspace-api/landlock.html) 用于核对约束。Fliuno 现有隔离进程从私有目录启动，不能直接检查刚改过的工作区；所以这阶段先给隔离执行增加项目输入快照。
+
+- `integrations.execution` 的用户侧执行配置可以登记项目检查。程序、参数、输入文件清单由配置固定；模型仅提供每个输入的最新哈希。审批展示程序、参数、隔离方式以及会交给程序的文件。无隐式仓库挂载、无回退至可信宿主进程。
+- 审批后读取文件，拒绝链接、路径冲突、超量和哈希不符，再放入私有执行目录。结果包含实际输入版本、退出码和输出；非零退出为检查未通过，超时与结果未知保留原有语义。未经用户配置的程序不会因某个项目文件的指令而获得执行权。
+- 先用 Windows AppContainer 与 Linux Landlock 的可重复验收，证明检查读到 Agent 修改后的内容、运行前后真实工作区没有被检查程序改写，并验证旧哈希不会触发启动。随后增加可在设置中管理的检查项以及构建工具链所需依赖的接入；固定清单的快照不宣称能装载任意项目依赖树。
+
 ## 验收与发布门槛
 
 - 用四种协议的离线回放检查实际请求与工具结果回流。中文短文在对话完成，零工具、零审批；托管产物可打开与另存且不冒充工作区文件；工作区写入此前可审阅，拒绝不修改文件，成功显示通过真实结果验证的路径。
