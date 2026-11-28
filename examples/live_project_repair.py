@@ -139,7 +139,7 @@ def run(args, directory, evidence):
                         (name in {"workspace_find", "workspace_list"} and path in {".", "src"})
                         or (name in {"workspace_read_text", "workspace_sha256"} and path == SOURCE)
                         or (name == "workspace_sha256_batch" and arguments.get("paths") == [SOURCE])
-                        or (name in {"workspace_patch_text", "workspace_replace_text"} and path == SOURCE)
+                        or (name in {"workspace_patch_text", "workspace_replace_text", "workspace_edit_text"} and path == SOURCE)
                         or (name == check_name and set(arguments.get("inputs", {})) == {SOURCE})
                     )
                     evidence["approvals"].append({"step": task["modelSteps"], "tool": name,
