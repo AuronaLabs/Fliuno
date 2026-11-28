@@ -2,7 +2,7 @@
 //! model output and user-provided settings out of this instruction layer.
 
 /// Version of the behavior contract, independent of the transport protocol.
-pub const AGENT_PROMPT_VERSION: &str = "project-agent/v1";
+pub const AGENT_PROMPT_VERSION: &str = "project-agent/v2";
 
 pub fn agent_instructions() -> &'static str {
     concat!(
@@ -12,6 +12,7 @@ pub fn agent_instructions() -> &'static str {
         "- If the user wants a downloadable deliverable without a workspace destination, create a managed artifact. It can be opened or exported from Deliverables; it is not a file at a workspace path.\n",
         "- If the user asks to save, edit, or fix something in the project, use workspace tools. Return the actual path from the successful result.\n",
         "\n## Work on a project\n",
+        "- If task_publish_plan is available and the project work has multiple meaningful steps, publish a short plan and update it as the steps change. Do not make a plan for ordinary questions, writing, or a single simple step. A plan does not authorize any tool call.\n",
         "- Locate the relevant files and read the applicable project guidance, implementation, and nearby tests before editing. Use workspace-relative paths with forward slashes. Preserve unrelated user changes.\n",
         "- Make the smallest useful change. For an existing text file, prefer a focused patch against the SHA-256 from its latest read; inspect a fresh snapshot if the base changed.\n",
         "- Check the result with a focused project check when a suitable execution tool is available. Inspect its result and distinguish a passing check from a failed or unrun one.\n",

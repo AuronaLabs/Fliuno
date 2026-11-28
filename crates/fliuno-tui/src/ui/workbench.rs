@@ -1,3 +1,5 @@
+use fliuno_protocol::TaskPlanStepStatus;
+
 use super::{
     transcript::{message_lines, response_lines},
     *,
@@ -165,7 +167,9 @@ impl App {
         } else if full_page {
             "Enter Open  Esc Back"
         } else if matches!(self.layer, Layer::None) {
-            if !self.demo && !self.show_details && self.transcript.has_older() {
+            if !self.demo && !self.can_compose() {
+                "Enter Review  F1 Commands  Tab Details"
+            } else if !self.demo && !self.show_details && self.transcript.has_older() {
                 "Enter Write  PgUp History  F1 Commands"
             } else if !self.demo {
                 "Enter Write  F1 Commands  Tab Details"
@@ -225,6 +229,41 @@ impl App {
                 pinned.push(Line::from(heading));
             }
             self.append_task_actions(detail, &mut pinned);
+            if !self.show_details
+                && !task.status.is_terminal()
+                && let Some(plan) = &detail.plan
+            {
+                let done = plan
+                    .steps
+                    .iter()
+                    .filter(|step| step.status == TaskPlanStepStatus::Completed)
+                    .count();
+                let progress = format!("Plan · {done}/{} complete", plan.steps.len());
+                let width = usize::from(area.width);
+                let hint = if width >= progress.width() + "  ·  Tab Details".width() && !self.demo
+                {
+                    "  ·  Tab Details"
+                } else {
+                    ""
+                };
+                pinned.push(Line::styled(
+                    ellipsis(&format!("{progress}{hint}"), width),
+                    self.palette.label,
+                ));
+                if let Some(step) = plan
+                    .steps
+                    .iter()
+                    .find(|step| step.status == TaskPlanStepStatus::InProgress)
+                {
+                    pinned.push(Line::styled(
+                        ellipsis(
+                            &format!("Now: {}", clean(&step.text).replace('\n', " ")),
+                            width,
+                        ),
+                        self.palette.quiet,
+                    ));
+                }
+            }
             if !active_rendered {
                 for message in task
                     .messages
@@ -483,11 +522,12 @@ impl App {
             lines.push(Line::raw(""));
             lines.push(Line::styled("Plan", self.palette.label));
             for step in &plan.steps {
-                lines.push(Line::raw(format!(
-                    "{:?}  {}",
-                    step.status,
-                    clean(&step.text)
-                )));
+                let state = match step.status {
+                    TaskPlanStepStatus::Pending => "Next",
+                    TaskPlanStepStatus::InProgress => "In progress",
+                    TaskPlanStepStatus::Completed => "Done",
+                };
+                lines.push(Line::raw(format!("{state}  ·  {}", clean(&step.text))));
             }
         }
         if !detail.artifacts.is_empty() {
@@ -557,6 +597,8 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(if self.demo {
                         "n or Enter to write a task"
+                    } else if !focused && !self.can_compose() {
+                        "Review the pending operation to continue"
                     } else if focused && self.detail.is_some() {
                         "Ask a follow-up…"
                     } else if focused {

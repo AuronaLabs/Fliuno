@@ -2916,7 +2916,18 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                 "type":"function_call","call_id":id,"name":name,"arguments":args.to_string()
             })
         };
-        for step in 0..7 {
+        let plan = |id, search, patch, check| {
+            call(
+                id,
+                "task_publish_plan",
+                json!({"steps":[
+                    {"text":"Find the greeting","status":search},
+                    {"text":"Update the greeting","status":patch},
+                    {"text":"Verify the updated file","status":check}
+                ]}),
+            )
+        };
+        for step in 0..9 {
             let (mut socket, request) = streaming_fixture_input(&listener);
             let input = request["input"].as_array().unwrap();
             let result = || {
@@ -2935,6 +2946,23 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                 }
                 1 => {
                     assert!(
+                        request["instructions"]
+                            .as_str()
+                            .unwrap()
+                            .contains("task_publish_plan")
+                    );
+                    assert!(
+                        request["tools"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|tool| tool["name"] == "task_publish_plan")
+                    );
+                    plan("plan-first", "in_progress", "pending", "pending")
+                }
+                2 => {
+                    assert_eq!(result()["published"], true);
+                    assert!(
                         request["tools"]
                             .as_array()
                             .unwrap()
@@ -2947,7 +2975,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                         json!({"path":".","mode":"text","query":"Hello world"}),
                     )
                 }
-                2 => {
+                3 => {
                     let found = result();
                     assert_eq!(found["matches"][0]["path"], "src/greeting.txt");
                     call(
@@ -2956,16 +2984,29 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                         json!({"path":found["matches"][0]["path"]}),
                     )
                 }
-                3 => {
-                    let before = result();
-                    assert_eq!(before["content"], "Hello world\n");
+                4 => {
+                    assert_eq!(result()["content"], "Hello world\n");
+                    plan("plan-patch", "completed", "in_progress", "pending")
+                }
+                5 => {
+                    assert_eq!(result()["published"], true);
+                    let before = input
+                        .iter()
+                        .find(|entry| {
+                            entry["call_id"] == "read" && entry["type"] == "function_call_output"
+                        })
+                        .map(|entry| {
+                            serde_json::from_str::<Value>(entry["output"].as_str().unwrap())
+                                .unwrap()
+                        })
+                        .expect("the read result is retained for the patch");
                     call(
                         "patch",
                         "workspace_patch_text",
                         json!({"path":before["path"],"baseSha256":before["sha256"],"patch":"--- a/src/greeting.txt\n+++ b/src/greeting.txt\n@@ -1 +1 @@\n-Hello world\n+Welcome to Fliuno\n"}),
                     )
                 }
-                4 => {
+                6 => {
                     let receipt = result();
                     assert_eq!(receipt["bytesWritten"], 18);
                     call(
@@ -2974,7 +3015,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                         json!({"path":receipt["path"]}),
                     )
                 }
-                5 => {
+                7 => {
                     assert_eq!(result()["content"], "Welcome to Fliuno\n");
                     let read = result();
                     let spec = request["tools"]
@@ -2997,7 +3038,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                         json!({"inputs":{"src/greeting.txt":read["sha256"]}}),
                     )
                 }
-                6 => {
+                8 => {
                     assert_eq!(result()["exitCode"], 0);
                     assert_eq!(result()["success"], true);
                     assert_eq!(result()["stdout"]["data"], "greeting check passed\n");
@@ -3076,6 +3117,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     terminal.expect("小作文：雨停之后");
     terminal.expect_absent("Review operation");
     terminal.expect_absent("Project activity");
+    terminal.expect_absent("Plan ·");
     terminal.expect("Ask a follow-up");
     terminal.keys("将项目中的 Hello world 改成 Welcome to Fliuno\r");
     for (preview, label) in [
@@ -3093,6 +3135,20 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     ] {
         terminal.expect("a Open");
         terminal.expect(preview);
+        if preview == "Search project files" {
+            terminal.expect("Plan · 0/3 complete");
+        } else if preview.starts_with("Patch file:") {
+            terminal.expect("Plan · 1/3 complete");
+            terminal.expect("Now: Update the greeting");
+            terminal.expect("Enter Review");
+            terminal.expect("Review the pending operation to continue");
+            for cols in [48, 80, 110] {
+                terminal.resize(24, cols);
+                terminal.ready();
+                terminal.expect("Now: Update the greeting");
+                terminal.capture(&format!("project-progress-{cols}"));
+            }
+        }
         terminal.ready();
         terminal.keys("a");
         terminal.expect(label);
