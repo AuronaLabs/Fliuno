@@ -84,6 +84,10 @@ enum Layer {
         scroll: u16,
     },
     ReadRules(Option<Vec<PolicyReadRule>>, usize),
+    ProjectReview {
+        return_to_draft: bool,
+        scroll: u16,
+    },
     Preview(Box<Preview>, u16),
     ConfirmCancel(String),
     Recovery(String, u16),
@@ -1143,6 +1147,18 @@ impl App {
             self.model_picker_key(key, worker);
             return false;
         }
+        if key.code == KeyCode::Esc
+            && matches!(
+                self.layer,
+                Layer::ProjectReview {
+                    return_to_draft: true,
+                    ..
+                }
+            )
+        {
+            self.layer = Layer::Edit(Edit::Task);
+            return false;
+        }
         if key.code == KeyCode::Esc && !matches!(self.layer, Layer::None) {
             if !self.start_pending {
                 self.layer = Layer::None;
@@ -1295,6 +1311,10 @@ impl App {
                         } else {
                             self.layer = Layer::Commands(menu);
                         }
+                        return false;
+                    }
+                    CommandAction::ProjectReview => {
+                        self.open_project_review(menu.origin != CommandOrigin::Workbench);
                         return false;
                     }
                     CommandAction::Help => {
@@ -1497,6 +1517,13 @@ impl App {
             Layer::DraftContext { .. } => {}
             Layer::Context(_, scroll) | Layer::TimelineEvent { scroll, .. } => {
                 scroll_key(key.code, scroll)
+            }
+            Layer::ProjectReview { scroll, .. } => {
+                if key.code == KeyCode::Home {
+                    *scroll = 0;
+                } else {
+                    scroll_key(key.code, scroll);
+                }
             }
             Layer::Queue(queue, index) => {
                 if pressed && !self.busy && key.code == KeyCode::Char('r') {
@@ -2059,6 +2086,7 @@ impl App {
             }
             KeyCode::F(6) if active => self.open_memories(worker, false),
             KeyCode::F(7) if active => self.open_deliverables(worker),
+            KeyCode::Char('d') if active && !self.demo => self.open_project_review(false),
             KeyCode::End => self.follow = true,
             KeyCode::Home => {
                 self.follow = false;
@@ -2251,6 +2279,13 @@ impl App {
                 label: "Switch model",
                 alias: Some("model"),
                 action: CommandAction::ModelProfiles,
+            });
+        }
+        if self.session.is_some() && !self.demo {
+            commands.push(Command {
+                label: "Review project changes and checks",
+                alias: Some("changes"),
+                action: CommandAction::ProjectReview,
             });
         }
         if self.online && self.read_rules && self.workspace.is_some() && !self.busy {

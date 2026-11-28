@@ -313,6 +313,7 @@ impl App {
             Layer::Recovery(..) | Layer::Reconcile(_) | Layer::Backup(_) => (88, 19),
             Layer::Approval { .. } => (88, 21),
             Layer::ReadRules(..) => (76, 17),
+            Layer::ProjectReview { .. } => (100, u16::MAX),
             _ => (104, u16::MAX),
         };
         let top_gap = u16::from(area.height >= 22);
@@ -411,6 +412,10 @@ impl App {
                 } else {
                     "n Deny  ·  Esc Back"
                 },
+            ),
+            Layer::ProjectReview { .. } => (
+                "Project changes & checks".into(),
+                "↑↓ Scroll  ·  Home Top  ·  Esc Back",
             ),
             Layer::ReadRules(..) => (
                 "Read permissions".into(),
@@ -587,6 +592,7 @@ impl App {
                 self.palette.choice,
             ),
             Layer::Approval { text, scroll, .. } => render_text(frame, body, text, *scroll),
+            Layer::ProjectReview { scroll, .. } => self.draw_project_review(frame, body, *scroll),
             Layer::ReadRules(rules, index) => match rules {
                 Some(rules) if !rules.is_empty() => {
                     let active = self.session.as_ref().map(|session| session.id.as_str());

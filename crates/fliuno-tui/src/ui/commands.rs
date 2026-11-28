@@ -30,6 +30,7 @@ pub(super) enum CommandAction {
     NewConversation,
     ModelProfiles,
     ReadRules,
+    ProjectReview,
     Help,
 }
 

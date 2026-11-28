@@ -3190,6 +3190,12 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             terminal.expect("Now: Update the greeting");
             terminal.expect("Enter Review");
             terminal.expect("Review the pending operation to continue");
+            terminal.keys("d");
+            terminal.expect("Project changes & checks");
+            terminal.expect("No recorded writes or checks for this turn.");
+            terminal.expect_absent("Applied patch");
+            terminal.keys("\x1b");
+            terminal.expect_absent("Project changes & checks");
             for cols in [48, 80, 110] {
                 terminal.resize(24, cols);
                 terminal.ready();
@@ -3259,6 +3265,24 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         diff.contains("-Hello world\n+Welcome to Fliuno\n"),
         "{diff}"
     );
+    terminal.expect("Ask a follow-up");
+    terminal.keys("/changes");
+    terminal.expect("Review project changes and checks");
+    terminal.keys("\t");
+    for cols in [48, 80, 110] {
+        terminal.resize(24, cols);
+        terminal.ready();
+        terminal.expect("Project changes & checks");
+        terminal.expect("Applied patch: src/greeting.txt");
+        terminal.expect("-Hello world");
+        terminal.expect("+Welcome to Fliuno");
+        terminal.expect("Check passed: Greeting check");
+        terminal.expect("greeting check passed");
+        terminal.expect_absent("unselected.txt");
+        terminal.capture(&format!("project-review-{cols}"));
+    }
+    terminal.keys("\x1b");
+    terminal.expect_absent("Project changes & checks");
     terminal.expect("Ask a follow-up");
     terminal.keys("/permissions");
     terminal.expect("Manage read permissions");

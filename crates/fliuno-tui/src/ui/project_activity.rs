@@ -39,7 +39,12 @@ impl App {
             return;
         }
         lines.push(Line::raw(""));
-        lines.push(Line::styled("Project activity", self.palette.label));
+        let review = if paths.is_empty() && checks.is_empty() {
+            "Project activity"
+        } else {
+            "Project activity  ·  d Review"
+        };
+        lines.push(Line::styled(review, self.palette.label));
         if let Some((count, limited)) = discovery {
             let coverage = if limited { " · scan limited" } else { "" };
             let matches = if count == 1 { "match" } else { "matches" };
@@ -68,25 +73,38 @@ impl App {
             }
         }
     }
+
+    pub(super) fn open_project_review(&mut self, return_to_draft: bool) {
+        self.layer = Layer::ProjectReview {
+            return_to_draft,
+            scroll: 0,
+        };
+    }
+
+    pub(super) fn draw_project_review(&self, frame: &mut Frame<'_>, area: Rect, scroll: u16) {
+        let lines = self.detail.as_ref().map_or_else(
+            || empty_review(&self.palette),
+            |detail| project_review(&detail.task, &self.palette),
+        );
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let last_row = paragraph
+            .line_count(area.width)
+            .saturating_sub(usize::from(area.height));
+        frame.render_widget(
+            paragraph.scroll((usize::from(scroll).min(last_row) as u16, 0)),
+            area,
+        );
+    }
 }
 
 fn last_search(task: &Task) -> Option<(usize, bool)> {
-    task.messages.iter().rev().find_map(|message| {
-        let Message::ToolResult { call_id, output } = message else {
+    tool_receipts(task).rev().find_map(|(call, output)| {
+        if call.name != "workspace_find" || call.arguments["path"] != output["path"] {
             return None;
-        };
+        }
         let matches = output["matches"].as_array()?;
         let limited = output["truncated"].as_bool()? || output["unreadable"].as_u64()? > 0;
-        task.messages
-            .iter()
-            .any(|message| {
-                matches!(message,
-                    Message::ToolCall { call }
-                        if call.id == *call_id && call.name == "workspace_find"
-                            && call.arguments["path"] == output["path"]
-                )
-            })
-            .then_some((matches.len(), limited))
+        Some((matches.len(), limited))
     })
 }
 
@@ -94,23 +112,9 @@ fn last_search(task: &Task) -> Option<(usize, bool)> {
 /// Model prose, pending approvals and unknown outcomes cannot create a receipt.
 fn saved_workspace_paths(task: &Task) -> Vec<&str> {
     let mut paths = Vec::new();
-    for message in task.messages.iter().rev() {
-        let Message::ToolResult { call_id, output } = message else {
-            continue;
-        };
-        if output["bytesWritten"].as_u64().is_none() {
-            continue;
-        }
-        let Some(path) = output["path"].as_str() else {
-            continue;
-        };
-        if !paths.contains(&path)
-            && task.messages.iter().any(|message| {
-                matches!(message, Message::ToolCall { call }
-                if call.id == *call_id && matches!(call.name.as_str(),
-                    "workspace_create_text" | "workspace_replace_text" | "workspace_patch_text")
-                    && call.arguments["path"].as_str() == Some(path))
-            })
+    for (call, output) in tool_receipts(task).rev() {
+        if let Some(path) = workspace_write_path(call, output)
+            && !paths.contains(&path)
         {
             paths.push(path);
             if paths.len() == 5 {
@@ -122,6 +126,35 @@ fn saved_workspace_paths(task: &Task) -> Vec<&str> {
     paths
 }
 
+fn tool_receipts(task: &Task) -> impl DoubleEndedIterator<Item = (&ToolCall, &Value)> {
+    let calls: std::collections::HashMap<_, _> = task
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::ToolCall { call } => Some((call.id.as_str(), call)),
+            _ => None,
+        })
+        .collect();
+    task.messages
+        .iter()
+        .filter_map(move |message| match message {
+            Message::ToolResult { call_id, output } => {
+                Some((*calls.get(call_id.as_str())?, output))
+            }
+            _ => None,
+        })
+}
+
+fn workspace_write_path<'a>(call: &ToolCall, output: &'a Value) -> Option<&'a str> {
+    let path = output["path"].as_str()?;
+    (matches!(
+        call.name.as_str(),
+        "workspace_create_text" | "workspace_replace_text" | "workspace_patch_text"
+    ) && call.arguments["path"].as_str() == Some(path)
+        && output["bytesWritten"].as_u64().is_some())
+    .then_some(path)
+}
+
 struct ProjectCheckReceipt {
     summary: String,
     passed: bool,
@@ -129,47 +162,124 @@ struct ProjectCheckReceipt {
 }
 
 fn project_check_receipts(task: &Task) -> Vec<ProjectCheckReceipt> {
-    task.messages
-        .iter()
+    let mut checks: Vec<_> = tool_receipts(task)
         .rev()
-        .filter_map(|message| {
-            let Message::ToolResult { call_id, output } = message else {
-                return None;
-            };
-            let plan = &output["projectCheck"];
-            if plan["kind"] != "project_check" || output["termination"] != "exited" {
-                return None;
-            }
-            let call = task.messages.iter().find_map(|message| match message {
-                Message::ToolCall { call }
-                    if &call.id == call_id && call.name.starts_with("process_") =>
-                {
-                    Some(call)
-                }
-                _ => None,
-            })?;
-            if call.arguments["inputs"] != plan["inputs"] {
-                return None;
-            }
-            let passed = output["success"].as_bool()?;
-            let state = if passed {
-                "Check passed"
-            } else {
-                "Check failed"
-            };
-            let exit = output["exitCode"]
-                .as_i64()
-                .map_or_else(|| "no exit code".into(), |code| format!("exit {code}"));
-            let label = clean(plan["label"].as_str()?).replace('\n', " ");
-            Some(ProjectCheckReceipt {
-                summary: format!("{state}: {label}  ·  {exit}"),
-                passed,
-                command: project_check_command(plan).map(|command| clean(&command)),
-            })
-        })
+        .filter_map(|(call, output)| project_check_receipt(call, output))
         .take(3)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect()
+        .collect();
+    checks.reverse();
+    checks
+}
+
+fn project_check_receipt(call: &ToolCall, output: &Value) -> Option<ProjectCheckReceipt> {
+    let plan = &output["projectCheck"];
+    if !call.name.starts_with("process_")
+        || plan["kind"] != "project_check"
+        || call.arguments["inputs"] != plan["inputs"]
+    {
+        return None;
+    }
+    let passed = output["success"].as_bool()? && output["termination"] == "exited";
+    let reason = match output["termination"].as_str()? {
+        "exited" => output["exitCode"]
+            .as_i64()
+            .map_or_else(|| "no exit code".into(), |code| format!("exit {code}")),
+        "timed_out" => "timed out".into(),
+        "cancelled" => "cancelled".into(),
+        "io_error" => "output error".into(),
+        "cleanup_failed" => "cleanup failed".into(),
+        _ => return None,
+    };
+    let state = if passed {
+        "Check passed"
+    } else {
+        "Check failed"
+    };
+    let label = one_line(plan["label"].as_str()?);
+    Some(ProjectCheckReceipt {
+        summary: format!("{state}: {label}  ·  {reason}"),
+        passed,
+        command: project_check_command(plan).map(|command| clean(&command)),
+    })
+}
+
+fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for (call, output) in tool_receipts(task) {
+        if let Some(path) = workspace_write_path(call, output) {
+            let patch = call.arguments["patch"]
+                .as_str()
+                .filter(|_| call.name == "workspace_patch_text");
+            let operation = if patch.is_some() {
+                "Applied patch"
+            } else {
+                "Wrote file"
+            };
+            lines.push(Line::styled(
+                format!("{operation}: {}", one_line(path)),
+                palette.label,
+            ));
+            if let Some(patch) = patch {
+                lines.extend(clean(patch).lines().map(|line| {
+                    let style = match line.as_bytes().first() {
+                        Some(b'+') if !line.starts_with("+++") => palette.status(Color::Green),
+                        Some(b'-') if !line.starts_with("---") => palette.status(Color::Red),
+                        Some(b'@') => palette.label,
+                        _ => palette.quiet,
+                    };
+                    Line::styled(line.to_owned(), style)
+                }));
+            }
+            lines.push(Line::default());
+        } else if let Some(check) = project_check_receipt(call, output) {
+            let color = if check.passed {
+                Color::Green
+            } else {
+                Color::Red
+            };
+            lines.push(Line::styled(check.summary, palette.status(color)));
+            if let Some(command) = check.command {
+                lines.push(Line::styled(command, palette.quiet));
+            }
+            for (key, label) in [("stdout", "Output"), ("stderr", "Errors")] {
+                let capture = &output[key];
+                let Some(bytes) = capture["bytesSeen"].as_u64().filter(|&bytes| bytes > 0) else {
+                    continue;
+                };
+                lines.push(Line::styled(
+                    format!("{label} · {bytes} bytes"),
+                    palette.label,
+                ));
+                if capture["truncated"] == true {
+                    lines.push(Line::styled(
+                        "Showing only the retained tail.",
+                        palette.quiet,
+                    ));
+                }
+                if capture["encoding"] == "utf8"
+                    && let Some(text) = capture["data"].as_str()
+                {
+                    lines.extend(clean(text).lines().map(|line| Line::raw(line.to_owned())));
+                } else {
+                    lines.push(Line::styled("Non-text output.", palette.quiet));
+                }
+            }
+            lines.push(Line::default());
+        }
+    }
+    if lines.is_empty() {
+        return empty_review(palette);
+    }
+    lines.insert(
+        0,
+        Line::styled("This turn · Recorded actions", palette.quiet),
+    );
+    lines
+}
+
+fn empty_review(palette: &Palette) -> Vec<Line<'static>> {
+    vec![Line::styled(
+        "No recorded writes or checks for this turn.",
+        palette.quiet,
+    )]
 }
