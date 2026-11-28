@@ -332,7 +332,7 @@ Windows 和 Linux 上，Run 子任务通过 `--exec-config` 注册的进程工�
 
 ### 模型尝试次数
 
-`initialize.capabilities.maxTaskModelSteps` 表示 `task/start` 和 `task/startSummary` 接受 `maxModelSteps`，取值为 `1..=8`。省略或显式填 `8` 都使用默认上限，重试时视为同一请求。外部 Agent 任务不接受该字段。低于默认值时，任务快照保留 `maxModelSteps`；已使用的次数见 `modelSteps`。
+`initialize.capabilities.maxTaskModelSteps` 表示 `task/start` 和 `task/startSummary` 接受 `maxModelSteps`，取值为 `1..=32`。省略或显式填 `8` 都使用默认上限，重试时视为同一请求。外部 Agent 任务不接受该字段。显式指定非默认上限时，任务快照保留 `maxModelSteps`；已使用的次数见 `modelSteps`。
 
 内核在开始尝试时记一次 `model_started`，随后再交给供应商。即使本次请求未发出或结果不明，这次尝试也占用上限。最后一次响应若提议了工具，获准的工具仍可执行并保存产物；若接下来还需要调用模型，任务以 `model step budget exceeded` 结束。次数用完且任务已中断时，`task/resume` 返回 `-32009`，不会写入续跑事件、清空 `modelOutcomeUnknown` 或再次发出请求。
 

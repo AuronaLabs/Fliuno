@@ -769,9 +769,31 @@ fn model_step_limit_preserves_default_receipts_and_rejects_invalid_settings() {
     assert_eq!(peer.call("task/start", default), waiting);
     assert_eq!(old_options(), v45);
 
+    let queued = peer.call(
+        "taskQueue/enqueue",
+        json!({
+            "sessionId":session["id"],"input":"larger budget","maxModelSteps":24,
+            "clientRequestId":"project-budget"
+        }),
+    );
+    drop(peer);
+    let mut peer = Peer::start(&db_path);
+    peer.call("task/cancel", json!({"taskId":id}));
+    let queued = peer.call(
+        "taskQueue/startNext",
+        json!({
+            "sessionId":session["id"],"queueId":queued["queueId"]
+        }),
+    );
+    let project = peer.wait_for_status(
+        queued["status"]["taskId"].as_str().unwrap(),
+        "waiting_approval",
+    );
+    assert_eq!(project["maxModelSteps"], 24);
+
     for invalid in [
         json!({"maxModelSteps":0}),
-        json!({"maxModelSteps":9}),
+        json!({"maxModelSteps":33}),
         json!({"maxModelSteps":1,"backend":{"type":"external_agent","agentId":"missing"}}),
     ] {
         let mut params = request.clone();
@@ -788,7 +810,7 @@ fn model_step_limit_preserves_default_receipts_and_rejects_invalid_settings() {
     assert_eq!(
         db.query_row::<u32, _, _>("SELECT count(*) FROM tasks", [], |row| row.get(0))
             .unwrap(),
-        1
+        2
     );
 }
 

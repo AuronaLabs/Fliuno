@@ -146,6 +146,16 @@ impl Options {
             .map(Settings::load)
             .transpose()?
             .unwrap_or_default();
+        if settings
+            .workbench
+            .max_model_steps
+            .is_some_and(|limit| !(1..=fliuno_protocol::MAX_TASK_MODEL_STEPS).contains(&limit))
+        {
+            return Err(format!(
+                "[workbench].max_model_steps must be 1 to {}",
+                fliuno_protocol::MAX_TASK_MODEL_STEPS
+            ));
+        }
         let demo = force_demo
             || matches!(
                 settings

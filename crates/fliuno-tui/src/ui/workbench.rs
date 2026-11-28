@@ -326,7 +326,10 @@ impl App {
                 } else if task.agent_run.is_some() {
                     "External Agent running".into()
                 } else if task.model_steps > 0 {
-                    format!("Model request  ·  Attempt {}", task.model_steps)
+                    let limit = task
+                        .max_model_steps
+                        .unwrap_or(fliuno_protocol::DEFAULT_TASK_MODEL_STEPS);
+                    format!("Model request  ·  Attempt {}/{limit}", task.model_steps)
                 } else {
                     "Waiting for a model worker".into()
                 };

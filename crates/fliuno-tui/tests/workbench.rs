@@ -2975,7 +2975,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                 ]}),
             )
         };
-        for step in 0..11 {
+        for step in 0..12 {
             let (mut socket, request) = streaming_fixture_input(&listener);
             let input = request["input"].as_array().unwrap();
             let result = || {
@@ -3090,14 +3090,18 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                     assert_eq!(result()["exitCode"], 0);
                     assert_eq!(result()["success"], true);
                     assert_eq!(result()["stdout"]["data"], "greeting check passed\n");
+                    plan("plan-verified", "completed", "completed", "completed")
+                }
+                9 => {
+                    assert_eq!(result()["published"], true);
                     complete("已更新问候语，并通过项目检查。")
                 }
-                9 => call(
+                10 => call(
                     "read-after-revoke",
                     "workspace_read_text",
                     json!({"path":"src/greeting.txt"}),
                 ),
-                10 => {
+                11 => {
                     assert_eq!(result()["content"], "Welcome to Fliuno\n");
                     complete("已再次读取问候语。")
                 }
@@ -3161,6 +3165,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         [workbench]
         database = "live.db"
         theme = "dark"
+        max_model_steps = 16
         [integrations]
         execution = "checks.json"
         [model]

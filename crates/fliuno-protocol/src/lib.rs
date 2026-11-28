@@ -496,7 +496,7 @@ pub struct Task {
     pub active_reply_identity: Option<ReplyIdentity>,
     pub output: Option<String>,
     pub model_steps: u32,
-    /// A lower attempt limit supplied at task creation. Absent model tasks use 8.
+    /// An explicit attempt limit supplied at task creation. Absent model tasks use 8.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(range(min = 1, max = MAX_TASK_MODEL_STEPS))]
     pub max_model_steps: Option<u32>,
@@ -1250,7 +1250,8 @@ pub struct WorkspaceIdParams {
 
 /// Existing model tasks without an override keep this attempt limit.
 pub const DEFAULT_TASK_MODEL_STEPS: u32 = 8;
-pub const MAX_TASK_MODEL_STEPS: u32 = DEFAULT_TASK_MODEL_STEPS;
+/// Explicit host limits may give new tasks more room without changing old tasks.
+pub const MAX_TASK_MODEL_STEPS: u32 = 32;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

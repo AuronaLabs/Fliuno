@@ -26,6 +26,7 @@ pub const TEMPLATE: &str = r#"# Fliuno user settings. Paths are relative to this
 [workbench]
 theme = "auto"
 # database = "state/workbench.db"
+# max_model_steps = 16
 
 [model]
 # Choose openai, anthropic, or gemini and fill in the model ID and key file.
@@ -51,6 +52,7 @@ pub struct WorkbenchSettings {
     pub database: Option<PathBuf>,
     pub server: Option<PathBuf>,
     pub model_profile: Option<String>,
+    pub max_model_steps: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]

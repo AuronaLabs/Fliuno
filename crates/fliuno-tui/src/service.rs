@@ -341,6 +341,7 @@ struct Service {
     transcript: Option<TranscriptHead>,
     activity: activity::Progress,
     selected_model: Option<ModelProfileEntry>,
+    max_model_steps: Option<u32>,
 }
 
 struct TranscriptHead {
@@ -408,6 +409,17 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
         .map_err(|_| "app-server process lock unavailable")? = Some(child);
     let (reader, inbox) = PipeReader::open(output)?;
     let client = Client::connect(reader, input, "Fliuno Workbench", |_| {})?;
+    let max_model_steps = (!options.force_demo)
+        .then_some(options.settings.workbench.max_model_steps)
+        .flatten();
+    if let Some(limit) = max_model_steps
+        && client.info().capabilities["maxTaskModelSteps"]
+            .as_u64()
+            .unwrap_or_default()
+            < u64::from(limit)
+    {
+        return Err("This app-server does not support [workbench].max_model_steps. Update the app-server or adjust this setting.".into());
+    }
     Ok(Service {
         client,
         inbox,
@@ -422,6 +434,7 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
         transcript: None,
         activity: activity::Progress::default(),
         selected_model: None,
+        max_model_steps,
     })
 }
 
@@ -1113,8 +1126,11 @@ impl Service {
                 context.plan_only = plan_only;
                 context.enable_interaction = !plan_only && self.supports("taskInteraction");
                 let context = (*context != ContextOptions::default()).then_some(context);
-                let params = json!({"sessionId":session,"input":text,"clientRequestId":key,
+                let mut params = json!({"sessionId":session,"input":text,"clientRequestId":key,
                     "context":context,"artifactInputs":input.into_iter().collect::<Vec<_>>()});
+                if let Some(limit) = self.max_model_steps {
+                    params["maxModelSteps"] = json!(limit);
+                }
                 if enqueue {
                     self.require_task_queue()?;
                     out.send(Update::Enqueued(self.rpc("taskQueue/enqueue", params)?))?;
