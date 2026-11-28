@@ -7,6 +7,7 @@ mod model_edit;
 mod model_setup;
 mod supplier_edit;
 mod suppliers;
+mod workbench_edit;
 pub use credentials::PendingApiKey;
 pub use model_connection::{
     ConnectionCredential, ModelConnectionDraft, ModelConnectionEdit, ModelConnectionTarget,
@@ -27,6 +28,7 @@ use std::{
 pub const TEMPLATE: &str = r#"# Fliuno user settings. Paths are relative to this file.
 [workbench]
 theme = "auto"
+# language = "zh-CN" # en (default) or zh-CN
 # database = "state/workbench.db"
 # max_model_steps = 16
 
@@ -51,10 +53,30 @@ pub struct Settings {
 #[serde(default, deny_unknown_fields)]
 pub struct WorkbenchSettings {
     pub theme: Theme,
+    pub language: Language,
     pub database: Option<PathBuf>,
     pub server: Option<PathBuf>,
     pub model_profile: Option<String>,
     pub max_model_steps: Option<u32>,
+}
+
+/// Language of the local workbench. This does not affect model requests.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub enum Language {
+    #[default]
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "zh-CN")]
+    SimplifiedChinese,
+}
+
+impl Language {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::English => "en",
+            Self::SimplifiedChinese => "zh-CN",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
