@@ -437,11 +437,15 @@ impl Tool for WorkspaceTool {
                     .patch()
                     .as_text()
                     .ok_or("only text patches are supported")?;
-                let updated = apply(&current, patch).map_err(|_| {
-                    ToolError::Failed("unified diff does not match the file".into())
+                let updated = apply(&current, patch).map_err(|_| ToolError::NeedsCorrection {
+                    code: "workspace_patch_mismatch",
+                    message: "No changes written. Reread the file and prepare a diff whose context matches it.".into(),
                 })?;
                 if updated == current {
-                    return Err(ToolError::Failed("patch does not change the file".into()));
+                    return Err(ToolError::NeedsCorrection {
+                        code: "workspace_patch_no_change",
+                        message: "No changes written. Check that your diff contains a valid hunk and actually changes the file.".into(),
+                    });
                 }
                 if updated.len() > READ_LIMIT as usize {
                     return Err(ToolError::Failed("patched file exceeds 256 KiB".into()));

@@ -633,6 +633,83 @@ fn file_patch_is_shown_for_approval_and_applies_only_to_its_reviewed_version() {
 }
 
 #[test]
+fn rejected_patch_leaves_bytes_intact_and_a_revised_diff_needs_new_approval() {
+    use fliuno_core::{ModelDecision, ModelTurn};
+    use fliuno_protocol::{ApprovalDecision, Message, Task, TaskStatus};
+
+    struct Retry;
+    impl fliuno_core::ModelProvider for Retry {
+        fn next(
+            &self,
+            task: &Task,
+            _tools: &[ToolSpec],
+            _cancellation: &CancellationToken,
+        ) -> Result<ModelTurn, String> {
+            let results: Vec<_> = task
+                .messages
+                .iter()
+                .filter_map(|message| match message {
+                    Message::ToolResult { output, .. } => Some(output),
+                    _ => None,
+                })
+                .collect();
+            let patch = match results.as_slice() {
+                [] => "--- a/report.txt\n+++ b/report.txt\n@@ -1 +1 @@\n before\n",
+                [no_change] => {
+                    assert_eq!(no_change["code"], "workspace_patch_no_change");
+                    "--- a/report.txt\n+++ b/report.txt\n@@ -1 +1 @@\n-wrong\n+after\n"
+                }
+                [_, mismatch] => {
+                    assert_eq!(mismatch["code"], "workspace_patch_mismatch");
+                    report_patch()
+                }
+                [_, _, written] => {
+                    assert_eq!(written["sha256"], sha256(b"after\nstable\n"));
+                    return Ok(ModelDecision::Complete("patch applied".into()).into());
+                }
+                _ => unreachable!(),
+            };
+            Ok(ModelDecision::Call(ToolCall {
+                id: format!("patch-{}", results.len()),
+                name: "workspace_patch_text".into(),
+                arguments: json!({"path":"report.txt", "baseSha256":sha256(b"before\nstable\n"), "patch":patch}),
+            }).into())
+        }
+    }
+
+    let root = std::env::temp_dir().join(format!(
+        "fliuno-patch-correction-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&root).unwrap();
+    let file = root.join("report.txt");
+    std::fs::write(&file, b"before\nstable\n").unwrap();
+    let mut kernel = Kernel::in_memory(Box::new(Retry)).unwrap();
+    register(&mut kernel).unwrap();
+    let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let mut task = kernel.start_task(&session.id, "edit report").unwrap();
+    let mut prior = Vec::new();
+    for _ in 0..3 {
+        assert_eq!(task.status, TaskStatus::WaitingApproval);
+        assert_eq!(std::fs::read(&file).unwrap(), b"before\nstable\n");
+        let approval = task.pending_approval.as_ref().unwrap();
+        assert!(!prior.contains(&approval.id));
+        prior.push(approval.id.clone());
+        task = kernel
+            .respond_approval(&task.id, &approval.id, ApprovalDecision::AllowOnce)
+            .unwrap();
+    }
+    assert_eq!(task.status, TaskStatus::Completed);
+    assert_eq!(std::fs::read(file).unwrap(), b"after\nstable\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn file_patch_rejects_stale_bases_and_multi_file_or_misdirected_diffs() {
     let root = std::env::temp_dir().join(format!(
         "fliuno-patch-guard-{}-{}",
