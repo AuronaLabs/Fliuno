@@ -1528,8 +1528,12 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
 
     let mut cancelled = Console::launch_unconfigured(server.as_deref(), root.path());
     cancelled.expect("Choose your model provider");
-    cancelled.expect("Google Gemini");
+    cancelled.expect("Google Gemini Interactions");
     cancelled.capture("setup-provider-110");
+    cancelled.resize(24, 80);
+    cancelled.capture("setup-provider-80");
+    cancelled.resize(21, 48);
+    cancelled.capture("setup-provider-48");
     cancelled.quit("\x03");
     assert!(
         !profile.exists(),
@@ -1538,8 +1542,9 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
 
     let mut console = Console::launch_unconfigured(server.as_deref(), root.path());
     console.expect("Choose your model provider");
-    console.keys("\r");
+    console.keys("\x1b[B\r");
     console.expect("Enter a model ID");
+    console.expect("OpenAI-compatible Chat Completions");
     console.resize(24, 80);
     console.ready();
     console.capture("setup-model-80");
@@ -1581,6 +1586,7 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.capture("conversation-first-launch-48");
     let profile_text = std::fs::read_to_string(&config).unwrap();
     assert!(profile_text.contains("provider = \"openai\""));
+    assert!(profile_text.contains("protocol = \"chat_completions\""));
     assert!(profile_text.contains("base_url = \"http://127.0.0.1:9/v1/\""));
     assert!(profile_text.contains("api_key_file = \"fixture key.txt\""));
     assert!(!profile_text.contains("fixture-secret-value"));

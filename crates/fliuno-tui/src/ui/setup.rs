@@ -1,7 +1,7 @@
 use super::{clean, palette::Palette};
 use crate::{Screen, editor::Editor, options::SetupOptions};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use fliuno_config::{PendingApiKey, Provider, provider_api_root, read_api_key};
+use fliuno_config::{ModelProtocol, PendingApiKey, Provider, provider_api_root, read_api_key};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Margin, Position, Rect},
@@ -16,10 +16,33 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const PROVIDERS: [(Provider, &str); 3] = [
-    (Provider::OpenAi, "OpenAI"),
-    (Provider::Anthropic, "Anthropic"),
-    (Provider::Gemini, "Google Gemini"),
+struct ModelRoute {
+    provider: Provider,
+    protocol: ModelProtocol,
+    label: &'static str,
+}
+
+const MODEL_ROUTES: [ModelRoute; 4] = [
+    ModelRoute {
+        provider: Provider::OpenAi,
+        protocol: ModelProtocol::Responses,
+        label: "OpenAI Responses",
+    },
+    ModelRoute {
+        provider: Provider::OpenAi,
+        protocol: ModelProtocol::ChatCompletions,
+        label: "OpenAI-compatible Chat Completions",
+    },
+    ModelRoute {
+        provider: Provider::Anthropic,
+        protocol: ModelProtocol::Messages,
+        label: "Anthropic Messages",
+    },
+    ModelRoute {
+        provider: Provider::Gemini,
+        protocol: ModelProtocol::Interactions,
+        label: "Google Gemini Interactions",
+    },
 ];
 
 #[derive(Default)]
@@ -34,7 +57,7 @@ enum Step {
 #[derive(Default)]
 struct Form {
     step: Step,
-    provider: usize,
+    route: usize,
     model: Editor,
     endpoint: Editor,
     key_file: Editor,
@@ -156,9 +179,9 @@ impl Form {
             }
         } else {
             match key {
-                KeyCode::Up | KeyCode::Left => self.provider = self.provider.saturating_sub(1),
+                KeyCode::Up | KeyCode::Left => self.route = self.route.saturating_sub(1),
                 KeyCode::Down | KeyCode::Right => {
-                    self.provider = (self.provider + 1).min(PROVIDERS.len() - 1);
+                    self.route = (self.route + 1).min(MODEL_ROUTES.len() - 1);
                 }
                 _ => {}
             }
@@ -170,7 +193,9 @@ impl Form {
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        let provider = PROVIDERS[self.provider].0.name();
+        let route = &MODEL_ROUTES[self.route];
+        let provider = route.provider.name();
+        let protocol = route.protocol.as_str();
         // JSON and TOML use the same string escapes for these single-line, control-free inputs.
         let model = serde_json::to_string(self.model.text().trim()).map_err(|e| e.to_string())?;
         let endpoint = self.endpoint.text().trim();
@@ -199,8 +224,9 @@ impl Form {
             pending = Some(key);
             setting
         };
-        let content =
-            format!("[model]\nprovider = \"{provider}\"\nname = {model}\n{endpoint}{credential}\n");
+        let content = format!(
+            "[model]\nprovider = \"{provider}\"\nprotocol = \"{protocol}\"\nname = {model}\n{endpoint}{credential}\n"
+        );
         let write = || -> io::Result<()> {
             fs::create_dir_all(parent)?;
             let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
@@ -240,7 +266,7 @@ impl Form {
             Step::Provider => (
                 1,
                 "Choose your model provider",
-                "Use a model from your own account.",
+                "Match the API offered by your provider or gateway.",
                 "↑ ↓ Select   Enter Continue   Esc Exit",
             ),
             Step::Model => (
@@ -282,7 +308,7 @@ impl Form {
         let [header_area, body, footer_area, _] = Layout::vertical([
             Constraint::Length(header.line_count(area.width).min(7) as u16 + 1),
             Constraint::Length(match self.step {
-                Step::Provider => 4,
+                Step::Provider => MODEL_ROUTES.len() as u16 + 1,
                 Step::Model | Step::Endpoint => 3,
                 Step::Credential => 5,
             }),
@@ -293,11 +319,12 @@ impl Form {
         frame.render_widget(header, header_area);
         match self.step {
             Step::Provider => {
-                let lines: Vec<_> = PROVIDERS
+                let lines: Vec<_> = MODEL_ROUTES
                     .iter()
                     .enumerate()
-                    .map(|(i, (_, label))| {
-                        if i == self.provider {
+                    .map(|(i, route)| {
+                        let label = route.label;
+                        if i == self.route {
                             Line::styled(format!("›  {label}"), palette.choice)
                         } else {
                             Line::raw(format!("   {label}"))
@@ -313,7 +340,7 @@ impl Form {
                     Step::Model => (
                         &self.model,
                         "Model ID",
-                        PROVIDERS[self.provider].1.to_owned(),
+                        MODEL_ROUTES[self.route].label.to_owned(),
                     ),
                     Step::Endpoint => (&self.endpoint, "Provider default", String::new()),
                     _ => (

@@ -119,6 +119,17 @@ pub enum ModelProtocol {
     Interactions,
 }
 
+impl ModelProtocol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Responses => "responses",
+            Self::ChatCompletions => "chat_completions",
+            Self::Messages => "messages",
+            Self::Interactions => "interactions",
+        }
+    }
+}
+
 impl ModelSettings {
     pub fn effective_protocol(&self) -> Result<Option<ModelProtocol>, &'static str> {
         use ModelProtocol::{ChatCompletions, Interactions, Messages, Responses};
