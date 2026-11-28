@@ -37,6 +37,15 @@ impl Console {
     }
 
     fn launch_with_config(server: Option<&Path>, root: &Path, config: Option<&Path>) -> Self {
+        Self::launch_with_config_at(server, root, config, (28, 110))
+    }
+
+    fn launch_with_config_at(
+        server: Option<&Path>,
+        root: &Path,
+        config: Option<&Path>,
+        viewport: (u16, u16),
+    ) -> Self {
         let mut command = CommandBuilder::new(binary());
         if let Some(config) = config {
             command.arg("--config");
@@ -46,15 +55,24 @@ impl Console {
             command.arg("--db");
             command.arg(root.join("workbench.db"));
         }
-        Self::spawn(command, server, root)
+        Self::spawn_at(command, server, root, viewport)
     }
 
     fn launch_unconfigured(server: Option<&Path>, root: &Path) -> Self {
         Self::spawn(CommandBuilder::new(binary()), server, root)
     }
 
-    fn spawn(mut command: CommandBuilder, server: Option<&Path>, root: &Path) -> Self {
-        let pair = native_pty_system().openpty(size(28, 110)).unwrap();
+    fn spawn(command: CommandBuilder, server: Option<&Path>, root: &Path) -> Self {
+        Self::spawn_at(command, server, root, (28, 110))
+    }
+
+    fn spawn_at(
+        mut command: CommandBuilder,
+        server: Option<&Path>,
+        root: &Path,
+        (rows, cols): (u16, u16),
+    ) -> Self {
+        let pair = native_pty_system().openpty(size(rows, cols)).unwrap();
         if let Some(server) = server {
             command.arg("--server");
             command.arg(server);
@@ -88,7 +106,7 @@ impl Console {
             master: pair.master,
             input,
             output,
-            screen: vt100::Parser::new(28, 110, 0),
+            screen: vt100::Parser::new(rows, cols, 0),
         }
     }
 
@@ -2501,6 +2519,167 @@ api_key_file = "fixture.key"
     assert_eq!(actual["reasoning"]["effort"], "high");
     assert!(actual["input"].to_string().contains("Draft survives edits"));
     console.expect("Edited model replied");
+    console.quit("\x03");
+    provider.join().unwrap();
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn workbench_adds_a_connection_and_rotates_its_route_without_reusing_credentials() {
+    for viewport in [(22, 48), (24, 80), (28, 110)] {
+        manage_connection_at_width(viewport);
+    }
+}
+
+fn manage_connection_at_width(viewport: (u16, u16)) {
+    let (_, cols) = viewport;
+    use std::net::TcpListener;
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let baseline =
+        "[model]\nprovider = 'openai'\nname = 'original-model'\napi_key_file = 'original.key'\n";
+    std::fs::write(&config, baseline).unwrap();
+    std::fs::write(root.path().join("original.key"), "original-fixture-key").unwrap();
+
+    let local = TcpListener::bind("127.0.0.1:0").unwrap();
+    let local_url = format!("http://{}/v1/", local.local_addr().unwrap());
+    let rotated = TcpListener::bind("127.0.0.1:0").unwrap();
+    let next_url = format!("http://{}/v1/", rotated.local_addr().unwrap());
+    let (dispatched, generation) = channel();
+    let provider = thread::spawn(move || {
+        write_catalog_response(
+            read_catalog_request(&local, None),
+            200,
+            r#"{"data":[{"id":"local-model"}]}"#,
+        );
+        write_catalog_response(
+            read_catalog_request(&rotated, Some("replacement-fixture-key")),
+            200,
+            r#"{"data":[{"id":"local-model","name":"replacement-fixture-key"}]}"#,
+        );
+        let (mut socket, request) = streaming_fixture_input(&rotated);
+        dispatched.send(request).unwrap();
+        socket.write_all(concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Updated connection replied.\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ).as_bytes()).unwrap();
+    });
+    let mut console =
+        Console::launch_with_config_at(server.as_deref(), root.path(), Some(&config), viewport);
+    console.expect("Enter Send");
+    let open = |c: &mut Console| {
+        c.keys("\x1bOPmodel");
+        c.expect("Commands  /  model");
+        c.keys("\r");
+        c.expect("Ctrl+N Add profile");
+    };
+    console.keys("My draft survives connection changes.");
+    open(&mut console);
+    console.keys("\x0e");
+    console.expect("Add model profile");
+    console.keys("local\r");
+    console.expect("API protocol");
+    console.keys("\x1b[B\r");
+    console.expect("Base URL");
+    console.keys(&format!("{local_url}\r"));
+    console.expect("Connect without a key");
+    console.expect_absent("Keep current settings");
+    console.capture(&format!("connection-auth-{cols}"));
+    console.keys("\x1b[B\x1b[B\r");
+    console.expect("Model and save");
+    console.keys("\x1b[15~");
+    console.expect("Browse connection catalog");
+    console.expect("local-model");
+    console.capture(&format!("connection-catalog-{cols}"));
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), baseline);
+    console.keys("\r");
+    console.expect("Model and save");
+    console.keys("\r");
+    console.expect("Profile saved. Enter to use it now.");
+    console.expect("[model] [now/default]");
+    let settings = fliuno_config::Settings::load(&config).unwrap();
+    assert!(
+        settings
+            .named_model("local")
+            .unwrap()
+            .read_model_key()
+            .unwrap()
+            .is_none()
+    );
+    assert!(settings.workbench.model_profile.is_none());
+    console.keys("\r");
+    console.expect_absent("Switch model");
+    console.expect("Using local-model");
+    console.ready();
+
+    open(&mut console);
+    console.keys("\x1bOS");
+    console.expect("API protocol");
+    console.keys("\r");
+    console.expect("Base URL");
+    console.keys(&"\x7f".repeat(local_url.len()));
+    console.keys(&format!("{next_url}\r"));
+    console.expect("Choose credentials for this connection.");
+    console.expect_absent("Keep current settings");
+    console.keys("\r");
+    console.expect("Paste API key");
+    console.keys("replacement-fixture-key");
+    console.expect("••••••••");
+    console.expect_absent("replacement-fixture-key");
+    console.capture(&format!("connection-masked-key-{cols}"));
+    console.keys("\r");
+    console.expect("Model and save");
+    console.keys("\x1b[15~");
+    console.expect("Browse connection catalog");
+    console.expect("> local-model");
+    console.expect_absent("replacement-fixture-key");
+    console.keys("\r");
+    console.expect("Model and save");
+
+    // Save with an existing key file: the preview above exercised pasted-key protection.
+    console.keys("\x1b");
+    console.expect("Connection · API key");
+    console.expect("••••••••");
+    console.keys("\x1b");
+    console.expect("Authentication");
+    std::fs::write(
+        root.path().join("replacement.key"),
+        "replacement-fixture-key",
+    )
+    .unwrap();
+    console.keys("\x1b[B\r");
+    console.expect("Path to key file");
+    console.keys("replacement.key\r");
+    console.expect("Model and save");
+    console.keys("\r");
+    console.expect("Profile saved. Enter to use it now.");
+    let saved = std::fs::read_to_string(&config).unwrap();
+    assert!(saved.starts_with(baseline));
+    assert!(!saved.contains("replacement-fixture-key"));
+    let settings = fliuno_config::Settings::load(&config).unwrap();
+    let model = settings.named_model("local").unwrap();
+    assert_eq!(model.base_url.as_deref(), Some(next_url.as_str()));
+    assert_eq!(model.read_api_key().unwrap(), "replacement-fixture-key");
+
+    // Reopen the picker before selecting to verify reload even with unchanged model ID.
+    console.keys("\x1b");
+    open(&mut console);
+    console.keys("\r");
+    console.expect_absent("Switch model");
+    console.expect("Using local-model");
+    console.expect("Enter Send");
+    console.ready();
+    console.keys("\r");
+    console.expect("Updated connection replied.");
+    let request = generation.recv_timeout(Duration::from_secs(15)).unwrap();
+    assert_eq!(request["model"], "local-model");
+    assert!(
+        request["messages"]
+            .to_string()
+            .contains("My draft survives connection changes.")
+    );
     console.quit("\x03");
     provider.join().unwrap();
 }

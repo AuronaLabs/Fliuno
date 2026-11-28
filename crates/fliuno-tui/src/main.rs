@@ -133,8 +133,9 @@ fn run(options: Options, screen: &mut Screen) -> io::Result<()> {
                     }
                     redraw = true;
                 }
-                Event::Paste(text) => {
+                Event::Paste(mut text) => {
                     app.paste(&text);
+                    zeroize::Zeroize::zeroize(&mut text);
                     redraw = true;
                 }
                 Event::Resize(..) => redraw = true,

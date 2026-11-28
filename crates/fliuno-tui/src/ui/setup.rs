@@ -16,13 +16,13 @@ use ratatui::{
 use std::{io, path::Path, time::Duration};
 use zeroize::{Zeroize, Zeroizing};
 
-struct ModelRoute {
-    provider: Provider,
-    protocol: ModelProtocol,
-    label: &'static str,
+pub(super) struct ModelRoute {
+    pub(super) provider: Provider,
+    pub(super) protocol: ModelProtocol,
+    pub(super) label: &'static str,
 }
 
-const MODEL_ROUTES: [ModelRoute; 4] = [
+pub(super) const MODEL_ROUTES: [ModelRoute; 4] = [
     ModelRoute {
         provider: Provider::OpenAi,
         protocol: ModelProtocol::Responses,

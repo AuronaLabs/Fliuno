@@ -2,6 +2,7 @@ mod answer;
 mod commands;
 mod deliverables;
 mod memories;
+mod model_connection;
 mod model_edit;
 mod model_picker;
 mod palette;
@@ -813,9 +814,24 @@ impl App {
                 self.message = message;
             }
             Update::Activity(previews) => self.activity = previews,
-            Update::ModelProfiles(profiles, default, editable) => {
+            Update::ModelProfiles(profiles, default, features) => {
                 if let Layer::ModelPicker(picker) = &mut self.layer {
-                    picker.install(profiles, default, editable);
+                    picker.install(profiles, default, features);
+                }
+            }
+            Update::ModelConnectionOpened(target, view) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.connection_opened(target, view);
+                }
+            }
+            Update::ModelConnectionPreviewed(preview) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.connection_previewed(preview);
+                }
+            }
+            Update::ModelConnectionSaved(entry) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.connection_saved(entry);
                 }
             }
             Update::ModelEditOpened(view) => {

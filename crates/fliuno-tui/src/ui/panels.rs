@@ -303,7 +303,10 @@ impl App {
                 (58, (self.filtered_commands(menu).len() as u16 + 4).max(6))
             }
             Layer::Commands(_) => (66, 17),
-            Layer::ModelPicker(picker) => (66, picker.preferred_height()),
+            Layer::ModelPicker(picker) => (
+                if picker.editing_connection() { 56 } else { 66 },
+                picker.preferred_height(),
+            ),
             Layer::Edit(Edit::Answer(..)) => (76, 15),
             Layer::Edit(_) | Layer::ConfirmCancel(_) => (64, 6),
             Layer::DraftContext { .. } => (76, 19),
@@ -321,7 +324,15 @@ impl App {
         } else {
             area.y + top_gap
         };
-        let modal = Rect::new(area.x + (area.width - width) / 2, y, width, height);
+        // At wide terminal sizes leave the left column of the transcript visible.
+        let x = if area.width >= 100
+            && matches!(&self.layer, Layer::ModelPicker(picker) if picker.editing_connection())
+        {
+            area.right().saturating_sub(width).saturating_sub(1)
+        } else {
+            area.x + (area.width - width) / 2
+        };
+        let modal = Rect::new(x, y, width, height);
         frame.render_widget(Clear, modal);
         let (title, actions) = match &self.layer {
             Layer::None | Layer::TaskBrowser(_) => return,

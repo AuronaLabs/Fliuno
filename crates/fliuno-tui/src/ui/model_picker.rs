@@ -1,8 +1,10 @@
 use super::*;
 use fliuno_protocol::{
-    ModelCatalogAccess, ModelCatalogStatus, ModelConfigurationStatus, ModelConnectionCheck,
-    ModelConnectionCheckParams, ModelCredentialsStatus, ModelPresence, ModelProfileDefault,
-    ModelProfileEditGetParams, ModelProfileEditView, ModelProfileList, ModelProfileSelectParams,
+    ModelCatalogAccess, ModelCatalogPreview, ModelCatalogStatus, ModelConfigurationStatus,
+    ModelConnectionCheck, ModelConnectionCheckParams, ModelCredentialsStatus, ModelPresence,
+    ModelProfileConnectionGetParams, ModelProfileConnectionTarget, ModelProfileConnectionView,
+    ModelProfileDefault, ModelProfileEditGetParams, ModelProfileEditView, ModelProfileEntry,
+    ModelProfileList, ModelProfileSelectParams,
 };
 
 pub(super) struct Picker {
@@ -11,6 +13,8 @@ pub(super) struct Picker {
     default: Option<ModelProfileDefault>,
     saved: bool,
     editable: bool,
+    connection_editable: bool,
+    connection: Option<Box<super::model_connection::Panel>>,
     editor: Option<super::model_edit::Panel>,
     edit_saved: bool,
     index: usize,
@@ -27,6 +31,8 @@ impl Picker {
             default: None,
             saved: false,
             editable: false,
+            connection_editable: false,
+            connection: None,
             editor: None,
             edit_saved: false,
             index: 0,
@@ -40,10 +46,11 @@ impl Picker {
         &mut self,
         profiles: ModelProfileList,
         default: Option<ModelProfileDefault>,
-        editable: bool,
+        features: crate::service::ModelProfileFeatures,
     ) {
         self.default = default;
-        self.editable = editable;
+        self.editable = features.edit;
+        self.connection_editable = features.connection;
         self.index = profiles
             .profiles
             .iter()
@@ -51,6 +58,42 @@ impl Picker {
             .unwrap_or(0);
         self.profiles = Some(profiles);
         self.error = None;
+    }
+
+    pub(super) fn connection_opened(
+        &mut self,
+        target: ModelProfileConnectionTarget,
+        view: ModelProfileConnectionView,
+    ) {
+        let panel = self
+            .connection
+            .get_or_insert_with(|| Box::new(super::model_connection::Panel::new()));
+        panel.opened(target, view);
+    }
+
+    pub(super) fn connection_previewed(&mut self, preview: ModelCatalogPreview) {
+        if let Some(panel) = &mut self.connection {
+            panel.install_preview(preview);
+        }
+    }
+
+    pub(super) fn connection_saved(&mut self, entry: ModelProfileEntry) {
+        if let Some(profiles) = &mut self.profiles {
+            if let Some(index) = profiles
+                .profiles
+                .iter()
+                .position(|profile| profile.profile == entry.profile)
+            {
+                profiles.profiles[index] = entry;
+                self.index = index;
+            } else {
+                self.index = profiles.profiles.len();
+                profiles.profiles.push(entry);
+            }
+        }
+        self.checked = None;
+        self.connection = None;
+        self.edit_saved = true;
     }
 
     pub(super) fn edit_opened(&mut self, view: ModelProfileEditView) {
@@ -77,19 +120,24 @@ impl Picker {
     }
 
     pub(super) fn paste(&mut self, value: &str, busy: bool) {
-        if let Some(editor) = &mut self.editor {
+        if let Some(panel) = &mut self.connection {
+            panel.paste(value, busy);
+        } else if let Some(editor) = &mut self.editor {
             editor.paste(value, busy);
         }
     }
 
     pub(super) fn title(&self) -> &'static str {
+        if let Some(panel) = &self.connection {
+            return panel.title();
+        }
         self.editor
             .as_ref()
             .map_or("Switch model", super::model_edit::Panel::title)
     }
 
     pub(super) fn actions(&self) -> &'static str {
-        if self.editor.is_some() {
+        if self.editor.is_some() || self.connection.is_some() {
             "Esc Back"
         } else {
             "↑/↓ Move  ·  Esc back"
@@ -107,6 +155,10 @@ impl Picker {
     }
 
     pub(super) fn failed(&mut self, error: String) {
+        if let Some(panel) = &mut self.connection {
+            panel.failed(error);
+            return;
+        }
         if let Some(editor) = &mut self.editor {
             editor.failed(error);
             return;
@@ -139,7 +191,14 @@ impl Picker {
         }
     }
 
+    pub(super) fn editing_connection(&self) -> bool {
+        self.connection.is_some()
+    }
+
     pub(super) fn preferred_height(&self) -> u16 {
+        if let Some(panel) = &self.connection {
+            return panel.preferred_height();
+        }
         if let Some(editor) = &self.editor {
             return editor.preferred_height();
         }
@@ -149,6 +208,7 @@ impl Picker {
             .map_or(1, |list| list.profiles.len().clamp(1, 8));
         (models as u16
             + u16::from(self.editable)
+            + u16::from(self.connection_editable)
             + if self.error.is_some() || self.status().is_some() {
                 7
             } else {
@@ -158,6 +218,10 @@ impl Picker {
     }
 
     pub(super) fn draw(&self, frame: &mut Frame<'_>, body: Rect, palette: &Palette) {
+        if let Some(panel) = &self.connection {
+            panel.draw(frame, body, palette);
+            return;
+        }
         if let Some(editor) = &self.editor {
             editor.draw(frame, body, palette);
             return;
@@ -168,7 +232,12 @@ impl Picker {
             return;
         };
         if profiles.profiles.is_empty() {
-            render_text(frame, body, "Configure a live model in config.toml.", 0);
+            let help = if self.connection_editable {
+                "No model profiles. Ctrl+N Add profile"
+            } else {
+                "Configure a live model in config.toml."
+            };
+            render_text(frame, body, help, 0);
             return;
         }
         let help = if self.default.is_some() {
@@ -179,6 +248,12 @@ impl Picker {
         let mut lines = vec![Line::styled(help, palette.quiet)];
         if self.editable {
             lines.push(Line::styled("F2 Edit profile", palette.quiet));
+        }
+        if self.connection_editable {
+            lines.push(Line::styled(
+                "F4 Connection   Ctrl+N Add profile",
+                palette.quiet,
+            ));
         }
         if let Some(error) = &self.error {
             lines.push(Line::styled(error.as_str(), palette.status(Color::Red)));
@@ -226,6 +301,19 @@ impl App {
         let Layer::ModelPicker(picker) = &mut self.layer else {
             return;
         };
+        if let Some(panel) = &mut picker.connection {
+            if key.code == KeyCode::Esc {
+                if !self.busy && panel.back() {
+                    picker.connection = None;
+                }
+            } else if let Some(request) = panel.key(key, self.busy)
+                && !self.send(worker, request)
+                && let Layer::ModelPicker(picker) = &mut self.layer
+            {
+                picker.failed("Connection worker unavailable".into());
+            }
+            return;
+        }
         if let Some(editor) = &mut picker.editor {
             if key.code == KeyCode::Esc {
                 if !self.busy && editor.back() {
@@ -246,6 +334,18 @@ impl App {
         if self.busy && picker.pending.is_none() {
             return;
         }
+        if !self.busy
+            && picker.connection_editable
+            && key.kind == KeyEventKind::Press
+            && key.code == KeyCode::Char('n')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            picker.connection = Some(Box::new(super::model_connection::Panel::new()));
+            picker.error = None;
+            picker.edit_saved = false;
+            picker.saved = false;
+            return;
+        }
         if let Some(profiles) = &picker.profiles {
             let before = picker.index;
             step(key.code, &mut picker.index, profiles.profiles.len());
@@ -260,6 +360,25 @@ impl App {
             let Some(profile) = profiles.profiles.get(picker.index) else {
                 return;
             };
+            if key.code == KeyCode::F(4) && picker.connection_editable {
+                picker.error = None;
+                picker.saved = false;
+                picker.edit_saved = false;
+                let target = profile
+                    .profile
+                    .clone()
+                    .map_or(ModelProfileConnectionTarget::Base, |profile| {
+                        ModelProfileConnectionTarget::Existing { profile }
+                    });
+                if !self.send(
+                    worker,
+                    Request::OpenModelConnection(ModelProfileConnectionGetParams { target }),
+                ) && let Layer::ModelPicker(picker) = &mut self.layer
+                {
+                    picker.failed("Connection worker unavailable".into());
+                }
+                return;
+            }
             if key.code == KeyCode::F(2) && picker.editable {
                 picker.error = None;
                 picker.saved = false;
@@ -312,8 +431,7 @@ impl App {
                 picker.error = None;
                 let params = ModelProfileSelectParams {
                     profile: profile.profile.clone(),
-                    reload: profile.profile == profiles.active.profile
-                        && *profile != profiles.active,
+                    reload: profile.profile == profiles.active.profile,
                 };
                 if !self.send(worker, Request::SelectModel(params))
                     && let Layer::ModelPicker(picker) = &mut self.layer

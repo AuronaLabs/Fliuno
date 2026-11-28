@@ -76,6 +76,10 @@ impl Catalog {
             self.status = "Model query failed. Enter a model ID or press F5 to retry.";
             return;
         };
+        self.install_preview(preview);
+    }
+
+    pub(super) fn install_preview(&mut self, preview: ModelCatalogPreview) {
         if let Some(page) = preview.page {
             self.install_page(page);
         } else {

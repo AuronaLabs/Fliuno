@@ -292,7 +292,7 @@ impl Panel {
     }
 }
 
-fn draw_field(
+pub(super) fn draw_field(
     frame: &mut Frame<'_>,
     area: Rect,
     editor: &Editor,

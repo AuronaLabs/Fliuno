@@ -11,17 +11,20 @@ use fliuno_client::{Client, Error as ClientError, EventFeed, SessionHistory};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
     ArtifactCatalogSnapshotPage, ArtifactCatalogSnapshotParams, ArtifactDigest, ArtifactGetParams,
-    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelConnectionCheck,
-    ModelConnectionCheckParams, ModelProfileDefault, ModelProfileEditGetParams,
-    ModelProfileEditParams, ModelProfileEditView, ModelProfileEntry, ModelProfileList,
-    ModelProfileSelectParams, ModelUsageSummary, ModelUsageTotals, ObjectPage,
-    ProviderModelListParams, ProviderModelPage, Session, SessionContextParams, SessionForkParams,
-    SessionHistoryListPage, SessionHistoryListParams, SessionHistoryRole, SessionListOrder,
-    SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan, TaskQueue,
-    TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams, TaskReconciliation,
-    TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState,
-    TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot,
-    WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
+    ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelCatalogPreview,
+    ModelConnectionCheck, ModelConnectionCheckParams, ModelProfileConnectionGetParams,
+    ModelProfileConnectionPreviewParams, ModelProfileConnectionSaveParams,
+    ModelProfileConnectionTarget, ModelProfileConnectionView, ModelProfileCredentialInput,
+    ModelProfileDefault, ModelProfileEditGetParams, ModelProfileEditParams, ModelProfileEditView,
+    ModelProfileEntry, ModelProfileList, ModelProfileSelectParams, ModelUsageSummary,
+    ModelUsageTotals, ObjectPage, ProviderModelListParams, ProviderModelPage, Session,
+    SessionContextParams, SessionForkParams, SessionHistoryListPage, SessionHistoryListParams,
+    SessionHistoryRole, SessionListOrder, SessionListParams, Task, TaskContext,
+    TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
+    TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
+    TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
+    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
+    Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -48,6 +51,9 @@ pub enum Request {
     Reconnect,
     Diagnostics,
     ModelProfiles,
+    OpenModelConnection(ModelProfileConnectionGetParams),
+    PreviewModelConnection(ModelProfileConnectionPreviewParams),
+    SaveModelConnection(ModelProfileConnectionSaveParams),
     EditModel(ModelProfileEditGetParams),
     SaveModelEdit(ModelProfileEditParams),
     BrowseModels(ProviderModelListParams),
@@ -164,13 +170,25 @@ pub enum TranscriptPage {
     Older(SessionHistoryListPage),
 }
 
+pub struct ModelProfileFeatures {
+    pub edit: bool,
+    pub connection: bool,
+}
+
 pub enum Update {
     Online {
         workspace: Workspace,
         model: Option<String>,
         model_profiles: bool,
     },
-    ModelProfiles(ModelProfileList, Option<ModelProfileDefault>, bool),
+    ModelProfiles(
+        ModelProfileList,
+        Option<ModelProfileDefault>,
+        ModelProfileFeatures,
+    ),
+    ModelConnectionOpened(ModelProfileConnectionTarget, ModelProfileConnectionView),
+    ModelConnectionPreviewed(ModelCatalogPreview),
+    ModelConnectionSaved(ModelProfileEntry),
     ModelEditOpened(ModelProfileEditView),
     ModelEditSaved(ModelProfileEditView),
     ModelCatalogPage(ProviderModelPage),
@@ -396,6 +414,22 @@ fn connect(options: &Options, slot: &ProcessSlot) -> Result<Service> {
     })
 }
 
+fn clear_model_key(input: &mut ModelProfileCredentialInput) {
+    if let ModelProfileCredentialInput::Managed { key } = input {
+        zeroize::Zeroize::zeroize(key);
+    }
+}
+
+fn model_profile_update<T>(result: Result<T>, success: impl FnOnce(T) -> Update) -> Result<Update> {
+    match result {
+        Ok(value) => Ok(success(value)),
+        Err(error) if !disconnected(error.as_ref()) => {
+            Ok(Update::ModelProfileError(profile_error(error.as_ref())))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn profile_error(error: &(dyn std::error::Error + 'static)) -> String {
     if let Some(ClientError::Rpc { message, .. }) = error.downcast_ref::<ClientError>() {
         message
@@ -597,6 +631,16 @@ impl Service {
         Ok(self
             .client
             .call(method, &params, |notice| observe(feed, activity, notice))?)
+    }
+
+    fn model_connection_rpc<T: DeserializeOwned>(
+        &mut self,
+        method: &str,
+        params: &impl serde::Serialize,
+    ) -> Result<T> {
+        Ok(self.client.call(method, params, |notice| {
+            observe(&mut self.feed, &mut self.activity, notice);
+        })?)
     }
 
     fn refresh(&mut self, out: &Sender<Update>, force: bool) -> Result<()> {
@@ -806,13 +850,56 @@ impl Service {
                     } else {
                         None
                     };
-                    Update::ModelProfiles(profiles, default, self.supports("modelProfileEditing"))
+                    Update::ModelProfiles(
+                        profiles,
+                        default,
+                        ModelProfileFeatures {
+                            edit: self.supports("modelProfileEditing"),
+                            connection: self.supports("modelProfileConnections"),
+                        },
+                    )
                 }
                 Err(error) if !disconnected(error.as_ref()) => {
                     Update::ModelProfileError(profile_error(error.as_ref()))
                 }
                 Err(error) => return Err(error),
             },
+            Request::OpenModelConnection(params) => {
+                let result = self.rpc("modelProfiles/getConnection", json!(&params));
+                model_profile_update(result, |view| {
+                    Update::ModelConnectionOpened(params.target, view)
+                })?
+            }
+            Request::PreviewModelConnection(mut params) => {
+                let result = self.model_connection_rpc("modelProfiles/previewConnection", &params);
+                clear_model_key(&mut params.connection.credential);
+                model_profile_update(result, Update::ModelConnectionPreviewed)?
+            }
+            Request::SaveModelConnection(mut params) => {
+                let result = self.model_connection_rpc::<ModelProfileConnectionView>(
+                    "modelProfiles/saveConnection",
+                    &params,
+                );
+                clear_model_key(&mut params.connection.credential);
+                model_profile_update(result, |saved| {
+                    let provider = if saved.protocol.as_deref() == Some("chat_completions") {
+                        "openai-chat".into()
+                    } else {
+                        saved.provider.unwrap_or_default()
+                    };
+                    let profile = match params.target {
+                        ModelProfileConnectionTarget::Base => None,
+                        ModelProfileConnectionTarget::Existing { profile }
+                        | ModelProfileConnectionTarget::New { profile } => Some(profile),
+                    };
+                    Update::ModelConnectionSaved(ModelProfileEntry {
+                        profile,
+                        provider,
+                        model: saved.model.unwrap_or_default(),
+                        reasoning_effort: saved.reasoning_effort,
+                    })
+                })?
+            }
             Request::SaveModelDefault(default) => {
                 match self.rpc("modelProfiles/setDefault", json!(default)) {
                     Ok(saved) => Update::ModelDefaultSaved(saved),
