@@ -793,6 +793,8 @@ fn gemini_streams_only_text_progress_and_sends_the_output_budget() {
         )
         .unwrap();
     let (task, tools) = prepared_model_step();
+    let preview = provider.draft_request_size(&task, &tools).unwrap().unwrap();
+    assert!(peer.requests().is_empty());
     let mut progress = Vec::new();
     let turn = provider
         .next_with_progress_classified(&task, &tools, &CancellationToken::new(), &mut |event| {
@@ -803,6 +805,12 @@ fn gemini_streams_only_text_progress_and_sends_the_output_budget() {
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].path, "/v1/models/fixture-model:countTokens");
     assert_eq!(requests[1].path, "/v1/interactions");
+    assert_eq!(
+        preview.generation_bytes,
+        requests[1].headers["content-length"]
+            .parse::<u64>()
+            .unwrap()
+    );
     assert_eq!(requests[1].body["stream"], true);
     assert_eq!(requests[1].body["store"], false);
     assert_eq!(
