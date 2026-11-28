@@ -204,7 +204,9 @@ fn local_budget_rejection_summarizes_history_then_retries_through_scheduler() {
         .env("FLIUNO_MODEL", "fixture-model")
         .env("ANTHROPIC_API_KEY", "test-key")
         .env("ANTHROPIC_BASE_URL", wire.url("/mock/v1"))
-        .env("FLIUNO_CONTEXT_WINDOW_TOKENS", "16384")
+        // One 6 KiB turn plus the real tool catalog and project instructions
+        // must fit; two turns must still force preflight compaction.
+        .env("FLIUNO_CONTEXT_WINDOW_TOKENS", "18432")
         .env("FLIUNO_MAX_OUTPUT_TOKENS", "512")
         .env("FLIUNO_CONTEXT_COUNT_MODE", "local")
         .stdin(Stdio::piped())
