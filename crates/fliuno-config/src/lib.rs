@@ -2,7 +2,7 @@
 mod credentials;
 pub use credentials::PendingApiKey;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs::{self, File, OpenOptions},
@@ -50,7 +50,7 @@ pub enum Theme {
     Mono,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     #[default]
@@ -110,7 +110,7 @@ impl ReasoningEffort {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelProtocol {
     Responses,
@@ -118,6 +118,18 @@ pub enum ModelProtocol {
     Messages,
     Interactions,
 }
+
+/// A catalog request before a model profile is saved. The key travels separately.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelCatalogDraft {
+    pub provider: Provider,
+    pub protocol: ModelProtocol,
+    pub base_url: Option<String>,
+    pub cursor: Option<String>,
+}
+
+pub const MAX_MODEL_CATALOG_DRAFT_BYTES: u64 = 24 * 1024;
 
 impl ModelProtocol {
     pub fn as_str(self) -> &'static str {
@@ -368,7 +380,7 @@ pub fn read_api_key(path: &Path) -> Result<String, &'static str> {
     Ok(key.to_owned())
 }
 
-fn validate_api_key(key: &str) -> Result<(), &'static str> {
+pub fn validate_api_key(key: &str) -> Result<(), &'static str> {
     if key.is_empty()
         || key.len() > 8192
         || key.chars().any(|ch| ch.is_whitespace() || ch.is_control())

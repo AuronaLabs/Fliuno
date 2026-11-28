@@ -734,6 +734,18 @@ pub struct ProviderModelListParams {
     pub cursor: Option<String>,
 }
 
+/// Result of previewing one catalog page with a draft profile.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelCatalogPreview {
+    pub catalog: ModelCatalogStatus,
+    pub catalog_access: ModelCatalogAccess,
+    pub http_status: Option<u16>,
+    pub page: Option<ProviderModelPage>,
+}
+
+pub const MAX_MODEL_CATALOG_PREVIEW_BYTES: u64 = 512 * 1024;
+
 /// A read-only check of a locally configured model and its catalog endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

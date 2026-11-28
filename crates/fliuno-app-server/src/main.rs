@@ -3,6 +3,7 @@ mod backup;
 mod configuration;
 mod diagnostics;
 mod mcp_oauth;
+mod model_catalog_preview;
 use fliuno_app_server::{MemoryEmbeddingConfig, MemoryEmbeddingProvider, RpcServer};
 use fliuno_core::Kernel;
 use fliuno_protocol::{Event, EventWatermark, MAX_APP_REQUEST_BYTES, ModelProgress};
@@ -22,6 +23,13 @@ fn main() {
     if mode == Some("backup") {
         if let Err(error) = backup::run(args) {
             eprintln!("fliuno backup: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if mode == Some("--preview-models") {
+        if let Err(error) = model_catalog_preview::run(args) {
+            eprintln!("fliuno model catalog: {error}");
             std::process::exit(1);
         }
         return;

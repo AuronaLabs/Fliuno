@@ -3,10 +3,13 @@ use crate::{
     http::{Http, MetadataError, provider_headers},
     provider_base,
 };
-use fliuno_config::{ModelSettings, Provider, ReasoningEffort, provider_api_root};
+use fliuno_config::{
+    ModelCatalogDraft, ModelSettings, Provider, ReasoningEffort, provider_api_root,
+    validate_api_key,
+};
 use fliuno_protocol::{
-    ModelCatalogAccess, ModelCatalogStatus, ModelConfigurationStatus, ModelConnectionCheck,
-    ModelCredentialsStatus, ModelPresence, ProviderModel, ProviderModelPage,
+    ModelCatalogAccess, ModelCatalogPreview, ModelCatalogStatus, ModelConfigurationStatus,
+    ModelConnectionCheck, ModelCredentialsStatus, ModelPresence, ProviderModel, ProviderModelPage,
 };
 use serde_json::Value;
 use std::{
@@ -30,6 +33,63 @@ pub fn discover_models(
     let headers = provider_headers(provider, &settings.read_api_key()?)?;
     let http = catalog_http(settings, headers)?;
     read_page(provider, &http, cursor, CATALOG_TIMEOUT).map_err(|error| error.to_string())
+}
+
+/// Preview a draft's catalog without saving settings or credentials.
+pub fn preview_model_catalog(
+    draft: ModelCatalogDraft,
+    key: &str,
+) -> Result<ModelCatalogPreview, String> {
+    let settings = ModelSettings {
+        provider: draft.provider,
+        protocol: Some(draft.protocol),
+        base_url: draft.base_url,
+        ..Default::default()
+    };
+    validate_configuration(&settings)?;
+    validate_api_key(key)?;
+    let headers = provider_headers(settings.provider, key)?;
+    let http = catalog_http(&settings, headers)?;
+    Ok(
+        match read_page(
+            settings.provider,
+            &http,
+            draft.cursor.as_deref(),
+            CATALOG_TIMEOUT,
+        ) {
+            Ok(mut page) => {
+                // An untrusted catalog can echo the supplied credential in JSON fields.
+                let echoes_key =
+                    |value: &str| value == key || (key.len() >= 8 && value.contains(key));
+                page.models.retain(|entry| !echoes_key(&entry.id));
+                for entry in &mut page.models {
+                    if entry.display_name.as_deref().is_some_and(echoes_key) {
+                        entry.display_name = None;
+                    }
+                }
+                if page.next_cursor.as_deref().is_some_and(echoes_key) {
+                    page.next_cursor = None;
+                    page.truncated = true;
+                }
+                ModelCatalogPreview {
+                    catalog: ModelCatalogStatus::Available,
+                    catalog_access: ModelCatalogAccess::Accepted,
+                    http_status: None,
+                    page: Some(page),
+                }
+            }
+            Err(error @ CatalogError::Input(_)) => return Err(error.to_string()),
+            Err(error) => {
+                let (catalog, catalog_access, http_status) = classify_failure(error);
+                ModelCatalogPreview {
+                    catalog,
+                    catalog_access,
+                    http_status,
+                    page: None,
+                }
+            }
+        },
+    )
 }
 
 /// Check a trusted local profile without generating or resolving a remote context budget.
@@ -132,25 +192,35 @@ fn validate_configuration(settings: &ModelSettings) -> Result<(), String> {
 }
 
 fn record_failure(check: &mut ModelConnectionCheck, error: CatalogError) {
+    let (status, access, http_status) = classify_failure(error);
+    check.catalog = status;
+    check.http_status = http_status;
+    if access != ModelCatalogAccess::Unverified {
+        check.catalog_access = access;
+    }
+}
+
+fn classify_failure(error: CatalogError) -> (ModelCatalogStatus, ModelCatalogAccess, Option<u16>) {
     use ModelCatalogStatus::*;
-    check.catalog = match error {
+    let status = match error {
         CatalogError::Request(MetadataError::Http(status)) => {
-            check.http_status = Some(status);
-            match status {
-                401 => check.catalog_access = ModelCatalogAccess::Unauthorized,
-                403 => check.catalog_access = ModelCatalogAccess::Forbidden,
-                _ => {}
-            }
-            if matches!(status, 404 | 405 | 501) {
+            let access = match status {
+                401 => ModelCatalogAccess::Unauthorized,
+                403 => ModelCatalogAccess::Forbidden,
+                _ => ModelCatalogAccess::Unverified,
+            };
+            let catalog = if matches!(status, 404 | 405 | 501) {
                 Unavailable
             } else {
                 HttpError
-            }
+            };
+            return (catalog, access, Some(status));
         }
         CatalogError::Request(MetadataError::Timeout) => TimedOut,
         CatalogError::Request(MetadataError::Transport) => TransportError,
         _ => InvalidResponse,
     };
+    (status, ModelCatalogAccess::Unverified, None)
 }
 
 fn catalog_http(

@@ -1,10 +1,10 @@
 use super::{fixture, read_request};
-use fliuno_config::{ModelProtocol, ModelSettings, Provider};
+use fliuno_config::{ModelCatalogDraft, ModelProtocol, ModelSettings, Provider};
 use fliuno_protocol::{
     ModelCatalogAccess, ModelCatalogStatus, ModelConfigurationStatus, ModelCredentialsStatus,
     ModelPresence,
 };
-use fliuno_providers::check_model_connection;
+use fliuno_providers::{check_model_connection, preview_model_catalog};
 use serde_json::json;
 use std::{io::Read, net::TcpListener, time::Duration};
 
@@ -159,4 +159,40 @@ fn connection_check_times_out_without_waiting_for_generation_timeout() {
     assert_eq!(check.catalog, ModelCatalogStatus::TimedOut);
     assert_eq!(check.model_presence, ModelPresence::NotSelected);
     server.join().unwrap();
+}
+
+#[test]
+fn draft_catalog_does_not_expose_credential_echoed_in_a_successful_page() {
+    let (base, worker) = fixture(vec![(
+        200,
+        json!({
+            "has_more": true,
+            "last_id": "secret-fixture-key",
+            "data": [
+                {"id":"secret-fixture-key"},
+                {"id":"valid-model", "display_name":"key: secret-fixture-key"}
+            ]
+        }),
+    )]);
+    let preview = preview_model_catalog(
+        ModelCatalogDraft {
+            provider: Provider::Anthropic,
+            protocol: ModelProtocol::Messages,
+            base_url: Some(base),
+            cursor: None,
+        },
+        "secret-fixture-key",
+    )
+    .unwrap();
+    assert!(
+        !serde_json::to_string(&preview)
+            .unwrap()
+            .contains("secret-fixture-key")
+    );
+    let page = preview.page.unwrap();
+    assert_eq!(page.models.len(), 1);
+    assert_eq!(page.models[0].id, "valid-model");
+    assert!(page.truncated);
+    assert!(page.next_cursor.is_none());
+    worker.join().unwrap();
 }
