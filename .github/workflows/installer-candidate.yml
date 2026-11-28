@@ -53,6 +53,8 @@ jobs:
         shell: pwsh
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
+          cargo build --locked --release -p fliuno-app-server --features test-fixtures --bin fliuno-app-exec-fixture
+          $env:FLIUNO_TEST_EXEC_FIXTURE = (Resolve-Path target/release/fliuno-app-exec-fixture.exe).Path
           $env:FLIUNO_TEST_TUI = "$env:ProgramFiles\Fliuno\fliuno.exe"
           $env:FLIUNO_TEST_APP_SERVER = "$env:ProgramFiles\Fliuno\fliuno-app-server.exe"
           $env:FLIUNO_TUI_CAPTURE = "$env:RUNNER_TEMP\fliuno-captures"
@@ -109,10 +111,12 @@ jobs:
         env:
           FLIUNO_TEST_TUI: /usr/bin/fliuno
           FLIUNO_TEST_APP_SERVER: /usr/bin/fliuno-app-server
+          FLIUNO_TEST_EXEC_FIXTURE: ${{ github.workspace }}/target/release/fliuno-app-exec-fixture
           FLIUNO_TEST_THEME: dark
           FLIUNO_TUI_CAPTURE: ${{ runner.temp }}/fliuno-captures
           TERM: xterm-256color
         run: |
+          cargo build --locked --release -p fliuno-app-server --features test-fixtures --bin fliuno-app-exec-fixture
           mkdir -p "$FLIUNO_TUI_CAPTURE"
           cargo test --locked --release -p fliuno-tui --test workbench -- --include-ignored --test-threads=1
       - uses: actions/upload-artifact@v4

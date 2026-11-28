@@ -3051,13 +3051,17 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         }
     });
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
-    let fixture = server
-        .as_deref()
-        .unwrap_or(&binary())
-        .with_file_name(format!(
-            "fliuno-app-exec-fixture{}",
-            std::env::consts::EXE_SUFFIX
-        ));
+    let fixture = std::env::var_os("FLIUNO_TEST_EXEC_FIXTURE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            server
+                .as_deref()
+                .unwrap_or(&binary())
+                .with_file_name(format!(
+                    "fliuno-app-exec-fixture{}",
+                    std::env::consts::EXE_SUFFIX
+                ))
+        });
     assert!(
         fixture.is_file(),
         "build the app-server with test-fixtures: {}",
