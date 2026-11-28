@@ -304,6 +304,20 @@ $env:CARGO_TARGET_DIR = 'D:/BuildCache/Fliuno'
 
 ## 版本升级验证
 
+### 从 v0.0.20 升级并切换两家供应商
+
+先从对应发布页下载并校验旧版和候选便携包。解压时，每个 `fliuno-app-server` 需要与同版本的 `fliuno` 同目录。下例用 PowerShell，另外指定一个已存在的临时目录父路径：
+
+```powershell
+python -B scripts/check_supplier_upgrade.py `
+  ./old/fliuno-app-server.exe ./candidate/fliuno-app-server.exe `
+  --from-version 0.0.20 --to-version 0.0.21 --scratch .
+```
+
+Linux 上去掉 `.exe` 后缀。本用例在临时目录中用旧服务创建会话、交付物和待审批任务，再让候选服务读取。它用两个回环模拟供应商校验协议、模型、凭据隔离和重启后的历史身份，不需要真实密钥。候选的实际结果见[安装包验收](execution-evidence.md#0021-安装包验收)。
+
+### 从 v0.0.2 升级数据库
+
 验证从 `v0.0.2` 创建的 SQLite 数据库升级到当前开发版。将标签检出到独立目录构建旧服务，再构建当前服务。以下命令在仓库根目录运行。
 
 ```powershell

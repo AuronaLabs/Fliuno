@@ -52,9 +52,10 @@ def download(tag, platform, directory):
 
 
 @contextmanager
-def connect(server, database, version):
+def connect(server, database, version, *, config=None):
+    mode = ["--config", str(config)] if config is not None else ["--demo"]
     with subprocess.Popen(
-        [str(server), "--db", str(database), "--demo"],
+        [str(server), "--db", str(database), *mode],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf-8",
     ) as process:
         counter = 0

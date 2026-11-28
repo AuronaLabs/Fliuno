@@ -58,7 +58,22 @@ cargo test --locked -p fliuno-tui --test workbench workbench_keeps_language_draf
 cargo test --locked -p fliuno-tui --test workbench workbench_review_keeps_long_preview_and_tool_details_separate -- --ignored
 ```
 
-真实模型例程、已记录的失败样本与候选门槛见 [0.0.21 计划](plan-0.0.21.md#真实模型编码验收)。发布还需要同一候选提交通过 Windows/Linux 工程检查和 MSI / Debian 12 的安装、升级、启动与卸载。
+真实模型例程和已记录的失败样本见 [0.0.21 计划](plan-0.0.21.md#真实模型编码验收)。
+
+## 0.0.21 安装包验收
+
+候选提交 `3ebf1caeb94c7f85568bbebdb93b0946f78a42d3`。两份工作流均对应此提交，升级基线为 v0.0.20。
+
+| 验收 | 结果 |
+| --- | --- |
+| [内核 CI](https://github.com/AuronaLabs/Fliuno/actions/runs/46136660589) | Windows 和 Linux 均通过：格式、严格 Clippy、工作区测试、协议 Schema、项目 Agent 与设置终端用例。 |
+| [Windows MSI](https://github.com/AuronaLabs/Fliuno/actions/runs/46136661149) | 安装、升级、卸载与重装通过；安装后的程序通过 29 项 ConPTY 用例。 |
+| [Debian 12 amd64](https://github.com/AuronaLabs/Fliuno/actions/runs/46136661149) | 安装、升级、卸载与重装通过；安装后的程序通过 30 项 PTY 用例。 |
+| Windows 便携包升级 | 同一份 v0.0.20 数据保留原会话、记忆和交付物；仍待审的旧 `artifact_create` 因工具摘要变化被拦截，未生成产物。配置两家模拟供应商后验证了实际 HTTP 路径、认证头、模型 ID，以及重启后默认档案和历史回复身份。 |
+| 终端排版 | 从两平台安装后的实际终端采集 48、80、110 列的单元格。复核中文审批、精确替换预览、隔离检查的命令和操作按钮。截图来源为工作流中的终端捕获产物。 |
+| 发布文件 | 两份候选的提交标记与单包 SHA-256 均通过校验；生成原生安装包、便携包和合并的 `SHA256SUMS.txt`。 |
+
+首次 Debian 候选曾在导出交付物的终端测试中提前读取文件：测试等到历史里已有的通用 `Saved` 文案便继续，未等实际的目标路径回执。此候选等待精确路径后再比对导出字节，两平台均通过。这里的安装场景使用本机模拟供应商；真实模型结果另见上节。
 
 ## 0.0.17 开发验收（2026-11-28）
 
