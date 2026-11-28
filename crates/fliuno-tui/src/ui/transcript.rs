@@ -26,6 +26,7 @@ struct LineStart {
 pub(super) struct Anchor {
     sequence: u64,
     source: Option<SourcePosition>,
+    // Prose uses an approximate display column within the same source line.
     wrapped_cells: usize,
 }
 
@@ -42,8 +43,11 @@ pub(super) struct LayoutAtWidth<'a> {
 }
 
 impl LayoutAtWidth<'_> {
-    pub(super) fn anchor_at(&self, row: u16) -> Option<Anchor> {
-        let row = usize::from(row);
+    pub(super) fn row_count(&self) -> usize {
+        self.rows
+    }
+
+    pub(super) fn anchor_at(&self, row: usize) -> Option<Anchor> {
         if row >= self.rows {
             return None;
         }
@@ -65,7 +69,7 @@ impl LayoutAtWidth<'_> {
         })
     }
 
-    pub(super) fn resolve(&self, anchor: Anchor) -> Option<u16> {
+    pub(super) fn resolve(&self, anchor: Anchor) -> Option<usize> {
         let index = self
             .turns
             .partition_point(|turn| turn.sequence < anchor.sequence);
@@ -86,7 +90,33 @@ impl LayoutAtWidth<'_> {
             None if turn.sequence == anchor.sequence => turn.start.saturating_sub(1),
             _ => turn.start,
         };
-        Some(row.min(usize::from(u16::MAX)) as u16)
+        Some(row)
+    }
+
+    pub(super) fn visible_lines(&self, start: usize, end: usize) -> (Vec<Line<'static>>, usize) {
+        let mut lines = Vec::new();
+        let mut skip = 0;
+        let first = self
+            .turns
+            .partition_point(|turn| turn.start + turn.rendered.rows <= start);
+        for turn in &self.turns[first..] {
+            if turn.start > start && turn.start - 1 < end {
+                lines.push(Line::default());
+            }
+            if turn.start >= end {
+                break;
+            }
+            let relative_start = start.saturating_sub(turn.start);
+            let relative_end = end - turn.start;
+            let positions = &turn.rendered.positions;
+            let first_line = positions.partition_point(|line| line.row <= relative_start) - 1;
+            let end_line = positions.partition_point(|line| line.row < relative_end);
+            if lines.is_empty() {
+                skip = relative_start - positions[first_line].row;
+            }
+            lines.extend_from_slice(&turn.rendered.lines[first_line..end_line]);
+        }
+        (lines, skip)
     }
 }
 
@@ -196,15 +226,14 @@ impl Transcript {
         }
     }
 
-    pub(super) fn render(
+    pub(super) fn layout(
         &self,
         palette: &Palette,
         width: u16,
         active: Option<&str>,
-    ) -> (Vec<Line<'static>>, LayoutAtWidth<'_>, bool) {
+    ) -> (LayoutAtWidth<'_>, bool) {
         let mut layout = LayoutAtWidth::default();
         let mut active_rendered = false;
-        let mut lines = Vec::new();
         for entry in &self.entries {
             match &entry.value {
                 SessionHistoryEntry::Turn { turn } => {
@@ -229,20 +258,15 @@ impl Transcript {
             if rendered.lines.is_empty() {
                 continue;
             }
-            if !lines.is_empty() {
-                lines.push(Line::default());
-                layout.rows += 1;
-            }
-            lines.extend(rendered.lines.iter().cloned());
-            let start = layout.rows;
-            layout.rows += rendered.rows;
+            let start = layout.rows + usize::from(!layout.turns.is_empty());
+            layout.rows = start + rendered.rows;
             layout.turns.push(TurnLayout {
                 sequence: sequence(&entry.value),
                 start,
                 rendered,
             });
         }
-        (lines, layout, active_rendered)
+        (layout, active_rendered)
     }
 }
 
@@ -322,4 +346,107 @@ fn message_heading(lines: &mut Vec<Line<'static>>, name: &'static str, label: St
         lines.push(Line::default());
     }
     lines.push(Line::styled(name, label));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fliuno_protocol::{ContextTurn, TaskBackend};
+    use ratatui::{buffer::Buffer, widgets::Widget};
+    use std::time::Instant;
+
+    #[test]
+    fn long_history_viewport_matches_the_full_paragraph() {
+        let palette = Palette::new(crate::options::Theme::Mono);
+        let area = Rect::new(0, 0, 48, 18);
+        let prose = "A long paragraph should continue on the next row without changing its source position. ";
+        let code = "    let name = construct_project_filename_from_workspace_state_and_user_selection();\n";
+        let history = Transcript {
+            entries: (1..=TRANSCRIPT_MAX_TURNS)
+                .map(|index| {
+                    Entry::from(SessionHistoryEntry::Turn {
+                        turn: ContextTurn {
+                            task_id: index.to_string(),
+                            completion_sequence: index as u64,
+                            backend: TaskBackend::Model,
+                            messages: vec![
+                                ContextMessage::User {
+                                    text: format!("Turn {index}: {}", prose.repeat(4)),
+                                },
+                                ContextMessage::Assistant {
+                                    text: format!("```rust\n{}```", code.repeat(24)),
+                                },
+                            ],
+                            artifacts: Vec::new(),
+                            host_tools: Vec::new(),
+                        },
+                    })
+                })
+                .collect(),
+            oldest: None,
+        };
+        let cold = Instant::now();
+        let (layout, _) = history.layout(&palette, area.width, None);
+        let cold = cold.elapsed();
+        let mut full = Vec::new();
+        for turn in &layout.turns {
+            if !full.is_empty() {
+                full.push(Line::default());
+            }
+            full.extend_from_slice(&turn.rendered.lines);
+        }
+        let full = Paragraph::new(full).wrap(Wrap { trim: false });
+        assert_eq!(full.line_count(area.width), layout.row_count());
+        let middle = layout.turns[48].start;
+        let end = layout.row_count() - usize::from(area.height);
+        for start in [0, middle - 1, middle + 2, middle + 22, end] {
+            let mut expected = Buffer::empty(area);
+            full.clone()
+                .scroll((start as u16, 0))
+                .render(area, &mut expected);
+            let (lines, skip) = layout.visible_lines(start, start + usize::from(area.height));
+            let mut actual = Buffer::empty(area);
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((skip as u16, 0))
+                .render(area, &mut actual);
+            assert_eq!(actual, expected, "viewport starts at row {start}");
+        }
+        let code = layout.turns[48]
+            .rendered
+            .positions
+            .iter()
+            .find(|line| line.source.byte > 0)
+            .unwrap();
+        let start = middle + code.row;
+        let anchor = layout.anchor_at(start).unwrap();
+        drop(layout);
+        let (wide, _) = history.layout(&palette, 110, None);
+        let resolved = wide.resolve(anchor).unwrap();
+        let wide_anchor = wide.anchor_at(resolved).unwrap();
+        assert_eq!(wide_anchor.sequence, anchor.sequence);
+        assert_eq!(
+            wide_anchor.source.unwrap().line,
+            anchor.source.unwrap().line
+        );
+        drop(wide);
+        let (layout, _) = history.layout(&palette, area.width, None);
+        assert_eq!(layout.resolve(anchor), Some(start));
+        drop(layout);
+
+        let warm = Instant::now();
+        for _ in 0..30 {
+            let (layout, _) = history.layout(&palette, area.width, None);
+            let (lines, skip) = layout.visible_lines(end, end + usize::from(area.height));
+            let mut buffer = Buffer::empty(area);
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((skip as u16, 0))
+                .render(area, &mut buffer);
+        }
+        eprintln!(
+            "96-turn layout: {cold:?}; mean cached viewport draw: {:?}",
+            warm.elapsed() / 30
+        );
+    }
 }

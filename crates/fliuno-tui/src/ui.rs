@@ -193,10 +193,10 @@ pub struct App {
     selected: Option<String>,
     detail: Option<Box<Detail>>,
     activity: Vec<activity::Preview>,
-    scroll: Cell<u16>,
+    scroll: Cell<usize>,
     scroll_anchor: Cell<Option<transcript::Anchor>>,
     transcript: Transcript,
-    rendered_scroll: Cell<u16>,
+    rendered_scroll: Cell<usize>,
     follow: bool,
     show_details: bool,
     layer: Layer,
@@ -440,7 +440,7 @@ impl App {
         .into();
     }
 
-    fn set_conversation_scroll(&self, row: u16) {
+    fn set_conversation_scroll(&self, row: usize) {
         self.scroll.set(row);
         self.scroll_anchor.set(None);
     }
@@ -1870,7 +1870,7 @@ impl App {
             }
             KeyCode::Up | KeyCode::Down | KeyCode::PageUp | KeyCode::PageDown => {
                 self.follow = false;
-                let mut scroll = self.rendered_scroll.get();
+                let scroll = self.rendered_scroll.get();
                 if key.code == KeyCode::PageUp
                     && scroll == 0
                     && active
@@ -1884,8 +1884,9 @@ impl App {
                     self.message.clear();
                     return false;
                 }
-                scroll_key(key.code, &mut scroll);
-                self.set_conversation_scroll(scroll);
+                self.set_conversation_scroll(
+                    scroll.saturating_add_signed(isize::from(scroll_delta(key.code))),
+                );
             }
             KeyCode::Char('w') if active => {
                 if self.send(worker, Request::Workspaces(0)) {
@@ -2486,14 +2487,18 @@ fn step(key: KeyCode, index: &mut usize, len: usize) {
     }
 }
 
-fn scroll_key(key: KeyCode, scroll: &mut u16) {
+fn scroll_delta(key: KeyCode) -> i16 {
     match key {
-        KeyCode::Up => *scroll = scroll.saturating_sub(1),
-        KeyCode::Down => *scroll = scroll.saturating_add(1),
-        KeyCode::PageUp => *scroll = scroll.saturating_sub(10),
-        KeyCode::PageDown => *scroll = scroll.saturating_add(10),
-        _ => {}
+        KeyCode::Up => -1,
+        KeyCode::Down => 1,
+        KeyCode::PageUp => -10,
+        KeyCode::PageDown => 10,
+        _ => 0,
     }
+}
+
+fn scroll_key(key: KeyCode, scroll: &mut u16) {
+    *scroll = scroll.saturating_add_signed(scroll_delta(key));
 }
 
 fn key_label(key: KeyCode) -> String {

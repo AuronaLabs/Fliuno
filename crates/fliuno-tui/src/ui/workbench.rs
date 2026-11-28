@@ -180,12 +180,19 @@ impl App {
     }
 
     fn draw_conversation(&self, frame: &mut Frame<'_>, area: Rect) {
-        let (mut lines, history, active_rendered) = if self.demo || self.show_details {
-            (Vec::new(), transcript::LayoutAtWidth::default(), false)
+        let (history, active_rendered) = if self.demo || self.show_details {
+            (transcript::LayoutAtWidth::default(), false)
         } else {
             self.transcript
-                .render(&self.palette, area.width, self.selected.as_deref())
+                .layout(&self.palette, area.width, self.selected.as_deref())
         };
+        let saved_rows = history.row_count();
+        // A placeholder lets the live tail use the same spacing as if saved
+        // rows were already in this buffer. Remove it before measuring.
+        let mut lines = Vec::new();
+        if saved_rows > 0 {
+            lines.push(Line::default());
+        }
         let mut pinned = Vec::new();
         if let Some(detail) = &self.detail {
             let task = &detail.task;
@@ -315,11 +322,12 @@ impl App {
         let [heading, conversation] =
             Layout::vertical([Constraint::Length(header_height), Constraint::Min(0)]).areas(area);
         frame.render_widget(header, heading);
-        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
-        let max_scroll = paragraph
-            .line_count(conversation.width)
-            .saturating_sub(usize::from(conversation.height))
-            .min(usize::from(u16::MAX)) as u16;
+        let tail = &lines[usize::from(saved_rows > 0)..];
+        let tail_rows = Paragraph::new(tail.to_vec())
+            .wrap(Wrap { trim: false })
+            .line_count(conversation.width);
+        let height = usize::from(conversation.height);
+        let max_scroll = (saved_rows + tail_rows).saturating_sub(height);
         let saved = self
             .scroll_anchor
             .get()
@@ -335,7 +343,24 @@ impl App {
             row
         };
         self.rendered_scroll.set(scroll);
-        frame.render_widget(paragraph.scroll((scroll, 0)), conversation);
+        if conversation.is_empty() {
+            return;
+        }
+        let end = scroll + height;
+        let (mut visible, mut skip) = history.visible_lines(scroll, end);
+        if end > saved_rows {
+            visible.extend_from_slice(tail);
+            if scroll >= saved_rows {
+                skip = scroll - saved_rows;
+            }
+        }
+        let skip = skip.min(usize::from(u16::MAX)) as u16;
+        frame.render_widget(
+            Paragraph::new(visible)
+                .wrap(Wrap { trim: false })
+                .scroll((skip, 0)),
+            conversation,
+        );
     }
 
     fn append_task_actions(&self, detail: &Detail, lines: &mut Vec<Line<'static>>) {
