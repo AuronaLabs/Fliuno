@@ -44,7 +44,7 @@
 从[发布页](https://github.com/AuronaLabs/Fliuno/releases/latest)下载对应版本。
 
 - **Windows x64**。打开 `.msi` 并按安装器提示操作。安装会注册系统 PATH。完成后打开新的 PowerShell，在项目目录运行 `fliuno`。
-- **Debian amd64**。在下载目录运行 `sudo apt install ./fliuno-v0.0.17-linux-amd64.deb`。完成后进入项目目录，再运行 `fliuno`。
+- **Debian amd64**。在下载目录将实际文件名传给 `apt install`，例如 `sudo apt install ./fliuno-v0.0.19-linux-amd64.deb`。完成后进入项目目录，再运行 `fliuno`。
 - **便携包**。解压 ZIP 或 tar.gz，在解压目录运行 `fliuno` 或 `fliuno.exe`。可通过 `--workspace PATH` 指定项目目录。
 
 安装后可运行 `fliuno --version` 检查版本。原生包通过系统卸载时会保留用户主目录中的 `~/.fliuno`。从 v0.0.16 升级可继续使用原来的配置和数据库。
