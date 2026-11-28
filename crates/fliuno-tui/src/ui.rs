@@ -207,6 +207,7 @@ pub struct App {
     next: Option<Request>,
     reopening: Option<String>,
     deferred_send: Option<DeferredSend>,
+    deferred_approval: Option<(String, String)>,
     workspace: Option<Workspace>,
     session: Option<Session>,
     session_query: Option<String>,
@@ -263,6 +264,7 @@ impl App {
             next: None,
             reopening: None,
             deferred_send: None,
+            deferred_approval: None,
             workspace: None,
             session: None,
             session_query: None,
@@ -342,6 +344,17 @@ impl App {
             return;
         }
         self.reopening = None;
+        if let Some((task, approval)) = self.deferred_approval.take()
+            && self.online
+            && matches!(self.layer, Layer::None)
+            && self.selected.as_deref() == Some(task.as_str())
+            && self.detail.as_ref().is_some_and(|detail| {
+                detail.task.id == task && pending_approval_id(&detail.task) == Some(&approval)
+            })
+            && self.send(worker, Request::Approval(task, approval))
+        {
+            return;
+        }
         if let Some(intent) = self.deferred_send.take()
             && self.online
             && matches!(self.layer, Layer::Edit(Edit::Task))
@@ -406,6 +419,7 @@ impl App {
     }
 
     fn install_session(&mut self, session: Session) {
+        self.deferred_approval = None;
         self.cancel_deferred_send();
         self.reopening = None;
         if self.session.as_ref().map(|current| &current.id) != Some(&session.id) {
@@ -555,6 +569,7 @@ impl App {
     }
 
     fn select_task(&mut self, id: String) {
+        self.deferred_approval = None;
         self.next = Some(Request::Task(id.clone()));
         self.selected = Some(id);
         self.detail = None;
@@ -944,6 +959,7 @@ impl App {
                 self.message = message;
             }
             Update::Offline(message) => {
+                self.deferred_approval = None;
                 self.deferred_send = None;
                 self.reopening = None;
                 self.online = false;
@@ -1123,7 +1139,10 @@ impl App {
             self.cancel_deferred_send();
             return true;
         }
-        if key.code == KeyCode::Esc && pressed && self.cancel_deferred_send() {
+        if key.code == KeyCode::Esc
+            && pressed
+            && (self.cancel_deferred_send() || self.deferred_approval.take().is_some())
+        {
             return false;
         }
         if matches!(self.layer, Layer::ProjectChecks(_)) {
@@ -2262,6 +2281,22 @@ impl App {
                 self.input.clear();
                 self.layer = Layer::Edit(Edit::HistorySearch);
             }
+            KeyCode::Enter | KeyCode::Char('a')
+                if pressed
+                    && self.busy
+                    && self
+                        .detail
+                        .as_ref()
+                        .is_some_and(|detail| pending_approval_id(&detail.task).is_some()) =>
+            {
+                // A background detail refresh can be in progress while Review is visible.
+                // Only remember opening the exact pending review, never an approval decision.
+                if let Some(detail) = &self.detail
+                    && let Some(approval) = pending_approval_id(&detail.task)
+                {
+                    self.deferred_approval = Some((detail.task.id.clone(), approval.to_owned()));
+                }
+            }
             KeyCode::Enter
                 if (active || (!self.demo && pressed && self.reopening.is_some()))
                     && self.session.is_some()
@@ -3115,6 +3150,52 @@ fn append(lines: &mut Vec<Line<'static>>, value: &str) {
 mod tests {
     use super::*;
     use ratatui::{Terminal, backend::TestBackend};
+
+    #[test]
+    fn opens_the_same_pending_approval_after_refresh_and_drops_stale_or_cancelled_open() {
+        let (worker, requests) = Worker::request_fixture();
+        let mut app = App::new(false, Theme::Auto, Language::English, None);
+        app.online = true;
+        app.selected = Some("task".into());
+        app.detail = Some(Box::new(Detail {
+            task: serde_json::from_value(serde_json::json!({
+                "id":"task", "sessionId":"session", "status":"waiting_approval", "messages":[], "modelSteps":1,
+                "pendingApproval":{"id":"pending","taskId":"task","call":{"id":"call","name":"workspace_patch_text","arguments":{}}}
+            })).unwrap(),
+            plan: None, artifacts: Vec::new(), resume: None, review: None, can_reconcile: false, usage: None,
+        }));
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        for _ in 0..2 {
+            app.key(enter, &worker);
+            assert!(requests.try_recv().is_err());
+        }
+        app.update(Update::Finished);
+        app.sync(&worker);
+        assert!(
+            matches!(requests.try_recv().unwrap(), Request::Approval(task, approval) if task == "task" && approval == "pending")
+        );
+        assert!(requests.try_recv().is_err());
+
+        app.key(enter, &worker);
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), &worker);
+        app.update(Update::Finished);
+        app.sync(&worker);
+        assert!(requests.try_recv().is_err());
+
+        app.busy = true;
+        app.key(enter, &worker);
+        app.detail
+            .as_mut()
+            .unwrap()
+            .task
+            .pending_approval
+            .as_mut()
+            .unwrap()
+            .id = "new-approval".into();
+        app.update(Update::Finished);
+        app.sync(&worker);
+        assert!(requests.try_recv().is_err());
+    }
 
     #[test]
     fn stale_browse_cannot_change_the_current_session() {

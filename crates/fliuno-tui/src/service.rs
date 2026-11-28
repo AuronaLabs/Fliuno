@@ -296,6 +296,22 @@ fn request_id() -> String {
 }
 
 impl Worker {
+    #[cfg(test)]
+    pub fn request_fixture() -> (Self, Receiver<Request>) {
+        let (commands, requests) = bounded(4);
+        let (_, updates) = bounded(1);
+        (
+            Self {
+                commands: Some(commands),
+                updates,
+                child: Arc::new(Mutex::new(None)),
+                backup_child: Arc::new(Mutex::new(backup::BackupProcess::default())),
+                join: None,
+            },
+            requests,
+        )
+    }
+
     pub fn spawn(options: Options) -> std::io::Result<Self> {
         let (commands, requests) = bounded(4);
         let (out, updates) = bounded(16);
