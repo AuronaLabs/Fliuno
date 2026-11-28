@@ -1260,3 +1260,6 @@ fn discovers_models_using_native_authentication_and_cursors_without_generation()
     handle.join().unwrap();
     std::fs::remove_file(key).unwrap();
 }
+
+#[path = "http_contract/chat.rs"]
+mod chat;

@@ -4,6 +4,7 @@ mod catalog;
 mod gemini;
 mod http;
 mod openai;
+mod openai_chat;
 
 pub use anthropic::AnthropicProvider;
 pub use catalog::discover_models;
@@ -170,7 +171,8 @@ pub fn from_env() -> Result<(String, Box<dyn ModelProvider>), String> {
 pub fn from_settings(
     settings: &fliuno_config::ModelSettings,
 ) -> Result<(String, Box<dyn ModelProvider>), String> {
-    use fliuno_config::{ContextWindow, Provider};
+    use fliuno_config::{ContextWindow, ModelProtocol, Provider};
+    let protocol = settings.effective_protocol()?;
     settings.validate_reasoning_effort()?;
     if matches!(settings.provider, Provider::Demo) {
         return Ok(("demo".into(), Box::new(DemoProvider)));
@@ -188,6 +190,16 @@ pub fn from_settings(
         max_output_tokens: budget.max_output_tokens,
         provider_count: budget.provider_count,
     });
+    if protocol == Some(ModelProtocol::ChatCompletions) {
+        let provider = openai_chat::ChatProvider::new(
+            provider_base(settings.provider, settings.base_url.as_deref()),
+            &key,
+            model,
+            settings.reasoning_effort,
+            budget,
+        )?;
+        return Ok((settings.runtime_provider_name().into(), Box::new(provider)));
+    }
     build_provider(
         settings.provider,
         model,

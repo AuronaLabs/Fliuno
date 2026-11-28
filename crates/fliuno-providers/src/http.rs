@@ -98,6 +98,11 @@ fn encode_request(
     Ok(writer.bytes)
 }
 
+pub(crate) struct StreamResponse {
+    pub json: Option<Value>,
+    pub done: bool,
+}
+
 pub(crate) struct Http {
     client: Client,
     base: Url,
@@ -382,7 +387,7 @@ impl Http {
         body: &Value,
         cancellation: &CancellationToken,
         on_event: impl FnMut(Value) -> Result<(), String>,
-    ) -> Result<(Option<Value>, Option<u64>), ModelError> {
+    ) -> Result<(StreamResponse, Option<u64>), ModelError> {
         let (body, estimate) = self.prepare_generation(body, None, cancellation)?;
         let response =
             self.runtime
@@ -396,7 +401,7 @@ impl Http {
         count_body: &Value,
         cancellation: &CancellationToken,
         on_event: impl FnMut(Value) -> Result<(), String>,
-    ) -> Result<(Option<Value>, Option<u64>), ModelError> {
+    ) -> Result<(StreamResponse, Option<u64>), ModelError> {
         let (body, estimate) = self.prepare_generation(body, Some(count_body), cancellation)?;
         let response =
             self.runtime
@@ -461,7 +466,7 @@ impl Http {
         body: Vec<u8>,
         cancellation: &CancellationToken,
         mut on_event: impl FnMut(Value) -> Result<(), String>,
-    ) -> Result<Option<Value>, ModelError> {
+    ) -> Result<StreamResponse, ModelError> {
         let response = tokio::select! {
             _ = cancellation.cancelled() => return Err("provider request cancelled".into()),
             response = self.client.post(self.endpoint.clone())
@@ -506,7 +511,10 @@ impl Http {
                 .map_err(|_| "provider returned invalid JSON".to_owned())?;
             // A compatibility JSON response is distinct from an SSE event;
             // an event cannot masquerade as a complete response by adding fields.
-            return Ok(Some(response));
+            return Ok(StreamResponse {
+                json: Some(response),
+                done: false,
+            });
         }
         if !media_type.eq_ignore_ascii_case("text/event-stream") {
             return Err("provider returned an unsupported response content type".into());
@@ -521,7 +529,10 @@ impl Http {
             decoder.feed(&chunk, &mut on_event)?;
         }
         decoder.finish()?;
-        Ok(None)
+        Ok(StreamResponse {
+            json: None,
+            done: decoder.done,
+        })
     }
 }
 
@@ -532,6 +543,7 @@ struct SseDecoder {
     bytes_seen: u64,
     previous_cr: bool,
     saw_first_line: bool,
+    done: bool,
 }
 
 impl SseDecoder {
@@ -612,7 +624,8 @@ impl SseDecoder {
         if self.data.last() == Some(&b'\n') {
             self.data.pop();
         }
-        if self.data == b"[DONE]" {
+        self.done = self.data == b"[DONE]";
+        if self.done {
             self.data.clear();
             return Ok(());
         }

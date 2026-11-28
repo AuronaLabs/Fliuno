@@ -305,7 +305,7 @@ impl ModelProvider for OpenAiProvider {
                         }
                         Ok(())
                     })?;
-            let response = if let Some(response) = json_response {
+            let response = if let Some(response) = json_response.json {
                 response
             } else {
                 response.ok_or_else(|| {

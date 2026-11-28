@@ -259,7 +259,7 @@ impl ModelProvider for AnthropicProvider {
                     .post_stream_observed(&body, cancellation, |event| {
                         stream.event(event, progress)
                     })?;
-            let (response, usage) = match json_response {
+            let (response, usage) = match json_response.json {
                 Some(response) => (response, None),
                 None => stream.finish()?,
             };

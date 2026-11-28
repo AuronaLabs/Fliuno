@@ -113,7 +113,7 @@ impl RpcServer {
 fn entry(id: Option<&str>, model: &ModelSettings) -> ModelProfileEntry {
     ModelProfileEntry {
         profile: id.map(str::to_owned),
-        provider: model.provider.name().to_owned(),
+        provider: model.runtime_provider_name().to_owned(),
         model: model.name.clone().unwrap_or_default(),
         reasoning_effort: model
             .reasoning_effort

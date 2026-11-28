@@ -75,6 +75,7 @@ impl Provider {
 #[serde(default, deny_unknown_fields)]
 pub struct ModelSettings {
     pub provider: Provider,
+    pub protocol: Option<ModelProtocol>,
     pub name: Option<String>,
     pub base_url: Option<String>,
     pub api_key_file: Option<PathBuf>,
@@ -109,7 +110,44 @@ impl ReasoningEffort {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProtocol {
+    Responses,
+    ChatCompletions,
+    Messages,
+    Interactions,
+}
+
 impl ModelSettings {
+    pub fn effective_protocol(&self) -> Result<Option<ModelProtocol>, &'static str> {
+        use ModelProtocol::{ChatCompletions, Interactions, Messages, Responses};
+        let default = match self.provider {
+            Provider::Demo => None,
+            Provider::OpenAi => Some(Responses),
+            Provider::Anthropic => Some(Messages),
+            Provider::Gemini => Some(Interactions),
+        };
+        match self.protocol {
+            None => Ok(default),
+            Some(ChatCompletions) if matches!(self.provider, Provider::OpenAi) => {
+                Ok(Some(ChatCompletions))
+            }
+            Some(protocol) if Some(protocol) == default => Ok(default),
+            _ => Err("The selected model protocol is incompatible with its provider"),
+        }
+    }
+
+    pub fn runtime_provider_name(&self) -> &'static str {
+        if self.protocol == Some(ModelProtocol::ChatCompletions)
+            && matches!(self.provider, Provider::OpenAi)
+        {
+            "openai-chat"
+        } else {
+            self.provider.name()
+        }
+    }
+
     pub fn validate_reasoning_effort(&self) -> Result<(), String> {
         use ReasoningEffort::{High, Low, Max, Medium, Minimal, XHigh};
         let Some(effort) = self.reasoning_effort else {

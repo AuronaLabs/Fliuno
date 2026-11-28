@@ -94,7 +94,18 @@ python examples/agent_demo.py --workspace --deny
 fliuno-app-server --config ~/.fliuno/config.toml --db .fliuno/kernel.db
 ```
 
-模型端点可通过 `[model].base_url` 或 `[models.<id>].base_url` 指定。地址填写 API 根路径。例如 `https://gateway.example/v1/`。`provider` 决定请求协议，`openai` 使用 Responses，`anthropic` 使用 Messages，`gemini` 使用 Interactions。配置自定义地址时，网关需要支持所选协议。
+模型端点可通过 `[model].base_url` 或 `[models.<id>].base_url` 指定。地址填写 API 根路径。例如 `https://gateway.example/v1/`。`provider` 决定请求协议，`openai` 使用 Responses，`anthropic` 使用 Messages，`gemini` 使用 Interactions。配置自定义地址时，网关需要支持所选协议。 给只提供 `/chat/completions` 的服务时，在 `provider = "openai"` 的配置旁设置 `protocol = "chat_completions"`。省略 `protocol` 时会使用上述原生协议。Chat Completions 使用相同的 `/models` 目录，本机服务可在回环地址上用 HTTP。
+
+```toml
+[models.local]
+provider = "openai"
+protocol = "chat_completions"
+base_url = "http://127.0.0.1:8080/v1/"
+name = "local-model-id"
+api_key_file = "credentials/local.key"
+```
+
+Chat Completions 支持文本、图像和每步一次函数调用，具体能力取决于服务器和模型。预算可配置数值窗口与 `max_output_tokens`，`provider_count` 须省略或为 `false`。使用同一模型 ID 的 Responses 和 Chat Completions 仍有不同的内核身份，以保留持久 Run 和续接的协议范围。
 
 在填写 `name` 前可以用已配置的 Provider、Base URL 和凭据拉取目录。命令输出 JSON，支持将返回的 `nextCursor` 传给下一次调用。运行中的可信本地 stdio 客户端也可以调用 `models/list`，可选 `profile` 和 `cursor`。
 

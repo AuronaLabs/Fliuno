@@ -110,7 +110,7 @@ impl GeminiProvider {
                         stream.event(event, progress)
                     })?
             };
-            let (response, usage) = match response {
+            let (response, usage) = match response.json {
                 Some(response) => (response, None),
                 None => stream.finish()?,
             };

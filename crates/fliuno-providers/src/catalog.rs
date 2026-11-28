@@ -14,6 +14,7 @@ pub fn discover_models(
     settings: &ModelSettings,
     cursor: Option<&str>,
 ) -> Result<ProviderModelPage, String> {
+    settings.effective_protocol()?;
     let provider = settings.provider;
     if cursor.is_some_and(|value| !bounded(value, 2048)) {
         return Err("Invalid model catalog cursor".into());
