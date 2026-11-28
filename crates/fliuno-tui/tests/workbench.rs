@@ -3383,6 +3383,141 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
 
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn workbench_keeps_language_draft_and_exact_project_review_at_terminal_widths() {
+    use serde_json::{Value, json};
+    use std::net::{Ipv4Addr, TcpListener};
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let original = format!(
+        "[workbench]\ntheme = 'dark' # keep theme\ndatabase = 'fixture.db'\n[providers.lab]\npreset = 'custom'\nbase_url = 'http://{address}/v1'\napi_key_file = 'fixture.key'\n[model]\nsupplier = 'lab'\nprotocol = 'openai.responses'\nname = 'fixture-coder'\n"
+    );
+    std::fs::write(&config, &original).unwrap();
+    std::fs::write(root.path().join("fixture.key"), "fixture-key").unwrap();
+    let model = thread::spawn(move || {
+        let catalog = read_catalog_request(&listener, Some("fixture-key"));
+        write_catalog_response(catalog, 200, r#"{"data":[{"id":"fixture-coder"}]}"#);
+        for step in 0..2 {
+            let (mut socket, request) = streaming_fixture_input(&listener);
+            assert_eq!(request["model"], "fixture-coder");
+            let output = if step == 0 {
+                json!({"type":"function_call","name":"workspace_create_text","call_id":"save-note",
+                    "arguments":json!({"path":"notes.txt","content":"Project hello\n"}).to_string()})
+            } else {
+                let last = request["input"].as_array().unwrap().last().unwrap();
+                let receipt: Value =
+                    serde_json::from_str(last["output"].as_str().unwrap()).unwrap();
+                assert_eq!(receipt["path"], "notes.txt");
+                json!({"type":"message","content":[{"type":"output_text","text":"Saved your project notes."}]})
+            };
+            let event = json!({"type":"response.completed","response":{"status":"completed","output":[output]}});
+            write!(socket, "data: {event}\n\n").unwrap();
+        }
+    });
+    let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    console.expect("Enter Send");
+    console.resize(22, 48);
+    console.expect("Ctrl+N Line");
+    console.keys("Please save project notes.");
+    console.keys("\x1bOP");
+    console.expect("Type to filter");
+    console.keys("language\r");
+    console.expect("Interface language");
+    console.keys("\x1b[B\r");
+    console.expect("已保存，下次启动仍然生效。");
+    console.capture("language-picker-48");
+    console.keys("\x1b");
+    console.expect("Enter 发送");
+    console.expect("Please save project notes.");
+    console.keys("\x1bOP");
+    console.expect("输入筛选");
+    console.keys("workspace memories");
+    console.expect("工作区记忆");
+    console.keys("\x1b");
+    console.expect("Enter 发送");
+    console.keys("\x1bOP");
+    console.expect("输入筛选");
+    console.keys("模型和供应商\r");
+    console.expect("已配置密钥");
+    console.expect("Esc 关闭");
+    console.capture("language-settings-48");
+    console.keys("\t");
+    console.expect("[模型]");
+    console.keys("\r");
+    console.expect("供应商连接");
+    console.keys("\r");
+    console.expect("对话协议");
+    console.keys("\r");
+    console.expect("F4 浏览模型");
+    console.keys("\x1bOS");
+    console.expect("供应商模型目录");
+    console.expect("Enter 选用");
+    console.capture("language-catalog-48");
+    for _ in 0..5 {
+        console.keys("\x1b");
+        thread::sleep(Duration::from_millis(75));
+    }
+    console.expect("Please save project notes.");
+    console.keys("\r");
+    console.expect("Enter 审阅");
+    console.keys("\r");
+    console.expect("审阅操作");
+    console.expect("创建工作区文件");
+    console.expect("notes.txt");
+    console.expect("y 允许一次");
+    console.capture("language-approval-48");
+    assert!(!root.path().join("notes.txt").exists());
+    console.keys("y");
+    console.expect("Saved your project notes.");
+    console.expect("已保存到工作区: notes.txt");
+    console.resize(26, 80);
+    console.expect("Please save project notes.");
+    console.capture("language-conversation-80");
+    console.keys("\x1bOP");
+    console.expect("输入筛选");
+    console.keys("查看改动与检查\r");
+    console.expect("已写入文件: notes.txt");
+    console.capture("language-changes-80");
+    console.keys("\x1b");
+    console.quit("\x03");
+    model.join().unwrap();
+    assert_eq!(
+        std::fs::read(root.path().join("notes.txt")).unwrap(),
+        b"Project hello\n"
+    );
+
+    let saved = std::fs::read_to_string(&config).unwrap();
+    assert_eq!(saved.replace("language = \"zh-CN\"\n", ""), original);
+    let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    reopened.expect("按 Enter 输入项目请求");
+    reopened.expect("Saved your project notes.");
+    reopened.expect("你");
+    reopened.expect_absent("You");
+    reopened.capture("language-reopened-110");
+    reopened.keys("\r");
+    reopened.expect("Enter 发送");
+    reopened.keys("/language\t");
+    reopened.expect("界面语言");
+    reopened.keys("\x1b[A\r");
+    reopened.expect("Saved for future launches.");
+    reopened.keys("\x1b");
+    reopened.expect("Enter Send");
+    reopened.expect("You");
+    reopened.expect_absent("你");
+    reopened.quit("\x03");
+    assert_eq!(
+        std::fs::read_to_string(&config)
+            .unwrap()
+            .replace("language = \"en\"\n", ""),
+        original,
+    );
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
     use std::net::TcpListener;
 
