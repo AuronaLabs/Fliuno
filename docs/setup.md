@@ -88,7 +88,7 @@ python examples/agent_demo.py --workspace --deny
 
 ## 真实模型
 
-[工作台配置](workbench.md#接入模型)可直接交给 stdio 应用服务。由宿主启动时传入配置文件和数据库路径。0.0.21 开发版可以用 [`/settings`](workbench.md#命名供应商0021-开发版) 维护 `[providers]` 和档案绑定。供应商决定连到哪个 Base URL、用哪套凭据；档案的 `protocol` 决定请求格式。下面的内联配置仍适用。
+[工作台配置](workbench.md#接入模型)可直接交给 stdio 应用服务。由宿主启动时传入配置文件和数据库路径。0.0.21 开发版可以用 [`/settings`](workbench.md#命名供应商0021-开发版) 维护 `[providers]` 和档案绑定。供应商决定连到哪个 Base URL、用哪套凭据；档案的 `protocol` 决定请求格式。绑定档案时可以查询已保存供应商的目录，无需先保存模型；[本地 RPC](protocol.md#命名供应商设置)提供相同能力。下面的内联配置仍适用。
 
 ```sh
 fliuno-app-server --config ~/.fliuno/config.toml --db .fliuno/kernel.db

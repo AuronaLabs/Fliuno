@@ -33,7 +33,7 @@
 
 ### 多供应商设置预览 · 0.0.21 开发版
 
-在输入框敲 `/settings` 后按 `Tab`，或按 `F1` 搜索 `settings`。先在 **Suppliers** 中配置 Base URL 和凭据，再切到 **Models**，给每个档案选供应商、协议、模型 ID 和思考强度。例如两个档案可以共用 `lab` 的连接，也可以各自连不同的服务。保存到 `~/.fliuno/config.toml` 后，用 `/model` 应用所选档案。旧回复仍显示当时的 `供应商/模型`。[设置步骤和配置示例](docs/workbench.md#命名供应商0021-开发版)
+在输入框敲 `/settings` 后按 `Tab`，或按 `F1` 搜索 `settings`。先在 **Suppliers** 中配置 Base URL 和凭据，再切到 **Models**，给每个档案选供应商和协议，按 `F4` 查询并选取模型，或手填模型 ID，再设置思考强度。例如两个档案可以共用 `lab` 的连接，也可以各自连不同的服务。保存到 `~/.fliuno/config.toml` 后，用 `/model` 应用所选档案。旧回复仍显示当时的 `供应商/模型`。[设置步骤和配置示例](docs/workbench.md#命名供应商0021-开发版)
 
 ## 快速体验
 

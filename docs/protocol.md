@@ -338,6 +338,7 @@ Windows 和 Linux 上，Run 子任务通过 `--exec-config` 注册的进程工�
 | --- | --- |
 | `modelSuppliers/list` | 发送 `{}`。返回同一配置快照下的 `revision`、`suppliers` 和 `models`。供应商包含 ID、预设、有效 Base URL 和凭据状态；模型条目包含档案 ID、绑定、协议、模型与思考强度。`profile: null` 指 `[model]`，`supplier: null` 表示尚未绑定。 |
 | `modelSuppliers/save` | 发送 `{target,revision,preset,baseUrl,credential}`。`target` 为 `{"type":"new","supplier":"lab"}` 或 `{"type":"existing","supplier":"lab"}`。省略 Base URL 时使用预设地址；自定义连接必须提供地址。凭据结构与 `modelProfiles/saveConnection` 相同。更换有效地址时不能使用 `keep`。返回新 `revision`。 |
+| `modelSuppliers/listModels` | 需要能力 `modelSupplierCatalog`。发送 `{supplier,revision,protocol,cursor?}`，返回 `ModelCatalogPreview`。首次查询省略 `cursor`，翻页传同一供应商、协议和配置修订的 `page.nextCursor`。地址和凭据取自已保存的供应商，不能从请求覆盖。修订过期返回 `-32009`，不发请求。查询只读，不执行模型生成。 |
 | `modelProfiles/bindSupplier` | 发送 `{target,revision,supplier,protocol,model,reasoningEffort}`。档案目标与 `modelProfiles/saveConnection` 相同。可新建档案，或显式以命名供应商替换原连接；保存时保留预算及启动默认档案。返回新 `revision`。 |
 
 过期的 `revision` 会拒绝写入；客户端需重新获取设置，供用户核对后再提交。列表和回执不会返回密钥内容、密钥文件路径或托管凭据的引用。更新供应商或档案并不会立即替换正在使用的模型；要应用到当前档案需显式调用 `modelProfiles/select` 并传 `reload: true`。已保存的回复身份不变。配置示例见[工作台指南](workbench.md#命名供应商0021-开发版)。
