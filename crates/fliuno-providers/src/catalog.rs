@@ -31,9 +31,12 @@ pub fn discover_models(
     if matches!(provider, Provider::Demo) {
         return Err("Choose a configured live model provider".into());
     }
-    let headers = provider_headers(provider, &settings.read_api_key()?)?;
+    let key = settings.read_api_key()?;
+    let headers = provider_headers(provider, &key)?;
     let http = catalog_http(settings, headers)?;
-    read_page(provider, &http, cursor, CATALOG_TIMEOUT).map_err(|error| error.to_string())
+    read_page(provider, &http, cursor, CATALOG_TIMEOUT)
+        .map(|page| filter_credential_echo(page, &key))
+        .map_err(|error| error.to_string())
 }
 
 /// Preview a draft's catalog without saving settings or credentials.
@@ -58,27 +61,12 @@ pub fn preview_model_catalog(
             draft.cursor.as_deref(),
             CATALOG_TIMEOUT,
         ) {
-            Ok(mut page) => {
-                // An untrusted catalog can echo the supplied credential in JSON fields.
-                let echoes_key =
-                    |value: &str| value == key || (key.len() >= 8 && value.contains(key));
-                page.models.retain(|entry| !echoes_key(&entry.id));
-                for entry in &mut page.models {
-                    if entry.display_name.as_deref().is_some_and(echoes_key) {
-                        entry.display_name = None;
-                    }
-                }
-                if page.next_cursor.as_deref().is_some_and(echoes_key) {
-                    page.next_cursor = None;
-                    page.truncated = true;
-                }
-                ModelCatalogPreview {
-                    catalog: ModelCatalogStatus::Available,
-                    catalog_access: ModelCatalogAccess::Accepted,
-                    http_status: None,
-                    page: Some(page),
-                }
-            }
+            Ok(page) => ModelCatalogPreview {
+                catalog: ModelCatalogStatus::Available,
+                catalog_access: ModelCatalogAccess::Accepted,
+                http_status: None,
+                page: Some(filter_credential_echo(page, key)),
+            },
             Err(error @ CatalogError::Input(_)) => return Err(error.to_string()),
             Err(error) => {
                 let (catalog, catalog_access, http_status) = classify_failure(error);
@@ -91,6 +79,22 @@ pub fn preview_model_catalog(
             }
         },
     )
+}
+
+fn filter_credential_echo(mut page: ProviderModelPage, key: &str) -> ProviderModelPage {
+    // A compatibility gateway can echo supplied credentials in catalog fields.
+    let echoes_key = |value: &str| value == key || (key.len() >= 8 && value.contains(key));
+    page.models.retain(|entry| !echoes_key(&entry.id));
+    for entry in &mut page.models {
+        if entry.display_name.as_deref().is_some_and(echoes_key) {
+            entry.display_name = None;
+        }
+    }
+    if page.next_cursor.as_deref().is_some_and(echoes_key) {
+        page.next_cursor = None;
+        page.truncated = true;
+    }
+    page
 }
 
 /// Check a trusted local profile without generating or resolving a remote context budget.

@@ -4,7 +4,7 @@ use fliuno_protocol::{
     ModelCatalogAccess, ModelCatalogStatus, ModelConfigurationStatus, ModelCredentialsStatus,
     ModelPresence, ModelReasoningEffortStatus,
 };
-use fliuno_providers::{check_model_connection, preview_model_catalog};
+use fliuno_providers::{check_model_connection, discover_models, preview_model_catalog};
 use serde_json::json;
 use std::{io::Read, net::TcpListener, time::Duration};
 
@@ -270,5 +270,39 @@ fn draft_catalog_does_not_expose_credential_echoed_in_a_successful_page() {
     assert_eq!(page.models[0].id, "valid-model");
     assert!(page.truncated);
     assert!(page.next_cursor.is_none());
+    worker.join().unwrap();
+}
+
+#[test]
+fn live_catalog_filters_credential_echoes_before_returning_rows_or_cursor() {
+    let (base, worker) = fixture(vec![(
+        200,
+        json!({
+            "has_more": true,
+            "last_id": "secret-fixture-key",
+            "data": [{"id":"secret-fixture-key"}, {"id":"visible", "display_name":"key: secret-fixture-key"}]
+        }),
+    )]);
+    let root = tempfile::tempdir().unwrap();
+    let key = root.path().join("fixture.key");
+    std::fs::write(&key, "secret-fixture-key\n").unwrap();
+    let page = discover_models(
+        &ModelSettings {
+            provider: Provider::Anthropic,
+            base_url: Some(base),
+            api_key_file: Some(key),
+            ..Default::default()
+        },
+        None,
+    )
+    .unwrap();
+    assert!(
+        !serde_json::to_string(&page)
+            .unwrap()
+            .contains("secret-fixture-key")
+    );
+    assert_eq!(page.models.len(), 1);
+    assert_eq!(page.models[0].id, "visible");
+    assert!(page.truncated && page.next_cursor.is_none());
     worker.join().unwrap();
 }
