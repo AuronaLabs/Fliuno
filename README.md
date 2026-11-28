@@ -19,9 +19,9 @@
 
 ## 开始真实工作
 
-在要工作的文件夹运行 `fliuno`。从 v0.0.17 起，首次启动会引导选择模型和已有密钥文件，完成后直接进入对话。按 `Enter` 发送，按 `Ctrl+N` 换行，按 `F1` 查看命令。配置、会话、审批和交付物都保存在本机。模型请求发送给你配置的供应商。
+在要工作的文件夹运行 `fliuno`。首次启动会引导你选择模型、填写可选的 Base URL，并粘贴 API 密钥或选择已有密钥文件。按 `Enter` 发送，按 `Ctrl+N` 换行，在输入框键入 `/` 查找命令。`/resume` 可续接项目对话，`/model` 可切换已配置的模型。配置、会话、审批和交付物保存在本机。模型请求会发往你配置的服务。
 
-从发布页选择对应平台的包。v0.0.17 提供 Windows x64 MSI 和 Debian amd64 安装包。使用便携压缩包时，把 `fliuno` 和 `fliuno-app-server` 解压到同一目录。v0.0.16 用户可运行 `fliuno --init-config` 创建模板，再按指南编辑配置。[安装与模型配置](docs/workbench.md#安装)
+从发布页选择 Windows x64 MSI 或 Debian amd64 安装包。使用便携包时，把 `fliuno` 和 `fliuno-app-server` 解压到同一目录。也可以用 `fliuno --init-config` 生成模板，或通过 `fliuno-app-server --list-models` 拉取远端模型目录。[安装与模型配置](docs/workbench.md#安装) · [模型服务接口](docs/setup.md#真实模型)
 
 ## 快速体验
 
