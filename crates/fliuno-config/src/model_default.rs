@@ -1,14 +1,10 @@
-//! Update a single user setting without re-serializing the rest of config.toml.
-use super::{ModelSettings, Settings, read_file};
-use std::{
-    ffi::OsString,
-    fs::{self, OpenOptions},
-    io::Write,
-    path::Path,
+//! Update the startup model without re-serializing the rest of config.toml.
+use super::{
+    ModelSettings, Settings,
+    config_edit::{ConfigEdit, replace_value},
 };
-use toml_edit::{DocumentMut, Item, Table, value};
-
-const CONFIG_LIMIT: u64 = 64 * 1024;
+use std::path::Path;
+use toml_edit::{Item, Table, value};
 
 impl Settings {
     pub fn save_default_model(
@@ -16,79 +12,36 @@ impl Settings {
         profile: Option<&str>,
         validate: impl FnOnce(&ModelSettings) -> Result<(), String>,
     ) -> Result<(), String> {
-        let original_path = path;
-        let path = fs::canonicalize(path).map_err(|_| "Cannot open model configuration")?;
-        let parent = path
-            .parent()
-            .ok_or("Configuration has no parent directory")?;
-        let mut lock_name = OsString::from(path.file_name().ok_or("Invalid configuration name")?);
-        lock_name.push(".lock");
-        let lock = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(parent.join(lock_name))
-            .map_err(|_| "Cannot open model configuration lock")?;
-        lock.try_lock()
-            .map_err(|_| "Model configuration is being edited. Try again.")?;
-
-        let original =
-            read_file(&path, CONFIG_LIMIT).map_err(|_| "Cannot read model configuration")?;
-        // Resolve credential references the same way as normal startup, including a config symlink.
-        let settings = Self::parse(original_path, &original)?;
+        let edit = ConfigEdit::open(path)?;
+        let settings = edit.settings()?;
         let model = profile.map_or(Ok(&settings.model), |id| settings.named_model(id))?;
         validate(model)?;
         if settings.workbench.model_profile.as_deref() == profile {
             return Ok(());
         }
-        let mut doc: DocumentMut = original
-            .parse()
-            .map_err(|_| "Cannot edit model configuration")?;
+        let mut doc = edit.document()?;
         if let Some(profile) = profile {
             let item = doc.entry("workbench").or_insert(Item::Table(Table::new()));
             let table = item
                 .as_table_like_mut()
                 .ok_or("Invalid workbench settings")?;
-            let mut update = value(profile);
-            if let Some(old) = table.get("model_profile").and_then(Item::as_value)
-                && let Some(new) = update.as_value_mut()
-            {
-                *new.decor_mut() = old.decor().clone();
-            }
-            table.insert("model_profile", update);
+            replace_value(table, "model_profile", value(profile));
         } else if let Some(table) = doc.get_mut("workbench").and_then(Item::as_table_like_mut) {
             table.remove("model_profile");
         }
         let output = doc.to_string();
-        if output.len() as u64 > CONFIG_LIMIT {
-            return Err("Updated model configuration exceeds its size limit".into());
-        }
-        let updated = Self::parse(original_path, &output)?;
+        let updated = edit.parse(&output)?;
         if updated.workbench.model_profile.as_deref() != profile {
             return Err("Could not update the startup model default".into());
         }
-        let mut temporary = tempfile::NamedTempFile::new_in(parent)
-            .map_err(|_| "Cannot stage model configuration changes")?;
-        temporary
-            .write_all(output.as_bytes())
-            .and_then(|()| temporary.as_file().sync_all())
-            .map_err(|_| "Cannot stage model configuration changes")?;
-        if fs::canonicalize(original_path).ok().as_ref() != Some(&path)
-            || read_file(&path, CONFIG_LIMIT).ok().as_deref() != Some(original.as_str())
-        {
-            return Err("Model configuration changed. Reload it and try again.".into());
-        }
-        temporary
-            .persist(&path)
-            .map_err(|_| "Cannot save the startup model default")?;
-        Ok(())
+        edit.commit(&output)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     const VALID: &str = r#"# profile notes
 [workbench]

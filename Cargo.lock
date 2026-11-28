@@ -987,6 +987,7 @@ version = "0.0.18"
 dependencies = [
  "keyring-core",
  "serde",
+ "sha2 0.10.9",
  "tempfile",
  "toml",
  "toml_edit",

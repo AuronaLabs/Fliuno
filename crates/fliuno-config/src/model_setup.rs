@@ -27,10 +27,7 @@ impl Settings {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        let model = setup.model.trim();
-        if model.is_empty() || model.len() > 256 || model.chars().any(char::is_control) {
-            return Err("Enter a model ID of at most 256 bytes without control characters.".into());
-        }
+        let model = super::model_edit::validate_model_name(setup.model)?;
         let settings = ModelSettings {
             provider: setup.provider,
             protocol: Some(setup.protocol),

@@ -1,8 +1,11 @@
 //! User-owned startup settings shared by the terminal client and app-server.
+mod config_edit;
 mod credentials;
 mod model_default;
+mod model_edit;
 mod model_setup;
 pub use credentials::PendingApiKey;
+pub use model_edit::ModelEdit;
 pub use model_setup::{ModelSetup, ModelSetupCredential};
 
 use serde::{Deserialize, Serialize};
