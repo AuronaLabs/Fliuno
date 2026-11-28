@@ -8,7 +8,7 @@
 | --- | --- |
 | **从零启动** | [准备环境](#快速开始) → [离线演示](#先运行离线演示) → [启动服务并握手](#再启动自己的服务) |
 | **配置模型或外部服务** | [真实模型](#真实模型) · [MCP](#mcp) · [ACP 客户端](#acp-客户端) · [A2A 远程任务](#a2a-远程任务) |
-| **启用本机能力** | [文件与 Skills](#文件与-skills) · [注册命令](#主机注册的命令) · [跨轮次终端](#跨轮次终端) |
+| **启用本机能力** | [文件与 Skills](#文件与-skills) · [注册命令](#主机注册的命令) · [隔离项目检查 · 0.0.21](#在隔离环境里运行项目检查0021) · [跨轮次终端](#跨轮次终端) |
 | **验证工作区** | [执行诊断](#执行诊断) · [工程检查和离线示例](#检查与演示) · [版本升级验证](#版本升级验证) |
 
 ## 快速开始
@@ -208,7 +208,14 @@ cargo run -p fliuno-app-server -- --exec-config C:/absolute/path/to/execution.js
 
 ## 在隔离环境里运行项目检查（0.0.21）
 
-在用户配置的 `[integrations]` 下将 `execution` 指向受信任的 JSON 文件。下面是一个检查配置示例；将 `command` 换成你安装的原生检查程序的绝对路径，`args` 换成该程序接受的固定参数。Windows 使用 `windows_app_container`；Linux 使用 `linux_landlock`。
+此功能属于开发中的 0.0.21。先在 `~/.fliuno/config.toml` 引用你控制的执行配置，路径相对于此 TOML，而非项目目录：
+
+```toml
+[integrations]
+execution = "execution.json"
+```
+
+下面是 `execution.json` 的检查配置示例；将 `command` 换成你安装的原生检查程序的绝对路径，`args` 换成该程序接受的固定参数。Windows 使用 `windows_app_container`；Linux 使用 `linux_landlock`。
 
 ```json
 {

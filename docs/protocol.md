@@ -884,6 +884,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 - `workspace_list({path})`：工作区内目录，根目录用 `.`；返回最多 256 项及 truncated。
 - `workspace_list_page({path,after?,limit?:128})` 按文件名的 UTF-8 字节顺序返回 `{entries,nextAfter,hasMore,omittedNames}`，每页 1..256 项。目录不变时，按 `nextAfter` 续页可浏览全部可寻址条目。文件名无法作为工作区相对路径片段时，计入 `omittedNames`。每次扫描最多 16,384 项，超限返回错误。分页期间目录可以变化，游标只表示名称边界。每页按工作区读取工具走审批。
+- `workspace_find({path,mode,query,limit?:20})`（0.0.21 开发版）：从工作区根目录 `.` 或其相对子目录查找未知路径。`mode:"name"` 按文件名匹配；`mode:"text"` 在常见文本文件中查找，每个文件只返回第一个匹配的位置。`query` 为 1 到 256 字节的单行字面文本，区分大小写；`limit` 为 1 到 40。返回 `matches`、`visitedEntries`、`examinedTextFiles`、`unreadable` 和 `truncated`。匹配项包含工作区相对路径，文本匹配另含从 1 开始的 `line` 和 UTF-8 `byteColumn`，不返回原文。跳过隐藏和常见生成目录，不跟随链接；深度、扫描数或返回数量到达上限时可缩小子目录重查。
 - `workspace_stat({path})`：查询工作区相对路径，根目录用 `.`。返回 `path`、`kind`（`file`、`directory`、`symlink` 或 `other`）、普通文件的 `bytes` 和可用的 `modifiedUnixMs`。不适用的字段为 `null`。不跟随末级符号链接。每次查询按工作区读取工具走审批。
 - `workspace_stat_batch({paths})` 一次审批查询 1 到 16 条不同的工作区相对路径，路径文本合计最多 8 KiB。返回按输入排序的 `entries`。可读取的项包含 `status:"found"` 及 `workspace_stat` 的元数据字段。无法读取的项仅返回 `path` 和 `status:"unavailable"`。整个批次会先验证路径格式。工具不读取文件正文，也不跟随末级符号链接。
 - `workspace_sha256({path})`：审批后对至多 64 MiB 的工作区普通文件逐块计算 SHA-256，返回 `path`、实际读取的 `bytes` 和小写十六进制 `sha256`。结果不含正文。并发修改文件时，摘要只描述实际读到的字节流。

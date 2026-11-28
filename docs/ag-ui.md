@@ -190,7 +190,7 @@ let router = RouterBuilder::new(client, authorize)
     .build();
 ```
 
-需要审批中断时改用 `.interrupts(reviewer)`。直接通过 Rust 客户端接入时，可用 `AgUiRunOptions::model_step_limit` 与 `Client::start_ag_ui_text_run`。不配置时沿用服务默认值。已配置限额而服务未声明支持时，HTTP 返回 `502`，不会降级为不限额提交。HTTP 请求体不能设置 `maxModelSteps`。
+需要审批中断时改用 `.interrupts(reviewer)`。直接通过 Rust 客户端接入时，可用 `AgUiRunOptions::model_step_limit` 与 `Client::start_ag_ui_text_run`。不配置时沿用服务默认值。0.0.21 开发版支持 1–32 次；默认仍为 8。若服务未声明 `maxTaskModelSteps`，或声明的最大值小于配置，HTTP 返回 `502`，不会降级为不限额提交。HTTP 请求体不能设置 `maxModelSteps`。
 
 限额与任务一起保存。审批续跑和 SSE 重连沿用该任务，无论宿主重启后设置了什么新上限。用同一个根 `runId` 重新提交时，如果有效上限已经改变，返回 `409`；通过 `GET /runs/{run_id}` 可继续读取原运行。最后一次模型响应提议的工具获批后仍可执行，若之后还需要模型则 SSE 输出 `RUN_ERROR`，已保存的交付物仍可读取。
 

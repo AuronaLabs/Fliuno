@@ -3,25 +3,33 @@
     <source media="(max-width: 600px) and (prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-compact-light.svg">
     <source media="(max-width: 600px)" srcset="docs/assets/fliuno-cover-compact.svg">
     <source media="(prefers-color-scheme: light)" srcset="docs/assets/fliuno-cover-light.svg">
-    <img src="docs/assets/fliuno-cover.svg" alt="Fliuno 的任务流程：提交任务、审批操作、查看交付物。" width="1120">
+    <img src="docs/assets/fliuno-cover.svg" alt="Fliuno：提交请求、审阅操作、查看交付结果。" width="1120">
   </picture>
 </p>
 
 # Fliuno
 
-**在终端里和 AI 一起完成工作。** Fliuno 是一款本机优先的 AI 工作台。在自己的项目目录里描述要完成的工作，和 Fliuno 一起整理计划、核对操作和审阅交付物。会话和结果保存在本机，重开终端后可以继续。
+**在项目目录里，用终端和 AI 一起做事。** Fliuno 是本机优先的 Rust Agent 工作台。打开项目，描述要完成的改动，审阅操作与交付结果。会话、审批记录和交付物保存在本机；模型请求发往你选择的服务。
 
 `Windows` · `Linux` · `Rust TUI`
 
 **[开始真实工作](#开始真实工作)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-[下载稳定版](https://github.com/AuronaLabs/Fliuno/releases/latest) · [更新记录](CHANGELOG.md)
+[下载安装包](https://github.com/AuronaLabs/Fliuno/releases/latest) · [更新记录](CHANGELOG.md) · [下一版：项目 Agent](docs/plan-0.0.21.md)
+
+当前已发布版本为 **v0.0.20**。下文的项目编辑与检查预览属于 **0.0.21 开发分支**。
 
 ## 开始真实工作
 
 在要工作的文件夹运行 `fliuno`。首次启动会引导你选择模型、填写可选的 Base URL，并粘贴 API 密钥或选择已有密钥文件。按 `Enter` 发送，按 `Ctrl+N` 换行，在输入框键入 `/` 查找命令。`/resume` 可续接项目对话，`/model` 可切换已配置的模型。配置、会话、审批和交付物保存在本机。模型请求会发往你配置的服务。
 
 从发布页选择 Windows x64 MSI 或 Debian amd64 安装包。使用便携包时，把 `fliuno` 和 `fliuno-app-server` 解压到同一目录。也可以用 `fliuno --init-config` 生成模板，或通过 `fliuno-app-server --list-models` 拉取远端模型目录。[安装与模型配置](docs/workbench.md#安装) · [模型服务接口](docs/setup.md#真实模型)
+
+### 项目工作流预览 · 0.0.21 开发版
+
+在项目目录运行 `fliuno`，例如输入：「找到订单折扣的实现，修复边界值错误，运行已配置的检查，并告诉我改了哪个文件。」开发版可以从未知路径搜索源码、读取文件，并提交可审阅的小范围替换或补丁。写入前会停下来等你批准；需要运行项目检查时，先由你在宿主配置登记程序，再审阅实际命令和输入文件。
+
+完成后用 `/changes` 查看本轮确认写入的文件、补丁和检查输出。仅需一段文字时可以直接在对话里交付；只有需要下载或写文件时，才走对应的交付流程。[项目工作流](docs/workbench.md#在项目目录里工作) · [如何配置检查](docs/setup.md#在隔离环境里运行项目检查0021)
 
 ## 快速体验
 
