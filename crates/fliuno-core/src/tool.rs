@@ -174,8 +174,7 @@ impl Tool for CreateArtifact {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "artifact_create".into(),
-            description: "Create a reviewable text artifact in the Fliuno database after approval."
-                .into(),
+            description: "Create a text deliverable the user can open or export from Deliverables. Use when the user wants a saved or downloadable document without a workspace destination. Returns the saved artifact ID and title; does not write a workspace file. For ordinary drafting, answer inline instead.".into(),
             effect: ToolEffect::ArtifactWrite,
             input_schema: json!({"type":"object", "additionalProperties":false,
             "required":["title","content"], "properties":{
@@ -209,7 +208,7 @@ impl Tool for CreateArtifact {
             },
         };
         Ok(ToolOutput {
-            output: json!({"artifactId": artifact.id}),
+            output: json!({"artifactId": artifact.id, "title": artifact.title, "storage":"deliverables"}),
             artifacts: vec![artifact],
         })
     }

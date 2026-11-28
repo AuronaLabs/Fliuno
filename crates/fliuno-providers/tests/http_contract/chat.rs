@@ -72,6 +72,10 @@ fn chat_sends_native_request_and_reads_json_usage() {
     assert_eq!(body["max_completion_tokens"], 128);
     assert_eq!(body["messages"][0]["role"], "system");
     assert_eq!(
+        body["messages"][0]["content"],
+        fliuno_core::agent_instructions()
+    );
+    assert_eq!(
         body["messages"][1],
         json!({"role":"user","content":"stream fixture"})
     );

@@ -14,6 +14,7 @@ mod interaction;
 mod json_size;
 mod model_tool_versions;
 pub use json_size::json_size;
+mod agent_prompt;
 mod policy;
 mod policy_rules;
 mod provider;
@@ -35,6 +36,7 @@ pub use agent::{
     AgentBackend, AgentCommand, AgentObservation, AgentObserver, AgentOutcome, AgentRequest,
     PreparedAgentRun, PreparedAgentSessionList,
 };
+pub use agent_prompt::{AGENT_PROMPT_VERSION, agent_instructions};
 pub use agent_remote::{
     CompletedRemoteTaskCheck, IncomingAgentArtifact, IncomingAgentArtifactPart,
     PreparedRemoteTaskCheck,
