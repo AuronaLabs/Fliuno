@@ -15,9 +15,9 @@
 
 **[开始真实工作](#开始真实工作)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-[下载安装包](https://github.com/AuronaLabs/Fliuno/releases/latest) · [更新记录](CHANGELOG.md) · [下一版：项目 Agent](docs/plan-0.0.21.md)
+[下载安装包](https://github.com/AuronaLabs/Fliuno/releases/latest) · [更新记录](CHANGELOG.md) · [0.0.21 开发记录](docs/plan-0.0.21.md)
 
-> **稳定版 v0.0.20** 可从发布页安装。下面标有 **0.0.21 开发版** 的功能需要从开发分支构建，安装版里还没有。
+> **稳定版 v0.0.21** 已提供 Windows x64 MSI、Debian 12 amd64 `.deb` 和两套便携包。[下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.21) · [安装包验收](docs/execution-evidence.md#0021-安装包验收)
 
 ## 开始真实工作
 
@@ -25,15 +25,15 @@
 
 Windows x64 可以安装 MSI，Debian amd64 可以安装 `.deb`；也可解压便携包，把 `fliuno` 和 `fliuno-app-server` 放在同一目录。[安装与校验](docs/workbench.md#安装) · [升级前备份](docs/workbench.md#从旧版升级) · [接入模型](docs/workbench.md#接入模型)
 
-### 项目工作流预览 · 0.0.21 开发版
+### 项目工作流
 
-在项目目录运行 `fliuno`，例如输入：「找到订单折扣的实现，修复边界值错误，运行已配置的检查，并告诉我改了哪个文件。」开发版可以从未知路径搜索源码、读取文件，并提交可审阅的小范围替换或补丁。写入前会停下来等你批准；审批先展示目标和改动，`Tab` 可查看工具参数。需要运行项目检查时，先由你在宿主配置登记程序，再审阅实际命令和输入文件。
+在项目目录运行 `fliuno`，例如输入：「找到订单折扣的实现，修复边界值错误，运行已配置的检查，并告诉我改了哪个文件。」Agent 可以从未知路径搜索源码、读取文件，并提交可审阅的小范围替换或补丁。写入前会停下来等你批准；审批先展示目标和改动，`Tab` 可查看工具参数。需要运行项目检查时，先由你在宿主配置登记程序，再审阅实际命令和输入文件。
 
 完成后用 `/changes` 查看本轮确认写入的文件、补丁和检查输出。仅需一段文字时可以直接在对话里交付；只有需要下载或写文件时，才走对应的交付流程。[项目工作流](docs/workbench.md#在项目目录里工作) · [如何配置检查](docs/setup.md#在隔离环境里运行项目检查0021)
 
-### 多供应商设置与简体中文 · 0.0.21 开发版
+### 多供应商设置与简体中文
 
-在输入框敲 `/settings` 后按 `Tab`，或按 `F1` 搜索 `settings`。先在 **Suppliers** 中配置 Base URL 和凭据，再切到 **Models**，给每个档案选供应商和协议，按 `F4` 查询并选取模型，或手填模型 ID，再设置思考强度。例如两个档案可以共用 `lab` 的连接，也可以各自连不同的服务。保存到 `~/.fliuno/config.toml` 后，用 `/model` 应用所选档案。旧回复仍显示当时的 `供应商/模型`。[设置步骤和配置示例](docs/workbench.md#命名供应商0021-开发版)
+在输入框敲 `/settings` 后按 `Tab`，或按 `F1` 搜索 `settings`。先在 **Suppliers** 中配置 Base URL 和凭据，再切到 **Models**，给每个档案选供应商和协议，按 `F4` 查询并选取模型，或手填模型 ID，再设置思考强度。例如两个档案可以共用 `lab` 的连接，也可以各自连不同的服务。保存到 `~/.fliuno/config.toml` 后，用 `/model` 应用所选档案。旧回复仍显示当时的 `供应商/模型`。[设置步骤和配置示例](docs/workbench.md#命名供应商)
 
 用 `/language` 或 `F1` 切换简体中文。项目主屏、命令、供应商设置、内置操作审阅和改动回执支持中文界面，语言偏好保存在本机，模型回复保留原文。[切换步骤与覆盖范围](docs/workbench.md#切换界面语言)
 

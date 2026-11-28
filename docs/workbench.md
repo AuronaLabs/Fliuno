@@ -4,7 +4,7 @@
 
 [安装](#安装) · [接入模型](#接入模型) · [项目工作](#在项目目录里工作) · [切换语言](#切换界面语言) · [恢复与备份](#恢复与备份)
 
-> 本指南以 **v0.0.20** 为安装基线。标为 **0.0.21 开发版** 的章节需要配套的开发版 `fliuno` 与 `fliuno-app-server`。
+> 本指南以 **v0.0.21** 为安装基线。便携安装时请使用同版本的 `fliuno` 与 `fliuno-app-server`。
 
 从项目目录在终端里运行 `fliuno`。首次启动会引导你选择接口、填写可选的 Base URL 并连接 API 密钥。随后可在后台加载的目录里搜索模型：用 `↑` / `↓` 浏览，`Tab` 填入所选模型，`Enter` 保存当前输入的模型 ID。目录不可用时仍可手填。OpenAI 官方接口选 Responses，使用兼容网关或本机服务时按该服务提供的接口选择 Chat Completions。Anthropic 和 Google Gemini 也有各自的原生选项。保存后可直接输入第一条消息，按 `Enter` 发送。`F1` 打开命令搜索，`Esc` 返回对话。用 `Ctrl+N` 或粘贴输入多行。
 
@@ -22,7 +22,7 @@
 | --- | --- |
 | 命令搜索 | 在工作台按 `F1`，或在输入框外按 `/`，输入关键字筛选当前可用操作，上下键选择，`Enter` 执行。0.0.21 将待审操作置顶，输入 `/plan` 后按 `Tab` 可切换计划模式。 |
 | 工作区、会话 | `W` 打开工作区列表，`O` 输入新路径；`S` 打开会话列表，列表中 `N` 新建会话，`F` 按标题或 ID 查找，`Shift+A` 切换归档视图，`R` 改名，`X` 归档或恢复。上下键选择，`Enter` 打开，`PageDown` 读取下一页。 |
-| 模型设置（0.0.21 开发版） | 输入 `/settings` 后按 `Tab`，或用 `F1` 搜索 `settings` 进入。连接与模型分开配置；用 `/model` 切换当前档案。 |
+| 模型设置 | 输入 `/settings` 后按 `Tab`，或用 `F1` 搜索 `settings` 进入。连接与模型分开配置；用 `/model` 切换当前档案。 |
 | 工作区交付物（v0.0.17 起） | `F7` 浏览当前工作区交付物。`F` 按媒体类型筛选，`Enter` 预览，预览中 `P` 查看上一修订，`D` 保存并显示校验摘要。 |
 | 工作区任务中心 | `Shift+I` 打开跨会话收件箱；`1` 待处理、`2` 运行中、`3` 最近结束。选中任务按 `Enter` 回到原会话；待审批项会打开原审批详情。审批有更多页时，移到列表末尾继续读取当前快照。实时更新会刷新列表。`Esc` 返回当前会话。 |
 | 历史查找 | `Shift+H` 搜索当前工作区已完成历史；结果按固定水位分页，`PageDown` 读更多，`U` 只搜用户输入，`A` 只搜助手回复，`B` 搜两者。选中结果按 `Enter` 返回任务。匹配是字面子串；列表会显示扫描量和因单条上限而跳过的记录数。 |
@@ -48,7 +48,7 @@
 
 ## 切换界面语言
 
-**0.0.21 开发版。** 在空输入框键入 `/language` 后按 `Tab`，或按 `F1` 搜索 `language` / `界面语言`。用方向键选择 **English** 或 **简体中文**，按 `Enter` 保存，再按 `Esc` 回到对话。切换保留草稿和模型连接。中文界面的 F1 仍可搜英文命令名；斜杠命令和按键保持一致。
+在空输入框键入 `/language` 后按 `Tab`，或按 `F1` 搜索 `language` / `界面语言`。用方向键选择 **English** 或 **简体中文**，按 `Enter` 保存，再按 `Esc` 回到对话。切换保留草稿和模型连接。中文界面的 F1 仍可搜英文命令名；斜杠命令和按键保持一致。
 
 也可编辑已有配置中的 `[workbench]`：
 
@@ -63,7 +63,7 @@ language = "zh-CN"
 
 ## 在项目目录里工作
 
-本节描述 **0.0.21 开发版**。顶栏显示当前项目、路径和模型。可以直接输入：「找到配置读取入口，修改默认日志级别，再运行已配置的检查，给出改动路径和结果。」
+顶栏显示当前项目、路径和模型。可以直接输入：「找到配置读取入口，修改默认日志级别，再运行已配置的检查，给出改动路径和结果。」
 
 1. **定位**：让 Agent 根据文件名或源码字面内容查找相关路径，然后读文件。简单问答直接在对话完成。
 2. **审批**：先核对工作区、相对路径、修改前后的内容或补丁。一处精确替换要求原文唯一，并且文件仍是读取时的版本。拒绝不会写入；遇到版本冲突可重读后提交新提案。
@@ -84,19 +84,19 @@ language = "zh-CN"
 从[发布页](https://github.com/AuronaLabs/Fliuno/releases/latest)下载对应平台的一份安装包或便携包，并下载同一版本的 `SHA256SUMS.txt`。校验后再运行安装程序。
 
 - **Windows x64**。打开 `.msi` 并按安装器提示操作。安装会注册系统 PATH。完成后打开新的 PowerShell，在项目目录运行 `fliuno`。
-- **Debian amd64**。在下载目录将实际文件名传给 `apt install`，例如 `sudo apt install ./fliuno-v0.0.20-linux-amd64.deb`。完成后进入项目目录，再运行 `fliuno`。
+- **Debian amd64**。在下载目录将实际文件名传给 `apt install`，例如 `sudo apt install ./fliuno-v0.0.21-linux-amd64.deb`。完成后进入项目目录，再运行 `fliuno`。
 - **便携包**。解压 ZIP 或 tar.gz，在解压目录运行 `fliuno` 或 `fliuno.exe`。可通过 `--workspace PATH` 指定项目目录。
 
 安装后运行 `fliuno --version` 确认版本。如果仍显示旧版本，在 PowerShell 中用 `Get-Command fliuno -All`，在 Debian 中用 `command -v fliuno` 检查当前终端实际找到的文件。便携版用解压目录里的程序路径启动。通过系统卸载原生包会保留用户主目录里的 `~/.fliuno`。
 
 ### 校验下载
 
-在下载目录检查 SHA-256。以下使用 v0.0.20 文件名举例；下载其他版本时替换名称。
+在下载目录检查 SHA-256。以下使用 v0.0.21 文件名举例；下载其他版本时替换名称。
 
 Windows PowerShell：
 
 ```powershell
-$asset = 'fliuno-v0.0.20-windows-x64.msi'
+$asset = 'fliuno-v0.0.21-windows-x64.msi'
 Get-FileHash -Algorithm SHA256 -LiteralPath $asset
 Select-String -Path SHA256SUMS.txt -Pattern ('  ' + [regex]::Escape($asset) + '$')
 ```
@@ -104,7 +104,7 @@ Select-String -Path SHA256SUMS.txt -Pattern ('  ' + [regex]::Escape($asset) + '$
 Debian：
 
 ```sh
-asset='fliuno-v0.0.20-linux-amd64.deb'
+asset='fliuno-v0.0.21-linux-amd64.deb'
 sha256sum -- "$asset"
 grep -F -- "  $asset" SHA256SUMS.txt
 ```
@@ -160,7 +160,9 @@ name = "your-lab-model"
 api_key_file = "credentials/anthropic.key"
 ```
 
-### 命名供应商（0.0.21 开发版）
+<a id="命名供应商0021-开发版"></a>
+
+### 命名供应商
 
 供应商保存 Base URL 和凭据引用；模型档案独立选择供应商、协议、模型 ID 和思考强度。多个档案可以复用同一个供应商。该页需要支持模型设置的本地 app-server。
 
@@ -205,7 +207,7 @@ name = "your-local-model"
 | 用户配置 | `~/.fliuno/config.toml`。`--config PATH` 可使用其他文件。配置里的相对路径均以该文件所在目录为基准。 |
 | 本地状态 | `~/.fliuno/state/workbench.db`。若新路径尚无数据库，已有的 Windows `%LOCALAPPDATA%\fliuno` 或 Linux `$XDG_STATE_HOME/fliuno` 数据库会继续打开。可用 `--db PATH` 或 `[workbench].database` 明确指定。 |
 | 离线演示 | `fliuno --demo` 使用独立的 `demo.db`。可以用 `--db PATH` 指定演示库。 |
-| 界面语言（0.0.21 开发版） | `[workbench].language`：`en`（默认）或 `zh-CN`。也可由 `/language` 保存。 |
+| 界面语言 | `[workbench].language`：`en`（默认）或 `zh-CN`。也可由 `/language` 保存。 |
 | 服务程序 | 默认使用同目录的 `fliuno-app-server`。可用 `--server PATH` 或 `[workbench].server` 覆盖。 |
 | 其他能力 | `[integrations]` 可以引用 `mcp`、`mcp_oauth`、`mcp_oauth_vault`、`acp`、`a2a`、`execution`、`terminal`、`skills`、`memory_embedding` 的宿主配置或目录。 |
 

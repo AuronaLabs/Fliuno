@@ -55,7 +55,7 @@
 
 可执行验收：`python examples/live_project_repair.py --config <仅模型的配置> --app-server <构建产物> --node <Node 可执行文件> --scratch <空闲的临时目录> --evidence <尚不存在的 JSON 文件> --steps 16`。该命令会使用真实模型调用，CI 默认不运行。
 
-2026 年 11 月 28 日的 Windows 开发构建使用 `gpt-6.2-sol` 完成一轮验收：8 次模型尝试，固定检查退出码由 1 变为 0，比对 Git diff 只修改 `src/order-total.cjs`，最终答复报告了实际路径与 4 条通过的断言。记录同时保留先前失败：有一轮修改和检查都成功，但旧 8 次预算截断最终答复；另一次因模型提交无效 diff 而失败。开发版保留默认 8 次，同时支持显式 1 到 32 次；可纠正的 diff 格式错误现在有独立审计记录，模型可重提，旧提案不会写入。这个结果覆盖一个小型回归用例，安装包和 Linux 真实模型验收尚未完成。
+2026 年 11 月 28 日的 Windows 开发构建使用 `gpt-6.2-sol` 完成一轮验收：8 次模型尝试，固定检查退出码由 1 变为 0，比对 Git diff 只修改 `src/order-total.cjs`，最终答复报告了实际路径与 4 条通过的断言。记录同时保留先前失败：有一轮修改和检查都成功，但旧 8 次预算截断最终答复；另一次因模型提交无效 diff 而失败。开发版保留默认 8 次，同时支持显式 1 到 32 次；可纠正的 diff 格式错误现在有独立审计记录，模型可重提，旧提案不会写入。这个结果覆盖一个小型回归用例。安装包的 Windows 和 Linux 终端验收使用本机模拟供应商，Linux 未运行真实模型评估。
 
 一次真实修复中，模型用三份补丁才完成一行替换。下一步参考 [OpenCode 工具文档](https://opencode.ai/docs/tools/) 和本地 OpenCode `d284e7c` 的 `packages/core/src/tool/plugin/edit.ts`：给小改动增加基于原文的编辑，比手写 diff 行范围更直接。Fliuno 采用严格字节匹配，要求原文在目标文件中只出现一次，并继续绑定读取时的 SHA-256 和审批；不做模糊匹配、隐式批量替换或自动改行尾。TUI 审批和回执都展示原文与替换内容，测试覆盖找不到原文、原文有歧义和审批后文件被修改。保留 unified diff 用于多个位置的修改。 接入后使用同一真实模型再次完成回归，8 次模型尝试，精确替换一次、无需修订提案，固定检查退出码仍为 1 → 0。
 
@@ -84,13 +84,15 @@
 - 英文和中文共用命令 ID、焦点与快捷键；F1 英文命令别名继续可搜索。首批覆盖项目入口、模型设置、权限审批入口和项目回执。协议、模型名、项目路径、补丁、实际命令输出与模型原文不翻译。将还未翻译的界面列为后续覆盖，验收记录注明具体范围。
 - [Unicode UAX #11](https://unicode.org/reports/tr11/) 提醒终端字宽不能直接按字符或字节计。命令行按显示列对齐，中文提示短屏可折行；Windows/Linux 测试真实 PTY，保留 48、80、110 列截屏，并验证切换、重启、配置其他字段不变、已有草稿不丢失。
 
-Windows ConPTY 已验证语言切换、配置与草稿保留、回环目录、中文审批、写入回执和重启；此次用例已纳入 Windows/Linux CI，当前提交的跨平台结果待验证。见[使用指南](workbench.md#切换界面语言)及[验收记录](execution-evidence.md#0021-项目-agent-开发验收)。
+Windows ConPTY 和 Debian PTY 均通过语言切换、配置与草稿保留、回环目录、中文审批、写入回执和重启测试。见[使用指南](workbench.md#切换界面语言)及[验收记录](execution-evidence.md#0021-项目-agent-开发验收)。
 
 ### 审批审阅与长内容导航
 
 [Claude Code 权限模型](https://code.claude.com/docs/en/permissions)把“需要用户选择的操作”和权限策略分开；本地 Codex `a1604a8` 的 `codex-rs/tui/src/bottom_pane/approval_overlay.rs` 与 OpenCode `d284e7c` 的 `packages/tui/src/mini/permission.shared.ts` 都把动作呈现与选择分开处理。Fliuno 默认展示要做什么、目标、后果和实际改动，`Tab` 切到工具与参数；项目检查的摘要仍展示实际程序、参数、隔离方式和全部输入文件。两页分别记住滚动位置，支持翻页、回到顶部和末尾，显示可见行范围；允许、拒绝与限时读取授权仍绑定原请求，滚动或换页不会执行操作。用 Windows/Linux PTY 验证长文、空白与原始参数、缩放后位置、拒绝后的文件状态，并保留中英文窄屏截图。
 
 ## 验收与发布门槛
+
+发布提交 `3ebf1ca`；同一提交的 Windows/Linux CI 和 Windows MSI / Debian 12 安装验收均已通过。见[发布证据](execution-evidence.md#0021-安装包验收)。
 
 开发候选使用 `0.0.21` 二进制版本号。通过 `Installer candidate` 工作流在开发分支构建和验证安装包，升级基线为已发布的 `v0.0.20`；工作流只保留候选产物，不创建发布标签。
 
