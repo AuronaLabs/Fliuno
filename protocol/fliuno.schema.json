@@ -4584,11 +4584,66 @@
             "string",
             "null"
           ]
+        },
+        "reload": {
+          "description": "Explicitly load the saved config even when this profile is already active.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
       "required": [
         "profile"
+      ]
+    },
+    "modelProfiles/getEdit": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileEditGetParams",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "description": "Null edits the base [model].",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ]
+    },
+    "modelProfiles/saveEdit": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileEditParams",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "description": "Null restores the provider default.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "revision",
+        "model",
+        "reasoningEffort"
       ]
     },
     "modelProfiles/getDefault": {
@@ -4627,6 +4682,17 @@
           ]
         },
         "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "baseProfile": {
+          "description": "Request the base [model] rather than the active profile.",
+          "type": "boolean"
+        },
+        "revision": {
+          "description": "When editing, query the same configuration revision the editor loaded.",
           "type": [
             "string",
             "null"
@@ -20228,6 +20294,64 @@
       "required": [
         "profile"
       ]
+    },
+    "ModelProfileEditView": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileEditView",
+      "description": "Saved profile values for an editor. Never includes a credential reference.",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "$ref": "#/$defs/ModelProfileEntry"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "configurableEfforts": {
+          "description": "Values understood by this adapter, not verified model capabilities.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "revision",
+        "configurableEfforts"
+      ],
+      "$defs": {
+        "ModelProfileEntry": {
+          "description": "A profile configured in the local app-server settings. None refers to [model].",
+          "type": "object",
+          "properties": {
+            "profile": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "reasoningEffort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model"
+          ]
+        }
+      }
     },
     "ProviderModelPage": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -599,6 +599,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["modelProfiles"] = json!(self.model_profiles.is_some());
+            capabilities["modelProfileEditing"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileDefaults"] = json!(self.model_profiles.is_some());
             capabilities["providerModelCatalog"] = json!(self.model_profiles.is_some());
             capabilities["modelBudgetRejectionEvents"] = json!(true);
@@ -803,9 +804,17 @@ impl RpcServer {
                 let selection: ModelProfileDefault = decode(params)?;
                 json!(self.set_default_model_profile(selection)?)
             }
+            "modelProfiles/getEdit" => {
+                let params: ModelProfileEditGetParams = decode(params)?;
+                json!(self.get_model_profile_edit(params)?)
+            }
+            "modelProfiles/saveEdit" => {
+                let params: ModelProfileEditParams = decode(params)?;
+                json!(self.save_model_profile_edit(params)?)
+            }
             "modelProfiles/select" => {
                 let params: ModelProfileSelectParams = decode(params)?;
-                json!(self.select_model_profile(params.profile)?)
+                json!(self.select_model_profile(params)?)
             }
             "terminal/archiveBatch" => {
                 let p: TerminalArchiveBatchParams = decode(params)?;

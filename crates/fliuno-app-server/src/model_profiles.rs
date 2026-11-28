@@ -1,9 +1,10 @@
 //! Profiles available to the trusted local stdio host.
 use super::{Error, RpcError, RpcServer};
-use fliuno_config::{ModelSettings, Provider, Settings};
+use fliuno_config::{ModelEdit, ModelSettings, Provider, ReasoningEffort, Settings};
 use fliuno_protocol::{
-    ModelConnectionCheck, ModelConnectionCheckParams, ModelProfileDefault, ModelProfileEntry,
-    ModelProfileList, ProviderModelListParams, ProviderModelPage,
+    ModelConnectionCheck, ModelConnectionCheckParams, ModelProfileDefault,
+    ModelProfileEditGetParams, ModelProfileEditParams, ModelProfileEditView, ModelProfileEntry,
+    ModelProfileList, ModelProfileSelectParams, ProviderModelListParams, ProviderModelPage,
 };
 use std::path::PathBuf;
 
@@ -65,13 +66,7 @@ impl RpcServer {
                     .map(|(id, model)| (Some(id.as_str()), model)),
             )
             .filter(|(_, model)| !matches!(model.provider, Provider::Demo))
-            .map(|(id, model)| {
-                if id == active.profile.as_deref() {
-                    active.clone()
-                } else {
-                    entry(id, model)
-                }
-            })
+            .map(|(id, model)| entry(id, model))
             .collect();
         Ok(ModelProfileList { active, profiles })
     }
@@ -98,10 +93,66 @@ impl RpcServer {
         params: ProviderModelListParams,
     ) -> Result<ProviderModelPage, RpcError> {
         let catalog = self.model_profile_catalog()?;
-        let settings = Settings::load(&catalog.path).map_err(Error::Invalid)?;
-        let model = catalog.model_for_lookup(&settings, params.profile.as_deref())?;
-        fliuno_providers::discover_models(model, params.cursor.as_deref())
-            .map_err(|error| Error::Invalid(error).into())
+        if params.base_profile && params.profile.is_some() {
+            return Err(Error::Invalid("Choose either profile or baseProfile".into()).into());
+        }
+        let id = if params.base_profile {
+            None
+        } else {
+            params.profile.as_deref().or(catalog.active.as_deref())
+        };
+        let listed = if let Some(expected) = params.revision {
+            let (revision, model) =
+                Settings::read_model_for_edit(&catalog.path, id).map_err(Error::Invalid)?;
+            if revision != expected {
+                return Err(Error::Conflict(
+                    "Model configuration changed. Reload it and try again.".into(),
+                )
+                .into());
+            }
+            fliuno_providers::discover_models(&model, params.cursor.as_deref())
+        } else {
+            let settings = Settings::load(&catalog.path).map_err(Error::Invalid)?;
+            let model = id
+                .map_or(Ok(&settings.model), |id| settings.named_model(id))
+                .map_err(Error::Invalid)?;
+            fliuno_providers::discover_models(model, params.cursor.as_deref())
+        };
+        listed.map_err(|error| Error::Invalid(error).into())
+    }
+
+    pub(super) fn get_model_profile_edit(
+        &self,
+        profile: ModelProfileEditGetParams,
+    ) -> Result<ModelProfileEditView, RpcError> {
+        let catalog = self.model_profile_catalog()?;
+        let id = profile.profile.as_deref();
+        let (revision, model) =
+            Settings::read_model_for_edit(&catalog.path, id).map_err(Error::Invalid)?;
+        Ok(edit_view(id, revision, model))
+    }
+
+    pub(super) fn save_model_profile_edit(
+        &self,
+        params: ModelProfileEditParams,
+    ) -> Result<ModelProfileEditView, RpcError> {
+        let catalog = self.model_profile_catalog()?;
+        let id = params.profile.as_deref();
+        let reasoning_effort: Option<ReasoningEffort> =
+            serde_json::from_value(serde_json::json!(params.reasoning_effort))
+                .map_err(|_| Error::Invalid("Unknown reasoning effort".into()))?;
+        let (revision, model) = Settings::save_model_edit(
+            &catalog.path,
+            ModelEdit {
+                profile: id,
+                revision: &params.revision,
+                model: &params.model,
+                reasoning_effort,
+            },
+            fliuno_providers::validate_live_profile,
+        )
+        .map_err(Error::Invalid)?;
+        Ok(edit_view(id, revision, model))
     }
 
     pub(super) fn get_default_model_profile(&self) -> Result<ModelProfileDefault, RpcError> {
@@ -128,10 +179,11 @@ impl RpcServer {
 
     pub(super) fn select_model_profile(
         &mut self,
-        profile: Option<String>,
+        params: ModelProfileSelectParams,
     ) -> Result<ModelProfileEntry, RpcError> {
+        let profile = params.profile;
         let catalog = self.model_profile_catalog()?;
-        if profile == catalog.active {
+        if !params.reload && profile == catalog.active {
             return self.active_model_profile(profile);
         }
         let settings = Settings::load(&catalog.path).map_err(Error::Invalid)?;
@@ -154,6 +206,21 @@ impl RpcServer {
             catalog.active = profile.clone();
         }
         self.active_model_profile(profile)
+    }
+}
+
+fn edit_view(id: Option<&str>, revision: String, model: ModelSettings) -> ModelProfileEditView {
+    ModelProfileEditView {
+        profile: entry(id, &model),
+        revision,
+        configurable_efforts: model
+            .provider
+            .reasoning_efforts()
+            .iter()
+            .copied()
+            .map(ReasoningEffort::as_str)
+            .map(str::to_owned)
+            .collect(),
     }
 }
 
@@ -183,6 +250,80 @@ mod tests {
             .unwrap();
         assert!(reply.get("result").is_none(), "{reply}");
         reply["error"].clone()
+    }
+
+    #[test]
+    fn edit_saves_separately_from_the_live_provider_and_stale_editors_cannot_write() {
+        let root = std::env::temp_dir().join(format!("fliuno-edit-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let config = root.join("config.toml");
+        std::fs::write(root.join("fixture.key"), "fixture-key\n").unwrap();
+        std::fs::write(
+            &config,
+            r#"
+[model]
+provider = "openai"
+name = "before"
+api_key_file = "fixture.key"
+"#,
+        )
+        .unwrap();
+        let (name, provider) =
+            fliuno_providers::from_settings(&Settings::load(&config).unwrap().model).unwrap();
+        let kernel = Kernel::in_memory(provider).unwrap();
+        let mut server = RpcServer::with_provider(kernel, name);
+        server.enable_local_model_profiles(config, None);
+        let mut attached = server.attach_connection().unwrap();
+        let initialize = json!({"protocolVersion":"0.1","clientName":"editor-test"});
+        assert_eq!(
+            rpc(&mut server, "initialize", initialize.clone())["capabilities"]["modelProfileEditing"],
+            true
+        );
+        assert_eq!(
+            rpc(&mut attached, "initialize", initialize)["capabilities"]["modelProfileEditing"],
+            false
+        );
+        assert_eq!(
+            failure(
+                &mut attached,
+                "modelProfiles/getEdit",
+                json!({"profile":null})
+            )["code"],
+            -32601
+        );
+        let initial = rpc(
+            &mut server,
+            "modelProfiles/getEdit",
+            json!({"profile":null}),
+        );
+        assert_eq!(initial["profile"]["model"], "before");
+        assert!(!initial.to_string().contains("fixture.key"));
+        let change = json!({"profile":null,"revision":initial["revision"],"model":"after","reasoningEffort":"high"});
+        assert_eq!(
+            failure(&mut attached, "modelProfiles/saveEdit", change.clone())["code"],
+            -32601
+        );
+        let saved = rpc(&mut server, "modelProfiles/saveEdit", change.clone());
+        assert_eq!(saved["profile"]["model"], "after");
+        assert_ne!(saved["revision"], initial["revision"]);
+        assert_eq!(
+            rpc(&mut server, "modelProfiles/list", json!({}))["active"]["model"],
+            "before"
+        );
+        assert!(
+            failure(&mut server, "modelProfiles/saveEdit", change)["message"]
+                .as_str()
+                .unwrap()
+                .contains("changed")
+        );
+        let current = rpc(
+            &mut server,
+            "modelProfiles/select",
+            json!({"profile":null,"reload":true}),
+        );
+        assert_eq!(current["model"], "after");
+        assert_eq!(current["reasoningEffort"], "high");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

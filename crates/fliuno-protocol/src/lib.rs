@@ -691,6 +691,42 @@ pub struct ModelProfileSelectParams {
     #[schemars(required, schema_with = "nullable_model_profile")]
     #[serde(deserialize_with = "Deserialize::deserialize")]
     pub profile: Option<String>,
+    /// Explicitly load the saved config even when this profile is already active.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reload: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileEditGetParams {
+    /// Null edits the base [model].
+    #[schemars(required, schema_with = "nullable_model_profile")]
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub profile: Option<String>,
+}
+
+/// Saved profile values for an editor. Never includes a credential reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileEditView {
+    pub profile: ModelProfileEntry,
+    pub revision: String,
+    /// Values understood by this adapter, not verified model capabilities.
+    pub configurable_efforts: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileEditParams {
+    #[schemars(required, schema_with = "nullable_model_profile")]
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub profile: Option<String>,
+    pub revision: String,
+    pub model: String,
+    /// Null restores the provider default.
+    #[schemars(required, schema_with = "nullable_model_profile")]
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub reasoning_effort: Option<String>,
 }
 
 /// The startup preference from the settings file, independent of the active provider.
@@ -742,6 +778,12 @@ pub struct ProviderModelListParams {
     /// Omit for the active profile. Use an explicit profile ID to browse another.
     pub profile: Option<String>,
     pub cursor: Option<String>,
+    /// Request the base [model] rather than the active profile.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub base_profile: bool,
+    /// When editing, query the same configuration revision the editor loaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
 }
 
 /// Result of previewing one catalog page with a draft profile.

@@ -107,11 +107,13 @@ api_key_file = "credentials/local.key"
 
 Chat Completions 支持文本、图像和每步一次函数调用，具体能力取决于服务器和模型。预算可配置数值窗口与 `max_output_tokens`，`provider_count` 须省略或为 `false`。使用同一模型 ID 的 Responses 和 Chat Completions 仍有不同的内核身份，以保留持久 Run 和续接的协议范围。
 
-在填写 `name` 前可以用已配置的 Provider、Base URL 和凭据拉取目录。命令输出 JSON，支持将返回的 `nextCursor` 传给下一次调用。运行中的可信本地 stdio 客户端也可以调用 `models/list`，可选 `profile` 和 `cursor`。
+在填写 `name` 前可以用已配置的 Provider、Base URL 和凭据拉取目录。命令输出 JSON，支持将返回的 `nextCursor` 传给下一次调用。运行中的可信本地 stdio 客户端也可以调用 `models/list`，可选 `profile` 和 `cursor`。 设置 `baseProfile: true` 可显式查询 `[model]`。编辑器可携带 `revision`，防止意外查询已被外部修改的配置。
 
 ```sh
 fliuno-app-server --list-models --config ~/.fliuno/config.toml --model-profile lab
 ```
+
+可信本地客户端可调用 `modelProfiles/getEdit` 取得指定档案的保存值和修订号；`profile: null` 指 `[model]`。`modelProfiles/saveEdit` 使用相同的档案和修订号改动 `model` 与 `reasoningEffort`（`null` 恢复提供方默认值）。修订过期时重新读档案再编辑。保存不会替换运行中的模型。确认使用已更新的活动档案时，调用 `modelProfiles/select` 并传 `reload: true`；待审批、待恢复或仍在进行的模型工作会阻止切换。
 
 `--check-model` 返回本地配置、凭据读取、目录访问和所选模型是否列出的独立状态。它最多检查 4 页，网络查询总时限为 5 秒。`incomplete` 表示搜索未走完，`not_listed` 表示已走完当前可见目录。目录访问成功只能确认本次目录请求通过。只提供生成端点的网关仍可手填模型 ID。命令不会发送生成请求或打开数据库。可信本地 stdio 客户端可调用 `models/check`，可选 `profile`。
 

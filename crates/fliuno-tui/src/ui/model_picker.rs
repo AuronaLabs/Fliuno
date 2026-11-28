@@ -213,6 +213,7 @@ impl App {
                 picker.error = None;
                 let params = ModelProfileSelectParams {
                     profile: profile.profile.clone(),
+                    reload: false,
                 };
                 if !self.send(worker, Request::SelectModel(params))
                     && let Layer::ModelPicker(picker) = &mut self.layer
