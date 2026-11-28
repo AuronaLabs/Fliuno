@@ -41,6 +41,7 @@ pub struct RpcServer {
     progress_receiver: Option<ProgressReceiver>,
     progress_stream_gap: bool,
     initialized: bool,
+    local_project_guides: bool,
     provider_name: String,
     model_profiles: Option<model_profiles::Catalog>,
     terminals: Option<fliuno_terminal::Service>,
@@ -144,6 +145,7 @@ impl RpcServer {
             progress_receiver: Some(progress_receiver),
             progress_stream_gap: false,
             initialized: false,
+            local_project_guides: false,
             provider_name,
             model_profiles: None,
             terminals,
@@ -153,6 +155,11 @@ impl RpcServer {
             eprintln!("fliuno: cannot schedule recovered task runs: {error:?}");
         }
         server
+    }
+
+    /// Allow the direct local stdio client to review and select project guides.
+    pub fn enable_local_project_guides(&mut self) {
+        self.local_project_guides = true;
     }
 
     /// Create another local, trusted protocol connection to the same host.
@@ -179,6 +186,7 @@ impl RpcServer {
             progress_receiver: Some(progress_receiver),
             progress_stream_gap: false,
             initialized: false,
+            local_project_guides: false,
             provider_name: self.provider_name.clone(),
             model_profiles: None,
             terminals: self.terminals.clone(),
@@ -707,6 +715,9 @@ impl RpcServer {
             capabilities["workNextActions"] = json!(true);
             capabilities["artifactRevisions"] = json!(true);
             capabilities["workspaceInstructions"] = json!(true);
+            if self.local_project_guides {
+                capabilities["workspaceProjectGuide"] = json!(true);
+            }
             capabilities["taskContextAttribution"] = json!(true);
             capabilities["taskMemoryBudgetReduction"] = json!(true);
             capabilities["taskMemoryHybridRetrieval"] = json!(self.memory_embeddings.is_some());
@@ -1372,6 +1383,17 @@ impl RpcServer {
                 let p: TaskIdParams = decode(params)?;
                 json!(self.kernel()?.task_context_attribution(&p.task_id)?)
             }
+            "workspace/getProjectGuide" if self.local_project_guides => {
+                let p: WorkspaceIdParams = decode(params)?;
+                json!(self.kernel()?.workspace_project_guide(&p.workspace_id)?)
+            }
+            "workspace/previewProjectGuide" if self.local_project_guides => {
+                let p: WorkspaceIdParams = decode(params)?;
+                json!(self.kernel()?.preview_project_guide(&p.workspace_id)?)
+            }
+            "workspace/setProjectGuide" if self.local_project_guides => {
+                json!(self.kernel()?.set_project_guide(decode(params)?)?)
+            }
             "workspace/getInstructions" => {
                 let p: WorkspaceIdParams = decode(params)?;
                 json!(self.kernel()?.workspace_instructions(&p.workspace_id)?)
@@ -1781,12 +1803,34 @@ mod interaction_tests;
 mod tests {
     use super::*;
     use fliuno_core::DemoProvider;
+
     use fliuno_protocol::EventKind;
     use std::{
         sync::{Condvar, mpsc},
         thread,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn project_guide_management_is_only_on_the_direct_local_connection() {
+        let mut server = RpcServer::new(Kernel::in_memory(Box::new(DemoProvider)).unwrap());
+        server.enable_local_project_guides();
+        let mut attached = server.attach_connection().unwrap();
+        let init = json!({"protocolVersion":"0.1","clientName":"guide-fixture"});
+        assert_eq!(
+            rpc(&mut server, "initialize", init.clone())["capabilities"]["workspaceProjectGuide"],
+            true
+        );
+        assert!(
+            rpc(&mut attached, "initialize", init)["capabilities"]
+                .get("workspaceProjectGuide")
+                .is_none()
+        );
+        for method in ["getProjectGuide", "previewProjectGuide", "setProjectGuide"] {
+            let response = attached.handle_line(&json!({"jsonrpc":"2.0","id":1,"method":format!("workspace/{method}"),"params":{}}).to_string()).unwrap();
+            assert_eq!(response["error"]["code"], -32601);
+        }
+    }
 
     fn server() -> RpcServer {
         RpcServer::new(Kernel::in_memory(Box::new(DemoProvider)).unwrap())

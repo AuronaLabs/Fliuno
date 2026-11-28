@@ -440,6 +440,11 @@ impl Kernel {
         let max_model_steps = max_model_steps.filter(|limit| *limit != DEFAULT_TASK_MODEL_STEPS);
         let explicit_context = options.is_some();
         let options = context::normalize_options(options.unwrap_or_default())?;
+        if options.project_guide_revision.is_some() && backend != TaskBackend::Model {
+            return Err(Error::Invalid(
+                "projectGuideRevision applies only to model tasks".into(),
+            ));
+        }
         if options.plan_only && backend != TaskBackend::Model {
             return Err(Error::Invalid(
                 "planOnly applies only to model tasks".into(),

@@ -40,6 +40,8 @@ pub struct TaskContextAttribution {
     pub memories: Vec<ContextMemoryAttribution>,
     pub instructions_revision: Option<u64>,
     pub instructions_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_guide: Option<crate::ProjectGuideAttribution>,
     pub normalized_input_bytes: Option<ModelBudgetInputBytes>,
     pub latest_preflight: Option<Event>,
     pub latest_budget_rejection: Option<Event>,

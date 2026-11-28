@@ -1001,6 +1001,8 @@ name = "fliuno-core"
 version = "0.0.21"
 dependencies = [
  "base64 0.22.1",
+ "cap-fs-ext",
+ "cap-std",
  "crossbeam-channel",
  "fliuno-protocol",
  "mime",

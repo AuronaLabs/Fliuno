@@ -64,6 +64,9 @@ pub struct ContextOptions {
     pub plan_only: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions_revision: Option<u64>,
+    /// Explicitly send the enabled project guide revision in session mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_guide_revision: Option<u64>,
     /// Select exactly these revisions, without keyword or embedding retrieval.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(length(min = 1, max = MAX_EXPLICIT_CONTEXT_MEMORIES))]
@@ -134,6 +137,7 @@ impl Default for ContextOptions {
             enable_interaction: false,
             plan_only: false,
             instructions_revision: None,
+            project_guide_revision: None,
             memory_selection: None,
             memory_recency_half_life_days: None,
             max_turns: default_turns(),
@@ -244,6 +248,8 @@ pub struct ContextSummary {
 pub struct TaskContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions: Option<crate::WorkspaceInstructions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_guide: Option<crate::ProjectGuideSnapshot>,
     pub options: ContextOptions,
     /// Global event cursor at capture time, not a live session attachment.
     pub through_sequence: u64,

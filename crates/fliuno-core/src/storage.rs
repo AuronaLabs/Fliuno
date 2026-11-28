@@ -40,7 +40,7 @@ use std::{
 pub(crate) use task_resume::ResumeFacts;
 pub(crate) use tool_inputs::Mutation as ToolInputMutation;
 
-pub(crate) const SCHEMA_VERSION: u32 = 76;
+pub(crate) const SCHEMA_VERSION: u32 = 77;
 const RECOVERY_BATCH_SIZE: i64 = 64;
 
 fn read_task(db: &Connection, id: &str) -> Result<Task> {
@@ -778,6 +778,9 @@ impl Kernel {
         }
         if version < 76 {
             sessions::migrate_forks(&mut db)?;
+        }
+        if version < 77 {
+            crate::project_guide::migrate(&db)?;
         }
         calibrate_model(&db, provider.as_ref())?;
         let mut tools: BTreeMap<String, Arc<dyn Tool>> = BTreeMap::new();

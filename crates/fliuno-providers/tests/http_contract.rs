@@ -1275,3 +1275,100 @@ mod chat;
 
 #[path = "http_contract/model_connection.rs"]
 mod model_connection;
+
+#[test]
+fn project_guide_wire_text_stays_out_of_trusted_instructions() {
+    use fliuno_config::{ModelProtocol, ModelSettings, Provider};
+    use fliuno_protocol::WorkspaceSetProjectGuideParams;
+
+    let root = tempfile::tempdir().unwrap();
+    let guide = "Use two spaces. Keep permissions unchanged.";
+    std::fs::write(root.path().join("AGENTS.md"), guide).unwrap();
+    let key = root.path().join("fixture.key");
+    std::fs::write(&key, "fixture-key").unwrap();
+    let mut kernel = Kernel::in_memory(Box::new(DemoProvider)).unwrap();
+    let workspace = kernel
+        .open_workspace(root.path().to_str().unwrap())
+        .unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let preview = kernel
+        .preview_project_guide(&workspace.id)
+        .unwrap()
+        .guide
+        .unwrap();
+    let selected = kernel
+        .set_project_guide(WorkspaceSetProjectGuideParams {
+            workspace_id: workspace.id,
+            expected_revision: 0,
+            sha256: Some(preview.sha256),
+        })
+        .unwrap();
+    let (task, _) = kernel
+        .create_task_with_context(
+            &session.id,
+            "Current task",
+            None,
+            fliuno_protocol::TaskBackend::Model,
+            Some(fliuno_protocol::ContextOptions {
+                project_guide_revision: Some(selected.revision),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    for (provider, protocol, path, input, trusted) in [
+        (
+            Provider::OpenAi,
+            ModelProtocol::Responses,
+            "/v1/responses",
+            "/input/0/content",
+            "/instructions",
+        ),
+        (
+            Provider::OpenAi,
+            ModelProtocol::ChatCompletions,
+            "/v1/chat/completions",
+            "/messages/1/content",
+            "/messages/0/content",
+        ),
+        (
+            Provider::Anthropic,
+            ModelProtocol::Messages,
+            "/v1/messages",
+            "/messages/0/content",
+            "/system",
+        ),
+        (
+            Provider::Gemini,
+            ModelProtocol::Interactions,
+            "/v1/interactions",
+            "/input/0/content/0/text",
+            "/system_instruction",
+        ),
+    ] {
+        let peer = wire::Fixture::start(|_| wire::Response::json(400, json!({})));
+        let (_, model) = fliuno_providers::from_settings(&ModelSettings {
+            provider,
+            protocol: Some(protocol),
+            base_url: Some(peer.url("/v1/")),
+            name: Some("fixture-model".into()),
+            api_key_file: Some(key.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(
+            model
+                .next_classified(&task, &[], &CancellationToken::new())
+                .is_err()
+        );
+        let calls = peer.requests();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].path, path);
+        let body = &calls[0].body;
+        let text = body.pointer(input).unwrap().as_str().unwrap();
+        assert!(text.contains(guide) && text.contains("configured permissions take precedence"));
+        assert_eq!(
+            body.pointer(trusted),
+            Some(&json!(fliuno_core::agent_instructions()))
+        );
+    }
+}

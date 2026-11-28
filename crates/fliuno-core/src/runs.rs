@@ -54,6 +54,12 @@ impl Kernel {
         self.require_session(&request.session_id)?;
         let request_context =
             context::normalize_options(request.context.clone().unwrap_or_default())?;
+        if request_context.project_guide_revision.is_some() {
+            return Err(Error::Invalid(
+                "projectGuideRevision is supported for individual model tasks, not durable runs"
+                    .into(),
+            ));
+        }
         let digest_input = serde_json::to_vec(&(
             request.max_concurrency,
             request.max_model_steps,

@@ -17,6 +17,7 @@ pub use json_size::json_size;
 mod agent_prompt;
 mod policy;
 mod policy_rules;
+mod project_guide;
 mod provider;
 mod query;
 pub use query::MAX_TASK_LIST_TARGET_BYTES;

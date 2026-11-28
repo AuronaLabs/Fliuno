@@ -10,6 +10,8 @@ name = "json_size"
 harness = false
 
 [dependencies]
+cap-std = "4.0.3"
+cap-fs-ext = "4.0.3"
 base64 = "0.22"
 mime = "0.3"
 fliuno-protocol.workspace = true

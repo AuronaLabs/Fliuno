@@ -135,6 +135,9 @@ impl Kernel {
                 .map(|value| json_size(&value.text))
                 .transpose()?
                 .unwrap_or(0) as u64,
+            project_guide: context
+                .and_then(|ctx| ctx.project_guide.as_ref())
+                .map(ProjectGuideAttribution::from),
             normalized_input_bytes: if task.backend == TaskBackend::Model {
                 Some(crate::provider::input_attribution(
                     &task,
