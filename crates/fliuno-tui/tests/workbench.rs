@@ -1505,7 +1505,10 @@ fn workspace_deliverables_filter_review_versions_and_verify_saved_bytes() {
     console.quit("\x03");
 }
 
-fn read_catalog_request(listener: &std::net::TcpListener, key: &str) -> std::net::TcpStream {
+fn read_catalog_request(
+    listener: &std::net::TcpListener,
+    key: Option<&str>,
+) -> std::net::TcpStream {
     use std::io::{BufRead, BufReader};
 
     let (mut socket, _) = listener.accept().unwrap();
@@ -1516,7 +1519,7 @@ fn read_catalog_request(listener: &std::net::TcpListener, key: &str) -> std::net
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
     assert!(line.starts_with("GET /v1/models HTTP/1.1"), "{line}");
-    let mut authenticated = false;
+    let mut authorization = None;
     loop {
         line.clear();
         assert!(reader.read_line(&mut line).unwrap() > 0);
@@ -1526,13 +1529,23 @@ fn read_catalog_request(listener: &std::net::TcpListener, key: &str) -> std::net
         if let Some((header, value)) = line.split_once(':')
             && header.eq_ignore_ascii_case("authorization")
         {
-            authenticated = value.trim().strip_prefix("Bearer ") == Some(key);
+            assert!(authorization.replace(value.trim().to_owned()).is_none());
         }
     }
-    assert!(
-        authenticated,
-        "catalog request must carry the selected credential"
+    assert_eq!(
+        authorization.is_some(),
+        key.is_some(),
+        "unexpected authentication header"
     );
+    if let Some(key) = key {
+        assert!(
+            authorization
+                .as_deref()
+                .and_then(|value| value.strip_prefix("Bearer "))
+                == Some(key),
+            "catalog request must use the selected credential"
+        );
+    }
     socket
 }
 
@@ -1580,9 +1593,9 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     let base = format!("http://{}/v1/", listener.local_addr().unwrap());
     let (release_catalog, wait_for_filter) = channel();
     let model_service = thread::spawn(move || {
-        let rejected = read_catalog_request(&listener, "fixture-rejected-key");
+        let rejected = read_catalog_request(&listener, Some("fixture-rejected-key"));
         write_catalog_response(rejected, 401, r#"{"error":"fixture-rejected-key"}"#);
-        let catalog = read_catalog_request(&listener, "fixture-secret-value");
+        let catalog = read_catalog_request(&listener, Some("fixture-secret-value"));
         wait_for_filter
             .recv_timeout(Duration::from_secs(5))
             .unwrap();
@@ -1701,6 +1714,57 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
 
 #[test]
 #[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn first_launch_guides_keyless_loopback_and_persists_the_profile() {
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let profile = root.path().join(".fliuno");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let model_service = thread::spawn(move || {
+        let stream = read_catalog_request(&listener, None);
+        write_catalog_response(stream, 200, r#"{"data":[{"id":"keyless-model"}]}"#);
+        let (mut stream, request) = streaming_fixture_input(&listener);
+        assert_eq!(request["model"], "keyless-model");
+        stream.write_all(concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Keyless connection works.\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ).as_bytes()).unwrap();
+    });
+    let mut console = Console::launch_unconfigured(server.as_deref(), root.path());
+    console.expect("Choose your model provider");
+    console.keys("\x1b[B\r");
+    console.expect("Set a Base URL");
+    console.keys(&format!("{base}\r"));
+    console.expect("F4 No key");
+    console.keys("\x1bOS");
+    console.expect("Connect without a key");
+    for (rows, cols) in [(21, 48), (24, 80), (28, 110)] {
+        console.resize(rows, cols);
+        console.capture(&format!("setup-keyless-{cols}"));
+    }
+    console.keys("\r");
+    console.expect("keyless-model");
+    console.keys("\t");
+    console.expect("› keyless-model");
+    console.keys("\r");
+    console.expect("Enter Send");
+    console.keys("Hello local model\r");
+    console.expect("Keyless connection works.");
+    model_service.join().unwrap();
+    console.quit("\x03");
+    let config = std::fs::read_to_string(profile.join("config.toml")).unwrap();
+    assert!(config.contains("auth = \"none\""));
+    assert!(!config.contains("api_key"));
+    assert!(!profile.join("credentials").exists());
+    let mut reopened = Console::launch_unconfigured(server.as_deref(), root.path());
+    reopened.expect("Keyless connection works.");
+    reopened.expect_absent("Choose your model provider");
+    reopened.quit("\x03");
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
 fn first_launch_stores_a_pasted_key_without_exposing_it() {
     let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
     let root = tempfile::tempdir().unwrap();
@@ -1708,7 +1772,7 @@ fn first_launch_stores_a_pasted_key_without_exposing_it() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}/v1/", listener.local_addr().unwrap());
     let catalog = thread::spawn(move || {
-        let stream = read_catalog_request(&listener, "fixture-managed-secret-value");
+        let stream = read_catalog_request(&listener, Some("fixture-managed-secret-value"));
         write_catalog_response(stream, 200, r#"{"data":[]}"#);
     });
     let mut terminal = Console::launch_unconfigured(server.as_deref(), root.path());
@@ -2162,7 +2226,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
             write!(socket, "data: {event}\n\n").unwrap();
             drop(socket);
             if answer == "Original model answer" {
-                let listing = read_catalog_request(&listener, "fixture-key");
+                let listing = read_catalog_request(&listener, Some("fixture-key"));
                 write_catalog_response(listing, 200, r#"{"data":[{"id":"second-model"}]}"#);
             }
         }
@@ -2362,7 +2426,7 @@ api_key_file = "fixture.key"
     let (release, wait_for_search) = channel();
     let (observed, generation) = channel();
     let provider = thread::spawn(move || {
-        let listing = read_catalog_request(&listener, "fixture-editor-key");
+        let listing = read_catalog_request(&listener, Some("fixture-editor-key"));
         wait_for_search
             .recv_timeout(Duration::from_secs(4))
             .unwrap();

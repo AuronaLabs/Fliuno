@@ -2,8 +2,9 @@ use super::{clean, palette::Palette, setup_catalog::Catalog};
 use crate::{Screen, editor::Editor, options::SetupOptions};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use fliuno_config::{
-    ModelCatalogDraft, ModelProtocol, ModelSetup, ModelSetupCredential, Provider, ReasoningEffort,
-    Settings, provider_api_root, read_api_key, validate_api_key,
+    ConnectionCredential, ModelCatalogDraft, ModelConnectionDraft, ModelProtocol, ModelSetup,
+    ModelSetupCredential, Provider, ReasoningEffort, Settings, is_local_provider_root,
+    provider_api_root,
 };
 use ratatui::{
     Frame,
@@ -65,6 +66,7 @@ struct Form {
     endpoint: Editor,
     key_file: Editor,
     use_key_file: bool,
+    keyless: bool,
     api_key: Zeroizing<String>,
     error: String,
 }
@@ -110,7 +112,16 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                         };
                     }
                     KeyCode::F(2) if matches!(form.step, Step::Credential) => {
-                        form.use_key_file = !form.use_key_file;
+                        form.use_key_file = !form.keyless && !form.use_key_file;
+                        form.keyless = false;
+                        form.api_key.zeroize();
+                        form.error.clear();
+                    }
+                    KeyCode::F(4)
+                        if matches!(form.step, Step::Credential) && form.can_use_keyless() =>
+                    {
+                        form.keyless = !form.keyless;
+                        form.use_key_file = false;
                         form.api_key.zeroize();
                         form.error.clear();
                     }
@@ -170,6 +181,7 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                                 {
                                     form.error = error.into();
                                 } else {
+                                    form.keyless &= form.can_use_keyless();
                                     form.step = Step::Credential;
                                 }
                             }
@@ -203,29 +215,50 @@ impl Form {
         MODEL_ROUTES[self.route].provider.reasoning_efforts()
     }
 
+    fn can_use_keyless(&self) -> bool {
+        MODEL_ROUTES[self.route].protocol == ModelProtocol::ChatCompletions
+            && provider_api_root(self.endpoint.text().trim())
+                .is_ok_and(|url| is_local_provider_root(&url))
+    }
+
     fn refresh_catalog(&mut self, options: &SetupOptions, cursor: Option<String>) -> bool {
-        let key = if self.use_key_file {
-            self.key_path()
-                .and_then(|path| read_api_key(&profile_parent(&options.config).join(path)))
+        let credential = if self.keyless {
+            Ok(ConnectionCredential::None)
+        } else if self.use_key_file {
+            self.key_path().map(ConnectionCredential::File)
         } else if self.api_key.is_empty() {
             Err("Paste your API key or press F2 to use a key file.")
         } else {
-            validate_api_key(&self.api_key).map(|()| self.api_key.to_string())
+            Ok(ConnectionCredential::Managed(&self.api_key))
         };
-        let key = match key {
-            Ok(key) => Zeroizing::new(key),
+        let credential = match credential {
+            Ok(credential) => credential,
             Err(error) => {
                 self.error = error.into();
                 return false;
             }
         };
-        self.error.clear();
         let route = &MODEL_ROUTES[self.route];
         let endpoint = self.endpoint.text().trim();
+        let draft = ModelConnectionDraft {
+            provider: route.provider,
+            protocol: route.protocol,
+            base_url: (!endpoint.is_empty()).then_some(endpoint),
+            credential,
+        };
+        let (settings, key) = match draft.for_preview(&options.config, None) {
+            Ok((settings, key)) => (settings, Zeroizing::new(key.unwrap_or_default())),
+            Err(error) => {
+                self.error = error;
+                return false;
+            }
+        };
+        self.error.clear();
         let draft = ModelCatalogDraft {
             provider: route.provider,
             protocol: route.protocol,
-            base_url: (!endpoint.is_empty()).then(|| endpoint.to_owned()),
+            base_url: settings.base_url,
+            auth: settings.auth,
             cursor,
         };
         self.catalog.request(&options.server, draft, key);
@@ -250,6 +283,9 @@ impl Form {
     }
 
     fn insert(&mut self, text: &str) {
+        if matches!(self.step, Step::Credential) && self.keyless {
+            return;
+        }
         let text = text.trim_matches(['\r', '\n']);
         if matches!(self.step, Step::Credential) && !self.use_key_file {
             if self.api_key.len() + text.len() > 8192
@@ -307,7 +343,9 @@ impl Form {
     fn save(&self, config: &Path) -> Result<(), String> {
         let route = &MODEL_ROUTES[self.route];
         let endpoint = self.endpoint.text().trim();
-        let credential = if self.use_key_file {
+        let credential = if self.keyless {
+            ModelSetupCredential::None
+        } else if self.use_key_file {
             ModelSetupCredential::File(self.key_path()?)
         } else {
             ModelSetupCredential::Managed(&self.api_key)
@@ -364,6 +402,12 @@ impl Form {
                 "Leave blank for the provider default, or enter your gateway's API root.",
                 "Enter Continue   Esc Back",
             ),
+            Step::Credential if self.keyless => (
+                3,
+                "Connect without a key",
+                "Fliuno will connect directly to this computer. No API key will be sent.",
+                "Enter Continue   F4 Use key   Esc Back",
+            ),
             Step::Credential if self.use_key_file => (
                 3,
                 "Connect an API key file",
@@ -378,7 +422,11 @@ impl Form {
                 } else {
                     "Paste a key from your model provider. Fliuno stores it in a private file next to your profile."
                 },
-                "Enter Continue   F2 Key file   Esc Back",
+                if self.can_use_keyless() {
+                    "Enter Continue   F2 Key file   F4 No key   Esc Back"
+                } else {
+                    "Enter Continue   F2 Key file   Esc Back"
+                },
             ),
         };
         let header = Paragraph::new(vec![
@@ -462,6 +510,14 @@ impl Form {
                     .collect();
                 super::render_list(frame, body, labels, self.effort_index, palette.choice);
             }
+            Step::Credential if self.keyless => {
+                frame.render_widget(
+                    Paragraph::new(clean(self.endpoint.text().trim()))
+                        .style(palette.label)
+                        .wrap(Wrap { trim: false }),
+                    body,
+                );
+            }
             Step::Model | Step::Endpoint | Step::Credential
                 if body.width > 2 && body.height > 0 =>
             {
@@ -521,10 +577,4 @@ impl Form {
         }
         frame.render_widget(footer, footer_area);
     }
-}
-
-fn profile_parent(path: &Path) -> &Path {
-    path.parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."))
 }

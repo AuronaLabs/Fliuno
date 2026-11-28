@@ -252,6 +252,7 @@ fn draft_catalog_does_not_expose_credential_echoed_in_a_successful_page() {
     )]);
     let preview = preview_model_catalog(
         ModelCatalogDraft {
+            auth: Default::default(),
             provider: Provider::Anthropic,
             protocol: ModelProtocol::Messages,
             base_url: Some(base),

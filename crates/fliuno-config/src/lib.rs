@@ -165,6 +165,8 @@ pub struct ModelCatalogDraft {
     pub provider: Provider,
     pub protocol: ModelProtocol,
     pub base_url: Option<String>,
+    #[serde(default)]
+    pub auth: ModelAuth,
     pub cursor: Option<String>,
 }
 

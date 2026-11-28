@@ -7,7 +7,9 @@ mod openai;
 mod openai_chat;
 
 pub use anthropic::AnthropicProvider;
-pub use catalog::{check_model_connection, discover_models, preview_model_catalog};
+pub use catalog::{
+    check_model_connection, discover_models, preview_model_catalog, preview_model_connection,
+};
 use fliuno_core::{DemoProvider, ModelProvider};
 use fliuno_protocol::{
     ModelBudget, ModelBudgetSource, ModelInputCountCoverage, ModelInputCountMode,

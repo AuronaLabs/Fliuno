@@ -1,7 +1,7 @@
 //! Bounded native model listing. Discovery never starts a generation request.
 use crate::http::{Http, MetadataError, provider_headers};
 use fliuno_config::{
-    ModelCatalogDraft, ModelSettings, Provider, ReasoningEffort, provider_api_root,
+    ModelAuth, ModelCatalogDraft, ModelSettings, Provider, ReasoningEffort, provider_api_root,
     validate_api_key,
 };
 use fliuno_protocol::{
@@ -44,24 +44,38 @@ pub fn preview_model_catalog(
         provider: draft.provider,
         protocol: Some(draft.protocol),
         base_url: draft.base_url,
+        auth: draft.auth,
         ..Default::default()
     };
-    validate_configuration(&settings)?;
-    validate_api_key(key)?;
-    let headers = catalog_headers(settings.provider, Some(key))?;
-    let http = catalog_http(&settings, headers)?;
+    let key = match draft.auth {
+        ModelAuth::ApiKey => Some(key),
+        ModelAuth::None if key.is_empty() => None,
+        ModelAuth::None => return Err("A keyless draft cannot include an API key".into()),
+    };
+    preview_model_connection(&settings, key, draft.cursor.as_deref())
+}
+
+/// Read a draft catalog with credentials already resolved by the local host.
+pub fn preview_model_connection(
+    settings: &ModelSettings,
+    key: Option<&str>,
+    cursor: Option<&str>,
+) -> Result<ModelCatalogPreview, String> {
+    validate_configuration(settings)?;
+    match (settings.auth, key) {
+        (ModelAuth::ApiKey, Some(key)) => validate_api_key(key)?,
+        (ModelAuth::None, None) => (),
+        _ => return Err("The draft credential does not match its authentication mode".into()),
+    }
+    let headers = catalog_headers(settings.provider, key)?;
+    let http = catalog_http(settings, headers)?;
     Ok(
-        match read_page(
-            settings.provider,
-            &http,
-            draft.cursor.as_deref(),
-            CATALOG_TIMEOUT,
-        ) {
+        match read_page(settings.provider, &http, cursor, CATALOG_TIMEOUT) {
             Ok(page) => ModelCatalogPreview {
                 catalog: ModelCatalogStatus::Available,
                 catalog_access: ModelCatalogAccess::Accepted,
                 http_status: None,
-                page: Some(filter_credential_echo(page, Some(key))),
+                page: Some(filter_credential_echo(page, key)),
             },
             Err(error @ CatalogError::Input(_)) => return Err(error.to_string()),
             Err(error) => {
