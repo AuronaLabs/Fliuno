@@ -2,8 +2,8 @@ use super::{clean, palette::Palette, setup_catalog::Catalog};
 use crate::{Screen, editor::Editor, options::SetupOptions};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use fliuno_config::{
-    ModelCatalogDraft, ModelProtocol, PendingApiKey, Provider, provider_api_root, read_api_key,
-    validate_api_key,
+    ModelCatalogDraft, ModelProtocol, ModelSetup, ModelSetupCredential, Provider, ReasoningEffort,
+    Settings, provider_api_root, read_api_key, validate_api_key,
 };
 use ratatui::{
     Frame,
@@ -12,12 +12,7 @@ use ratatui::{
     text::Line,
     widgets::{Block, Paragraph, Wrap},
 };
-use std::{
-    fs,
-    io::{self, Write},
-    path::Path,
-    time::Duration,
-};
+use std::{io, path::Path, time::Duration};
 use zeroize::{Zeroize, Zeroizing};
 
 struct ModelRoute {
@@ -56,6 +51,7 @@ enum Step {
     Model,
     Endpoint,
     Credential,
+    Reasoning,
 }
 
 #[derive(Default)]
@@ -63,6 +59,8 @@ struct Form {
     step: Step,
     catalog: Catalog,
     route: usize,
+    effort: Option<ReasoningEffort>,
+    effort_index: usize,
     model: Editor,
     endpoint: Editor,
     key_file: Editor,
@@ -99,6 +97,7 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                         form.error.clear();
                         form.step = match form.step {
                             Step::Provider => return Ok(false),
+                            Step::Reasoning => Step::Model,
                             Step::Endpoint => Step::Provider,
                             Step::Credential => {
                                 form.api_key.zeroize();
@@ -114,6 +113,16 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                         form.use_key_file = !form.use_key_file;
                         form.api_key.zeroize();
                         form.error.clear();
+                    }
+                    KeyCode::F(3) if matches!(form.step, Step::Model) => {
+                        form.effort_index = form
+                            .effort
+                            .and_then(|selected| {
+                                form.efforts().iter().position(|effort| *effort == selected)
+                            })
+                            .map_or(0, |index| index + 1);
+                        form.error.clear();
+                        form.step = Step::Reasoning;
                     }
                     KeyCode::F(5)
                         if matches!(form.step, Step::Model) && !form.catalog.loading() =>
@@ -138,7 +147,22 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
                     KeyCode::Enter if key.kind == KeyEventKind::Press => {
                         form.error.clear();
                         match form.step {
-                            Step::Provider => form.step = Step::Endpoint,
+                            Step::Provider => {
+                                if form
+                                    .effort
+                                    .is_some_and(|effort| !form.efforts().contains(&effort))
+                                {
+                                    form.effort = None;
+                                }
+                                form.step = Step::Endpoint;
+                            }
+                            Step::Reasoning => {
+                                form.effort = form
+                                    .effort_index
+                                    .checked_sub(1)
+                                    .and_then(|index| form.efforts().get(index).copied());
+                                form.step = Step::Model;
+                            }
                             Step::Endpoint => {
                                 let endpoint = form.endpoint.text().trim();
                                 if !endpoint.is_empty()
@@ -175,6 +199,10 @@ pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
 }
 
 impl Form {
+    fn efforts(&self) -> &'static [ReasoningEffort] {
+        MODEL_ROUTES[self.route].provider.reasoning_efforts()
+    }
+
     fn refresh_catalog(&mut self, options: &SetupOptions, cursor: Option<String>) -> bool {
         let key = if self.use_key_file {
             self.key_path()
@@ -262,6 +290,9 @@ impl Form {
                 self.api_key.pop();
                 self.error.clear();
             }
+        } else if matches!(self.step, Step::Reasoning) {
+            let len = self.efforts().len() + 1;
+            super::step(key, &mut self.effort_index, len);
         } else {
             match key {
                 KeyCode::Up | KeyCode::Left => self.route = self.route.saturating_sub(1),
@@ -274,57 +305,24 @@ impl Form {
     }
 
     fn save(&self, config: &Path) -> Result<(), String> {
-        let parent = profile_parent(config);
         let route = &MODEL_ROUTES[self.route];
-        let provider = route.provider.name();
-        let protocol = route.protocol.as_str();
-        // JSON and TOML use the same string escapes for these single-line, control-free inputs.
-        let model = serde_json::to_string(self.model.text().trim()).map_err(|e| e.to_string())?;
         let endpoint = self.endpoint.text().trim();
-        let endpoint = if endpoint.is_empty() {
-            String::new()
-        } else {
-            let normalized = provider_api_root(endpoint)?;
-            let value = serde_json::to_string(normalized.as_str()).map_err(|e| e.to_string())?;
-            format!("base_url = {value}\n")
-        };
-        let mut pending = None;
         let credential = if self.use_key_file {
-            let key_file = self.key_path()?;
-            read_api_key(&parent.join(key_file))?;
-            let file = serde_json::to_string(key_file).map_err(|e| e.to_string())?;
-            format!("api_key_file = {file}")
+            ModelSetupCredential::File(self.key_path()?)
         } else {
-            if self.api_key.is_empty() {
-                return Err("Paste your API key or press F2 to use a key file.".into());
-            }
-            let key = PendingApiKey::stage(config, &self.api_key)?;
-            let setting = key.setting().to_owned();
-            pending = Some(key);
-            setting
+            ModelSetupCredential::Managed(&self.api_key)
         };
-        let content = format!(
-            "[model]\nprovider = \"{provider}\"\nprotocol = \"{protocol}\"\nname = {model}\n{endpoint}{credential}\n"
-        );
-        let write = || -> io::Result<()> {
-            fs::create_dir_all(parent)?;
-            let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-            temporary.write_all(content.as_bytes())?;
-            temporary.as_file().sync_all()?;
-            temporary.persist_noclobber(config)?;
-            Ok(())
-        };
-        write().map_err(|error| {
-            if error.kind() == io::ErrorKind::AlreadyExists {
-                "A profile already exists. Restart Fliuno to open it.".into()
-            } else {
-                format!("Could not save profile: {error}")
-            }
-        })?;
-        if let Some(key) = pending {
-            key.commit();
-        }
-        Ok(())
+        Settings::create_live_model(
+            config,
+            ModelSetup {
+                provider: route.provider,
+                protocol: route.protocol,
+                model: self.model.text(),
+                base_url: (!endpoint.is_empty()).then_some(endpoint),
+                reasoning_effort: self.effort,
+                credential,
+            },
+        )
     }
 
     fn draw(&self, frame: &mut Frame<'_>, config: &Path, palette: &Palette) {
@@ -353,6 +351,12 @@ impl Form {
                 "Choose a model",
                 "Type a model ID or search the catalog.",
                 "↑ ↓ Browse   Tab Use model   Enter Save ID",
+            ),
+            Step::Reasoning => (
+                4,
+                "Set reasoning effort",
+                "Use the provider default unless you know your model supports a specific level.",
+                "↑ ↓ Select   Enter Apply   Esc Back",
             ),
             Step::Endpoint => (
                 2,
@@ -409,6 +413,13 @@ impl Form {
                 format!("F5 Reload{more}   Esc Back"),
                 palette.quiet,
             ));
+            let effort = self
+                .effort
+                .map_or("provider default", ReasoningEffort::as_str);
+            footer_lines.push(Line::styled(
+                format!("F3 Reasoning: {effort}"),
+                palette.quiet,
+            ));
         }
         if !self.error.is_empty() {
             footer_lines.push(Line::styled(clean(&self.error), palette.status(Color::Red)));
@@ -418,6 +429,7 @@ impl Form {
             Constraint::Length(header.line_count(area.width).min(7) as u16 + 1),
             Constraint::Length(match self.step {
                 Step::Provider => MODEL_ROUTES.len() as u16,
+                Step::Reasoning => (1 + self.efforts().len()) as u16,
                 Step::Model => 1 + status_rows + self.catalog.visible_rows(self.model.text()),
                 Step::Endpoint => 3,
                 Step::Credential => 5,
@@ -442,6 +454,13 @@ impl Form {
                     })
                     .collect();
                 frame.render_widget(Paragraph::new(lines), body);
+            }
+            Step::Reasoning => {
+                let labels = std::iter::once("Provider default")
+                    .chain(self.efforts().iter().map(|effort| effort.as_str()))
+                    .map(str::to_owned)
+                    .collect();
+                super::render_list(frame, body, labels, self.effort_index, palette.choice);
             }
             Step::Model | Step::Endpoint | Step::Credential
                 if body.width > 2 && body.height > 0 =>

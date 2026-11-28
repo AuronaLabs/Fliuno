@@ -51,7 +51,7 @@ const DRAFT_LIMIT: usize = 48 * 1024;
 
 enum Layer {
     Commands(CommandMenu),
-    ModelPicker(model_picker::Picker),
+    ModelPicker(Box<model_picker::Picker>),
     Inbox(usize),
     History(usize),
     TaskBrowser(TaskBrowser),
@@ -1126,7 +1126,9 @@ impl App {
                     }
                     CommandAction::ModelProfiles => {
                         if self.send(worker, Request::ModelProfiles) {
-                            self.layer = Layer::ModelPicker(model_picker::Picker::new(menu.origin));
+                            self.layer = Layer::ModelPicker(Box::new(model_picker::Picker::new(
+                                menu.origin,
+                            )));
                         } else {
                             self.layer = Layer::Commands(menu);
                         }

@@ -1593,6 +1593,7 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
         );
         let (mut stream, request) = streaming_fixture_input(&listener);
         assert_eq!(request["model"], "fixture-catalog-model");
+        assert_eq!(request["reasoning_effort"], "high");
         stream.write_all(concat!(
             "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Connected from the catalog.\"},\"finish_reason\":null}]}\n\n",
             "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
@@ -1646,6 +1647,20 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.keys("\t");
     console.expect("› fixture-catalog-model");
 
+    console.keys("\x1bOR");
+    console.expect("Set reasoning effort");
+    console.expect("Provider default");
+    console.keys(&"\x1b[B".repeat(5));
+    console.resize(21, 48);
+    console.capture("setup-reasoning-high-48");
+    console.resize(24, 80);
+    console.capture("setup-reasoning-high-80");
+    console.resize(28, 110);
+    console.capture("setup-reasoning-high-110");
+    console.keys("\r");
+    console.expect("F3 Reasoning: high");
+    console.expect("› fixture-catalog-model");
+
     std::fs::write(&config, "concurrent profile").unwrap();
     console.keys("\r");
     console.expect("A profile already exists.");
@@ -1666,6 +1681,7 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     assert!(profile_text.contains("protocol = \"chat_completions\""));
     assert!(profile_text.contains(&format!("base_url = \"{base}\"")));
     assert!(profile_text.contains("name = \"fixture-catalog-model\""));
+    assert!(profile_text.contains("reasoning_effort = \"high\""));
     assert!(profile_text.contains("api_key_file = \"fixture key.txt\""));
     assert!(!profile_text.contains("fixture-secret-value"));
     assert!(data.is_file());

@@ -12,6 +12,8 @@
 | 本地 Codex `a1604a8` 的 `codex-rs/core/src/config/edit.rs` | 用保留格式的 TOML 编辑器和同目录暂存文件更新单个设置。活动模型与启动默认值分别操作。 |
 | 本地 Codex `a1604a8` 的 `codex-rs/model-provider-info/src/lib.rs` | 分离供应商 ID、端点、线上协议与能力。如同一主机提供多种协议，给用户明确选择。保持现有 `provider = "openai"` 的解释和已有配置文件可读。 |
 
+[Anthropic Models API](https://platform.claude.com/docs/en/api/models/list) 区分模型是否支持思考与 `effort` 的各个档位；[Gemini Models API](https://aistudio.google.com/api-reference/models) 的 `thinking` 表示思考能力，不给出完整档位。同样参考了本地 Codex `a1604a8` 的 `codex-rs/tui/src/chatwidget/model_command.rs` 对模型和档位的分开选择。Fliuno 还要支持自定义网关，因此只把目录声明作为诊断证据。档位没公布时保留提供方默认值或用户显式选择，目录检查不调用生成。
+
 本地 OpenCode 的 `packages/core/src/modal/models.ts` 也把远端目录解码留在 Provider 层。Fliuno 首启通过本机子进程读取草稿目录，不需要先写入配置、密钥或数据库。UI 仅负责搜索、翻页和手填。
 
 ## 交付与验收
@@ -28,4 +30,7 @@
 - Windows 使用 llama.cpp `b12821` 和 SmolLM2-135M-Instruct Q4_K_M，完成了带 Bearer 凭据的 `/v1/models` 查询、`--check-model` 和 stdio 对话。连接检查通过时模型在目录中，启动对话前数据库文件未创建。对话完成后保留 `openai-chat` 续接身份。
 - Windows ConPTY 与 Debian 来宾 PTY 在 110、80 和 48 列抓取首启和工作台截图。两端通过三项端到端用例：目录加载期间编辑、401 重试、从目录保存模型并发出请求；粘贴凭据、目录为空时手填；工作台检查高亮档案、保留草稿和历史、临时切换实际模型。Debian 来宾复测结果为 `FLIUNO_RESULT=0`。
 - 首启等待目录时只在输入或查询状态变化后重绘。安装包候选工作流分别保留 Windows 与 Debian 的终端捕获，以便核对已安装程序的排版。
-- 当前工作台的临时切换和配置文件的启动默认值独立。工作台保存默认值以及对最终候选包的安装、升级、卸载和哈希验收仍待完成。
+- Windows ConPTY 已验证工作台临时切换不写配置；保存启动默认不切换活动模型、不丢草稿，重启后的生成请求带上保存的模型 ID 和思考档位。保存默认值后逐个检查了 48、80 和 110 列终端截图。
+- 首启的自定义档位由 `fliuno-config` 校验和保存。Windows ConPTY 从目录选择模型，再通过 `F3` 设置 `high`；聊天请求实际携带了相同模型与 `reasoning_effort: "high"`。48、80 和 110 列捕获已检查。
+- Rust HTTP 约定测试覆盖思考档位明确列出、未列出、无元数据、提供方默认，以及思考能力与档位信息互相独立的情况。连接检查仍然只请求模型目录。
+- 工作台内从远端目录重新选模型并编辑档案，以及最终候选包的安装、升级、卸载和哈希验收，仍待完成。
