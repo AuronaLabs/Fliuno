@@ -43,6 +43,8 @@ jobs:
         run: cargo test --locked -p fliuno-tui --test workbench workbench_review_keeps_long_preview_and_tool_details_separate -- --ignored
       - name: Verify project guide consent in a real terminal
         run: cargo test --locked -p fliuno-tui --test workbench workbench_reviews_project_guide_and_preserves_draft_after_change -- --ignored
+      - name: Verify draft budget, layout, and return to composer in a real terminal
+        run: cargo test --locked -p fliuno-tui --test workbench draft_context -- --ignored --test-threads=1
       - name: Verify first-launch language and profile persistence
         run: cargo test --locked -p fliuno-tui --test workbench first_launch_switches_and_persists_chinese -- --ignored
       - run: python scripts/check_linux_cgroup.py
