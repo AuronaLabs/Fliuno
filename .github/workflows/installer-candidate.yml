@@ -7,7 +7,7 @@ on:
         description: Stable release tag used for the upgrade fixture
         type: string
         required: true
-        default: v0.0.16
+        default: v0.0.20
 
 permissions:
   contents: read
