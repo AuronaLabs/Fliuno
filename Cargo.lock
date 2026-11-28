@@ -884,7 +884,7 @@ checksum = "5905ec755cc8386d7928353e4d356d2be3e89e81e5ca01fe630a1ca4d08dc175"
 
 [[package]]
 name = "fliuno-a2a"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "reqwest",
@@ -896,7 +896,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-acp"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "agent-client-protocol",
  "fliuno-sandbox",
@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-ag-ui-http"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "axum",
  "fliuno-client",
@@ -925,7 +925,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-agents"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "fliuno-a2a",
  "fliuno-acp",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-app-server"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-client"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "fliuno-protocol",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-config"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "keyring-core",
  "serde",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-core"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "crossbeam-channel",
@@ -1017,7 +1017,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-exec"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "fliuno-core",
@@ -1034,7 +1034,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-mcp"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1062,7 +1062,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-protocol"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "schemars 1.2.3",
@@ -1072,7 +1072,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-providers"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "fliuno-config",
  "fliuno-core",
@@ -1087,7 +1087,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-sandbox"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-skills"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "cap-fs-ext",
@@ -1120,7 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-terminal"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "fliuno-core",
@@ -1139,7 +1139,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-tools"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "base64 0.22.1",
  "cap-fs-ext",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "fliuno-tui"
-version = "0.0.19"
+version = "0.0.20"
 dependencies = [
  "crossbeam-channel",
  "crossterm 0.28.1",
