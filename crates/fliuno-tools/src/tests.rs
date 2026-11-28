@@ -635,7 +635,7 @@ fn file_patch_is_shown_for_approval_and_applies_only_to_its_reviewed_version() {
 #[test]
 fn rejected_patch_leaves_bytes_intact_and_a_revised_diff_needs_new_approval() {
     use fliuno_core::{ModelDecision, ModelTurn};
-    use fliuno_protocol::{ApprovalDecision, Message, Task, TaskStatus};
+    use fliuno_protocol::{ApprovalDecision, EventKind, Message, Task, TaskStatus};
 
     struct Retry;
     impl fliuno_core::ModelProvider for Retry {
@@ -654,16 +654,21 @@ fn rejected_patch_leaves_bytes_intact_and_a_revised_diff_needs_new_approval() {
                 })
                 .collect();
             let patch = match results.as_slice() {
-                [] => "--- a/report.txt\n+++ b/report.txt\n@@ -1 +1 @@\n before\n",
-                [no_change] => {
+                [] => "--- a/report.txt\n+++ b/report.txt\n@@ invalid @@\n-before\n+after\n",
+                [format_error] => {
+                    assert_eq!(format_error["status"], "not_applied");
+                    assert_eq!(format_error["code"], "workspace_patch_format");
+                    "--- a/report.txt\n+++ b/report.txt\n@@ -1 +1 @@\n before\n"
+                }
+                [_, no_change] => {
                     assert_eq!(no_change["code"], "workspace_patch_no_change");
                     "--- a/report.txt\n+++ b/report.txt\n@@ -1 +1 @@\n-wrong\n+after\n"
                 }
-                [_, mismatch] => {
+                [_, _, mismatch] => {
                     assert_eq!(mismatch["code"], "workspace_patch_mismatch");
                     report_patch()
                 }
-                [_, _, written] => {
+                [_, _, _, written] => {
                     assert_eq!(written["sha256"], sha256(b"after\nstable\n"));
                     return Ok(ModelDecision::Complete("patch applied".into()).into());
                 }
@@ -693,6 +698,15 @@ fn rejected_patch_leaves_bytes_intact_and_a_revised_diff_needs_new_approval() {
     let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
     let session = kernel.create_session(&workspace.id).unwrap();
     let mut task = kernel.start_task(&session.id, "edit report").unwrap();
+    let audit = kernel.list_events(&task.id, 0, 100).unwrap().events;
+    assert!(audit.iter().any(|event| matches!(&event.data,
+        EventKind::ToolProposalRejected { call_id, code, .. }
+        if call_id == "patch-0" && code == "workspace_patch_format"
+    )));
+    assert!(!audit.iter().any(|event| matches!(&event.data,
+        EventKind::ApprovalRequested { approval } if approval.call.id == "patch-0"
+    ) || matches!(&event.data, EventKind::ToolStarted { call } if call.id == "patch-0")));
+    assert_eq!(task.pending_approval.as_ref().unwrap().call.id, "patch-1");
     let mut prior = Vec::new();
     for _ in 0..3 {
         assert_eq!(task.status, TaskStatus::WaitingApproval);
@@ -706,6 +720,58 @@ fn rejected_patch_leaves_bytes_intact_and_a_revised_diff_needs_new_approval() {
     }
     assert_eq!(task.status, TaskStatus::Completed);
     assert_eq!(std::fs::read(file).unwrap(), b"after\nstable\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn repeated_malformed_patches_stop_at_the_model_budget_without_execution() {
+    use fliuno_core::{ModelDecision, ModelTurn};
+    use fliuno_protocol::{DEFAULT_TASK_MODEL_STEPS, EventKind, Task, TaskStatus};
+    struct Malformed;
+    impl fliuno_core::ModelProvider for Malformed {
+        fn next(
+            &self,
+            task: &Task,
+            _: &[ToolSpec],
+            _: &CancellationToken,
+        ) -> Result<ModelTurn, String> {
+            Ok(ModelDecision::Call(ToolCall {
+                id: format!("bad-{}", task.model_steps), name: "workspace_patch_text".into(),
+                arguments: json!({"path":"report.txt","baseSha256":sha256(b"before\n"), "patch":"not a diff"}),
+            }).into())
+        }
+    }
+    let root = std::env::temp_dir().join(format!(
+        "fliuno-patch-budget-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir(&root).unwrap();
+    let file = root.join("report.txt");
+    fs::write(&file, b"before\n").unwrap();
+    let mut kernel = Kernel::in_memory(Box::new(Malformed)).unwrap();
+    register(&mut kernel).unwrap();
+    let workspace = kernel.open_workspace(root.to_str().unwrap()).unwrap();
+    let session = kernel.create_session(&workspace.id).unwrap();
+    let task = kernel.start_task(&session.id, "edit report").unwrap();
+    assert_eq!(task.status, TaskStatus::Failed);
+    assert_eq!(task.model_steps, DEFAULT_TASK_MODEL_STEPS);
+    let events = kernel.list_events(&task.id, 0, 100).unwrap().events;
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e.data, EventKind::ToolProposalRejected { .. }))
+            .count(),
+        DEFAULT_TASK_MODEL_STEPS as usize
+    );
+    assert!(!events.iter().any(|e| matches!(
+        e.data,
+        EventKind::ApprovalRequested { .. } | EventKind::ToolStarted { .. }
+    )));
+    assert_eq!(fs::read(file).unwrap(), b"before\n");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -761,6 +827,21 @@ fn file_patch_rejects_stale_bases_and_multi_file_or_misdirected_diffs() {
     let mut wrong_path = args;
     wrong_path["patch"] = json!(report_patch().replace("report.txt", "../secret.txt"));
     assert!(tool.validate(&wrong_path).is_err());
+    assert!(matches!(
+        tool.validate_model_proposal(&wrong_path),
+        Err(ToolProposalError::Rejected(_))
+    ));
+    assert!(matches!(
+        tool.validate_model_proposal(&multi_file),
+        Err(ToolProposalError::Rejected(_))
+    ));
+    let mut escape = wrong_path.clone();
+    escape["path"] = json!("../outside.txt");
+    escape["patch"] = json!("malformed diff");
+    assert!(matches!(
+        tool.validate_model_proposal(&escape),
+        Err(ToolProposalError::Rejected(_))
+    ));
     fs::remove_dir_all(root).unwrap();
 }
 

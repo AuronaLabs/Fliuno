@@ -57,6 +57,7 @@ impl Kernel {
                     .map_err(|error| error.with_input_attribution(&task, &specs))
             }))
             .unwrap_or_else(|_| Err(ModelError::OutcomeUnknown("model provider panicked".into())));
+            let previous_messages = task.messages.len();
             let memory_was_omitted = task.context_memory_omitted_for_budget;
             let outputs_were_reduced = reduce_historical_tool_outputs(&task);
             task = self.apply_model_response(task, turn)?;
@@ -81,8 +82,13 @@ impl Kernel {
                 !memory_was_omitted && task.context_memory_omitted_for_budget;
             let retry_with_reduced_outputs =
                 !outputs_were_reduced && reduce_historical_tool_outputs(&task);
+            // A rejected model proposal may append a call/result pair without
+            // creating an approval. The synchronous driver must continue too.
+            let proposal_feedback = task.messages.len() > previous_messages
+                && matches!(task.messages.last(), Some(Message::ToolResult { .. }));
             if task.status != TaskStatus::Running
-                || !(retry_without_memory
+                || !(proposal_feedback
+                    || retry_without_memory
                     || retry_with_reduced_outputs
                     || compaction::pending(&task)
                     || self.has_pending_steering(&task.id)?)
@@ -297,8 +303,31 @@ impl Kernel {
                         events,
                     );
                 };
-                if let Err(message) = tool.validate(&call.arguments) {
-                    return self.fail_with_events(task, message, events);
+                match tool.validate_model_proposal(&call.arguments) {
+                    Ok(()) => {}
+                    Err(ToolProposalError::Rejected(message)) => {
+                        return self.fail_with_events(task, message, events);
+                    }
+                    Err(ToolProposalError::Correctable { code, message }) => {
+                        // Record the original call and its rejection together for
+                        // provider replay. Nothing was approved or started.
+                        let message: String = message.chars().take(1024).collect();
+                        let call_id = call.id.clone();
+                        let tool_name = call.name.clone();
+                        task.messages.push(Message::ToolCall { call });
+                        task.messages.push(Message::ToolResult {
+                            call_id: call_id.clone(),
+                            output: serde_json::json!({"status":"not_applied", "code":code, "message":message}),
+                        });
+                        events.push(EventKind::ToolProposalRejected {
+                            call_id,
+                            tool_name,
+                            code: code.into(),
+                            message,
+                        });
+                        self.commit(&task, &events, &[])?;
+                        return Ok(task);
+                    }
                 }
                 if let PolicyDecision::Deny(message) = self.policy.evaluate(&tool.spec(), &call) {
                     return self.fail_with_events(task, message, events);

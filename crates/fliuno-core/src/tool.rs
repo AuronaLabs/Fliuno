@@ -75,6 +75,22 @@ impl From<&str> for ToolError {
     }
 }
 
+/// Errors in a model proposal before any approval or execution.
+/// Only a trusted adapter may classify a specific input error as correctable.
+#[derive(Debug, thiserror::Error)]
+pub enum ToolProposalError {
+    #[error("{0}")]
+    Rejected(String),
+    #[error("{message}")]
+    Correctable { code: &'static str, message: String },
+}
+
+impl From<String> for ToolProposalError {
+    fn from(message: String) -> Self {
+        Self::Rejected(message)
+    }
+}
+
 /// Trusted in-process tools only. This interface is not an OS sandbox.
 /// Implementations should observe cancellation during bounded work. External
 /// tools receive a durable ToolStarted record before execution and are never
@@ -100,6 +116,16 @@ pub trait Tool: Send + Sync {
     }
 
     fn validate(&self, arguments: &Value) -> std::result::Result<(), String>;
+    /// Optional feedback for a wholly rejected model proposal. This must perform
+    /// the same validation as `validate`, without IO or side effects. Approval
+    /// and every execution path still use the strict validation contract.
+    fn validate_model_proposal(
+        &self,
+        arguments: &Value,
+    ) -> std::result::Result<(), ToolProposalError> {
+        self.validate(arguments)
+            .map_err(ToolProposalError::Rejected)
+    }
     /// Optional immutable approval details; no IO or execution at this stage.
     fn execution_plan(&self, _arguments: &Value) -> Option<Value> {
         None

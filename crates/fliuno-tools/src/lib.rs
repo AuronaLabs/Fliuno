@@ -20,7 +20,8 @@ use diffy::{
     patch_set::{FileOperation, ParseOptions, PatchSet},
 };
 use fliuno_core::{
-    CancellationToken, Kernel, Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec,
+    CancellationToken, Kernel, Tool, ToolContext, ToolEffect, ToolError, ToolOutput,
+    ToolProposalError, ToolSpec,
 };
 use fliuno_protocol::ToolCall;
 use serde::Deserialize;
@@ -138,7 +139,7 @@ fn relative(path: &str, allow_root: bool) -> Result<&Path, String> {
     Ok(parsed)
 }
 
-fn validate_patch(args: &PatchArgs) -> Result<(), String> {
+fn validate_patch(args: &PatchArgs) -> Result<(), ToolProposalError> {
     relative(&args.path, false)?;
     if args.base_sha256.len() != 64
         || !args
@@ -146,26 +147,44 @@ fn validate_patch(args: &PatchArgs) -> Result<(), String> {
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
-        return Err("baseSha256 must be a lowercase SHA-256 hex digest".into());
+        return Err(ToolProposalError::Rejected(
+            "baseSha256 must be a lowercase SHA-256 hex digest".into(),
+        ));
     }
     if args.patch.is_empty() || args.patch.len() > 65_536 {
-        return Err("patch must contain 1..65536 UTF-8 bytes".into());
+        return Err(ToolProposalError::Rejected(
+            "patch must contain 1..65536 UTF-8 bytes".into(),
+        ));
     }
     let mut patches = PatchSet::parse(&args.patch, ParseOptions::unidiff());
+    let invalid_format = || {
+        ToolProposalError::Correctable {
+        code: "workspace_patch_format",
+        message: "Invalid unified diff. Supply one text diff with --- a/<path>, +++ b/<path>, valid @@ line ranges, and matching hunk line counts. No file was modified.".into(),
+    }
+    };
     let file_patch = patches
         .next()
-        .ok_or_else(|| "patch must contain one unified file diff".to_owned())?
-        .map_err(|_| "invalid unified diff")?;
+        .ok_or_else(invalid_format)?
+        .map_err(|_| invalid_format())?;
     if patches.next().is_some() {
-        return Err("patch must modify exactly one file".into());
+        return Err(ToolProposalError::Rejected(
+            "patch must modify exactly one file".into(),
+        ));
     }
     match file_patch.operation().strip_prefix(1) {
         FileOperation::Modify { original, modified }
             if original == args.path && modified == args.path => {}
-        _ => return Err("diff paths must both identify the requested file".into()),
+        _ => {
+            return Err(ToolProposalError::Rejected(
+                "diff paths must both identify the requested file".into(),
+            ));
+        }
     }
     if file_patch.patch().as_text().is_none() {
-        return Err("only text patches are supported".into());
+        return Err(ToolProposalError::Rejected(
+            "only text patches are supported".into(),
+        ));
     }
     Ok(())
 }
@@ -264,7 +283,7 @@ impl Tool for WorkspaceTool {
             Operation::Patch => {
                 let args: PatchArgs = serde_json::from_value(arguments.clone())
                     .map_err(|_| "expected path, baseSha256 and patch")?;
-                validate_patch(&args)?;
+                validate_patch(&args).map_err(|error| error.to_string())?;
             }
             Operation::Replace => {
                 workspace::validate_replace(arguments)?;
@@ -289,6 +308,18 @@ impl Tool for WorkspaceTool {
             }
         }
         Ok(())
+    }
+
+    fn validate_model_proposal(&self, arguments: &Value) -> Result<(), ToolProposalError> {
+        if matches!(self.0, Operation::Patch) {
+            let args: PatchArgs = serde_json::from_value(arguments.clone()).map_err(|_| {
+                ToolProposalError::Rejected("expected path, baseSha256 and patch".into())
+            })?;
+            validate_patch(&args)
+        } else {
+            self.validate(arguments)
+                .map_err(ToolProposalError::Rejected)
+        }
     }
 
     fn execute(

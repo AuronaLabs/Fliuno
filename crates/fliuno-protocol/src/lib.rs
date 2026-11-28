@@ -1164,6 +1164,13 @@ pub enum EventKind {
         call_id: String,
         rule_id: String,
     },
+    /// Malformed model proposal, rejected before approval or any execution.
+    ToolProposalRejected {
+        call_id: String,
+        tool_name: String,
+        code: String,
+        message: String,
+    },
     ToolCompleted {
         call_id: String,
         output: Value,

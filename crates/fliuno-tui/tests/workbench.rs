@@ -2975,7 +2975,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                 ]}),
             )
         };
-        for step in 0..12 {
+        for step in 0..13 {
             let (mut socket, request) = streaming_fixture_input(&listener);
             let input = request["input"].as_array().unwrap();
             let result = || {
@@ -3049,12 +3049,32 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                         })
                         .expect("the read result is retained for the patch");
                     call(
+                        "malformed-patch",
+                        "workspace_patch_text",
+                        json!({"path":before["path"],"baseSha256":before["sha256"],"patch":"--- a/src/greeting.txt\n+++ b/src/greeting.txt\n@@ invalid @@\n-Hello world\n+Welcome to Fliuno\n"}),
+                    )
+                }
+                6 => {
+                    assert_eq!(input.last().unwrap()["call_id"], "malformed-patch");
+                    assert_eq!(result()["status"], "not_applied");
+                    assert_eq!(result()["code"], "workspace_patch_format");
+                    let before = input
+                        .iter()
+                        .find(|entry| {
+                            entry["call_id"] == "read" && entry["type"] == "function_call_output"
+                        })
+                        .map(|entry| {
+                            serde_json::from_str::<Value>(entry["output"].as_str().unwrap())
+                                .unwrap()
+                        })
+                        .expect("the read result is retained for the patch");
+                    call(
                         "patch",
                         "workspace_patch_text",
                         json!({"path":before["path"],"baseSha256":before["sha256"],"patch":"--- a/src/greeting.txt\n+++ b/src/greeting.txt\n@@ -1 +1 @@\n-Hello world\n+Welcome to Fliuno\n"}),
                     )
                 }
-                6 => {
+                7 => {
                     let receipt = result();
                     assert_eq!(receipt["bytesWritten"], 18);
                     call(
@@ -3063,7 +3083,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                         json!({"path":receipt["path"]}),
                     )
                 }
-                7 => {
+                8 => {
                     assert_eq!(result()["content"], "Welcome to Fliuno\n");
                     let read = result();
                     let spec = request["tools"]
@@ -3086,22 +3106,22 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                         json!({"inputs":{"src/greeting.txt":read["sha256"]}}),
                     )
                 }
-                8 => {
+                9 => {
                     assert_eq!(result()["exitCode"], 0);
                     assert_eq!(result()["success"], true);
                     assert_eq!(result()["stdout"]["data"], "greeting check passed\n");
                     plan("plan-verified", "completed", "completed", "completed")
                 }
-                9 => {
+                10 => {
                     assert_eq!(result()["published"], true);
                     complete("已更新问候语，并通过项目检查。")
                 }
-                10 => call(
+                11 => call(
                     "read-after-revoke",
                     "workspace_read_text",
                     json!({"path":"src/greeting.txt"}),
                 ),
-                11 => {
+                12 => {
                     assert_eq!(result()["content"], "Welcome to Fliuno\n");
                     complete("已再次读取问候语。")
                 }

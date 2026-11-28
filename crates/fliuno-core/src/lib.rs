@@ -67,7 +67,7 @@ pub use task::compaction::{
     execute as execute_context_compaction, pending as context_compaction_pending,
 };
 pub use task::{PreparedModelStep, compaction::ContextCompaction, start::TaskSummaryStart};
-pub use tool::{Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec};
+pub use tool::{Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolProposalError, ToolSpec};
 
 use fliuno_protocol::*;
 use rusqlite::Connection;
