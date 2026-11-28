@@ -3005,6 +3005,17 @@ mod tests {
                 allow_once: true,
                 scroll: 10,
             };
+            let mut loading = Terminal::new(TestBackend::new(48, 18)).unwrap();
+            let frame = loading.draw(|frame| app.draw(frame)).unwrap();
+            let text: String = frame
+                .buffer
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains("Loading review…"));
+            assert!(!text.contains("y Allow once"));
+            app.update(Update::Finished);
             for (width, height) in [(48, 18), (80, 24), (120, 32)] {
                 let mut screen = Terminal::new(TestBackend::new(width, height)).unwrap();
                 let frame = screen.draw(|frame| app.draw(frame)).unwrap();
