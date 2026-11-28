@@ -268,6 +268,16 @@ cargo run -p fliuno-app-server -- --skills-dir C:/absolute/path/to/skills
 
 目录结构为 `<skills-dir>/<skill-name>/SKILL.md`。启用后先用 `skills_list` / `skills_read` 发现元数据和指令，再通过 `skills_list_resources` / `skills_read_resource` 按需读取参考资料、文本模板和脚本源码；显式传 `encoding:"base64"` 可读取最多 256 KiB 的二进制资源。每个工具均逐次审批，资源不能通过目录链接跳到其他技能；读取不会执行脚本、解码文档或创建产物。技能的 `allowed-tools` 作为元数据保留，不授予执行权限。路径、预算、来源绑定与离线演示见 [Skills 文档](skills.md)。
 
+## 核对安装包候选
+
+在 GitHub Actions 中先确认内核 CI 和 `Installer candidate` 的 Windows、Debian 作业均通过，且对应同一个 Git 提交。从该候选运行下载 `fliuno-windows-candidate` 和 `fliuno-debian-candidate`，分别解包到同一目录下的两个同名子目录。然后在仓库根目录运行：
+
+```sh
+python scripts/stage_release.py ./candidate-artifacts ./verified-release --version 0.0.21 --commit FULL_GIT_SHA
+```
+
+脚本检查两套候选的构建提交、文件名与 SHA-256，并检查便携包内的两份程序，再生成四份发布资产和合并的 `SHA256SUMS.txt`。它不会上传、创建标签或替换已有输出目录。只有 GitHub Actions 的安装和终端用例能证明候选可用；文件校验确认准备上传的是那批经过验收的产物。
+
 ## 检查与演示
 
 ```powershell
