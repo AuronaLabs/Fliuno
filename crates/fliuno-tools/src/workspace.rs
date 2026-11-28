@@ -36,7 +36,11 @@ pub(crate) fn validate_replace(arguments: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn open_target(directory: &Dir, path: &str, writable: bool) -> std::io::Result<cap_std::fs::File> {
+pub(crate) fn open_target(
+    directory: &Dir,
+    path: &str,
+    writable: bool,
+) -> std::io::Result<cap_std::fs::File> {
     let (parent, name) = path.rsplit_once('/').unwrap_or((".", path));
     let parent = directory.open_dir(parent)?;
     let metadata = parent.symlink_metadata(name)?;
@@ -57,7 +61,7 @@ fn open_target(directory: &Dir, path: &str, writable: bool) -> std::io::Result<c
     Ok(file)
 }
 
-fn read_snapshot(
+pub(crate) fn read_snapshot(
     file: &mut cap_std::fs::File,
     cancellation: &CancellationToken,
 ) -> Result<String, ToolError> {

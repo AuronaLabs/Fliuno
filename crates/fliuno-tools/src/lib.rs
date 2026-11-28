@@ -2,6 +2,7 @@
 //! lexical checks alone are insufficient against symlinks and path races.
 mod batch_paths;
 mod directory_page;
+mod edit;
 mod file_io;
 mod find;
 mod hash;
@@ -69,6 +70,7 @@ enum Operation {
     ReadBinary,
     Create,
     Patch,
+    Edit,
     Replace,
 }
 struct WorkspaceTool(Operation, Arc<Mutex<()>>);
@@ -87,6 +89,7 @@ pub fn register(kernel: &mut Kernel) -> fliuno_core::Result<()> {
         Operation::ReadBinary,
         Operation::Create,
         Operation::Patch,
+        Operation::Edit,
         Operation::Replace,
     ]
     .into_iter()
@@ -228,6 +231,11 @@ impl Tool for WorkspaceTool {
                 "Review and apply one single-file unified diff to an existing UTF-8 workspace file after approval. Read it first, use the returned sha256 as baseSha256, and use --- a/<path> / +++ b/<path> headers.",
                 ToolEffect::WorkspaceWrite,
             ),
+            Operation::Edit => (
+                "workspace_edit_text",
+                "Replace one exact occurrence of oldText with newText in an existing UTF-8 file after approval. Read it first and reuse its SHA-256. Include surrounding text to make the match unique. Preserve the original whitespace and line endings in oldText.",
+                ToolEffect::WorkspaceWrite,
+            ),
             Operation::Replace => (
                 "workspace_replace_text",
                 "Create or replace a UTF-8 workspace file after review. Existing files require the exact baseSha256 from a prior read; null only creates a new file.",
@@ -246,6 +254,15 @@ impl Tool for WorkspaceTool {
                     json!({"type":"string","pattern":"^[0-9a-f]{64}$"});
                 schema["properties"]["patch"] =
                     json!({"type":"string","minLength":1,"maxLength":65536});
+            }
+            Operation::Edit => {
+                schema["required"] = json!(["path", "baseSha256", "oldText", "newText"]);
+                schema["properties"]["baseSha256"] =
+                    json!({"type":"string","pattern":"^[0-9a-f]{64}$"});
+                schema["properties"]["oldText"] =
+                    json!({"type":"string","minLength":1,"maxLength":edit::MAX_EDIT_TEXT_BYTES});
+                schema["properties"]["newText"] =
+                    json!({"type":"string","maxLength":edit::MAX_EDIT_TEXT_BYTES});
             }
             Operation::Replace => {
                 schema["required"] = json!(["path", "content", "baseSha256"]);
@@ -284,6 +301,9 @@ impl Tool for WorkspaceTool {
                 let args: PatchArgs = serde_json::from_value(arguments.clone())
                     .map_err(|_| "expected path, baseSha256 and patch")?;
                 validate_patch(&args).map_err(|error| error.to_string())?;
+            }
+            Operation::Edit => {
+                edit::validate(arguments)?;
             }
             Operation::Replace => {
                 workspace::validate_replace(arguments)?;
@@ -334,7 +354,7 @@ impl Tool for WorkspaceTool {
         self.validate(&call.arguments)?;
         let _write_guard = if matches!(
             self.0,
-            Operation::Create | Operation::Patch | Operation::Replace
+            Operation::Create | Operation::Patch | Operation::Edit | Operation::Replace
         ) {
             Some(
                 self.1
@@ -502,6 +522,7 @@ impl Tool for WorkspaceTool {
                 })?;
                 json!({"path":args.path,"sha256":sha256(updated.as_bytes()),"bytesWritten":updated.len()})
             }
+            Operation::Edit => edit::execute(&directory, &call.arguments, cancellation)?,
             Operation::Replace => {
                 workspace::execute_replace(&directory, &call.arguments, cancellation)?
             }

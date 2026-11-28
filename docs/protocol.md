@@ -894,6 +894,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 - `workspace_import_artifact({path,title})`：一次审批后将指定常规文件按原始字节保存为当前任务的二进制产物，至多 256 KiB。返回 `{artifactId,contentBytes,mediaType,sha256}`，固定类型为 `application/octet-stream`。审批绑定工作区相对路径，读取时不跟随末级符号链接。客户端可通过 `artifacts/read` 下载，原文件之后删除也不影响已提交的产物。
 - `workspace_create_text({path,content})`：创建新文件，父目录须存在，目标须不存在。
 - `workspace_patch_text({path,baseSha256,patch})`：对已存在文本文件应用一个 unified diff。diff 的 `a/` 与 `b/` 路径必须与 `path` 一致，且必须是单文件修改；`baseSha256` 必须等于最近读取的内容哈希。审批记录包含完整 diff，批准前不修改文件。执行时通过打开的文件句柄复核基线，以不跟随符号链接方式打开最终文件，拒绝多硬链接目标。本进程内的新建和补丁会串行化；其他进程不受此互斥锁约束，因此外部并发编辑不具备事务性保证。写入错误或同步错误标记为结果未知，中断任务且不会自动重试。
+- `workspace_edit_text({path,baseSha256,oldText,newText})`：在已存在的 UTF-8 文件中替换唯一一处精确匹配。原文不能为空，两个文本参数分别最多 16 KiB，`newText` 可为空以删除该段。按原始字节匹配，不规范化缩进、Unicode 或行尾。审批绑定原文、替换文本与文件哈希；目标版本变化、原文找不到或多处出现时，不写入并返回可纠正结果。通过与补丁相同的工作区权限和单进程写锁约束执行。
 - `workspace_replace_text({path,content,baseSha256})`：全文替换或创建；baseSha256 必须提供，既有文件须匹配小写 SHA-256，null 仅允许新建。与补丁共享最终文件的符号链接/硬链接检查以及写入锁；保留权限的原位更新不构成针对外部进程的原子 CAS。
 
 读取、补丁基线和全文写入预览共用普通文件检查、实际字节预算和逐块取消；不能通过按行参数读取超额文件的局部内容来绕过 256 KiB 限制。Unix 以 O_NONBLOCK 打开已有文件后检查描述符，拒绝 FIFO 等特殊文件；该标志不保证普通存储 IO 可在固定时间内中止。读取失败或取消不返回部分成功；尚未开始写入时不会报告已修改。
