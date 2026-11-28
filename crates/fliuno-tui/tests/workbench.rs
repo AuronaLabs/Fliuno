@@ -2318,11 +2318,22 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     using_default.expect("Press Enter to write a message");
     using_default.keys("n");
     using_default.expect("Enter Send");
-    using_default.keys("Use the saved default.\r");
-    let third = requests.recv_timeout(Duration::from_secs(12)).unwrap();
+    // The composer is visible during the startup history refresh. Wait until
+    // that command finishes before submitting, and verify the draft actually
+    // reached the composer. A timeout should report the screen, including RPC errors.
+    using_default.keys("Use the saved default.");
+    using_default.expect("Use the saved default.");
+    using_default.ready();
+    using_default.keys("\r");
+    using_default.expect("Saved default answer");
+    let third = requests.recv_timeout(Duration::from_secs(1)).unwrap();
     assert_eq!(third["model"], "second-model");
     assert_eq!(third["reasoning"]["effort"], "high");
-    using_default.expect("Saved default answer");
+    assert!(
+        third["input"]
+            .to_string()
+            .contains("Use the saved default.")
+    );
     using_default.quit("\x03");
     provider.join().unwrap();
 }
