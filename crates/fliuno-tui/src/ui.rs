@@ -29,8 +29,8 @@ use crate::{
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactGetParams, ArtifactSummary,
-    Message, ObjectPage, Session, SessionHistoryRole, Task, TaskResumeDisposition, TaskStatus,
-    TaskSummary, WorkActionKind, WorkSnapshot, Workspace,
+    Message, ObjectPage, PolicyReadRule, PolicyReadRuleCreateParams, Session, SessionHistoryRole,
+    Task, TaskResumeDisposition, TaskStatus, TaskSummary, WorkActionKind, WorkSnapshot, Workspace,
 };
 use ratatui::{
     Frame,
@@ -80,8 +80,10 @@ enum Layer {
         id: String,
         text: String,
         allow_once: bool,
+        remember: Option<Box<PolicyReadRuleCreateParams>>,
         scroll: u16,
     },
+    ReadRules(Option<Vec<PolicyReadRule>>, usize),
     Preview(Box<Preview>, u16),
     ConfirmCancel(String),
     Recovery(String, u16),
@@ -183,6 +185,7 @@ pub struct App {
     online: bool,
     model: Option<String>,
     model_profiles: bool,
+    read_rules: bool,
     busy: bool,
     next: Option<Request>,
     reopening: Option<String>,
@@ -232,6 +235,7 @@ impl App {
             online: false,
             model: None,
             model_profiles: false,
+            read_rules: false,
             busy: true,
             next: None,
             reopening: None,
@@ -542,10 +546,12 @@ impl App {
                 workspace,
                 model,
                 model_profiles,
+                read_rules,
             } => {
                 self.online = true;
                 self.model = model.and_then(model_label);
                 self.model_profiles = model_profiles;
+                self.read_rules = read_rules;
                 self.activity.clear();
                 self.message.clear();
                 let id = self.workspace.get_or_insert(workspace).id.clone();
@@ -764,10 +770,10 @@ impl App {
                     }
                 }
             }
-            Update::Approval(task, id, details) => {
+            Update::Approval(task, id, details, remember) => {
                 if self.selected.as_deref() == Some(task.as_str())
                     && matches!(self.layer, Layer::None)
-                    && let Some((text, allow_once)) = approval_review(
+                    && let Some((mut text, allow_once)) = approval_review(
                         &task,
                         &id,
                         self.workspace
@@ -778,14 +784,31 @@ impl App {
                         *details,
                     )
                 {
+                    if remember.is_some()
+                        && let Some(arguments) = text.find("\nTool:")
+                    {
+                        text.insert_str(arguments, "\nRemember the same path and read options\nin this conversation for 1 hour.\nRevoke with /permissions.\n");
+                    }
                     self.message.clear();
                     self.layer = Layer::Approval {
                         task,
                         id,
                         text,
                         allow_once,
+                        remember,
                         scroll: 0,
                     };
+                }
+            }
+            Update::ReadRules(workspace, rules) => {
+                if self
+                    .workspace
+                    .as_ref()
+                    .is_some_and(|root| root.id == workspace)
+                    && let Layer::ReadRules(current, index) = &mut self.layer
+                {
+                    *index = (*index).min(rules.len().saturating_sub(1));
+                    *current = Some(rules);
                 }
             }
             Update::Preview(preview) => {
@@ -897,6 +920,7 @@ impl App {
                 self.online = false;
                 self.model = None;
                 self.model_profiles = false;
+                self.read_rules = false;
                 self.activity.clear();
                 self.layer = Layer::None;
                 self.next = None;
@@ -1264,6 +1288,15 @@ impl App {
                         }
                         return false;
                     }
+                    CommandAction::ReadRules => {
+                        if self.send(worker, Request::ReadRules) {
+                            self.message.clear();
+                            self.layer = Layer::ReadRules(None, 0);
+                        } else {
+                            self.layer = Layer::Commands(menu);
+                        }
+                        return false;
+                    }
                     CommandAction::Help => {
                         self.layer = Layer::Commands(CommandMenu::new(CommandOrigin::Composer));
                         return false;
@@ -1553,19 +1586,39 @@ impl App {
                 task,
                 id,
                 allow_once,
+                remember,
                 scroll,
                 ..
             } => {
                 scroll_key(key.code, scroll);
-                if pressed {
-                    let decision = match key.code {
-                        KeyCode::Char('y') if *allow_once => Some(ApprovalDecision::AllowOnce),
-                        KeyCode::Char('n') => Some(ApprovalDecision::Deny),
+                if pressed && !ctrl {
+                    request = match key.code {
+                        KeyCode::Char('y') if *allow_once => Some(Request::Decide(
+                            task.clone(),
+                            id.clone(),
+                            ApprovalDecision::AllowOnce,
+                        )),
+                        KeyCode::Char('n') => Some(Request::Decide(
+                            task.clone(),
+                            id.clone(),
+                            ApprovalDecision::Deny,
+                        )),
+                        KeyCode::Char('r') if *allow_once => remember.as_ref().map(|scope| {
+                            Request::RememberRead(task.clone(), id.clone(), scope.clone())
+                        }),
                         _ => None,
                     };
-                    if let Some(decision) = decision {
-                        request = Some(Request::Decide(task.clone(), id.clone(), decision));
-                        close = true;
+                    close = request.is_some();
+                }
+            }
+            Layer::ReadRules(rules, index) => {
+                if let Some(rules) = rules {
+                    step(key.code, index, rules.len());
+                    if pressed
+                        && key.code == KeyCode::Delete
+                        && let Some(rule) = rules.get(*index)
+                    {
+                        request = Some(Request::RevokeRead(rule.id.clone()));
                     }
                 }
             }
@@ -2198,6 +2251,13 @@ impl App {
                 label: "Switch model",
                 alias: Some("model"),
                 action: CommandAction::ModelProfiles,
+            });
+        }
+        if self.online && self.read_rules && self.workspace.is_some() && !self.busy {
+            commands.push(Command {
+                label: "Manage read permissions",
+                alias: Some("permissions"),
+                action: CommandAction::ReadRules,
             });
         }
         if menu.origin == CommandOrigin::Slash {
@@ -3003,6 +3063,7 @@ mod tests {
                 id: "approval".into(),
                 text: "Operation with many arguments\n".repeat(40),
                 allow_once: true,
+                remember: None,
                 scroll: 10,
             };
             let mut loading = Terminal::new(TestBackend::new(48, 18)).unwrap();

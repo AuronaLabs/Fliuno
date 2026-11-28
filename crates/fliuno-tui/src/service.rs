@@ -17,10 +17,11 @@ use fliuno_protocol::{
     ModelProfileConnectionTarget, ModelProfileConnectionView, ModelProfileCredentialInput,
     ModelProfileDefault, ModelProfileEditGetParams, ModelProfileEditParams, ModelProfileEditView,
     ModelProfileEntry, ModelProfileList, ModelProfileSelectParams, ModelUsageSummary,
-    ModelUsageTotals, ObjectPage, ProviderModelListParams, ProviderModelPage, Session,
-    SessionContextParams, SessionForkParams, SessionHistoryListPage, SessionHistoryListParams,
-    SessionHistoryRole, SessionListOrder, SessionListParams, Task, TaskContext,
-    TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
+    ModelUsageTotals, ObjectPage, PolicyReadRule, PolicyReadRuleCreateParams,
+    PolicyReadRuleRevokeParams, PolicyReadTool, ProviderModelListParams, ProviderModelPage,
+    Session, SessionContextParams, SessionForkParams, SessionHistoryListPage,
+    SessionHistoryListParams, SessionHistoryRole, SessionListOrder, SessionListParams, Task,
+    TaskContext, TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
     TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
     TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
     TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
@@ -35,7 +36,7 @@ use std::{
     rc::Rc,
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 const POLL_REFRESH: Duration = Duration::from_millis(750);
@@ -100,6 +101,9 @@ pub enum Request {
     CancelQueued(TaskQueueItemParams),
     Approval(String, String),
     Decide(String, String, ApprovalDecision),
+    RememberRead(String, String, Box<PolicyReadRuleCreateParams>),
+    ReadRules,
+    RevokeRead(String),
     Answer(String, String, String),
     Steer(String, String),
     Cancel(String),
@@ -180,6 +184,7 @@ pub enum Update {
         workspace: Workspace,
         model: Option<String>,
         model_profiles: bool,
+        read_rules: bool,
     },
     ModelProfiles(
         ModelProfileList,
@@ -221,7 +226,13 @@ pub enum Update {
     Approvals(Vec<ApprovalSummary>, bool),
     Jump(Session, String),
     History(HistoryPage, bool),
-    Approval(String, String, Box<ApprovalDetails>),
+    Approval(
+        String,
+        String,
+        Box<ApprovalDetails>,
+        Option<Box<PolicyReadRuleCreateParams>>,
+    ),
+    ReadRules(String, Vec<PolicyReadRule>),
     Preview(Box<Preview>),
     Started(String),
     Enqueued(TaskQueueItem),
@@ -489,11 +500,13 @@ fn serve(
                         .as_str()
                         .map(str::to_owned);
                     let model_profiles = server.supports("modelProfiles");
+                    let read_rules = server.supports("workspaceReadRules");
                     service = Some(server);
                     out.send(Update::Online {
                         workspace,
                         model,
                         model_profiles,
+                        read_rules,
                     })?;
                     Ok(())
                 }) {
@@ -1160,17 +1173,38 @@ impl Service {
                 out.send(Update::Notice("Queued prompt cancelled".into()))?;
                 Update::Queue(self.task_queue(&target.session_id)?)
             }
-            Request::Approval(task, approval) => {
-                let details =
-                    self.rpc("approval/get", json!({"taskId":task,"approvalId":approval}))?;
-                Update::Approval(task, approval, Box::new(details))
-            }
+            Request::Approval(task, approval) => self.review(task, approval)?,
             Request::Decide(task, approval, decision) => {
-                let _: Value = self.rpc(
-                    "approval/respond",
-                    json!({"taskId":task,"approvalId":approval,"decision":decision}),
-                )?;
+                self.decide(&task, &approval, decision)?;
                 return self.changed(&task, out);
+            }
+            Request::RememberRead(task, approval, mut scope) => {
+                if self.workspace.as_ref() != Some(&scope.workspace_id)
+                    || self.session != scope.session_id
+                {
+                    return Err("The reviewed read is outside the active conversation".into());
+                }
+                let now = i64::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())?;
+                scope.expires_at_ms = now.saturating_add(60 * 60 * 1000);
+                self.decide(&task, &approval, ApprovalDecision::AllowOnce)?;
+                let saved: Result<PolicyReadRule> = self.rpc("policy/createReadRule", json!(scope));
+                out.send(Update::Notice(match saved {
+                    Ok(_) => "Matching reads allowed in this conversation for 1 hour".into(),
+                    Err(error) => format!("Allowed once; could not confirm a saved rule: {error}"),
+                }))?;
+                return self.changed(&task, out);
+            }
+            Request::ReadRules => self.read_rules()?,
+            Request::RevokeRead(rule) => {
+                let workspace_id = self.workspace.clone().ok_or("Open a workspace first")?;
+                let _: PolicyReadRule = self.rpc(
+                    "policy/revoke",
+                    json!(PolicyReadRuleRevokeParams {
+                        workspace_id,
+                        rule_id: rule,
+                    }),
+                )?;
+                self.read_rules()?
             }
             Request::Answer(task, call, answer) => {
                 let _: Value = self.rpc("task/respondToolInput", json!({"taskId":task,"callId":call,"requestId":request_id(),"responses":{"answer":answer}}))?;
@@ -1259,9 +1293,7 @@ impl Service {
                 out.send(Update::Jump(target, task.clone()))?;
                 out.send(Update::Detail(Box::new(detail)))?;
                 if let Some(approval) = approval {
-                    let details: ApprovalDetails =
-                        self.rpc("approval/get", json!({"taskId":task,"approvalId":approval}))?;
-                    out.send(Update::Approval(task, approval, Box::new(details)))?;
+                    out.send(self.review(task, approval)?)?;
                 }
                 return self.refresh(out, true);
             }
@@ -1403,6 +1435,59 @@ impl Service {
             }
         };
         out.send(update)?;
+        Ok(())
+    }
+
+    fn review(&mut self, task: String, id: String) -> Result<Update> {
+        let details: ApprovalDetails =
+            self.rpc("approval/get", json!({"taskId":task,"approvalId":id}))?;
+        let remember = if self.supports("workspaceReadRules")
+            && self.session.is_some()
+            && let Some(workspace) = self.workspace.clone()
+            && let ApprovalDetails::ToolCall { approval } = &details
+            && approval.task_id == task
+            && approval.id == id
+            && approval.call.name == "workspace_read_text"
+            && approval.call.arguments["path"].is_string()
+            && let Some(authority) = &approval.authority
+        {
+            let tools: Vec<PolicyReadTool> = self.rpc("policy/readTools", json!({}))?;
+            tools
+                .into_iter()
+                .any(|tool| tool.name == approval.call.name && tool.authority == *authority)
+                .then(|| {
+                    Box::new(PolicyReadRuleCreateParams {
+                        workspace_id: workspace,
+                        session_id: self.session.clone(),
+                        tool_name: approval.call.name.clone(),
+                        expected_authority: authority.clone(),
+                        arguments: approval.call.arguments.clone(),
+                        expires_at_ms: 0,
+                        client_request_id: request_id(),
+                    })
+                })
+        } else {
+            None
+        };
+        Ok(Update::Approval(task, id, Box::new(details), remember))
+    }
+
+    fn read_rules(&mut self) -> Result<Update> {
+        let workspace = self.workspace.clone().ok_or("Open a workspace first")?;
+        let rules = self.rpc("policy/list", json!({"workspaceId":workspace}))?;
+        Ok(Update::ReadRules(workspace, rules))
+    }
+
+    fn decide(&mut self, task: &str, approval: &str, decision: ApprovalDecision) -> Result<()> {
+        let method = if self.supports("approvalRespondDecision") {
+            "approval/respondDecision"
+        } else {
+            "approval/respond"
+        };
+        let _: Value = self.rpc(
+            method,
+            json!({"taskId":task,"approvalId":approval,"decision":decision}),
+        )?;
         Ok(())
     }
 

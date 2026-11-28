@@ -312,6 +312,7 @@ impl App {
             Layer::DraftContext { .. } => (76, 19),
             Layer::Recovery(..) | Layer::Reconcile(_) | Layer::Backup(_) => (88, 19),
             Layer::Approval { .. } => (88, 21),
+            Layer::ReadRules(..) => (76, 17),
             _ => (104, u16::MAX),
         };
         let top_gap = u16::from(area.height >= 22);
@@ -395,15 +396,25 @@ impl App {
                 ),
                 "Enter start first / Del remove / g blocking task / r refresh",
             ),
-            Layer::Approval { allow_once, .. } => (
+            Layer::Approval {
+                allow_once,
+                remember,
+                ..
+            } => (
                 "Review operation".into(),
                 if self.busy {
                     "Loading review…  ·  Esc Back"
+                } else if *allow_once && remember.is_some() {
+                    "y Allow once  ·  n Deny  ·  Esc Back\nr Remember read for 1 hour"
                 } else if *allow_once {
                     "y Allow once  ·  n Deny  ·  Esc Back"
                 } else {
                     "n Deny  ·  Esc Back"
                 },
+            ),
+            Layer::ReadRules(..) => (
+                "Read permissions".into(),
+                "↑↓ Select  ·  Del Revoke  ·  Esc Back",
             ),
             Layer::Recovery(id, _) => {
                 let actions = match self.detail.as_ref().filter(|detail| detail.task.id == *id) {
@@ -466,21 +477,16 @@ impl App {
         if body.is_empty() {
             return;
         }
-        let footer_height = if actions.is_empty() || body.height < 2 {
-            0
-        } else if body.height >= 4 && actions.width() > usize::from(body.width) {
-            2
-        } else {
-            1
-        };
+        let actions = Paragraph::new(actions)
+            .wrap(Wrap { trim: true })
+            .style(self.palette.label);
+        let footer_height = actions
+            .line_count(body.width)
+            .min(usize::from(body.height.saturating_sub(1)))
+            .min(2) as u16;
         let [body, footer] =
             Layout::vertical([Constraint::Min(0), Constraint::Length(footer_height)]).areas(body);
-        frame.render_widget(
-            Paragraph::new(actions)
-                .wrap(Wrap { trim: true })
-                .style(self.palette.label),
-            footer,
-        );
+        frame.render_widget(actions, footer);
         match &self.layer {
             Layer::None => {}
             Layer::Inbox(_) | Layer::History(_) | Layer::TaskBrowser(_) => {}
@@ -581,6 +587,40 @@ impl App {
                 self.palette.choice,
             ),
             Layer::Approval { text, scroll, .. } => render_text(frame, body, text, *scroll),
+            Layer::ReadRules(rules, index) => match rules {
+                Some(rules) if !rules.is_empty() => {
+                    let active = self.session.as_ref().map(|session| session.id.as_str());
+                    let items = rules
+                        .iter()
+                        .map(|rule| {
+                            let scope = match rule.session_id.as_deref() {
+                                None => "workspace",
+                                Some(session) if Some(session) == active => "this conversation",
+                                Some(_) => "another conversation",
+                            };
+                            let target = rule.arguments["path"].as_str().unwrap_or(&rule.tool_name);
+                            let target = clean(target).replace('\n', " ");
+                            format!(
+                                "{}\n    {}",
+                                ellipsis(&target, usize::from(body.width.saturating_sub(2))),
+                                scope
+                            )
+                        })
+                        .collect();
+                    render_list(frame, body, items, *index, self.palette.choice);
+                }
+                Some(_) => render_text(frame, body, "No active read permissions", 0),
+                None => render_text(
+                    frame,
+                    body,
+                    if self.message.is_empty() {
+                        "Loading read permissions…"
+                    } else {
+                        &self.message
+                    },
+                    0,
+                ),
+            },
             Layer::Recovery(id, scroll) => {
                 if let Some(detail) = self.detail.as_ref().filter(|detail| detail.task.id == *id) {
                     let mut text = detail.resume.as_ref().map_or_else(String::new, |status| {

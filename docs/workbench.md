@@ -117,6 +117,8 @@ name = "your-local-model"
 
 官方端点预设包括 `openai`、`anthropic` 和 `gemini`。协议 ID 为 `openai.responses`、`openai.compatible`、`claude.message` 和 `google.gemini.interactions`。已有的内联模型连接和旧协议拼写仍可读取。档案引用供应商后，不能再单独覆盖 Base URL 或凭据。本机无 Key 连接仍限于回环地址和 `openai.compatible`。目前请在用户配置中维护供应商，模型选择器可以编辑所绑定的模型和思考强度。
 
+开发中的 0.0.21 在文本读取审批中提供 `r`：允许本次读取，并记住当前会话中参数完全相同的读取一小时。文件内容以后变化时，该授权仍适用于同一路径和读取范围。补丁、项目检查和其他读取范围各自审批。输入 `/permissions` 后按 `Tab` 打开当前工作区的只读授权列表，用方向键选择、`Del` 撤销。
+
 | 项目 | 默认或覆盖方式 |
 | --- | --- |
 | 用户配置 | `~/.fliuno/config.toml`。`--config PATH` 可使用其他文件。配置里的相对路径均以该文件所在目录为基准。 |

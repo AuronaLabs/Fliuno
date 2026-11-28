@@ -2182,7 +2182,7 @@ fn composer_commands_start_and_resume_conversations_without_consuming_literal_in
     .unwrap();
 
     let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    console.expect("What would you like to do in this folder?");
+    console.expect("Describe a change or ask about the project");
     console.resize(24, 80);
     console.ready();
     console.keys("/");
@@ -2192,7 +2192,7 @@ fn composer_commands_start_and_resume_conversations_without_consuming_literal_in
     console.capture("composer-commands-80");
     console.keys("new\t");
     console.expect("Untitled session");
-    console.expect("What would you like to do in this folder?");
+    console.expect("Describe a change or ask about the project");
 
     console.resize(22, 48);
     console.ready();
@@ -2204,7 +2204,7 @@ fn composer_commands_start_and_resume_conversations_without_consuming_literal_in
     console.keys("\x1b[B\r");
     console.expect_absent("Sessions");
     console.expect("Fliuno  /  Conversation");
-    console.expect("What would you like to do in this folder?");
+    console.expect("Describe a change or ask about the project");
 
     console.keys("/tmp/notes");
     console.expect("/tmp/notes");
@@ -2216,7 +2216,7 @@ fn composer_commands_start_and_resume_conversations_without_consuming_literal_in
     console.quit("\x03");
 
     let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    reopened.expect("What would you like to do in this folder?");
+    reopened.expect("Describe a change or ask about the project");
     reopened.keys("\x1b[200~/new\x1b[201~");
     reopened.expect("/new");
     reopened.ready();
@@ -2927,7 +2927,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                 ]}),
             )
         };
-        for step in 0..9 {
+        for step in 0..11 {
             let (mut socket, request) = streaming_fixture_input(&listener);
             let input = request["input"].as_array().unwrap();
             let result = || {
@@ -3044,6 +3044,15 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                     assert_eq!(result()["stdout"]["data"], "greeting check passed\n");
                     complete("已更新问候语，并通过项目检查。")
                 }
+                9 => call(
+                    "read-after-revoke",
+                    "workspace_read_text",
+                    json!({"path":"src/greeting.txt"}),
+                ),
+                10 => {
+                    assert_eq!(result()["content"], "Welcome to Fliuno\n");
+                    complete("已再次读取问候语。")
+                }
                 _ => unreachable!(),
             };
             let event = json!({"type":"response.completed","response":{"status":"completed","output":[output]}});
@@ -3131,7 +3140,6 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             "Patch file: src/greeting.txt",
             "Apply a patch to a workspace file",
         ),
-        ("Read file: src/greeting.txt", "Read a workspace file"),
         (
             "Run project check: Greeting check",
             "Run project check: Greeting check",
@@ -3179,7 +3187,20 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                 terminal.capture(&format!("project-check-approval-{cols}"));
             }
         }
-        terminal.keys("y");
+        if preview.starts_with("Read file:") {
+            for cols in [48, 80, 110] {
+                terminal.resize(24, cols);
+                terminal.ready();
+                terminal.expect("r Remember read for 1 hour");
+                terminal.expect("Revoke with");
+                terminal.expect("/permissions");
+                terminal.capture(&format!("project-read-approval-{cols}"));
+            }
+            terminal.keys("r");
+        } else {
+            terminal.expect_absent("Remember read for 1 hour");
+            terminal.keys("y");
+        }
         terminal.expect_absent("y Allow once");
     }
     terminal.expect("已更新问候语");
@@ -3202,6 +3223,33 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         diff.contains("-Hello world\n+Welcome to Fliuno\n"),
         "{diff}"
     );
+    terminal.expect("Ask a follow-up");
+    terminal.keys("/permissions");
+    terminal.expect("Manage read permissions");
+    terminal.keys("\t");
+    terminal.expect("Read permissions");
+    terminal.expect("src/greeting.txt");
+    terminal.expect("this conversation");
+    for cols in [48, 80, 110] {
+        terminal.resize(24, cols);
+        terminal.ready();
+        terminal.expect("Del Revoke");
+        terminal.capture(&format!("project-read-permissions-{cols}"));
+    }
+    terminal.keys("\x1b[3~");
+    terminal.expect("No active read permissions");
+    terminal.keys("\x1b");
+    terminal.expect_absent("Read permissions");
+    terminal.keys("\r");
+    terminal.expect("Ask a follow-up");
+    terminal.keys("再读一次问候语\r");
+    terminal.expect("Read file: src/greeting.txt");
+    terminal.expect("a Open");
+    terminal.ready();
+    terminal.keys("a");
+    terminal.expect("y Allow once");
+    terminal.keys("y");
+    terminal.expect("已再次读取问候语");
     terminal.quit("\x03");
     model.join().unwrap();
 }
