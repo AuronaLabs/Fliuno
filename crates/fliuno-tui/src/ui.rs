@@ -1,4 +1,5 @@
 mod answer;
+mod approval;
 mod commands;
 mod deliverables;
 mod language;
@@ -82,10 +83,8 @@ enum Layer {
     Approval {
         task: String,
         id: String,
-        text: String,
-        allow_once: bool,
+        review: Box<approval::Review>,
         remember: Option<Box<PolicyReadRuleCreateParams>>,
-        scroll: u16,
     },
     ReadRules(Option<Vec<PolicyReadRule>>, usize),
     ProjectReview {
@@ -793,7 +792,7 @@ impl App {
             Update::Approval(task, id, details, remember) => {
                 if self.selected.as_deref() == Some(task.as_str())
                     && matches!(self.layer, Layer::None)
-                    && let Some((text, allow_once)) = approval_review(
+                    && let Some(review) = approval::review(
                         &task,
                         &id,
                         self.workspace
@@ -810,10 +809,8 @@ impl App {
                     self.layer = Layer::Approval {
                         task,
                         id,
-                        text,
-                        allow_once,
+                        review: Box::new(review),
                         remember,
-                        scroll: 0,
                     };
                 }
             }
@@ -1671,15 +1668,15 @@ impl App {
             Layer::Approval {
                 task,
                 id,
-                allow_once,
+                review,
                 remember,
-                scroll,
-                ..
             } => {
-                scroll_key(key.code, scroll);
+                if !ctrl {
+                    review.navigate(key.code, pressed);
+                }
                 if pressed && !ctrl {
                     request = match key.code {
-                        KeyCode::Char('y') if *allow_once => Some(Request::Decide(
+                        KeyCode::Char('y') if review.allow_once => Some(Request::Decide(
                             task.clone(),
                             id.clone(),
                             ApprovalDecision::AllowOnce,
@@ -1689,7 +1686,7 @@ impl App {
                             id.clone(),
                             ApprovalDecision::Deny,
                         )),
-                        KeyCode::Char('r') if *allow_once => remember.as_ref().map(|scope| {
+                        KeyCode::Char('r') if review.allow_once => remember.as_ref().map(|scope| {
                             Request::RememberRead(task.clone(), id.clone(), scope.clone())
                         }),
                         _ => None,
@@ -3003,203 +3000,6 @@ fn exact_edit_text(text: &str) -> String {
     visible
 }
 
-fn approval_review(
-    task: &str,
-    id: &str,
-    root: &str,
-    details: ApprovalDetails,
-    language: Language,
-    remember: bool,
-) -> Option<(String, bool)> {
-    match details {
-        ApprovalDetails::ToolCall { approval } => {
-            if approval.task_id != task || approval.id != id {
-                return None;
-            }
-            if let Some(plan) = approval.execution_plan.as_ref()
-                && let Some(text) = project_check_review(root, plan, language)
-            {
-                return Some((text, true));
-            }
-            let call = &approval.call;
-            if call.name == "workspace_edit_text" {
-                let path = clean(call.arguments["path"].as_str()?);
-                let base = call.arguments["baseSha256"].as_str()?;
-                let before = exact_edit_text(call.arguments["oldText"].as_str()?);
-                let replacement = call.arguments["newText"].as_str()?;
-                let after = if replacement.is_empty() {
-                    language.text("(remove text)", "（移除文本）").into()
-                } else {
-                    exact_edit_text(replacement)
-                };
-                return Some((
-                    format!(
-                        "{}\n{}: {path}\n\n{}\n{before}\n\n{}\n{after}\n\n{}\n\n{}: {root}\n{}: {base}",
-                        language.text("Replace an exact text match", "替换精确匹配的文本"),
-                        language.text("Path", "路径"),
-                        language.text("Before", "替换前"),
-                        language.text("After", "替换后"),
-                        language.text(
-                            "Requires one match and an unchanged file.",
-                            "要求原文只匹配一次，且文件尚未变更。"
-                        ),
-                        language.text("Workspace", "工作区"),
-                        language.text("Base SHA-256", "基准 SHA-256"),
-                    ),
-                    true,
-                ));
-            }
-            let (action, consequence, preview_key) = match call.name.as_str() {
-                "artifact_create" => (
-                    language.text("Save a text deliverable", "保存文字交付物"),
-                    language.text("Creates an item in Deliverables. No workspace file is written.", "在交付物中保存一项，不会写入工作区文件。"),
-                    Some(("content", language.text("Text to save", "将要保存的文字"))),
-                ),
-                "artifact_create_binary" => (
-                    language.text("Save a downloadable deliverable", "保存可下载交付物"),
-                    language.text("Creates an item in Deliverables. No workspace file is written.", "在交付物中保存一项，不会写入工作区文件。"),
-                    None,
-                ),
-                "workspace_create_text" => (
-                    language.text("Create a workspace file", "创建工作区文件"),
-                    language.text("Writes a new file at the requested path. Existing files are not overwritten.", "在指定路径新建文件，不会覆盖已有文件。"),
-                    Some(("content", language.text("Text to write", "将要写入的文字"))),
-                ),
-                "workspace_patch_text" => (
-                    language.text("Apply a patch to a workspace file", "为工作区文件应用补丁"),
-                    language.text("Changes the file only if its saved contents still match the reviewed base.", "仅在文件内容仍与审阅时的基准一致时应用。"),
-                    Some(("patch", language.text("Patch to apply", "将要应用的补丁"))),
-                ),
-                "workspace_replace_text" => (
-                    language.text("Write a workspace file", "写入工作区文件"),
-                    language.text("Creates or replaces the specified file. An existing file must match the reviewed base.", "新建或替换指定文件。已有文件必须仍与审阅时的基准一致。"),
-                    Some(("content", language.text("Text to write", "将要写入的文字"))),
-                ),
-                "workspace_find" => (
-                    language.text("Search project files", "搜索项目文件"),
-                    language.text("Searches the selected directory for matching names or text. No file is changed.", "在指定目录匹配文件名或内容，不会改动文件。"),
-                    None,
-                ),
-                "workspace_read_text" | "workspace_read_bytes" => (
-                    language.text("Read a workspace file", "读取工作区文件"),
-                    language.text("Sends the requested file content to the model. No file is changed.", "将请求的文件内容发送给模型，不会改动文件。"),
-                    None,
-                ),
-                _ => (
-                    language.text("Review this operation", "审阅此次操作"),
-                    language.text("Check the target and arguments before allowing it.", "允许前请核对目标和参数。"),
-                    None,
-                ),
-            };
-            let mut arguments = call.arguments.clone();
-            let preview = preview_key.and_then(|(key, label)| {
-                arguments
-                    .as_object_mut()?
-                    .remove(key)
-                    .map(|value| (label, value))
-            });
-            let identity = call.arguments["path"]
-                .as_str()
-                .map(|value| (language.text("Path", "路径"), value))
-                .or_else(|| {
-                    call.arguments["title"]
-                        .as_str()
-                        .map(|value| (language.text("Title", "标题"), value))
-                });
-            let mut text = format!(
-                "{action}\n{consequence}\n\n{}: {root}\n",
-                language.text("Workspace", "工作区")
-            );
-            if let Some((kind, value)) = identity {
-                text.push_str(&format!("{kind}: {}\n", clean(value).replace('\n', " ")));
-            }
-            text.push_str(language.text(
-                "\nAllow once runs this request. Deny stops it without running the operation.\n",
-                "\n允许一次会执行此请求。拒绝后不执行。\n",
-            ));
-            if let Some((label, value)) = preview {
-                text.push_str(&format!(
-                    "\n{label}\n{}\n",
-                    value
-                        .as_str()
-                        .unwrap_or(language.text("(invalid text)", "（无效文本）"))
-                ));
-            }
-            if let Some(plan) = &approval.execution_plan {
-                let plan = serde_json::to_string_pretty(plan).unwrap_or_default();
-                text.push_str(&format!(
-                    "\n{}\n{plan}\n",
-                    language.text("Execution details", "执行详情")
-                ));
-            }
-            if remember {
-                text.push_str(language.text(
-                    "\nRemember the same path and read options\nin this conversation for 1 hour.\nRevoke with /permissions.\n",
-                    "\n在此对话中记住相同路径和读取参数一小时。\n可用 /permissions 撤销。\n",
-                ));
-            }
-            let arguments = serde_json::to_string_pretty(&arguments).unwrap_or_default();
-            text.push_str(&format!(
-                "\n{}: {}\n{}\n{arguments}",
-                language.text("Tool", "工具"),
-                call.name,
-                language.text("Arguments", "参数")
-            ));
-            Some((text, true))
-        }
-        ApprovalDetails::AgentPermission { ref approval }
-        | ApprovalDetails::HostTool { ref approval } => {
-            if approval.id != id {
-                return None;
-            }
-            let label = match details {
-                ApprovalDetails::HostTool { .. } => "Agent host tool",
-                _ => "External Agent permission",
-            };
-            let request = serde_json::to_string_pretty(&approval.request).unwrap_or_default();
-            Some((
-                format!(
-                    "{label}\nWorkspace: {root}\nRun: {}\n\n{request}",
-                    approval.run_id
-                ),
-                approval.allow_once_available,
-            ))
-        }
-    }
-}
-
-fn project_check_review(
-    root: &str,
-    plan: &serde_json::Value,
-    language: Language,
-) -> Option<String> {
-    if plan["kind"] != "project_check" {
-        return None;
-    }
-    let label = plan["label"].as_str()?;
-    let command = project_check_command(plan)?;
-    let inputs = plan["inputs"].as_object()?;
-    let isolation = match plan["isolation"].as_str()? {
-        "windows_app_container" => "Windows AppContainer",
-        "linux_landlock" => "Linux Landlock",
-        _ => return None,
-    };
-    let mut text = format!(
-        "{}: {label}\n\n{}: {command}\n{}\n{}: {isolation}\n\n{} {root}\n",
-        language.text("Run project check", "运行项目检查"),
-        language.text("Command", "命令"),
-        language.text("Run from: private snapshot", "运行位置：私有快照"),
-        language.text("Isolation", "隔离方式"),
-        language.text("Copy from", "复制自"),
-    );
-    for path in inputs.keys() {
-        text.push_str(&format!("  {path}\n"));
-    }
-    text.push_str(language.text("\nOnly listed copies are checked. Changes in the scratch directory are not written back. Deny skips the check.\n\nExecution details\n", "\n只检查列出的副本。临时目录中的更改不会写回工作区。拒绝会跳过此次检查。\n\n执行详情\n"));
-    text.push_str(&serde_json::to_string_pretty(plan).ok()?);
-    Some(text)
-}
-
 fn project_check_command(plan: &serde_json::Value) -> Option<String> {
     let mut words = Vec::new();
     words.push(plan["program"].as_str()?);
@@ -3302,10 +3102,12 @@ mod tests {
             app.layer = Layer::Approval {
                 task: "task".into(),
                 id: "approval".into(),
-                text: "Operation with many arguments\n".repeat(40),
-                allow_once: true,
+                review: Box::new(approval::Review::new(
+                    "Operation with many arguments\n".repeat(40),
+                    String::new(),
+                    true,
+                )),
                 remember: None,
-                scroll: 10,
             };
             let mut loading = Terminal::new(TestBackend::new(48, 18)).unwrap();
             let frame = loading.draw(|frame| app.draw(frame)).unwrap();
@@ -3354,7 +3156,7 @@ mod tests {
             approval: approval.clone(),
         };
         assert!(
-            approval_review(
+            approval::review(
                 "task",
                 "different",
                 "root",
@@ -3364,7 +3166,7 @@ mod tests {
             )
             .is_none()
         );
-        let (text, allow_once) = approval_review(
+        let review = approval::review(
             "task",
             "approval",
             "root",
@@ -3373,14 +3175,14 @@ mod tests {
             false,
         )
         .unwrap();
-        assert!(text.contains("External Agent permission"));
-        assert!(text.contains("Read report"));
-        assert!(!allow_once);
+        assert!(review.summary().contains("External Agent permission"));
+        assert!(review.summary().contains("Read report"));
+        assert!(!review.allow_once);
 
         approval.allow_once_available = true;
         approval.source = fliuno_protocol::AgentApprovalSource::HostTool;
         let details = ApprovalDetails::HostTool { approval };
-        let (text, allow_once) = approval_review(
+        let review = approval::review(
             "task",
             "approval",
             "root",
@@ -3389,8 +3191,8 @@ mod tests {
             false,
         )
         .unwrap();
-        assert!(text.contains("Agent host tool"));
-        assert!(allow_once);
+        assert!(review.summary().contains("Agent host tool"));
+        assert!(review.allow_once);
     }
 
     #[test]

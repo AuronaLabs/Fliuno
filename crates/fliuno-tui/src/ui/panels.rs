@@ -416,20 +416,18 @@ impl App {
                 "Enter start first / Del remove / g blocking task / r refresh",
             ),
             Layer::Approval {
-                allow_once,
-                remember,
-                ..
+                review, remember, ..
             } => (
                 self.language.text("Review operation", "审阅操作").into(),
                 if self.busy {
                     self.language
                         .text("Loading review…  ·  Esc Back", "正在加载审阅… · Esc 返回")
-                } else if *allow_once && remember.is_some() {
+                } else if review.allow_once && remember.is_some() {
                     self.language.text(
                         "y Allow once  ·  n Deny  ·  Esc Back\nr Remember read for 1 hour",
                         "y 允许一次 · n 拒绝 · Esc 返回\nr 记住读取授权一小时",
                     )
-                } else if *allow_once {
+                } else if review.allow_once {
                     self.language.text(
                         "y Allow once  ·  n Deny  ·  Esc Back",
                         "y 允许一次 · n 拒绝 · Esc 返回",
@@ -643,7 +641,9 @@ impl App {
                 *index,
                 self.palette.choice,
             ),
-            Layer::Approval { text, scroll, .. } => render_text(frame, body, text, *scroll),
+            Layer::Approval { review, .. } => {
+                review.draw(frame, body, self.language, &self.palette)
+            }
             Layer::ProjectReview { scroll, .. } => self.draw_project_review(frame, body, *scroll),
             Layer::ReadRules(rules, index) => match rules {
                 Some(rules) if !rules.is_empty() => {
