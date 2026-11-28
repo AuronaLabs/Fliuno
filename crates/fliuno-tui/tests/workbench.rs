@@ -2533,12 +2533,11 @@ api_key_file = "fixture.key"
     release.send(()).unwrap();
     console.expect("found-model");
     console.expect_absent("other-model");
-    console.resize(22, 48);
-    console.capture("workbench-model-catalog-48");
-    console.resize(24, 80);
-    console.capture("workbench-model-catalog-80");
-    console.resize(28, 110);
-    console.capture("workbench-model-catalog-110");
+    for (rows, cols) in [(22, 48), (24, 80), (28, 110)] {
+        console.resize(rows, cols);
+        console.ready();
+        console.capture(&format!("workbench-model-catalog-{cols}"));
+    }
     console.keys("\r");
     console.expect("Edit model profile");
     console.expect("found-model");
@@ -2546,12 +2545,11 @@ api_key_file = "fixture.key"
     console.expect("Set reasoning effort");
     console.keys(&format!("{}\r", "\x1b[B".repeat(5)));
     console.expect("Reasoning: high");
-    console.resize(22, 48);
-    console.capture("workbench-model-edit-48");
-    console.resize(24, 80);
-    console.capture("workbench-model-edit-80");
-    console.resize(28, 110);
-    console.capture("workbench-model-edit-110");
+    for (rows, cols) in [(22, 48), (24, 80), (28, 110)] {
+        console.resize(rows, cols);
+        console.ready();
+        console.capture(&format!("workbench-model-edit-{cols}"));
+    }
     console.keys("\x13");
     console.expect("Profile saved. Enter to use it now.");
     console.expect("·  startup-model");
@@ -3376,4 +3374,235 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     terminal.expect("已再次读取问候语");
     terminal.quit("\x03");
     model.join().unwrap();
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
+    use std::net::TcpListener;
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let original = "[workbench]\ntheme = 'dark'\n[model]\nprovider = 'openai'\nprotocol = 'openai.compatible'\nname = 'original-model'\napi_key_file = 'original.key'\n";
+    std::fs::write(&config, original).unwrap();
+    std::fs::write(root.path().join("original.key"), "original-fixture-key").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let lab_url = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let local_url = "http://127.0.0.1:11434/v1/";
+    let key = "supplier-fixture-secret-key";
+    let mut console =
+        Console::launch_with_config_at(server.as_deref(), root.path(), Some(&config), (22, 48));
+    console.expect("Enter Send");
+    console.keys("Please preserve this draft.");
+    let open = |console: &mut Console, query: &str, expected: &str| {
+        console.keys("\x1bOP");
+        console.expect("Type to filter");
+        console.keys(query);
+        console.expect(&format!("Commands  /  {query}"));
+        console.keys("\r");
+        console.expect(expected);
+        console.ready();
+    };
+    open(&mut console, "settings", "No named suppliers");
+
+    let add_supplier = |console: &mut Console, id: &str, url: &str| {
+        console.keys("n");
+        console.expect("Supplier ID");
+        console.keys(&format!("{id}\r"));
+        console.expect("Endpoint preset");
+        console.keys("\x1b[B\x1b[B\x1b[B\r");
+        console.expect("Base URL");
+        console.keys(&format!("{url}\r"));
+        console.expect("Credentials");
+    };
+    add_supplier(&mut console, "lab", &lab_url);
+    console.keys("\r");
+    console.expect("API key · hidden");
+    #[cfg(unix)]
+    console.keys(&format!("\x1b[200~{key}\x1b[201~"));
+    #[cfg(windows)]
+    console.keys(key);
+    console.expect("••••••");
+    console.expect_absent(key);
+    console.capture("supplier-key-48");
+    console.keys("\r");
+    console.expect("Review and save");
+    console.expect_absent(key);
+    console.keys("\r");
+    console.expect("lab  ·  key set");
+    console.expect("Saved. Use /model");
+    let settings = fliuno_config::Settings::load(&config).unwrap();
+    #[cfg(windows)]
+    let _cleanup = {
+        struct RemoveFixture(String);
+        impl Drop for RemoveFixture {
+            fn drop(&mut self) {
+                let _ = Command::new("cmdkey")
+                    .arg(format!("/delete:{}.fliuno-model", self.0))
+                    .output();
+            }
+        }
+        let id = settings.providers["lab"]
+            .api_key_credential
+            .as_ref()
+            .unwrap();
+        assert!(uuid::Uuid::parse_str(id).is_ok());
+        RemoveFixture(id.clone())
+    };
+    #[cfg(unix)]
+    assert!(
+        settings.providers["lab"]
+            .api_key_file
+            .as_ref()
+            .unwrap()
+            .is_file()
+    );
+    assert!(settings.models.is_empty());
+    assert!(!std::fs::read_to_string(&config).unwrap().contains(key));
+
+    add_supplier(&mut console, "local", local_url);
+    console.keys("\x1b[B\x1b[B\r");
+    console.expect("No API key (loopback only)");
+    console.expect("Review and save");
+    console.keys("\r");
+    console.expect("local  ·  no key");
+    console.capture("supplier-list-48");
+    console.keys("\t");
+    console.expect("[Models]");
+    let bind = |console: &mut Console, profile: &str, model: &str, local: bool| {
+        console.keys("n");
+        console.expect("Model profile ID");
+        console.keys(&format!("{profile}\r"));
+        console.expect("lab  ·  key set");
+        if local {
+            console.keys("\x1b[B");
+            console.expect("> local  ·  no key");
+        }
+        console.keys("\r");
+        console.expect("Conversation protocol");
+        console.expect("> openai.compatible");
+        if local {
+            console.expect_absent("openai.responses");
+        }
+        console.keys("\r");
+        console.expect("ID accepted by the endpoint");
+        console.keys(&format!("{model}\r"));
+        console.expect("Adapter default");
+        if !local {
+            console.keys("\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B");
+            console.expect("> high");
+        }
+        console.keys("\r");
+        console.expect("Review and save");
+        console.expect(&format!("Model: {model}"));
+    };
+
+    bind(&mut console, "daily", "daily-model", false);
+    console.expect("Reasoning: high");
+    console.capture("binding-review-48");
+    console.resize(16, 48);
+    console.ready();
+    console.expect_absent("Reasoning: high");
+    console.keys("\x1b[B\x1b[B\x1b[B");
+    console.expect("Reasoning: high");
+    console.capture("binding-scroll-48");
+    for (rows, cols) in [(24, 80), (28, 110)] {
+        console.resize(rows, cols);
+        console.ready();
+        console.capture(&format!("binding-review-{cols}"));
+    }
+    let amended = format!(
+        "{}\n# concurrent change\n",
+        std::fs::read_to_string(&config).unwrap()
+    );
+    std::fs::write(&config, &amended).unwrap();
+    console.keys("\r");
+    console.expect("Model configuration changed");
+    console.expect("F5 Discard draft and reload");
+    console.capture("binding-stale-110");
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), amended);
+    console.keys("\x1b[15~");
+    console.expect_absent("Model configuration changed");
+    console.expect("[Models]");
+    console.ready();
+
+    bind(&mut console, "daily", "daily-model", false);
+    console.keys("\r");
+    console.expect("daily  ·  lab/daily-model");
+    console.ready();
+    bind(&mut console, "review", "review-model", false);
+    console.keys("\r");
+    console.expect("review  ·  lab/review-model");
+    console.ready();
+    bind(&mut console, "local", "local-model", true);
+    console.keys("\r");
+    console.expect("local  ·  local/local-model");
+    console.capture("binding-list-110");
+    console.ready();
+
+    let text = std::fs::read_to_string(&config).unwrap();
+    assert!(text.starts_with(original));
+    assert!(text.contains("# concurrent change"));
+    assert!(!text.contains(key));
+    let settings = fliuno_config::Settings::load(&config).unwrap();
+    for profile in ["daily", "review"] {
+        let configured = settings.named_model(profile).unwrap();
+        assert_eq!(configured.supplier.as_deref(), Some("lab"));
+        assert_eq!(configured.base_url.as_deref(), Some(lab_url.as_str()));
+        assert_eq!(configured.read_api_key().unwrap(), key);
+        assert_eq!(configured.reasoning_effort.unwrap().as_str(), "high");
+    }
+    let local = settings.named_model("local").unwrap();
+    assert_eq!(local.supplier.as_deref(), Some("local"));
+    assert!(local.read_model_key().unwrap().is_none());
+    assert!(settings.workbench.model_profile.is_none());
+
+    console.keys("\x1b");
+    console.expect_absent("[Models]");
+    console.expect("Please preserve this draft.");
+    open(&mut console, "model", "[model] [now/default]");
+    let (dispatched, received) = channel();
+    let provider = thread::spawn(move || {
+        let (mut socket, request) = streaming_fixture_request_with_key(&listener, Some(key));
+        dispatched.send(request).unwrap();
+        socket.write_all(concat!(
+            "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Named supplier replied.\"},\"finish_reason\":null}]}\n\n",
+            "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ).as_bytes()).unwrap();
+    });
+    console.keys("\x1b[B\r");
+    console.expect("Using daily-model");
+    console.ready();
+    console.keys("\r");
+    console.expect("Named supplier replied.");
+    console.expect("lab/daily-model");
+    console.expect_absent(key);
+    let request = received.recv_timeout(Duration::from_secs(15)).unwrap();
+    assert_eq!(request["model"], "daily-model");
+    assert_eq!(request["reasoning_effort"], "high");
+    assert!(
+        request["messages"]
+            .to_string()
+            .contains("Please preserve this draft.")
+    );
+    console.quit("\x03");
+    provider.join().unwrap();
+
+    let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    reopened.expect("original-model");
+    reopened.expect("lab/daily-model");
+    reopened.expect("Named supplier replied.");
+    reopened.ready();
+    reopened.keys("\r");
+    reopened.expect("Enter Send");
+    reopened.keys("/settings");
+    reopened.expect("Model settings and suppliers");
+    reopened.keys("\t");
+    reopened.expect("lab  ·  key set  ·  2 bound");
+    reopened.keys("\t");
+    reopened.expect("review  ·  lab/review-model");
+    reopened.expect_absent(key);
+    reopened.quit("\x03");
 }
