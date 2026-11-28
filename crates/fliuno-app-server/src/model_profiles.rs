@@ -2,13 +2,28 @@
 use super::{Error, RpcError, RpcServer};
 use fliuno_config::{ModelSettings, Provider, Settings};
 use fliuno_protocol::{
-    ModelProfileEntry, ModelProfileList, ProviderModelListParams, ProviderModelPage,
+    ModelConnectionCheck, ModelProfileEntry, ModelProfileList, ProviderModelListParams,
+    ProviderModelPage,
 };
 use std::path::PathBuf;
 
 pub(super) struct Catalog {
     path: PathBuf,
     active: Option<String>,
+}
+
+impl Catalog {
+    fn model_for_lookup<'a>(
+        &self,
+        settings: &'a Settings,
+        profile: Option<&str>,
+    ) -> Result<&'a ModelSettings, Error> {
+        if let Some(id) = profile.or(self.active.as_deref()) {
+            settings.model_for_launch(Some(id)).map_err(Error::Invalid)
+        } else {
+            Ok(&settings.model)
+        }
+    }
 }
 
 impl RpcServer {
@@ -61,20 +76,23 @@ impl RpcServer {
         Ok(ModelProfileList { active, profiles })
     }
 
+    pub(super) fn check_provider_model(
+        &self,
+        profile: Option<&str>,
+    ) -> Result<ModelConnectionCheck, RpcError> {
+        let catalog = self.model_profile_catalog()?;
+        let settings = Settings::load(&catalog.path).map_err(Error::Invalid)?;
+        let model = catalog.model_for_lookup(&settings, profile)?;
+        Ok(fliuno_providers::check_model_connection(model))
+    }
+
     pub(super) fn discover_provider_models(
         &self,
         params: ProviderModelListParams,
     ) -> Result<ProviderModelPage, RpcError> {
         let catalog = self.model_profile_catalog()?;
         let settings = Settings::load(&catalog.path).map_err(Error::Invalid)?;
-        let profile = params.profile.as_deref().or(catalog.active.as_deref());
-        let model = if let Some(id) = profile {
-            settings
-                .model_for_launch(Some(id))
-                .map_err(Error::Invalid)?
-        } else {
-            &settings.model
-        };
+        let model = catalog.model_for_lookup(&settings, params.profile.as_deref())?;
         fliuno_providers::discover_models(model, params.cursor.as_deref())
             .map_err(|error| Error::Invalid(error).into())
     }
@@ -192,6 +210,9 @@ api_key_file = "missing.key"
                 .unwrap()
                 .contains("existing model work")
         );
+        let check = rpc(&mut server, "models/check", json!({"profile":"invalid"}));
+        assert_eq!(check["configuration"], "ready");
+        assert_eq!(check["credentials"], "unavailable");
         let list = rpc(&mut server, "modelProfiles/list", json!({}));
         assert_eq!(list["active"]["model"], "default-model");
         assert_eq!(
@@ -232,6 +253,10 @@ api_key_file = "missing.key"
         assert_eq!(observed["capabilities"]["provider"], "gemini");
         assert_eq!(
             failure(&mut attached, "models/list", json!({}))["code"],
+            -32601
+        );
+        assert_eq!(
+            failure(&mut attached, "models/check", json!({}))["code"],
             -32601
         );
         assert_eq!(

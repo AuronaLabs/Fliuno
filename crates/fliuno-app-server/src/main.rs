@@ -64,6 +64,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut demo = false;
     let mut model_profile = None;
     let mut list_models = false;
+    let mut check_model = false;
     let mut model_cursor = None;
     let mut mcp_config: Option<PathBuf> = None;
     let mut mcp_oauth_config: Option<PathBuf> = None;
@@ -139,6 +140,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "--config" => user_config = Some(args.next().ok_or("--config requires a path")?.into()),
             "--demo" => demo = true,
             "--list-models" => list_models = true,
+            "--check-model" => check_model = true,
             "--cursor" => model_cursor = Some(args.next().ok_or("--cursor requires a value")?),
             "--model-profile" => {
                 model_profile = Some(args.next().ok_or("--model-profile requires a profile ID")?)
@@ -152,6 +154,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--help" | "-h" => {
                 println!("{}", backup::USAGE);
+                println!("fliuno-app-server --check-model --config PATH [--model-profile ID]");
                 println!(
                     "fliuno-app-server --list-models --config PATH [--model-profile ID] [--cursor TOKEN]"
                 );
@@ -169,6 +172,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if model_profile.is_some() && (demo || user_config.is_none()) {
         return Err("--model-profile requires --config with a live model".into());
     }
+    if list_models && check_model {
+        return Err("Choose either --list-models or --check-model".into());
+    }
     if list_models {
         let path = user_config
             .as_deref()
@@ -184,6 +190,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     if model_cursor.is_some() {
         return Err("--cursor requires --list-models".into());
+    }
+    if check_model {
+        let path = user_config
+            .as_deref()
+            .ok_or("--check-model requires --config")?;
+        if demo {
+            return Err("--check-model requires a live model provider".into());
+        }
+        let config = fliuno_config::Settings::load(path)?;
+        let model = config.model_for_launch(model_profile.as_deref())?;
+        let check = fliuno_providers::check_model_connection(model);
+        println!("{}", serde_json::to_string_pretty(&check)?);
+        return Ok(());
     }
     // Parse every startup file before opening SQLite or allowing an earlier
     // adapter to connect/spawn. Semantic validation remains adapter-owned.

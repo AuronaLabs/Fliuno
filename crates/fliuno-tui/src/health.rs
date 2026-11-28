@@ -1,6 +1,5 @@
 use crate::options::Options;
 use fliuno_client::ServerInfo;
-use fliuno_config::{ContextWindow, Provider};
 use std::{fmt::Write, fs, io::Read, path::Path};
 
 pub struct Report {
@@ -122,7 +121,7 @@ pub fn inspect(
             },
             &format!(
                 "{} / {}",
-                model.provider.name(),
+                model.runtime_provider_name(),
                 model.name.as_deref().unwrap_or("unnamed")
             ),
             false,
@@ -133,6 +132,9 @@ pub fn inspect(
             .is_none_or(|name| name.trim().is_empty())
         {
             report.check("Model settings", "[model].name is required", true);
+        }
+        if let Err(error) = model.effective_protocol() {
+            report.check("Model protocol", error, true);
         }
         if let Some(value) = &model.base_url {
             match fliuno_config::provider_api_root(value) {
@@ -165,20 +167,8 @@ pub fn inspect(
             ),
             Err(error) => report.check("Credentials", error, true),
         }
-        if let Some(budget) = &model.budget {
-            let error = match budget.window {
-                ContextWindow::Tokens(window) if window <= budget.max_output_tokens => {
-                    Some("max_output_tokens must be smaller than the window")
-                }
-                ContextWindow::Discovery(_) if !matches!(model.provider, Provider::Anthropic) => {
-                    Some("this provider needs a numeric context window")
-                }
-                _ if budget.max_output_tokens < 16 => Some("max_output_tokens must be at least 16"),
-                _ => None,
-            };
-            if let Some(error) = error {
-                report.check("Model budget", error, true);
-            }
+        if let Err(error) = model.validate_budget() {
+            report.check("Model budget", error, true);
         }
     }
     path_check(&mut report, "App-server", &options.server, executable);

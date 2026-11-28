@@ -117,6 +117,7 @@ pub fn schema_bundle() -> Value {
         "modelProfiles/list" => serde_json::json!({"type":"object","additionalProperties":false}),
         "modelProfiles/select" => schema::<ModelProfileSelectParams>(),
         "models/list" => schema::<ProviderModelListParams>(),
+        "models/check" => schema::<ModelConnectionCheckParams>(),
         "modelUsage/getSummary" => schema::<ModelUsageSummaryParams>(),
         "modelUsage/getSummaries" => schema::<ModelUsageSummaryBatchParams>(),
         "modelUsage/summarizeRange" => schema::<ModelUsageRangeParams>(),
@@ -256,6 +257,7 @@ pub fn schema_bundle() -> Value {
         "ModelProfileEntry" => schema::<ModelProfileEntry>(),
         "ModelProfileList" => schema::<ModelProfileList>(),
         "ProviderModelPage" => schema::<ProviderModelPage>(),
+        "ModelConnectionCheck" => schema::<ModelConnectionCheck>(),
         "ModelCapabilitiesSource" => schema::<ModelCapabilitiesSource>(),
         "ModelInputType" => schema::<ModelInputType>(),
         "EventsPage" => schema::<EventsPage>()

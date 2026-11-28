@@ -1263,3 +1263,6 @@ fn discovers_models_using_native_authentication_and_cursors_without_generation()
 
 #[path = "http_contract/chat.rs"]
 mod chat;
+
+#[path = "http_contract/model_connection.rs"]
+mod model_connection;

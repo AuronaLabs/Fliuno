@@ -98,6 +98,25 @@ fn encode_request(
     Ok(writer.bytes)
 }
 
+#[derive(Debug)]
+pub(crate) enum MetadataError {
+    Http(u16),
+    Transport,
+    Timeout,
+    Response(ModelError),
+}
+
+impl std::fmt::Display for MetadataError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Http(status) => write!(formatter, "provider HTTP status {status}"),
+            Self::Transport => formatter.write_str("provider metadata transport failed"),
+            Self::Timeout => formatter.write_str("provider metadata request timed out"),
+            Self::Response(error) => error.fmt(formatter),
+        }
+    }
+}
+
 pub(crate) struct StreamResponse {
     pub json: Option<Value>,
     pub done: bool,
@@ -240,45 +259,62 @@ impl Http {
             .pop_if_empty()
             .push("models")
             .push(model);
-        self.read_metadata(endpoint, 64 * 1024, |_| {
-            "provider metadata response was unsuccessful or invalid".into()
-        })
+        self.read_metadata(endpoint, 64 * 1024, Duration::from_secs(5))
+            .map_err(|error| match error {
+                MetadataError::Http(_) | MetadataError::Response(_) => {
+                    "provider metadata response was unsuccessful or invalid".into()
+                }
+                error => error.to_string(),
+            })
     }
 
-    pub fn model_catalog(&self, params: &[(&str, &str)]) -> Result<Value, String> {
+    pub fn model_catalog(
+        &self,
+        params: &[(&str, &str)],
+        timeout: Duration,
+    ) -> Result<Value, MetadataError> {
         let mut endpoint = self.endpoint.clone();
         if !params.is_empty() {
             endpoint
                 .query_pairs_mut()
                 .extend_pairs(params.iter().copied());
         }
-        self.read_metadata(endpoint, 2 * 1024 * 1024, |error| error.to_string())
+        self.read_metadata(endpoint, 2 * 1024 * 1024, timeout)
     }
 
     fn read_metadata(
         &self,
         endpoint: Url,
         limit: u64,
-        response_error: impl FnOnce(ModelError) -> String,
-    ) -> Result<Value, String> {
+        timeout: Duration,
+    ) -> Result<Value, MetadataError> {
         let cancellation = CancellationToken::new();
         self.runtime
             .block_on(async {
-                tokio::time::timeout(Duration::from_secs(5), async {
+                tokio::time::timeout(timeout, async {
                     let response = self
                         .client
                         .get(endpoint)
                         .header(reqwest::header::ACCEPT, "application/json")
                         .send()
                         .await
-                        .map_err(|_| "provider metadata transport failed".to_owned())?;
+                        .map_err(|error| {
+                            if error.is_timeout() {
+                                MetadataError::Timeout
+                            } else {
+                                MetadataError::Transport
+                            }
+                        })?;
+                    if !response.status().is_success() {
+                        return Err(MetadataError::Http(response.status().as_u16()));
+                    }
                     Self::read_json(response, &cancellation, limit)
                         .await
-                        .map_err(response_error)
+                        .map_err(MetadataError::Response)
                 })
                 .await
             })
-            .map_err(|_| "provider metadata request timed out")?
+            .map_err(|_| MetadataError::Timeout)?
     }
 
     fn prepare_generation(

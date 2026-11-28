@@ -113,6 +113,12 @@ Chat Completions 支持文本、图像和每步一次函数调用，具体能力
 fliuno-app-server --list-models --config ~/.fliuno/config.toml --model-profile lab
 ```
 
+`--check-model` 返回本地配置、凭据读取、目录访问和所选模型是否列出的独立状态。它最多检查 4 页，网络查询总时限为 5 秒。`incomplete` 表示搜索未走完，`not_listed` 表示已走完当前可见目录。目录访问成功只能确认本次目录请求通过。只提供生成端点的网关仍可手填模型 ID。命令不会发送生成请求或打开数据库。可信本地 stdio 客户端可调用 `models/check`，可选 `profile`。
+
+```sh
+fliuno-app-server --check-model --config ~/.fliuno/config.toml --model-profile lab
+```
+
 目录中的 `maxInputTokens`、`maxOutputTokens` 和 `supportsThinking` 来自服务方返回的模型元数据。Anthropic 还会提供明确支持的 `reasoningEfforts`。字段缺省表示目录未提供这项信息。模型目录所报的上限供客户端和用户参考，实际请求仍使用配置中的上下文预算。
 
 `reasoning_effort` 可写在 `[model]` 或某个 `[models.<id>]` 下。省略时使用提供方默认值。具体模型支持的档位由服务端决定。

@@ -734,6 +734,75 @@ pub struct ProviderModelListParams {
     pub cursor: Option<String>,
 }
 
+/// A read-only check of a locally configured model and its catalog endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelConnectionCheck {
+    pub configuration: ModelConfigurationStatus,
+    pub configuration_issue: Option<String>,
+    pub credentials: ModelCredentialsStatus,
+    pub catalog_access: ModelCatalogAccess,
+    pub catalog: ModelCatalogStatus,
+    pub model_presence: ModelPresence,
+    pub http_status: Option<u16>,
+    pub pages_checked: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConfigurationStatus {
+    Ready,
+    MissingModel,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCredentialsStatus {
+    NotChecked,
+    Ready,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCatalogAccess {
+    Unverified,
+    /// The endpoint served a catalog page with the supplied credential.
+    Accepted,
+    Unauthorized,
+    Forbidden,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCatalogStatus {
+    NotChecked,
+    Available,
+    Unavailable,
+    TimedOut,
+    TransportError,
+    InvalidResponse,
+    HttpError,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPresence {
+    NotChecked,
+    NotSelected,
+    Present,
+    NotListed,
+    Incomplete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelConnectionCheckParams {
+    /// Omit for the active profile. Use a profile ID to check another one.
+    pub profile: Option<String>,
+}
+
 /// Token count performed immediately before dispatching one model request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

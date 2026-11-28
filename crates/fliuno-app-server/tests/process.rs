@@ -782,6 +782,44 @@ fn stdio_approval_restart_and_artifact_roundtrip() {
 }
 
 #[test]
+fn check_model_reports_invalid_credentials_before_opening_sqlite() {
+    let root = std::env::temp_dir().join(format!("fliuno-model-check-{}", uuid::Uuid::new_v4()));
+    fs::create_dir(&root).unwrap();
+    let config = root.join("config.toml");
+    let db = root.join("kernel.db");
+    fs::write(
+        &config,
+        r#"
+[model]
+provider = "openai"
+protocol = "chat_completions"
+name = "local-model"
+api_key_file = "missing.key"
+"#,
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
+        .arg("--check-model")
+        .arg("--config")
+        .arg(&config)
+        .arg("--db")
+        .arg(&db)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let check: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(check["configuration"], "ready");
+    assert_eq!(check["credentials"], "unavailable");
+    assert_eq!(check["catalog"], "not_checked");
+    assert!(!db.exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn schema_export_is_valid_json_and_needs_no_provider_configuration() {
     let output = Command::new(env!("CARGO_BIN_EXE_fliuno-app-server"))
         .arg("--schema")

@@ -773,6 +773,10 @@ impl RpcServer {
             });
         }
         Ok(match method {
+            "models/check" => {
+                let params: ModelConnectionCheckParams = decode(params)?;
+                json!(self.check_provider_model(params.profile.as_deref())?)
+            }
             "models/list" => {
                 let params: ProviderModelListParams = decode(params)?;
                 json!(self.discover_provider_models(params)?)

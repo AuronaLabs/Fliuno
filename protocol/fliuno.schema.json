@@ -4612,6 +4612,21 @@
       },
       "additionalProperties": false
     },
+    "models/check": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelConnectionCheckParams",
+      "type": "object",
+      "properties": {
+        "profile": {
+          "description": "Omit for the active profile. Use a profile ID to check another one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "modelUsage/getSummary": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ModelUsageSummaryParams",
@@ -20249,6 +20264,116 @@
           "additionalProperties": false,
           "required": [
             "id"
+          ]
+        }
+      }
+    },
+    "ModelConnectionCheck": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelConnectionCheck",
+      "description": "A read-only check of a locally configured model and its catalog endpoint.",
+      "type": "object",
+      "properties": {
+        "configuration": {
+          "$ref": "#/$defs/ModelConfigurationStatus"
+        },
+        "configurationIssue": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credentials": {
+          "$ref": "#/$defs/ModelCredentialsStatus"
+        },
+        "catalogAccess": {
+          "$ref": "#/$defs/ModelCatalogAccess"
+        },
+        "catalog": {
+          "$ref": "#/$defs/ModelCatalogStatus"
+        },
+        "modelPresence": {
+          "$ref": "#/$defs/ModelPresence"
+        },
+        "httpStatus": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "pagesChecked": {
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "configuration",
+        "credentials",
+        "catalogAccess",
+        "catalog",
+        "modelPresence",
+        "pagesChecked"
+      ],
+      "$defs": {
+        "ModelConfigurationStatus": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "missing_model",
+            "invalid"
+          ]
+        },
+        "ModelCredentialsStatus": {
+          "type": "string",
+          "enum": [
+            "not_checked",
+            "ready",
+            "unavailable"
+          ]
+        },
+        "ModelCatalogAccess": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "unverified",
+                "unauthorized",
+                "forbidden"
+              ]
+            },
+            {
+              "description": "The endpoint served a catalog page with the supplied credential.",
+              "type": "string",
+              "const": "accepted"
+            }
+          ]
+        },
+        "ModelCatalogStatus": {
+          "type": "string",
+          "enum": [
+            "not_checked",
+            "available",
+            "unavailable",
+            "timed_out",
+            "transport_error",
+            "invalid_response",
+            "http_error"
+          ]
+        },
+        "ModelPresence": {
+          "type": "string",
+          "enum": [
+            "not_checked",
+            "not_selected",
+            "present",
+            "not_listed",
+            "incomplete"
           ]
         }
       }

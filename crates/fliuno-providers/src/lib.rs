@@ -7,7 +7,7 @@ mod openai;
 mod openai_chat;
 
 pub use anthropic::AnthropicProvider;
-pub use catalog::discover_models;
+pub use catalog::{check_model_connection, discover_models};
 use fliuno_core::{DemoProvider, ModelProvider};
 use fliuno_protocol::{
     ModelBudget, ModelBudgetSource, ModelInputCountCoverage, ModelInputCountMode,
@@ -177,6 +177,7 @@ pub fn from_settings(
     if matches!(settings.provider, Provider::Demo) {
         return Ok(("demo".into(), Box::new(DemoProvider)));
     }
+    settings.validate_budget()?;
     let model = settings
         .name
         .as_deref()

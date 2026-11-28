@@ -138,6 +138,38 @@ impl ModelSettings {
         }
     }
 
+    /// Validate budget settings without probing a provider.
+    pub fn validate_budget(&self) -> Result<(), &'static str> {
+        let Some(budget) = &self.budget else {
+            return Ok(());
+        };
+        let protocol = self.effective_protocol()?;
+        if budget.provider_count && protocol == Some(ModelProtocol::ChatCompletions) {
+            return Err(
+                "Chat Completions does not provide an input count endpoint; set provider_count = false",
+            );
+        }
+        match budget.window {
+            ContextWindow::Discovery(_) if protocol != Some(ModelProtocol::Messages) => {
+                Err("This model protocol needs a numeric context window")
+            }
+            ContextWindow::Tokens(window) if budget.max_output_tokens >= window => {
+                Err("max_output_tokens must be smaller than the context window")
+            }
+            _ if budget.max_output_tokens < 16 => Err("max_output_tokens must be at least 16"),
+            ContextWindow::Tokens(window)
+                if protocol == Some(ModelProtocol::Interactions)
+                    && budget.provider_count
+                    && window - budget.max_output_tokens < 2 =>
+            {
+                Err(
+                    "Gemini provider token counting needs at least two input tokens for its safety margin",
+                )
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub fn runtime_provider_name(&self) -> &'static str {
         if self.protocol == Some(ModelProtocol::ChatCompletions)
             && matches!(self.provider, Provider::OpenAi)
