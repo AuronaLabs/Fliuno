@@ -2380,7 +2380,12 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     reopened.expect("Ctrl+S Default");
     reopened.ready();
     reopened.resize(22, 48);
-    reopened.keys("\x1b[B\x1b[B\x13");
+    reopened.ready();
+    reopened.keys("\x1b[B");
+    reopened.expect("> broken");
+    reopened.keys("\x1b[B");
+    reopened.expect("> lab");
+    reopened.keys("\x13");
     reopened.expect("Startup default saved.");
     reopened.expect("lab [default]");
     reopened.expect("[model] [now]");
