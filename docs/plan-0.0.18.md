@@ -33,3 +33,5 @@ Windows 凭据使用本机持久范围。核对了 [Windows 凭据规范](https:
 - [Gemini Models API](https://ai.google.dev/api/models) 与 [Interactions API](https://ai.google.dev/gemini-api/docs/interactions) 用于核对列表过滤、分页与 `generation_config.thinking_level`。
 
 通过本地 HTTP 夹具验收三个原生协议、Base URL、凭据、分页、错误脱敏、请求参数以及对持久 Run 绑定的影响。模型目录供无界面命令和本地 JSON-RPC 使用，允许在填写模型 ID 前查询。手工输入模型 ID 的路径继续保留，兼容只实现生成接口的网关。
+
+模型目录保留服务方明确返回的能力信息。Anthropic 返回输入上限、输出上限、思考能力和档位，Gemini 返回输入输出上限与思考能力，OpenAI 的公开列表保留基础标识。参考本地 Codex `a1604a8` 的 `codex-rs/protocol/src/openai_models.rs` 和 OpenCode `d284e7c` 的 `packages/tui/src/mini/catalog.shared.ts`，客户端从结构化元数据读取能力。手填模型 ID 和显式预算继续适用于兼容网关。

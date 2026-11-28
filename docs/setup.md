@@ -102,6 +102,8 @@ fliuno-app-server --config ~/.fliuno/config.toml --db .fliuno/kernel.db
 fliuno-app-server --list-models --config ~/.fliuno/config.toml --model-profile lab
 ```
 
+目录中的 `maxInputTokens`、`maxOutputTokens` 和 `supportsThinking` 来自服务方返回的模型元数据。Anthropic 还会提供明确支持的 `reasoningEfforts`。字段缺省表示目录未提供这项信息。模型目录所报的上限供客户端和用户参考，实际请求仍使用配置中的上下文预算。
+
 `reasoning_effort` 可写在 `[model]` 或某个 `[models.<id>]` 下。省略时使用提供方默认值。具体模型支持的档位由服务端决定。
 
 | Provider | 配置接受的档位 |

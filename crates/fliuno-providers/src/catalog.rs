@@ -3,8 +3,9 @@ use crate::{
     http::{Http, provider_headers},
     provider_base,
 };
-use fliuno_config::{ModelSettings, Provider};
+use fliuno_config::{ModelSettings, Provider, ReasoningEffort};
 use fliuno_protocol::{ProviderModel, ProviderModelPage};
+use serde_json::Value;
 use std::collections::BTreeSet;
 
 const MAX_MODELS_PER_PAGE: usize = 256;
@@ -109,9 +110,28 @@ pub fn discover_models(
             next = None;
             break;
         }
+        let (input, output, thinking, efforts) = match provider {
+            Provider::Anthropic => (
+                token_limit(&entry["max_input_tokens"]),
+                token_limit(&entry["max_tokens"]),
+                entry["capabilities"]["thinking"]["supported"].as_bool(),
+                anthropic_efforts(&entry["capabilities"]["effort"]),
+            ),
+            Provider::Gemini => (
+                token_limit(&entry["inputTokenLimit"]),
+                token_limit(&entry["outputTokenLimit"]),
+                entry["thinking"].as_bool(),
+                None,
+            ),
+            _ => (None, None, None, None),
+        };
         models.push(ProviderModel {
             id: id.to_owned(),
             display_name: label.filter(|name| bounded(name, 256)).map(str::to_owned),
+            max_input_tokens: input,
+            max_output_tokens: output,
+            supports_thinking: thinking,
+            reasoning_efforts: efforts,
         });
     }
     Ok(ProviderModelPage {
@@ -120,6 +140,38 @@ pub fn discover_models(
         next_cursor: next.map(str::to_owned),
         truncated,
     })
+}
+
+fn token_limit(value: &Value) -> Option<u32> {
+    u32::try_from(value.as_u64()?)
+        .ok()
+        .filter(|limit| *limit > 0)
+}
+
+fn anthropic_efforts(capability: &Value) -> Option<Vec<String>> {
+    if capability["supported"].as_bool() == Some(false) {
+        return Some(Vec::new());
+    }
+    let mut reported = [
+        ReasoningEffort::Low,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+        ReasoningEffort::XHigh,
+        ReasoningEffort::Max,
+    ]
+    .into_iter()
+    .filter_map(|effort| {
+        let name = effort.as_str();
+        Some((name, capability[name]["supported"].as_bool()?))
+    })
+    .peekable();
+    reported.peek()?;
+    Some(
+        reported
+            .filter(|(_, supported)| *supported)
+            .map(|(name, _)| name.to_owned())
+            .collect(),
+    )
 }
 
 fn bounded(value: &str, max: usize) -> bool {

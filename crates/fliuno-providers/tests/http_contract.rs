@@ -1165,6 +1165,7 @@ fn discovers_models_using_native_authentication_and_cursors_without_generation()
             "authorization: bearer fixture-key",
             None,
             json!({"data":[{"id":"fixture"},{"id":"fixture"}]}),
+            json!({"id":"fixture"}),
             None,
         ),
         (
@@ -1172,7 +1173,37 @@ fn discovers_models_using_native_authentication_and_cursors_without_generation()
             "GET /v1/models?limit=100&after_id=older ",
             "x-api-key: fixture-key",
             Some("older"),
-            json!({"data":[{"id":"retired","lifecycle":"retired"},{"id":"fixture","display_name":"Fixture"}],"has_more":true,"last_id":"more"}),
+            json!({
+                "data": [
+                    {"id": "retired", "lifecycle": "retired"},
+                    {
+                        "id": "fixture",
+                        "display_name": "Fixture",
+                        "max_input_tokens": 200000,
+                        "max_tokens": 64000,
+                        "capabilities": {
+                            "thinking": {"supported": true},
+                            "effort": {
+                                "supported": true,
+                                "low": {"supported": true},
+                                "high": {"supported": false},
+                                "xhigh": null,
+                                "max": {"supported": true}
+                            }
+                        }
+                    }
+                ],
+                "has_more": true,
+                "last_id": "more"
+            }),
+            json!({
+                "id": "fixture",
+                "displayName": "Fixture",
+                "maxInputTokens": 200000,
+                "maxOutputTokens": 64000,
+                "supportsThinking": true,
+                "reasoningEfforts": ["low", "max"]
+            }),
             Some("more"),
         ),
         (
@@ -1180,11 +1211,24 @@ fn discovers_models_using_native_authentication_and_cursors_without_generation()
             "GET /v1/models?pageSize=100&pageToken=older%2B%2B ",
             "x-goog-api-key: fixture-key",
             Some("older++"),
-            json!({"models":[{"name":"models/embed","supportedGenerationMethods":["embedContent"]},{"name":"models/fixture","supportedGenerationMethods":["generateContent"]}],"nextPageToken":"more"}),
+            json!({
+                "models": [
+                    {"name": "models/embed", "supportedGenerationMethods": ["embedContent"]},
+                    {
+                        "name": "models/fixture",
+                        "supportedGenerationMethods": ["generateContent"],
+                        "inputTokenLimit": 1048576,
+                        "outputTokenLimit": 0,
+                        "thinking": false
+                    }
+                ],
+                "nextPageToken": "more"
+            }),
+            json!({"id": "fixture", "maxInputTokens": 1048576, "supportsThinking": false}),
             Some("more"),
         ),
     ];
-    for (provider, route, auth, cursor, response, next) in cases {
+    for (provider, route, auth, cursor, response, model, next) in cases {
         let (base, handle) = fixture(vec![(200, response)]);
         let settings = ModelSettings {
             provider,
@@ -1195,7 +1239,7 @@ fn discovers_models_using_native_authentication_and_cursors_without_generation()
         let page = discover_models(&settings, cursor).unwrap();
         assert_eq!(page.provider, provider.name());
         assert_eq!(page.models.len(), 1);
-        assert_eq!(page.models[0].id, "fixture");
+        assert_eq!(serde_json::to_value(&page.models[0]).unwrap(), model);
         assert_eq!(page.next_cursor.as_deref(), next);
         assert!(!page.truncated);
         let requests = handle.join().unwrap();

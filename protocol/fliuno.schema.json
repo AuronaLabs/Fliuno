@@ -20210,6 +20210,40 @@
                 "string",
                 "null"
               ]
+            },
+            "maxInputTokens": {
+              "description": "Maximum advertised input size in tokens.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "description": "Maximum advertised output size in tokens.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "supportsThinking": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "reasoningEfforts": {
+              "description": "Levels explicitly advertised as supported. None means no level data.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
             }
           },
           "additionalProperties": false,
