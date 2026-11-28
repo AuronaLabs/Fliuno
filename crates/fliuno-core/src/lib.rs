@@ -17,9 +17,11 @@ pub use json_size::json_size;
 mod agent_prompt;
 mod policy;
 mod policy_rules;
+mod project_checks;
 mod project_guide;
 mod provider;
 mod query;
+mod workspace_path;
 pub use query::MAX_TASK_LIST_TARGET_BYTES;
 pub const MAX_APPROVAL_LIST_TARGET_BYTES: u32 = MAX_TASK_LIST_TARGET_BYTES;
 mod registry;
@@ -68,7 +70,10 @@ pub use task::compaction::{
     execute as execute_context_compaction, pending as context_compaction_pending,
 };
 pub use task::{PreparedModelStep, compaction::ContextCompaction, start::TaskSummaryStart};
-pub use tool::{Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolProposalError, ToolSpec};
+pub use tool::{
+    ProjectCheckRegistration, Tool, ToolContext, ToolEffect, ToolError, ToolOutput,
+    ToolProposalError, ToolSpec,
+};
 
 use fliuno_protocol::*;
 use rusqlite::Connection;

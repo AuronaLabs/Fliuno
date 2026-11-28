@@ -18,7 +18,8 @@ pub use skill::SkillExecution;
 
 use config::{MAX_INPUT, Program, validate_args};
 use fliuno_core::{
-    CancellationToken, Kernel, Tool, ToolContext, ToolEffect, ToolError, ToolOutput, ToolSpec,
+    CancellationToken, Kernel, ProjectCheckRegistration, Tool, ToolContext, ToolEffect, ToolError,
+    ToolOutput, ToolSpec,
 };
 use fliuno_protocol::ToolCall;
 use serde::Deserialize;
@@ -83,6 +84,17 @@ impl Program {
 }
 
 impl Tool for Program {
+    fn project_check(&self) -> Option<ProjectCheckRegistration> {
+        self.config
+            .project_check
+            .as_ref()
+            .map(|check| ProjectCheckRegistration {
+                label: check.label.clone(),
+                description: check.description.clone(),
+                inputs: check.inputs.clone(),
+            })
+    }
+
     fn supports_supervision(&self) -> bool {
         cfg!(any(windows, target_os = "linux")) && self.supervisor.is_some()
     }

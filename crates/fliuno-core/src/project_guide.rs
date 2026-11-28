@@ -1,15 +1,13 @@
 //! Keep workspace guide consent separate from user-authored instructions.
 use super::*;
-use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
-use cap_std::{
-    ambient_authority,
-    fs::{Dir, OpenOptions},
-};
+use crate::workspace_path::{is_reparse_point, open_workspace_root};
+use cap_fs_ext::{FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
+use cap_std::fs::OpenOptions;
 use rusqlite::{OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::{
     io::{self, Read},
-    path::{Component, Path},
+    path::Path,
 };
 
 pub(crate) fn migrate(db: &Connection) -> Result<()> {
@@ -137,31 +135,6 @@ fn current_guide(workspace: &Workspace, digest: &str) -> Result<ProjectGuideSnap
     })
 }
 
-// The stored workspace root is canonical. Traverse its components without
-// following links so replacing that root or an ancestor cannot redirect access.
-fn open_workspace_root(root: &Path) -> io::Result<Dir> {
-    let mut anchor = std::path::PathBuf::new();
-    let mut parts = root.components().peekable();
-    if matches!(parts.peek(), Some(Component::Prefix(_))) {
-        anchor.push(parts.next().expect("prefix checked"));
-    }
-    if !matches!(parts.peek(), Some(Component::RootDir)) {
-        return Err(io::ErrorKind::InvalidInput.into());
-    }
-    anchor.push(parts.next().expect("root checked"));
-    let mut dir = Dir::open_ambient_dir(anchor, ambient_authority())?;
-    for part in parts {
-        let Component::Normal(name) = part else {
-            return Err(io::ErrorKind::InvalidInput.into());
-        };
-        dir = dir.open_dir_nofollow(name)?;
-        if is_reparse_point(&dir.dir_metadata()?) {
-            return Err(io::ErrorKind::PermissionDenied.into());
-        }
-    }
-    Ok(dir)
-}
-
 fn read_guide(root: &Path) -> Result<Option<ProjectGuideSnapshot>> {
     let dir = open_workspace_root(root).map_err(|_| {
         Error::Conflict("cannot open the original project directory without following links".into())
@@ -215,18 +188,6 @@ fn read_guide(root: &Path) -> Result<Option<ProjectGuideSnapshot>> {
         sha256: format!("{:x}", Sha256::digest(text.as_bytes())),
         text,
     }))
-}
-
-#[cfg(windows)]
-fn is_reparse_point(metadata: &cap_std::fs::Metadata) -> bool {
-    use cap_std::fs::MetadataExt;
-    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-#[cfg(not(windows))]
-fn is_reparse_point(_: &cap_std::fs::Metadata) -> bool {
-    false
 }
 
 #[cfg(test)]

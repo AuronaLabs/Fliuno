@@ -30,6 +30,15 @@ pub struct ToolContext<'a> {
     pub workspace: &'a Workspace,
 }
 
+/// Immutable, display-safe metadata supplied by a trusted host registration.
+/// Paths must be normalized, slash-separated workspace-relative file names.
+/// Include no executable paths, arguments, environment values or credentials.
+pub struct ProjectCheckRegistration {
+    pub label: String,
+    pub description: String,
+    pub inputs: Vec<String>,
+}
+
 pub struct ToolSpec {
     pub name: String,
     pub description: String,
@@ -97,6 +106,10 @@ impl From<String> for ToolProposalError {
 /// retried on recovery.
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
+    /// Only bounded, isolated project check registrations should opt in.
+    fn project_check(&self) -> Option<ProjectCheckRegistration> {
+        None
+    }
     /// Host adapters with endpoint/process/environment authority must include
     /// their immutable resolved registration in this digest. The default binds
     /// the public in-process contract; bump its domain when semantics change.

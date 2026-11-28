@@ -303,6 +303,20 @@
         "text"
       ]
     },
+    "workspace/listProjectChecks": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceIdParams",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId"
+      ]
+    },
     "workspace/getProjectGuide": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "WorkspaceIdParams",
@@ -9572,6 +9586,86 @@
         "workspaceId",
         "revision"
       ]
+    },
+    "WorkspaceProjectChecks": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WorkspaceProjectChecks",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProjectCheckSummary"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "workspaceId",
+        "checks",
+        "truncated"
+      ],
+      "$defs": {
+        "ProjectCheckSummary": {
+          "type": "object",
+          "properties": {
+            "toolName": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "inputs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ProjectCheckInput"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "toolName",
+            "label",
+            "description",
+            "inputs"
+          ]
+        },
+        "ProjectCheckInput": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/$defs/ProjectCheckInputStatus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "status"
+          ]
+        },
+        "ProjectCheckInputStatus": {
+          "description": "Advisory metadata only: execution validates bytes and freshly approved hashes.",
+          "type": "string",
+          "enum": [
+            "present",
+            "missing",
+            "unavailable",
+            "unsupported"
+          ]
+        }
+      }
     },
     "WorkspaceProjectGuidePreview": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

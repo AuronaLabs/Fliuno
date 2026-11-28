@@ -41,7 +41,7 @@ pub struct RpcServer {
     progress_receiver: Option<ProgressReceiver>,
     progress_stream_gap: bool,
     initialized: bool,
-    local_project_guides: bool,
+    local_project_features: bool,
     provider_name: String,
     model_profiles: Option<model_profiles::Catalog>,
     terminals: Option<fliuno_terminal::Service>,
@@ -145,7 +145,7 @@ impl RpcServer {
             progress_receiver: Some(progress_receiver),
             progress_stream_gap: false,
             initialized: false,
-            local_project_guides: false,
+            local_project_features: false,
             provider_name,
             model_profiles: None,
             terminals,
@@ -158,8 +158,8 @@ impl RpcServer {
     }
 
     /// Allow the direct local stdio client to review and select project guides.
-    pub fn enable_local_project_guides(&mut self) {
-        self.local_project_guides = true;
+    pub fn enable_local_project_features(&mut self) {
+        self.local_project_features = true;
     }
 
     /// Create another local, trusted protocol connection to the same host.
@@ -186,7 +186,7 @@ impl RpcServer {
             progress_receiver: Some(progress_receiver),
             progress_stream_gap: false,
             initialized: false,
-            local_project_guides: false,
+            local_project_features: false,
             provider_name: self.provider_name.clone(),
             model_profiles: None,
             terminals: self.terminals.clone(),
@@ -715,8 +715,9 @@ impl RpcServer {
             capabilities["workNextActions"] = json!(true);
             capabilities["artifactRevisions"] = json!(true);
             capabilities["workspaceInstructions"] = json!(true);
-            if self.local_project_guides {
+            if self.local_project_features {
                 capabilities["workspaceProjectGuide"] = json!(true);
+                capabilities["workspaceProjectChecks"] = json!(true);
             }
             capabilities["taskContextAttribution"] = json!(true);
             capabilities["taskMemoryBudgetReduction"] = json!(true);
@@ -1383,15 +1384,19 @@ impl RpcServer {
                 let p: TaskIdParams = decode(params)?;
                 json!(self.kernel()?.task_context_attribution(&p.task_id)?)
             }
-            "workspace/getProjectGuide" if self.local_project_guides => {
+            "workspace/listProjectChecks" if self.local_project_features => {
+                let p: WorkspaceIdParams = decode(params)?;
+                json!(self.kernel()?.workspace_project_checks(&p.workspace_id)?)
+            }
+            "workspace/getProjectGuide" if self.local_project_features => {
                 let p: WorkspaceIdParams = decode(params)?;
                 json!(self.kernel()?.workspace_project_guide(&p.workspace_id)?)
             }
-            "workspace/previewProjectGuide" if self.local_project_guides => {
+            "workspace/previewProjectGuide" if self.local_project_features => {
                 let p: WorkspaceIdParams = decode(params)?;
                 json!(self.kernel()?.preview_project_guide(&p.workspace_id)?)
             }
-            "workspace/setProjectGuide" if self.local_project_guides => {
+            "workspace/setProjectGuide" if self.local_project_features => {
                 json!(self.kernel()?.set_project_guide(decode(params)?)?)
             }
             "workspace/getInstructions" => {
@@ -1812,21 +1817,23 @@ mod tests {
     };
 
     #[test]
-    fn project_guide_management_is_only_on_the_direct_local_connection() {
+    fn project_features_are_only_on_the_direct_local_connection() {
         let mut server = RpcServer::new(Kernel::in_memory(Box::new(DemoProvider)).unwrap());
-        server.enable_local_project_guides();
+        server.enable_local_project_features();
         let mut attached = server.attach_connection().unwrap();
         let init = json!({"protocolVersion":"0.1","clientName":"guide-fixture"});
-        assert_eq!(
-            rpc(&mut server, "initialize", init.clone())["capabilities"]["workspaceProjectGuide"],
-            true
-        );
-        assert!(
-            rpc(&mut attached, "initialize", init)["capabilities"]
-                .get("workspaceProjectGuide")
-                .is_none()
-        );
-        for method in ["getProjectGuide", "previewProjectGuide", "setProjectGuide"] {
+        let direct = rpc(&mut server, "initialize", init.clone());
+        let restricted = rpc(&mut attached, "initialize", init);
+        for capability in ["workspaceProjectGuide", "workspaceProjectChecks"] {
+            assert_eq!(direct["capabilities"][capability], true);
+            assert!(restricted["capabilities"].get(capability).is_none());
+        }
+        for method in [
+            "getProjectGuide",
+            "previewProjectGuide",
+            "setProjectGuide",
+            "listProjectChecks",
+        ] {
             let response = attached.handle_line(&json!({"jsonrpc":"2.0","id":1,"method":format!("workspace/{method}"),"params":{}}).to_string()).unwrap();
             assert_eq!(response["error"]["code"], -32601);
         }

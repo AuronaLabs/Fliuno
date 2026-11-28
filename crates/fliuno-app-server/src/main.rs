@@ -356,7 +356,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let live_model = provider_name != "demo";
     let mut server = RpcServer::with_terminals(kernel, provider_name, terminals);
-    server.enable_local_project_guides();
+    server.enable_local_project_features();
     if live_model && let Some(path) = user_config_path {
         let initial =
             model_profile.or_else(|| user_config.and_then(|config| config.workbench.model_profile));
