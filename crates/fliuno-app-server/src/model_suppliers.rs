@@ -4,16 +4,50 @@ use super::{
     model_connections::{connection_target, with_credential},
 };
 use fliuno_config::{
-    ModelAuth, ModelSupplierEdit, ReasoningEffort, Settings, SupplierEdit, SupplierPreset,
-    SupplierTarget,
+    ModelAuth, ModelProtocol, ModelSupplierEdit, ReasoningEffort, Settings, SupplierEdit,
+    SupplierPreset, SupplierTarget,
 };
 use fliuno_protocol::{
-    ModelProfileCredentialStatus, ModelSupplierBindingParams, ModelSupplierEntry,
-    ModelSupplierPreset, ModelSupplierProfile, ModelSupplierRevision, ModelSupplierSaveParams,
-    ModelSupplierSnapshot, ModelSupplierTarget,
+    ModelCatalogPreview, ModelProfileCredentialStatus, ModelSupplierBindingParams,
+    ModelSupplierCatalogParams, ModelSupplierEntry, ModelSupplierPreset, ModelSupplierProfile,
+    ModelSupplierRevision, ModelSupplierSaveParams, ModelSupplierSnapshot, ModelSupplierTarget,
 };
 
+use zeroize::Zeroizing;
+
+fn parse_protocol(protocol: String) -> Result<ModelProtocol, Error> {
+    serde_json::from_value(serde_json::Value::String(protocol))
+        .map_err(|_| Error::Invalid("Unknown model protocol".into()))
+}
+
 impl RpcServer {
+    pub(super) fn list_supplier_models(
+        &self,
+        params: ModelSupplierCatalogParams,
+    ) -> Result<ModelCatalogPreview, RpcError> {
+        let (revision, settings) =
+            Settings::read_for_supplier_edit(self.local_model_config()?).map_err(Error::Invalid)?;
+        if params.revision != revision {
+            return Err(Error::Conflict(
+                "Model configuration changed. Reload it and try again.".into(),
+            )
+            .into());
+        }
+        let model = settings
+            .model_for_supplier_catalog(params.supplier, parse_protocol(params.protocol)?)
+            .map_err(Error::Invalid)?;
+        let key = model
+            .read_model_key()
+            .map_err(|error| Error::Invalid(error.into()))?
+            .map(Zeroizing::new);
+        fliuno_providers::preview_model_connection(
+            &model,
+            key.as_ref().map(|key| key.as_str()),
+            params.cursor.as_deref(),
+        )
+        .map_err(|error| Error::Invalid(error).into())
+    }
+
     pub(super) fn list_model_suppliers(&self) -> Result<ModelSupplierSnapshot, RpcError> {
         let (revision, settings) =
             Settings::read_for_supplier_edit(self.local_model_config()?).map_err(Error::Invalid)?;
@@ -108,8 +142,7 @@ impl RpcServer {
         &self,
         params: ModelSupplierBindingParams,
     ) -> Result<ModelSupplierRevision, RpcError> {
-        let protocol = serde_json::from_value(serde_json::Value::String(params.protocol))
-            .map_err(|_| Error::Invalid("Unknown model protocol".into()))?;
+        let protocol = parse_protocol(params.protocol)?;
         let reasoning_effort = params
             .reasoning_effort
             .map(|value| {

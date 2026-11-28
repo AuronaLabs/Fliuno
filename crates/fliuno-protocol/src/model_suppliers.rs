@@ -32,6 +32,20 @@ pub struct ModelSupplierSaveParams {
     pub credential: ModelProfileCredentialInput,
 }
 
+/// Query a catalog through an existing supplier without saving a model profile.
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelSupplierCatalogParams {
+    #[schemars(length(min = 1, max = 48))]
+    pub supplier: String,
+    #[schemars(length(min = 64, max = 64))]
+    pub revision: String,
+    pub protocol: String,
+    #[serde(default)]
+    #[schemars(length(max = 2048))]
+    pub cursor: Option<String>,
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelSupplierBindingParams {

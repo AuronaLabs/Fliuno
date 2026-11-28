@@ -612,6 +612,7 @@ impl RpcServer {
             capabilities["modelProfileEditing"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileConnections"] = json!(self.model_profiles.is_some());
             capabilities["modelSupplierSettings"] = json!(self.model_profiles.is_some());
+            capabilities["modelSupplierCatalog"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileDefaults"] = json!(self.model_profiles.is_some());
             capabilities["providerModelCatalog"] = json!(self.model_profiles.is_some());
             capabilities["modelBudgetRejectionEvents"] = json!(true);
@@ -848,6 +849,10 @@ impl RpcServer {
             "modelSuppliers/save" => {
                 self.local_model_config()?;
                 json!(self.save_model_supplier(decode_connection(params)?)?)
+            }
+            "modelSuppliers/listModels" => {
+                self.local_model_config()?;
+                json!(self.list_supplier_models(decode_connection(params)?)?)
             }
             "modelProfiles/bindSupplier" => {
                 self.local_model_config()?;

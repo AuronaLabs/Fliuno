@@ -119,6 +119,23 @@ fn resolve_model(
     Ok(())
 }
 
+impl Settings {
+    /// Form an unsaved model route using a resolved supplier in this snapshot.
+    pub fn model_for_supplier_catalog(
+        &self,
+        supplier: String,
+        protocol: super::ModelProtocol,
+    ) -> Result<ModelSettings, String> {
+        let mut model = ModelSettings {
+            supplier: Some(supplier),
+            protocol: Some(protocol),
+            ..Default::default()
+        };
+        resolve_model(&mut model, &self.providers)?;
+        Ok(model)
+    }
+}
+
 impl ModelSettings {
     /// Identity for display. The wire adapter and provider replay namespace
     /// continue to be chosen by the protocol.

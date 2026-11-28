@@ -123,6 +123,7 @@ pub fn schema_bundle() -> Value {
         "modelProfiles/saveConnection" => schema::<ModelProfileConnectionSaveParams>(),
         "modelSuppliers/list" => serde_json::json!({"type":"object","additionalProperties":false}),
         "modelSuppliers/save" => schema::<ModelSupplierSaveParams>(),
+        "modelSuppliers/listModels" => schema::<ModelSupplierCatalogParams>(),
         "modelProfiles/bindSupplier" => schema::<ModelSupplierBindingParams>(),
         "modelProfiles/getDefault" => serde_json::json!({"type":"object","additionalProperties":false}),
         "modelProfiles/setDefault" => schema::<ModelProfileDefault>(),

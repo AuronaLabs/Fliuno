@@ -5235,6 +5235,41 @@
         }
       }
     },
+    "modelSuppliers/listModels": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelSupplierCatalogParams",
+      "description": "Query a catalog through an existing supplier without saving a model profile.",
+      "type": "object",
+      "properties": {
+        "supplier": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 64
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2048,
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "supplier",
+        "revision",
+        "protocol"
+      ]
+    },
     "modelProfiles/bindSupplier": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "ModelSupplierBindingParams",
