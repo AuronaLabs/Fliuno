@@ -123,6 +123,8 @@ fliuno-app-server --check-model --config ~/.fliuno/config.toml --model-profile l
 
 `reasoning_effort` 可写在 `[model]` 或某个 `[models.<id>]` 下。省略时使用提供方默认值。具体模型支持的档位由服务端决定。
 
+`--check-model` 和 `models/check` 可返回 `reasoning`，分别报告已配置的档位、目录声明的档位和模型是否声明支持思考。`advertised` 表示目录明确列出该档，`not_advertised` 表示目录提供了档位信息但未列出该档，`unknown` 表示拿不到档位证据。没有配置档位时使用提供方默认值（`provider_default`）。目录证据不等于生成验收；不会据此自动修改配置。
+
 | Provider | 配置接受的档位 |
 | --- | --- |
 | `openai` | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` |

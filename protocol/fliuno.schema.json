@@ -20356,6 +20356,16 @@
           "format": "uint8",
           "minimum": 0,
           "maximum": 255
+        },
+        "reasoning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelReasoningCheck"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -20421,6 +20431,61 @@
             "present",
             "not_listed",
             "incomplete"
+          ]
+        },
+        "ModelReasoningCheck": {
+          "description": "Reasoning evidence from the catalog, independent of generation support.",
+          "type": "object",
+          "properties": {
+            "configuredEffort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "supportsThinking": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "advertisedEfforts": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "effortStatus": {
+              "$ref": "#/$defs/ModelReasoningEffortStatus"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "effortStatus"
+          ]
+        },
+        "ModelReasoningEffortStatus": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "provider_default",
+                "advertised"
+              ]
+            },
+            {
+              "description": "The catalog advertised effort metadata but did not list this value.",
+              "type": "string",
+              "const": "not_advertised"
+            },
+            {
+              "description": "No per-effort metadata was available for the selected model.",
+              "type": "string",
+              "const": "unknown"
+            }
           ]
         }
       }

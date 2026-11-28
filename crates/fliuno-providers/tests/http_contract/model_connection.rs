@@ -1,8 +1,8 @@
 use super::{fixture, read_request};
-use fliuno_config::{ModelCatalogDraft, ModelProtocol, ModelSettings, Provider};
+use fliuno_config::{ModelCatalogDraft, ModelProtocol, ModelSettings, Provider, ReasoningEffort};
 use fliuno_protocol::{
     ModelCatalogAccess, ModelCatalogStatus, ModelConfigurationStatus, ModelCredentialsStatus,
-    ModelPresence,
+    ModelPresence, ModelReasoningEffortStatus,
 };
 use fliuno_providers::{check_model_connection, preview_model_catalog};
 use serde_json::json;
@@ -71,6 +71,82 @@ fn connection_check_reports_local_and_catalog_results_without_echoing_credential
         };
         assert!(headers.starts_with("GET /v1/models HTTP/1.1"));
         assert!(body.is_null());
+    }
+}
+
+#[test]
+fn connection_check_reports_advertised_effort_without_inferring_missing_capabilities() {
+    use ModelReasoningEffortStatus::{Advertised, NotAdvertised, ProviderDefault, Unknown};
+
+    let root = tempfile::tempdir().unwrap();
+    let key = root.path().join("fixture.key");
+    std::fs::write(&key, "fixture-key\n").unwrap();
+    let mut settings = ModelSettings {
+        provider: Provider::Anthropic,
+        name: Some("selected".into()),
+        api_key_file: Some(key),
+        ..Default::default()
+    };
+    let published = json!({
+        "thinking": {"supported": true},
+        "effort": {"supported": true, "high": {"supported": true}}
+    });
+    for (effort, capabilities, advertised, thinking, expected) in [
+        (
+            Some(ReasoningEffort::High),
+            published.clone(),
+            Some(vec!["high"]),
+            Some(true),
+            Advertised,
+        ),
+        (
+            Some(ReasoningEffort::Max),
+            published.clone(),
+            Some(vec!["high"]),
+            Some(true),
+            NotAdvertised,
+        ),
+        (
+            None,
+            published,
+            Some(vec!["high"]),
+            Some(true),
+            ProviderDefault,
+        ),
+        (
+            Some(ReasoningEffort::High),
+            json!({"thinking":{"supported":false}}),
+            None,
+            Some(false),
+            Unknown,
+        ),
+        (Some(ReasoningEffort::High), json!({}), None, None, Unknown),
+    ] {
+        let (base, server) = fixture(vec![(
+            200,
+            json!({
+                "data": [{"id":"selected", "capabilities":capabilities}],
+                "has_more": false,
+            }),
+        )]);
+        settings.base_url = Some(base);
+        settings.reasoning_effort = effort;
+        let check = check_model_connection(&settings);
+        assert_eq!(check.model_presence, ModelPresence::Present);
+        let result = check.reasoning.unwrap();
+        assert_eq!(
+            result.configured_effort.as_deref(),
+            effort.map(ReasoningEffort::as_str)
+        );
+        assert_eq!(
+            result.advertised_efforts,
+            advertised.map(|efforts| efforts.into_iter().map(str::to_owned).collect())
+        );
+        assert_eq!(result.supports_thinking, thinking);
+        assert_eq!(result.effort_status, expected);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].0.starts_with("GET /v1/models?limit=100 "));
     }
 }
 

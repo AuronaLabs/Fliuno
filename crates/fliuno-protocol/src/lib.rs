@@ -768,6 +768,29 @@ pub struct ModelConnectionCheck {
     pub model_presence: ModelPresence,
     pub http_status: Option<u16>,
     pub pages_checked: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ModelReasoningCheck>,
+}
+
+/// Reasoning evidence from the catalog, independent of generation support.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelReasoningCheck {
+    pub configured_effort: Option<String>,
+    pub supports_thinking: Option<bool>,
+    pub advertised_efforts: Option<Vec<String>>,
+    pub effort_status: ModelReasoningEffortStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelReasoningEffortStatus {
+    ProviderDefault,
+    Advertised,
+    /// The catalog advertised effort metadata but did not list this value.
+    NotAdvertised,
+    /// No per-effort metadata was available for the selected model.
+    Unknown,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

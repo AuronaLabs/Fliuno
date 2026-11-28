@@ -9,7 +9,8 @@ use fliuno_config::{
 };
 use fliuno_protocol::{
     ModelCatalogAccess, ModelCatalogPreview, ModelCatalogStatus, ModelConfigurationStatus,
-    ModelConnectionCheck, ModelCredentialsStatus, ModelPresence, ProviderModel, ProviderModelPage,
+    ModelConnectionCheck, ModelCredentialsStatus, ModelPresence, ModelReasoningCheck,
+    ModelReasoningEffortStatus, ProviderModel, ProviderModelPage,
 };
 use serde_json::Value;
 use std::{
@@ -111,6 +112,7 @@ pub fn check_model_connection(settings: &ModelSettings) -> ModelConnectionCheck 
         },
         http_status: None,
         pages_checked: 0,
+        reasoning: reasoning_check(settings.reasoning_effort, None),
     };
     if let Err(issue) = validate_configuration(settings) {
         check.configuration = ModelConfigurationStatus::Invalid;
@@ -154,8 +156,9 @@ pub fn check_model_connection(settings: &ModelSettings) -> ModelConnectionCheck 
         check.catalog = ModelCatalogStatus::Available;
         check.catalog_access = ModelCatalogAccess::Accepted;
         let Some(model) = model else { break };
-        if page.models.iter().any(|entry| entry.id == model) {
+        if let Some(entry) = page.models.into_iter().find(|entry| entry.id == model) {
             check.model_presence = ModelPresence::Present;
+            check.reasoning = reasoning_check(settings.reasoning_effort, Some(entry));
             break;
         }
         check.model_presence = ModelPresence::Incomplete;
@@ -176,6 +179,31 @@ pub fn check_model_connection(settings: &ModelSettings) -> ModelConnectionCheck 
         cursor = Some(next);
     }
     check
+}
+
+fn reasoning_check(
+    configured: Option<ReasoningEffort>,
+    entry: Option<ProviderModel>,
+) -> Option<ModelReasoningCheck> {
+    let supports_thinking = entry.as_ref().and_then(|entry| entry.supports_thinking);
+    let advertised_efforts = entry.and_then(|entry| entry.reasoning_efforts);
+    if configured.is_none() && supports_thinking.is_none() && advertised_efforts.is_none() {
+        return None;
+    }
+    let effort_status = match (configured, &advertised_efforts) {
+        (None, _) => ModelReasoningEffortStatus::ProviderDefault,
+        (Some(_), None) => ModelReasoningEffortStatus::Unknown,
+        (Some(effort), Some(levels)) if levels.iter().any(|level| level == effort.as_str()) => {
+            ModelReasoningEffortStatus::Advertised
+        }
+        (Some(_), Some(_)) => ModelReasoningEffortStatus::NotAdvertised,
+    };
+    Some(ModelReasoningCheck {
+        configured_effort: configured.map(|effort| effort.as_str().to_owned()),
+        supports_thinking,
+        advertised_efforts,
+        effort_status,
+    })
 }
 
 fn validate_configuration(settings: &ModelSettings) -> Result<(), String> {
