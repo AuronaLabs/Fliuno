@@ -50,12 +50,15 @@ python -B scripts/measure_draft_context.py ./fliuno-app-server.exe --version 0.0
 | `none` | 0 | 3,475 B | 通过，HTTP 1 次 |
 
 ```powershell
-python -B scripts/measure_draft_context.py ./fliuno-app-server.exe --version 0.0.22 --window 8192 --tool-scope all --tool-scope project --tool-scope none
+python -B scripts/measure_draft_context.py ./fliuno-app-server.exe --version 0.0.23 --window 8192 --tool-scope all --tool-scope project --tool-scope none
 ```
 
-此时开发二进制尚未改版本号。回环模型的回复是固定的，结果只证明本地请求预算及序列化。发送成功的两档，预览字节与实际 HTTP 正文相同。长历史、更多检查或连续工具回执可能让请求再次超过上限。Anthropic 回环测试另验证项目范围入队重启后仍生效，并拒绝模型自行提出的范围外工具，不进入审批。
+实测最初使用同实现的开发二进制；上面是正式包的复现命令。回环模型的回复是固定的，结果只证明本地请求预算及序列化。发送成功的两档，预览字节与实际 HTTP 正文相同。长历史、更多检查或连续工具回执可能让请求再次超过上限。Anthropic 回环测试另验证项目范围入队重启后仍生效，并拒绝模型自行提出的范围外工具，不进入审批。
 
 - 在 Windows ConPTY 下，全部和项目两档均通过了查找、读取、审批精确编辑和真实隔离检查（退出码 `0`）。Git 差异只涉及 `src/greeting.txt`。项目档的编辑任务每次生成都只开放 8 个工具，其中 1 个为宿主登记的检查；下一条恢复默认范围。已看过 48/80/110 列的中文预览和 110 列的英文预览。
+
+- 本机真实模型：Windows llama.cpp / SmolLM2-135M-Instruct Q4_K_M，Fliuno 窗口 8,192，项目档 7 个工具，生成请求 7,000 B。两次都收到了回复，归因确认用了 72 字节的已审阅指南；一次答出 `Cedar`，另一次给出错误项目名。小窗口发送链路可用，但不以这次试跑评估模型准确率或编码能力。
+- 首次生成超限后，终端能读取预算拒绝事件，先显示上限和计量单位。复制文字、选择项目档、返回输入框均不发请求；用户再次按 Enter 才产生一次回环生成，并获得回复。
 
 ## 验收门槛
 

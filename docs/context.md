@@ -51,7 +51,7 @@
 
 ### 发送前检查草稿
 
-开发分支的 `initialize.capabilities.draftContextInspection` 为 `true` 时，可调用 `session/inspectDraftContext` 检查当前模型下的下一条文本草稿：
+从 0.0.23 起，`initialize.capabilities.draftContextInspection` 为 `true` 时，可调用 `session/inspectDraftContext` 检查当前模型下的下一条文本草稿：
 
 ```json
 {"jsonrpc":"2.0","id":9,"method":"session/inspectDraftContext","params":{"sessionId":"<session-id>","input":"检查项目构建","options":{"enableInteraction":true,"toolScope":"project"}}}
