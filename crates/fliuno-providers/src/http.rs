@@ -235,7 +235,9 @@ impl Http {
             .pop_if_empty()
             .push("models")
             .push(model);
-        self.read_metadata(endpoint, 64 * 1024)
+        self.read_metadata(endpoint, 64 * 1024, |_| {
+            "provider metadata response was unsuccessful or invalid".into()
+        })
     }
 
     pub fn model_catalog(&self, params: &[(&str, &str)]) -> Result<Value, String> {
@@ -245,10 +247,15 @@ impl Http {
                 .query_pairs_mut()
                 .extend_pairs(params.iter().copied());
         }
-        self.read_metadata(endpoint, 2 * 1024 * 1024)
+        self.read_metadata(endpoint, 2 * 1024 * 1024, |error| error.to_string())
     }
 
-    fn read_metadata(&self, endpoint: Url, limit: u64) -> Result<Value, String> {
+    fn read_metadata(
+        &self,
+        endpoint: Url,
+        limit: u64,
+        response_error: impl FnOnce(ModelError) -> String,
+    ) -> Result<Value, String> {
         let cancellation = CancellationToken::new();
         self.runtime
             .block_on(async {
@@ -262,7 +269,7 @@ impl Http {
                         .map_err(|_| "provider metadata transport failed".to_owned())?;
                     Self::read_json(response, &cancellation, limit)
                         .await
-                        .map_err(|error| error.to_string())
+                        .map_err(response_error)
                 })
                 .await
             })
