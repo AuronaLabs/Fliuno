@@ -96,11 +96,23 @@ impl App {
         } else {
             self.model.as_deref().unwrap_or("Connected")
         };
+        let project = if !self.demo && !matches!(self.layer, Layer::Inbox(_) | Layer::History(_)) {
+            self.workspace
+                .as_ref()
+                .map(|root| workspace_title(&root.root))
+        } else {
+            None
+        };
+        let title = project.as_deref().unwrap_or(&session);
         let title_room = usize::from(area.width).saturating_sub("Fliuno  /  ".width());
-        let state_separator = "  ·  ";
+        let state_separator = if project.is_some() && area.width < 58 {
+            " · "
+        } else {
+            "  ·  "
+        };
         let state_width = state
             .width()
-            .min(title_room.saturating_sub(session.width().min(12) + state_separator.width()));
+            .min(title_room.saturating_sub(title.width().min(12) + state_separator.width()));
         let state_suffix = if state_width >= 2 {
             format!("{state_separator}{}", ellipsis(state, state_width))
         } else {
@@ -118,17 +130,22 @@ impl App {
             .map_or(root.clone(), |origin| {
                 format!("{} inherited turns · {root}", origin.inherited_turns)
             });
+        let room = usize::from(area.width);
+        let location = if project.is_some() && !session.is_empty() && room >= 65 {
+            let session = ellipsis(&session.replace('\n', " "), room / 3);
+            let path = path_tail(&breadcrumb, room.saturating_sub(session.width() + 3));
+            format!("{session} · {path}")
+        } else {
+            path_tail(&breadcrumb, room)
+        };
         frame.render_widget(
             Paragraph::new(vec![
                 Line::from(vec![
                     Span::styled("Fliuno", self.palette.label),
-                    Span::raw(format!("  /  {}", ellipsis(&session, title_width))),
+                    Span::raw(format!("  /  {}", ellipsis(title, title_width))),
                     Span::styled(state_suffix, self.palette.quiet),
                 ]),
-                Line::styled(
-                    path_tail(&breadcrumb, usize::from(area.width)),
-                    self.palette.quiet,
-                ),
+                Line::styled(location, self.palette.quiet),
             ]),
             area,
         );
@@ -382,7 +399,7 @@ impl App {
             } else if self.demo {
                 ("No tasks yet", "")
             } else {
-                ("Start a conversation", "")
+                ("Work in this folder", "")
             };
             lines.push(Line::styled(title, self.palette.label));
             if !hint.is_empty() {
@@ -393,13 +410,19 @@ impl App {
                 && self.snapshot.is_some()
             {
                 lines.push(Line::raw(""));
-                lines.push(Line::styled("Work in this folder", self.palette.label));
+                for (label, example) in [
+                    ("Explore", "Find where a feature is implemented."),
+                    ("Change", "Describe the fix you want."),
+                    ("Verify", "Run a configured project check."),
+                ] {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("{label:8}"), self.palette.label),
+                        Span::styled(example, self.palette.quiet),
+                    ]));
+                }
+                lines.push(Line::default());
                 lines.push(Line::styled(
-                    "Ask me to find code, propose a patch, or run a configured check.",
-                    self.palette.quiet,
-                ));
-                lines.push(Line::styled(
-                    "Or ask a question without changing files.",
+                    "F2 Plan mode  ·  F1 Commands",
                     self.palette.quiet,
                 ));
             }
@@ -571,7 +594,7 @@ impl App {
         let mode = if self.plan_only {
             "Plan only"
         } else if !self.demo {
-            "Message Fliuno"
+            "Project prompt"
         } else if focused {
             "New task · Execution"
         } else {
@@ -626,7 +649,7 @@ impl App {
                     } else if focused {
                         "Describe a change or ask about the project…"
                     } else {
-                        "Press Enter to write a message"
+                        "Press Enter to enter a project prompt"
                     })
                     .style(self.palette.quiet),
                     body,
@@ -642,4 +665,12 @@ impl App {
             frame.set_cursor_position(Position::new(body.x + x, body.y + y));
         }
     }
+}
+
+fn workspace_title(root: &str) -> String {
+    let path = display_path(root).replace('\n', " ");
+    path.trim_end_matches(['/', '\\'])
+        .rsplit(['/', '\\'])
+        .find(|part| !part.is_empty())
+        .map_or_else(|| path.clone(), str::to_owned)
 }

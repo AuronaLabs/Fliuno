@@ -41,6 +41,8 @@ impl App {
         lines.push(Line::raw(""));
         let review = if paths.is_empty() && checks.is_empty() {
             "Project activity"
+        } else if matches!(self.layer, Layer::Edit(Edit::Task)) {
+            "Project activity  ·  F1 changes"
         } else {
             "Project activity  ·  d Review"
         };

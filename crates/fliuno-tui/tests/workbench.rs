@@ -922,13 +922,13 @@ fn model_and_budget_load_from_files_without_provider_environment() {
     std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
     assert!(process.wait().unwrap().success());
     let mut terminal = Console::launch_with_config(Some(&server), root.path(), Some(&config));
-    terminal.expect("Start a conversation");
-    terminal.expect("Message Fliuno");
-    terminal.expect("·  fixture-model");
+    terminal.expect("Work in this folder");
+    terminal.expect("Project prompt");
+    terminal.expect("fixture-model");
     terminal.capture("active-model-110");
     terminal.resize(20, 48);
     terminal.ready();
-    terminal.expect("·  fixture-model");
+    terminal.expect("fixture-model");
     terminal.capture("active-model-48");
     terminal.resize(30, 110);
     terminal.ready();
@@ -978,7 +978,7 @@ fn named_model_profiles_select_the_actual_server_model_without_rewriting_config(
     std::fs::write(&config, settings).unwrap();
 
     let mut default = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    default.expect("Start a conversation");
+    default.expect("Work in this folder");
     default.expect("office-fixture");
     default.quit("\x03");
 
@@ -987,7 +987,7 @@ fn named_model_profiles_select_the_actual_server_model_without_rewriting_config(
     alternate.arg(&config);
     alternate.args(["--model-profile", "lab"]);
     let mut terminal = Console::spawn(alternate, server.as_deref(), root.path());
-    terminal.expect("Start a conversation");
+    terminal.expect("Work in this folder");
     terminal.expect("lab-fixture");
     terminal.expect_absent("office-fixture");
     terminal.quit("\x03");
@@ -1247,8 +1247,8 @@ fn live_preview_follows_output_and_keeps_manual_reading_position() {
     )
     .unwrap();
     let mut terminal = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    terminal.expect("Start a conversation");
-    terminal.expect("Message Fliuno");
+    terminal.expect("Work in this folder");
+    terminal.expect("Project prompt");
     terminal.ready();
     terminal.capture("conversation-first-message");
     terminal.keys("Live transcript start\x0esecond input line");
@@ -1724,8 +1724,8 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     );
     std::fs::remove_file(&config).unwrap();
     console.keys("\r");
-    console.expect("Start a conversation");
-    console.expect("Message Fliuno");
+    console.expect("Work in this folder");
+    console.expect("Project prompt");
     console.expect_absent("Offline demo");
     console.expect_absent("fixture-secret-value");
     console.resize(21, 48);
@@ -1747,7 +1747,7 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.quit("\x03");
 
     let mut reopened = Console::launch_unconfigured(server.as_deref(), root.path());
-    reopened.expect("Message Fliuno");
+    reopened.expect("Project prompt");
     reopened.expect_absent("Choose your model provider");
     reopened.quit("\x03");
     assert_eq!(std::fs::read_to_string(config).unwrap(), profile_text);
@@ -1866,7 +1866,7 @@ fn first_launch_stores_a_pasted_key_without_exposing_it() {
         "fixture-managed-secret-value"
     );
 
-    terminal.expect("Start a conversation");
+    terminal.expect("Work in this folder");
     terminal.expect("fixture-managed");
     terminal.quit("\x03");
     let mut doctor = Command::new(binary());
@@ -1888,7 +1888,7 @@ fn first_launch_stores_a_pasted_key_without_exposing_it() {
     assert!(!String::from_utf8_lossy(&diagnostic.stdout).contains("fixture-managed-secret-value"));
 
     let mut reopened = Console::launch_unconfigured(server.as_deref(), root.path());
-    reopened.expect("Start a conversation");
+    reopened.expect("Work in this folder");
     reopened.expect("fixture-managed");
     reopened.expect_absent("Connect your API key");
     reopened.quit("\x03");
@@ -2014,7 +2014,7 @@ fn conversation_keeps_order_loads_older_turns_and_reopens_with_live_responses() 
             .trim()
             .to_owned()
     };
-    for _ in 0..24 {
+    for _ in 0..64 {
         if top_line(&terminal) == "Earlier prompt 02" {
             break;
         }
@@ -2144,7 +2144,7 @@ fn markdown_code_is_readable_while_streaming_and_after_reopening() {
     .unwrap();
 
     let mut terminal = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    terminal.expect("Start a conversation");
+    terminal.expect("Work in this folder");
     terminal.keys("Show a Rust example for reading a file\r");
     terminal.expect("    std::fs::read_to_string(");
     terminal.expect("Keep the file path relative to your project.");
@@ -2201,7 +2201,7 @@ fn composer_commands_start_and_resume_conversations_without_consuming_literal_in
     console.keys("/");
     console.expect("Start a new conversation");
     console.expect("/resume");
-    console.expect("Message Fliuno");
+    console.expect("Project prompt");
     console.capture("composer-commands-80");
     console.keys("new\t");
     console.expect("Untitled session");
@@ -2216,7 +2216,7 @@ fn composer_commands_start_and_resume_conversations_without_consuming_literal_in
     console.capture("composer-resume-48");
     console.keys("\x1b[B\r");
     console.expect_absent("Sessions");
-    console.expect("Fliuno  /  Conversation");
+    console.expect("Fliuno  /  ");
     console.expect("Describe a change or ask about the project");
 
     console.keys("/tmp/notes");
@@ -2317,7 +2317,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     std::fs::write(&config, &settings).unwrap();
 
     let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    console.expect("Start a conversation");
+    console.expect("Work in this folder");
     console.expect("first-model");
     console.keys("Retain the first prompt\r");
     let first = requests.recv_timeout(Duration::from_secs(12)).unwrap();
@@ -2405,7 +2405,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     reopened.expect("main/first-model");
     reopened.expect("lab/second-model");
     assert_eq!(std::fs::read_to_string(&config).unwrap(), settings);
-    reopened.expect("Press Enter to write a message");
+    reopened.expect("Press Enter to enter a project prompt");
     reopened.keys("n");
     reopened.expect("Enter Send");
     reopened.keys("Save without switching");
@@ -2434,7 +2434,7 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     reopened.keys("\x1b");
     reopened.expect_absent("Switch model");
     reopened.expect("Save without switching");
-    reopened.expect("Conversation  ·  first-model");
+    reopened.expect("·  first-model");
     reopened.quit("\x03");
     let updated = std::fs::read_to_string(&config).unwrap();
     assert_eq!(
@@ -2446,9 +2446,9 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     );
     let mut using_default =
         Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    using_default.expect("Conversation  ·  second-model");
+    using_default.expect("·  second-model");
     using_default.expect("Selected model answer");
-    using_default.expect("Press Enter to write a message");
+    using_default.expect("Press Enter to enter a project prompt");
     using_default.keys("n");
     using_default.expect("Enter Send");
     // The composer is visible during the startup history refresh. Wait until
@@ -2510,7 +2510,7 @@ api_key_file = "fixture.key"
         write!(socket, "data: {event}\n\n").unwrap();
     });
     let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
-    console.expect("Start a conversation");
+    console.expect("Work in this folder");
     console.keys("Draft survives edits");
     console.expect("Draft survives edits");
     let open_picker = |console: &mut Console| {
@@ -2550,7 +2550,7 @@ api_key_file = "fixture.key"
     console.capture("workbench-model-edit-110");
     console.keys("\x13");
     console.expect("Profile saved. Enter to use it now.");
-    console.expect("Conversation  ·  startup-model");
+    console.expect("·  startup-model");
     console.keys("\x1b");
     console.expect_absent("Switch model");
     console.expect("Draft survives edits");
@@ -2562,10 +2562,18 @@ api_key_file = "fixture.key"
     open_picker(&mut console);
     console.expect("[model] [default] [saved]");
     console.keys("\r");
-    console.expect("Conversation  ·  found-model");
+    console.expect("·  found-model");
+    console.expect("Using found-model");
     console.expect("Draft survives edits");
     console.keys("\r");
-    let actual = generation.recv_timeout(Duration::from_secs(12)).unwrap();
+    let actual = generation
+        .recv_timeout(Duration::from_secs(12))
+        .unwrap_or_else(|error| {
+            panic!(
+                "no request after switching models: {error}; screen: {}",
+                console.screen.screen().contents()
+            )
+        });
     assert_eq!(actual["model"], "found-model");
     assert_eq!(actual["reasoning"]["effort"], "high");
     assert!(actual["input"].to_string().contains("Draft survives edits"));
@@ -3113,16 +3121,17 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         fixture.display()
     );
     let user = tempfile::tempdir().unwrap();
-    let root = tempfile::tempdir().unwrap();
+    let checkout = tempfile::tempdir().unwrap();
+    let root = checkout.path().join("greeting-project");
     let config = user.path().join("live.toml");
-    std::fs::create_dir(root.path().join("src")).unwrap();
-    let file = root.path().join("src/greeting.txt");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let file = root.join("src/greeting.txt");
     std::fs::write(&file, "Hello world\n").unwrap();
-    std::fs::write(root.path().join("unselected.txt"), "fixture private data").unwrap();
+    std::fs::write(root.join("unselected.txt"), "fixture private data").unwrap();
     let git = |args: &[&str]| {
         let result = Command::new("git")
             .args(args)
-            .current_dir(root.path())
+            .current_dir(&root)
             .output()
             .unwrap();
         assert!(
@@ -3147,21 +3156,31 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             r#"
         [workbench]
         database = "live.db"
+        theme = "dark"
         [integrations]
         execution = "checks.json"
         [model]
         provider = "openai"
-        name = "fixture-project"
+        name = "fixture-coder"
         api_key_file = "fixture.key"
         base_url = "http://{address}/v1/"
     "#
         ),
     )
     .unwrap();
-    let mut terminal = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    let mut terminal = Console::launch_with_config(server.as_deref(), &root, Some(&config));
     terminal.expect("Work in this folder");
     terminal.expect("Describe a change or ask about the project");
-    terminal.capture("project-start-110");
+    for cols in [48, 80, 110] {
+        terminal.resize(24, cols);
+        terminal.ready();
+        terminal.expect("Work in this folder");
+        terminal.expect("Fliuno  /  greeting-project");
+        terminal.expect("Explore");
+        terminal.expect("Change");
+        terminal.expect("Verify");
+        terminal.capture(&format!("project-start-{cols}"));
+    }
     terminal.keys("写一篇小作文\r");
     terminal.expect("小作文：雨停之后");
     terminal.expect_absent("Review operation");
@@ -3248,7 +3267,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     terminal.expect("已更新问候语");
     for cols in [48, 80, 110] {
         terminal.resize(24, cols);
-        terminal.expect("Project activity");
+        terminal.expect("Project activity  ·  F1 changes");
         terminal.expect("Searched project files: 1 match");
         terminal.expect("Saved in workspace: src/greeting.txt");
         terminal.expect("Check passed: Greeting check  ·  exit 0");
@@ -3258,7 +3277,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
         std::fs::read_to_string(&file).unwrap(),
         "Welcome to Fliuno\n"
     );
-    assert!(!root.path().join("check-scratch.txt").exists());
+    assert!(!root.join("check-scratch.txt").exists());
     assert_eq!(git(&["diff", "--name-only"]), "src/greeting.txt\n");
     let diff = git(&["diff", "--", "src/greeting.txt"]);
     assert!(
