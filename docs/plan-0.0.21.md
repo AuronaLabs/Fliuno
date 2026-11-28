@@ -86,6 +86,10 @@
 
 Windows ConPTY 已验证语言切换、配置与草稿保留、回环目录、中文审批、写入回执和重启；此次用例已纳入 Windows/Linux CI，当前提交的跨平台结果待验证。见[使用指南](workbench.md#切换界面语言)及[验收记录](execution-evidence.md#0021-项目-agent-开发验收)。
 
+### 审批审阅与长内容导航
+
+[Claude Code 权限模型](https://code.claude.com/docs/en/permissions)把“需要用户选择的操作”和权限策略分开；本地 Codex `a1604a8` 的 `codex-rs/tui/src/bottom_pane/approval_overlay.rs` 与 OpenCode `d284e7c` 的 `packages/tui/src/mini/permission.shared.ts` 都把动作呈现与选择分开处理。Fliuno 默认展示要做什么、目标、后果和实际改动，`Tab` 切到工具与参数；项目检查的摘要仍展示实际程序、参数、隔离方式和全部输入文件。两页分别记住滚动位置，支持翻页、回到顶部和末尾，显示可见行范围；允许、拒绝与限时读取授权仍绑定原请求，滚动或换页不会执行操作。用 Windows/Linux PTY 验证长文、空白与原始参数、缩放后位置、拒绝后的文件状态，并保留中英文窄屏截图。
+
 ## 验收与发布门槛
 
 - 用四种协议的离线回放检查实际请求与工具结果回流。中文短文在对话完成，零工具、零审批；托管产物可打开与另存且不冒充工作区文件；工作区写入此前可审阅，拒绝不修改文件，成功显示通过真实结果验证的路径。
