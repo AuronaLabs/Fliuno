@@ -1,8 +1,8 @@
 use crate::{ToolSpec, new_id};
 use fliuno_protocol::{
     ContextMode, Message, ModelBudget, ModelBudgetInputBytes, ModelBudgetRejection,
-    ModelCapabilitiesSource, ModelInputPreflight, ModelInputType, ModelUsage, Task, ToolCall,
-    UserContentPart,
+    ModelCapabilitiesSource, ModelInputPreflight, ModelInputType, ModelUsage, Task, TaskContext,
+    ToolCall, UserContentPart,
 };
 use serde_json::json;
 
@@ -89,12 +89,26 @@ pub(crate) fn input_attribution(
     task: &Task,
     tools: &[ToolSpec],
 ) -> crate::Result<ModelBudgetInputBytes> {
+    context_input_attribution(
+        task.context.as_ref(),
+        task.context_memory_omitted_for_budget,
+        &task.messages,
+        tools,
+    )
+}
+
+pub(crate) fn context_input_attribution(
+    context: Option<&TaskContext>,
+    omit_memory: bool,
+    messages: &[Message],
+    tools: &[ToolSpec],
+) -> crate::Result<ModelBudgetInputBytes> {
     fn size(value: &impl serde::Serialize) -> crate::Result<u64> {
         Ok(crate::json_size(value)? as u64)
     }
 
     let mut bytes = ModelBudgetInputBytes::default();
-    if let Some(context) = &task.context
+    if let Some(context) = context
         && context.options.mode != ContextMode::Isolated
     {
         let turns = crate::context::tool_outputs::project(
@@ -107,13 +121,13 @@ pub(crate) fn input_attribution(
         for summary in &context.summaries {
             bytes.history += size(&(&summary.text, &summary.sources))?;
         }
-        if !task.context_memory_omitted_for_budget {
+        if !omit_memory {
             for memory in &context.memories {
                 bytes.memory += size(memory)?;
             }
         }
     }
-    for message in &task.messages {
+    for message in messages {
         match message {
             Message::User { text } => bytes.current_text += size(text)?,
             Message::UserParts { parts } => {

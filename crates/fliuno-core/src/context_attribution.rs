@@ -94,6 +94,62 @@ impl Kernel {
         })
     }
 
+    /// Estimate a prospective text draft using only local selection and registered tool specs.
+    /// No model calls, memory access audit, or task writes take place.
+    pub fn inspect_draft_context(&self, p: DraftContextParams) -> Result<DraftContextReport> {
+        if p.input.len() > MAX_TASK_TEXT_BYTES {
+            return Err(Error::Invalid(
+                "draft input exceeds 262144 UTF-8 bytes".into(),
+            ));
+        }
+        let mut context = self.build_session_context(&p.session_id, p.options, None)?;
+        let memory_mode =
+            if context.options.mode == ContextMode::Isolated || context.options.disable_memory {
+                DraftMemoryMode::Off
+            } else if context.options.memory_selection.is_some() {
+                DraftMemoryMode::Explicit
+            } else {
+                DraftMemoryMode::KeywordPreview
+            };
+        self.inject_context_memories(
+            &p.session_id,
+            &p.input,
+            &mut context,
+            TaskMemoryQuery::Keyword,
+        )?;
+        let tools = self.draft_model_specs(&context.options);
+        let messages = if p.input.is_empty() {
+            None
+        } else {
+            Some(Message::User { text: p.input })
+        };
+        Ok(DraftContextReport {
+            through_sequence: context.through_sequence,
+            model: self.provider.reply_identity(),
+            budget: self.configured_model_budget(),
+            history_turns: context.turns.len() as u32,
+            omitted_turns: context.omitted_turns,
+            memory_mode,
+            memory_count: context.memories.len() as u32,
+            tool_count: tools.len() as u32,
+            instructions_bytes: context
+                .instructions
+                .as_ref()
+                .map(|instructions| instructions.text.len() as u64)
+                .unwrap_or(0),
+            project_guide: context
+                .project_guide
+                .as_ref()
+                .map(ProjectGuideAttribution::from),
+            normalized_input_bytes: crate::provider::context_input_attribution(
+                Some(&context),
+                false,
+                messages.as_slice(),
+                &tools,
+            )?,
+        })
+    }
+
     pub fn task_context_attribution(&self, task_id: &str) -> Result<TaskContextAttribution> {
         let task = self.get_task(task_id)?;
         let (preflight, rejection): (Option<i64>, Option<i64>) = self.db.prepare_cached(

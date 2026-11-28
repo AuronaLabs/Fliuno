@@ -1233,6 +1233,251 @@
         }
       }
     },
+    "session/inspectDraftContext": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "DraftContextParams",
+      "description": "Read-only preview of a text draft and the active model's available context.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "input": {
+          "description": "Empty text is valid for inspecting the baseline without sending anything.",
+          "type": "string",
+          "default": ""
+        },
+        "options": {
+          "$ref": "#/$defs/ContextOptions",
+          "default": {
+            "mode": "session",
+            "maxTurns": 16,
+            "maxBytes": 131072
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "sessionId"
+      ],
+      "$defs": {
+        "ContextOptions": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "$ref": "#/$defs/ContextMode",
+              "default": "session"
+            },
+            "disableMemory": {
+              "description": "Disable workspace memory retrieval without discarding session history.",
+              "type": "boolean"
+            },
+            "enableInteraction": {
+              "description": "Expose local plan and clarification tools to this model task.",
+              "type": "boolean"
+            },
+            "planOnly": {
+              "description": "Limit this model task to planning, clarification and trusted confined reads.",
+              "type": "boolean"
+            },
+            "instructionsRevision": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "projectGuideRevision": {
+              "description": "Explicitly send the enabled project guide revision in session mode.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memorySelection": {
+              "description": "Select exactly these revisions, without keyword or embedding retrieval.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "$ref": "#/$defs/ContextMemoryRef"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            },
+            "memoryRecencyHalfLifeDays": {
+              "description": "Optional freshness weighting for automatically selected memories.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 3650
+            },
+            "maxTurns": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 16
+            },
+            "maxBytes": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 131072
+            },
+            "selection": {
+              "description": "FitRecent may skip whole records within a bounded recent window.",
+              "$ref": "#/$defs/ContextSelection"
+            },
+            "detail": {
+              "$ref": "#/$defs/ContextDetail"
+            },
+            "taskIds": {
+              "description": "Explicit completed tasks from this session; None keeps recent history.\nThe kernel sorts IDs for stable request identity, then orders records by\ntheir completion sequence. Selected records are never silently omitted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            },
+            "historyQuery": {
+              "description": "Required in match_recent mode; searches only user and assistant text.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ContextHistoryQuery"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scanLimit": {
+              "description": "Maximum completed records examined by fit_recent or match_recent.\nOmit to examine at most 128 records, including any skipped records.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 1,
+              "maximum": 512
+            },
+            "afterSequence": {
+              "description": "Include only records completed strictly after this event cursor.\nOmit or set to zero to consider the entire session history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            },
+            "throughSequence": {
+              "description": "Pin the inclusive completion watermark for preview and task creation.\nOmit to use the current watermark. Zero selects an empty history.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "ContextMode": {
+          "type": "string",
+          "enum": [
+            "session",
+            "isolated"
+          ]
+        },
+        "ContextMemoryRef": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "revision"
+          ]
+        },
+        "ContextSelection": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "recent",
+                "fit_recent"
+              ]
+            },
+            {
+              "description": "Fit recent records whose conversation matches an explicit query.",
+              "type": "string",
+              "const": "match_recent"
+            }
+          ]
+        },
+        "ContextDetail": {
+          "description": "Controls which parts of a completed record count toward the context budget.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "full"
+              ]
+            },
+            {
+              "description": "Keep user and assistant messages and artifact references.",
+              "type": "string",
+              "const": "conversation"
+            }
+          ]
+        },
+        "ContextHistoryQuery": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "role": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SessionHistoryRole"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "query"
+          ]
+        },
+        "SessionHistoryRole": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        }
+      }
+    },
     "session/listHistory": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "SessionHistoryListParams",
@@ -14848,6 +15093,267 @@
             "provider",
             "inputTokens",
             "outputTokens"
+          ]
+        }
+      }
+    },
+    "DraftContextReport": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "DraftContextReport",
+      "description": "Snapshot of candidate input fragments, not a token count or a send receipt.",
+      "type": "object",
+      "properties": {
+        "throughSequence": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReplyIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "budget": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelBudget"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "historyTurns": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "omittedTurns": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "memoryMode": {
+          "$ref": "#/$defs/DraftMemoryMode"
+        },
+        "memoryCount": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "toolCount": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "instructionsBytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "projectGuide": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectGuideAttribution"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "normalizedInputBytes": {
+          "$ref": "#/$defs/ModelBudgetInputBytes"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "throughSequence",
+        "historyTurns",
+        "omittedTurns",
+        "memoryMode",
+        "memoryCount",
+        "toolCount",
+        "instructionsBytes",
+        "normalizedInputBytes"
+      ],
+      "$defs": {
+        "ReplyIdentity": {
+          "type": "object",
+          "properties": {
+            "supplier": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "supplier",
+            "model"
+          ]
+        },
+        "ModelBudget": {
+          "description": "Host configuration for each model request, independent of task history caps.",
+          "type": "object",
+          "properties": {
+            "windowTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputTokens": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxInputBytes": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "countMode": {
+              "$ref": "#/$defs/ModelInputCountMode"
+            },
+            "countCoverage": {
+              "$ref": "#/$defs/ModelInputCountCoverage"
+            },
+            "safetyMarginTokens": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "source": {
+              "$ref": "#/$defs/ModelBudgetSource"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "windowTokens",
+            "maxOutputTokens",
+            "countMode",
+            "countCoverage",
+            "safetyMarginTokens",
+            "source"
+          ]
+        },
+        "ModelInputCountMode": {
+          "type": "string",
+          "enum": [
+            "json_bytes_estimate",
+            "provider"
+          ]
+        },
+        "ModelInputCountCoverage": {
+          "type": "string",
+          "enum": [
+            "serialized_json_bytes",
+            "provider_request",
+            "provider_projection"
+          ]
+        },
+        "ModelBudgetSource": {
+          "type": "string",
+          "enum": [
+            "configured",
+            "provider_metadata"
+          ]
+        },
+        "DraftMemoryMode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "explicit",
+            "keyword_preview"
+          ]
+        },
+        "ProjectGuideAttribution": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "sha256": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "ModelBudgetInputBytes": {
+          "description": "Compact JSON sizes of independent input fragments before adapter encoding.\nThey are useful for attribution but do not sum to the wire byte or token count.",
+          "type": "object",
+          "properties": {
+            "history": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "memory": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentText": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "currentMedia": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolDefinitions": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "toolResults": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "providerReplay": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "history",
+            "memory",
+            "currentText",
+            "currentMedia",
+            "toolDefinitions",
+            "toolResults",
+            "providerReplay"
           ]
         }
       }

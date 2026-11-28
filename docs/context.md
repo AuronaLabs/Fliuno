@@ -49,6 +49,18 @@
 
 从 0.0.22 起，本地客户端可预览工作区根目录的 `AGENTS.md`，由用户确认内容摘要，再在会话上下文中显式传入 `projectGuideRevision`。每次创建新任务时复核文件内容，冻结本轮使用的版本，并把正文计入上下文预算。归因接口列出路径、摘要、字节数。项目指南不改变工具权限；如果文件或选择版本变了，客户端可保留草稿，回到审阅界面处理。[工作台操作](workbench.md#审阅项目指南) · [协议](protocol.md#项目指南)
 
+### 发送前检查草稿
+
+开发分支的 `initialize.capabilities.draftContextInspection` 为 `true` 时，可调用 `session/inspectDraftContext` 检查当前模型下的下一条文本草稿：
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"session/inspectDraftContext","params":{"sessionId":"<session-id>","input":"检查项目构建","options":{"enableInteraction":true}}}
+```
+
+报告返回当前模型身份和配置预算、历史选取的事件水位、纳入与省略的历史条数、工具数量、指令字节数，以及启用的指南来源。`normalizedInputBytes` 计量各独立 JSON 片段，无法据此得出完整请求体大小或 Token 用量。省略 `input` 可查看空草稿的固定开销；诊断暂不包含附件，也不会冻结后续正式提交的输入。
+
+它不运行生成、供应商计数或 Embedding，不创建任务或写入记忆访问审计。`memoryMode` 为 `off`、`explicit` 或 `keyword_preview`；自动匹配仅预览本机关键词，正式提交可能因语义检索、模型切换或历史变化选到不同内容。选择过期的指南或记忆依然会被拒绝。
+
 ### 显式任务选择
 
 在 `options` 或 `context` 中传 `taskIds`，可跳过无关或超大的最近记录：

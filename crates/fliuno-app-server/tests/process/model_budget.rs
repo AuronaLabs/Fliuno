@@ -930,3 +930,93 @@ fn resume_status_requires_consent_only_when_another_model_attempt_is_available()
     );
     assert_eq!(wire.requests().len(), 2);
 }
+
+#[test]
+fn draft_context_previews_local_fragments_without_dispatch_or_audit() {
+    let wire = Fixture::start(|request| match request.path.as_str() {
+        "/mock/v1/models/fixture-alias" => Response::json(200, model_metadata(4096)),
+        "/mock/v1/messages/count_tokens" => {
+            assert!(request.body.to_string().contains("private sentinel"));
+            Response::json(200, json!({"input_tokens":128}))
+        }
+        "/mock/v1/messages" => Response::json(
+            200,
+            json!({"stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}),
+        ),
+        path => panic!("unexpected endpoint {path}"),
+    });
+    let directory = TestDirectory::new();
+    let child = directory
+        .command(&wire)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut peer = Peer::from_child(child);
+    let init = peer.call(
+        "initialize",
+        json!({"protocolVersion":"0.1","clientName":"draft-test"}),
+    );
+    assert_eq!(init["capabilities"]["draftContextInspection"], true);
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let ws = json!({"workspaceId":workspace["id"]});
+    let session = peer.call("session/create", ws.clone());
+    let memory = peer.call(
+        "workspace/memory/put",
+        json!({"workspaceId":workspace["id"],"key":"sentinel","content":"private sentinel body"}),
+    );
+    let mut draft = json!({"sessionId":session["id"],"input":"Explain the private sentinel","options":{"enableInteraction":true}});
+    let mark = peer.call("events/getWatermark", json!({}));
+    let audit = peer.call("workspace/memory/listAudit", ws.clone());
+    let report = peer.call("session/inspectDraftContext", draft.clone());
+    assert_eq!(report["model"]["model"], "fixture-pinned-20261118");
+    assert_eq!(report["budget"], init["capabilities"]["modelBudget"]);
+    assert_eq!(report["memoryMode"], "keyword_preview");
+    assert_eq!(report["memoryCount"], 1);
+    assert_eq!(report["historyTurns"], 0);
+    assert!(!report.to_string().contains("private sentinel"));
+    assert!(!report.to_string().contains(memory["id"].as_str().unwrap()));
+    let isolated = peer.call(
+        "session/inspectDraftContext",
+        json!({"sessionId":session["id"],"options":{"mode":"isolated","planOnly":true}}),
+    );
+    assert_eq!(isolated["memoryMode"], "off");
+    assert_eq!(isolated["normalizedInputBytes"]["currentText"], 0);
+    assert!(isolated["toolCount"].as_u64().unwrap() < report["toolCount"].as_u64().unwrap());
+    let stale = json!({"sessionId":session["id"],"options":{"memorySelection":[{"id":memory["id"],"revision":2}]}});
+    assert_eq!(
+        peer.request("session/inspectDraftContext", stale)["error"]["code"],
+        -32009
+    );
+    let oversized = json!({"sessionId":session["id"],"input":"a".repeat(262145)});
+    assert_eq!(
+        peer.request("session/inspectDraftContext", oversized)["error"]["code"],
+        -32602
+    );
+    assert_eq!(peer.call("events/getWatermark", json!({})), mark);
+    assert_eq!(peer.call("workspace/memory/listAudit", ws), audit);
+    assert_eq!(
+        wire.requests().len(),
+        1,
+        "only provider metadata from startup"
+    );
+
+    let context = draft.as_object_mut().unwrap().remove("options").unwrap();
+    draft["context"] = context;
+    let task = peer.call("task/start", draft);
+    let id = task["id"].as_str().unwrap();
+    peer.wait_for_status(id, "completed");
+    let outcome = peer.call("task/contextAttribution", json!({"taskId":id}));
+    for field in ["currentText", "toolDefinitions", "history", "memory"] {
+        assert_eq!(
+            report["normalizedInputBytes"][field],
+            outcome["normalizedInputBytes"][field]
+        );
+    }
+    let requests = wire.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests[2].body["tools"].as_array().unwrap().len(),
+        report["toolCount"].as_u64().unwrap() as usize
+    );
+}

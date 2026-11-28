@@ -150,19 +150,31 @@ impl Kernel {
             .map(|(name, tool)| (name, self.model_tool_overrides.get(name).unwrap_or(tool)))
     }
 
-    pub(crate) fn current_model_bindings(&self, task: &Task) -> Result<Bindings> {
-        let mut bindings = BTreeMap::new();
-        let options = task.context.as_ref().map(|context| &context.options);
-        for (name, tool) in self.active_model_tools() {
+    fn eligible_current_model_tools<'a>(
+        &'a self,
+        options: Option<&'a ContextOptions>,
+    ) -> impl Iterator<Item = (&'a String, &'a Arc<dyn Tool>, String)> {
+        self.active_model_tools().filter_map(move |(name, tool)| {
             if !crate::interaction::allows_model_tool(options, name, tool.as_ref()) {
-                continue;
+                return None;
             }
             let authority = tool.authority();
-            if !self.model_tool_revoked(name, &authority) {
-                bindings.insert(name.clone(), authority);
-            }
-        }
-        Ok(bindings)
+            (!self.model_tool_revoked(name, &authority)).then_some((name, tool, authority))
+        })
+    }
+
+    pub(crate) fn current_model_bindings(&self, task: &Task) -> Result<Bindings> {
+        let options = task.context.as_ref().map(|context| &context.options);
+        Ok(self
+            .eligible_current_model_tools(options)
+            .map(|(name, _, authority)| (name.clone(), authority))
+            .collect())
+    }
+
+    pub(crate) fn draft_model_specs(&self, options: &ContextOptions) -> Vec<ToolSpec> {
+        self.eligible_current_model_tools(Some(options))
+            .map(|(_, tool, _)| tool.spec())
+            .collect()
     }
 
     fn model_bindings(&self, task_id: &str) -> Result<Option<Bindings>> {

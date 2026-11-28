@@ -616,6 +616,7 @@ impl RpcServer {
                 "concurrentExecution":scheduler::WORKER_COUNT > 1,
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
+            capabilities["draftContextInspection"] = json!(true);
             capabilities["modelProfiles"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileEditing"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileConnections"] = json!(self.model_profiles.is_some());
@@ -1125,6 +1126,9 @@ impl RpcServer {
                     p.options,
                     p.through_sequence,
                 )?)
+            }
+            "session/inspectDraftContext" => {
+                json!(self.kernel()?.inspect_draft_context(decode(params)?)?)
             }
             "taskQueue/enqueue" => {
                 json!(self.kernel()?.enqueue_task_prompt(decode(params)?)?)

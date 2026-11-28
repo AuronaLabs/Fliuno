@@ -985,6 +985,8 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `workspaceInstructions:true` 时，通过 `workspace/getInstructions` 读取 `{workspaceId,revision,text}`。通过 `workspace/setInstructions` 提交 `{workspaceId,expectedRevision,text}`，首次写入使用修订 `0`。新任务在 `context.instructionsRevision` 中显式选择当前修订，任务保存该修订的文本快照。`taskExplicitMemory:true` 声明任务可选定确切记忆版本，见[工作区记忆](memory.md)。
 
+`draftContextInspection:true` 时，`session/inspectDraftContext {sessionId,input?,options?}` 预览文本草稿的本地输入片段和预算，不生成、不写入事件。参见[草稿报告与计量口径](context.md#发送前检查草稿)。
+
 `taskContextAttribution:true` 时，`task/contextAttribution {taskId}` 返回历史及摘要引用、记忆命中来源和因预算省略状态、说明修订和字节数。`normalizedInputBytes` 是当前可重建的规范化请求估算。`latestPreflight` 和 `latestBudgetRejection` 引用已记录的事件，供应商总量的覆盖范围取自该事件。
 
 ### 项目检查清单
