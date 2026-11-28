@@ -54,7 +54,7 @@
 开发分支的 `initialize.capabilities.draftContextInspection` 为 `true` 时，可调用 `session/inspectDraftContext` 检查当前模型下的下一条文本草稿：
 
 ```json
-{"jsonrpc":"2.0","id":9,"method":"session/inspectDraftContext","params":{"sessionId":"<session-id>","input":"检查项目构建","options":{"enableInteraction":true}}}
+{"jsonrpc":"2.0","id":9,"method":"session/inspectDraftContext","params":{"sessionId":"<session-id>","input":"检查项目构建","options":{"enableInteraction":true,"toolScope":"project"}}}
 ```
 
 报告返回当前模型身份和配置预算、历史选取的事件水位、纳入与省略的历史条数、工具数量、指令字节数，以及启用的指南来源。`normalizedInputBytes` 计量独立 JSON 片段。四种模型协议另用生成时的编码器计算 `requestSize.generationBytes`，包括系统提示、工具定义和消息封装，不含 HTTP 头；`transportLimitBytes` 是请求体硬上限。两个字段均不代表 Token 数。省略 `input` 可查看空草稿的固定开销；诊断暂不包含附件，也不会冻结后续正式提交的输入。

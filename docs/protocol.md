@@ -987,6 +987,12 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `draftContextInspection:true` 时，`session/inspectDraftContext {sessionId,input?,options?}` 预览文本草稿的本地输入片段和预算，不生成、不写入事件。参见[草稿报告与计量口径](context.md#发送前检查草稿)。
 
+### 模型工具范围
+
+开发版的 `modelToolScope:true` 表示模型任务支持 `context.toolScope`，草稿预览使用 `options.toolScope`。省略或传 `all` 保留现有行为；`project` 限制为宿主内置的项目编辑工具、已注册且未撤销的隔离项目检查，以及启用的计划和询问工具；`none` 不开放工具，包括互动工具。只规划与所选范围取交集。外部 Agent 任务不接受非默认值。
+
+工具范围参与任务请求身份，入队草稿保存选项，真正创建任务时绑定当时符合范围的工具版本。预览、模型的工具定义及调用校验使用相同过滤规则；撤销仍优先，审批约束及结果未知语义不变。旧任务与省略选项的客户端保留既有行为。
+
 `taskContextAttribution:true` 时，`task/contextAttribution {taskId}` 返回历史及摘要引用、记忆命中来源和因预算省略状态、说明修订和字节数。`normalizedInputBytes` 是当前可重建的规范化请求估算。`latestPreflight` 和 `latestBudgetRejection` 引用已记录的事件，供应商总量的覆盖范围取自该事件。
 
 ### 项目检查清单
