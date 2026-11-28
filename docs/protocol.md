@@ -987,6 +987,20 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `taskContextAttribution:true` 时，`task/contextAttribution {taskId}` 返回历史及摘要引用、记忆命中来源和因预算省略状态、说明修订和字节数。`normalizedInputBytes` 是当前可重建的规范化请求估算。`latestPreflight` 和 `latestBudgetRejection` 引用已记录的事件，供应商总量的覆盖范围取自该事件。
 
+### 项目指南
+
+开发版的 `workspaceProjectGuide:true` 只在启用了管理功能的直接本机连接声明。指南管理独立于 `workspace/setInstructions`，不修改用户手工维护的指令。
+
+| 方法 | 参数与返回 |
+| --- | --- |
+| `workspace/getProjectGuide` | `{workspaceId}`，返回 `{workspaceId,revision,enabledSha256}`，未设置时为 `0` 与 `null`。此方法不读文件。 |
+| `workspace/previewProjectGuide` | `{workspaceId}`，返回 `{state,guide,readError?}`；`guide` 为 `{path,sha256,text}` 或 `null`。只读根目录 `AGENTS.md`，最多 8192 UTF-8 字节；缺失或空白没有指南，不可读的文件带 `readError`。 |
+| `workspace/setProjectGuide` | `{workspaceId,expectedRevision,sha256}`。`sha256` 必须是刚审阅的摘要，显式传 `null` 停用。成功时返回新状态；若修订冲突或文件内容变化，客户端须重新预览，取得新的状态和摘要后再提交。 |
+
+`task/start`、`task/startSummary` 和 `session/context` 可在会话上下文选项中显式带 `projectGuideRevision`；省略时不发送。内核按会话所属工作区核对当前启用版本和文件摘要，成功时把原文冻结到 `Task.context.projectGuide`，并纳入 `maxBytes`。排队请求在真正创建任务时核对；重复提交已经成功创建的请求仍返回原回执。此选项不适用于隔离上下文、外部 Agent 或持久 Run。`task/contextAttribution.projectGuide` 返回 `{path,sha256,bytes}`，不重复返回正文。
+
+四种模型协议都将指南放在用户上下文数据块里，当前用户指令和已配置的权限优先。指南只提供项目约定，不参与工具注册与权限判断。
+
 ## 核对与修订
 
 | 能力 | 方法 | 用途 |
