@@ -2,7 +2,7 @@ use super::*;
 use fliuno_protocol::{
     ModelCatalogAccess, ModelCatalogStatus, ModelConfigurationStatus, ModelConnectionCheck,
     ModelConnectionCheckParams, ModelCredentialsStatus, ModelPresence, ModelProfileDefault,
-    ModelProfileList, ModelProfileSelectParams,
+    ModelProfileEditGetParams, ModelProfileEditView, ModelProfileList, ModelProfileSelectParams,
 };
 
 pub(super) struct Picker {
@@ -10,6 +10,9 @@ pub(super) struct Picker {
     profiles: Option<ModelProfileList>,
     default: Option<ModelProfileDefault>,
     saved: bool,
+    editable: bool,
+    editor: Option<super::model_edit::Panel>,
+    edit_saved: bool,
     index: usize,
     error: Option<String>,
     pending: Option<Option<String>>,
@@ -23,6 +26,9 @@ impl Picker {
             profiles: None,
             default: None,
             saved: false,
+            editable: false,
+            editor: None,
+            edit_saved: false,
             index: 0,
             error: None,
             pending: None,
@@ -34,8 +40,10 @@ impl Picker {
         &mut self,
         profiles: ModelProfileList,
         default: Option<ModelProfileDefault>,
+        editable: bool,
     ) {
         self.default = default;
+        self.editable = editable;
         self.index = profiles
             .profiles
             .iter()
@@ -43,6 +51,49 @@ impl Picker {
             .unwrap_or(0);
         self.profiles = Some(profiles);
         self.error = None;
+    }
+
+    pub(super) fn edit_opened(&mut self, view: ModelProfileEditView) {
+        self.editor = Some(super::model_edit::Panel::new(view));
+    }
+
+    pub(super) fn edit_saved(&mut self, view: ModelProfileEditView) {
+        if let Some(entry) = self
+            .profiles
+            .as_mut()
+            .and_then(|profiles| profiles.profiles.get_mut(self.index))
+        {
+            *entry = view.profile;
+        }
+        self.checked = None;
+        self.editor = None;
+        self.edit_saved = true;
+    }
+
+    pub(super) fn catalog_page(&mut self, page: fliuno_protocol::ProviderModelPage) {
+        if let Some(editor) = &mut self.editor {
+            editor.install_page(page);
+        }
+    }
+
+    pub(super) fn paste(&mut self, value: &str, busy: bool) {
+        if let Some(editor) = &mut self.editor {
+            editor.paste(value, busy);
+        }
+    }
+
+    pub(super) fn title(&self) -> &'static str {
+        self.editor
+            .as_ref()
+            .map_or("Switch model", super::model_edit::Panel::title)
+    }
+
+    pub(super) fn actions(&self) -> &'static str {
+        if self.editor.is_some() {
+            "Esc Back"
+        } else {
+            "↑/↓ Move  ·  Esc back"
+        }
     }
 
     pub(super) fn saved(&mut self, default: ModelProfileDefault) {
@@ -56,12 +107,19 @@ impl Picker {
     }
 
     pub(super) fn failed(&mut self, error: String) {
+        if let Some(editor) = &mut self.editor {
+            editor.failed(error);
+            return;
+        }
         self.pending = None;
         self.error = Some(error);
         self.saved = false;
     }
 
     fn status(&self) -> Option<String> {
+        if self.edit_saved {
+            return Some("Profile saved. Enter to use it now.".into());
+        }
         if self.saved {
             return Some("Startup default saved. Active model unchanged.".into());
         }
@@ -82,11 +140,15 @@ impl Picker {
     }
 
     pub(super) fn preferred_height(&self) -> u16 {
+        if let Some(editor) = &self.editor {
+            return editor.preferred_height();
+        }
         let models = self
             .profiles
             .as_ref()
             .map_or(1, |list| list.profiles.len().clamp(1, 8));
         (models as u16
+            + u16::from(self.editable)
             + if self.error.is_some() || self.status().is_some() {
                 7
             } else {
@@ -96,6 +158,10 @@ impl Picker {
     }
 
     pub(super) fn draw(&self, frame: &mut Frame<'_>, body: Rect, palette: &Palette) {
+        if let Some(editor) = &self.editor {
+            editor.draw(frame, body, palette);
+            return;
+        }
         let Some(profiles) = &self.profiles else {
             let text = self.error.as_deref().unwrap_or("Loading model profiles…");
             render_text(frame, body, text, 0);
@@ -111,6 +177,9 @@ impl Picker {
             "Enter Use now   F5 Check"
         };
         let mut lines = vec![Line::styled(help, palette.quiet)];
+        if self.editable {
+            lines.push(Line::styled("F2 Edit profile", palette.quiet));
+        }
         if let Some(error) = &self.error {
             lines.push(Line::styled(error.as_str(), palette.status(Color::Red)));
         } else if let Some(status) = self.status() {
@@ -130,7 +199,8 @@ impl Picker {
                     .default
                     .as_ref()
                     .is_some_and(|default| default.profile == entry.profile);
-                let role = match (active, default) {
+                let pending = active && *entry != profiles.active;
+                let role = match (active && !pending, default) {
                     (true, true) => " [now/default]",
                     (true, false) => " [now]",
                     (false, true) => " [default]",
@@ -142,7 +212,8 @@ impl Picker {
                     .as_deref()
                     .map_or_else(String::new, |effort| format!("  ·  {}", clean(effort)));
                 // Keep the model ID visible on narrow terminals; the profile state still leads.
-                format!("{id}{role}  ·  {model}{effort}")
+                let pending = if pending { " [saved]" } else { "" };
+                format!("{id}{role}{pending}  ·  {model}{effort}")
             })
             .collect();
         render_list(frame, list, labels, self.index, palette.choice);
@@ -155,6 +226,19 @@ impl App {
         let Layer::ModelPicker(picker) = &mut self.layer else {
             return;
         };
+        if let Some(editor) = &mut picker.editor {
+            if key.code == KeyCode::Esc {
+                if !self.busy && editor.back() {
+                    picker.editor = None;
+                }
+            } else if let Some(request) = editor.key(key, self.busy)
+                && !self.send(worker, request)
+                && let Layer::ModelPicker(picker) = &mut self.layer
+            {
+                picker.failed("Connection worker unavailable".into());
+            }
+            return;
+        }
         if key.code == KeyCode::Esc && (!self.busy || picker.pending.is_some()) {
             self.layer = picker.return_layer();
             return;
@@ -168,6 +252,7 @@ impl App {
             if before != picker.index {
                 picker.error = None;
                 picker.saved = false;
+                picker.edit_saved = false;
             }
             if self.busy || key.kind != KeyEventKind::Press {
                 return;
@@ -175,6 +260,20 @@ impl App {
             let Some(profile) = profiles.profiles.get(picker.index) else {
                 return;
             };
+            if key.code == KeyCode::F(2) && picker.editable {
+                picker.error = None;
+                picker.saved = false;
+                picker.edit_saved = false;
+                let params = ModelProfileEditGetParams {
+                    profile: profile.profile.clone(),
+                };
+                if !self.send(worker, Request::EditModel(params))
+                    && let Layer::ModelPicker(picker) = &mut self.layer
+                {
+                    picker.failed("Connection worker unavailable".into());
+                }
+                return;
+            }
             if key.code == KeyCode::Char('s')
                 && key.modifiers.contains(KeyModifiers::CONTROL)
                 && picker.default.is_some()
@@ -213,7 +312,8 @@ impl App {
                 picker.error = None;
                 let params = ModelProfileSelectParams {
                     profile: profile.profile.clone(),
-                    reload: false,
+                    reload: profile.profile == profiles.active.profile
+                        && *profile != profiles.active,
                 };
                 if !self.send(worker, Request::SelectModel(params))
                     && let Layer::ModelPicker(picker) = &mut self.layer

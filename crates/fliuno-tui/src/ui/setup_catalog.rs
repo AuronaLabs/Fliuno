@@ -3,7 +3,7 @@ use crossterm::event::KeyCode;
 use fliuno_config::ModelCatalogDraft;
 use fliuno_protocol::{
     MAX_MODEL_CATALOG_PREVIEW_BYTES, ModelCatalogAccess, ModelCatalogPreview, ModelCatalogStatus,
-    ProviderModel,
+    ProviderModel, ProviderModelPage,
 };
 use ratatui::{Frame, layout::Rect, style::Style};
 use std::{
@@ -50,12 +50,8 @@ impl Catalog {
         let cursor = draft.cursor.clone();
         match Lookup::spawn(server, draft, key) {
             Ok(lookup) => {
-                if let Some(cursor) = cursor {
-                    self.requested_cursors.insert(cursor);
-                    self.next_cursor = None;
-                }
+                self.page_requested(cursor);
                 self.lookup = Some(lookup);
-                self.status = "Loading the model catalog…";
             }
             Err(_) => {
                 self.status = "Could not start the model query. Enter a model ID to continue."
@@ -81,30 +77,7 @@ impl Catalog {
             return;
         };
         if let Some(page) = preview.page {
-            let seen: BTreeSet<_> = self.models.iter().map(|entry| entry.id.as_str()).collect();
-            let new = page
-                .models
-                .into_iter()
-                .filter(|entry| !seen.contains(entry.id.as_str()))
-                .collect::<Vec<_>>();
-            self.models.extend(new);
-            let limit_reached = self.requested_cursors.len() + 1 >= MAX_PAGES;
-            let repeated = page
-                .next_cursor
-                .as_ref()
-                .is_some_and(|cursor| self.requested_cursors.contains(cursor));
-            let missing_rows =
-                page.truncated || ((limit_reached || repeated) && page.next_cursor.is_some());
-            self.next_cursor = page
-                .next_cursor
-                .filter(|cursor| !limit_reached && !self.requested_cursors.contains(cursor));
-            self.status = if missing_rows {
-                "Catalog limit reached. You can enter any model ID."
-            } else if self.models.is_empty() && self.next_cursor.is_none() {
-                "The catalog is empty. Enter a model ID to continue."
-            } else {
-                ""
-            };
+            self.install_page(page);
         } else {
             self.status = match (preview.catalog_access, preview.catalog) {
                 (ModelCatalogAccess::Unauthorized, _) => {
@@ -122,6 +95,43 @@ impl Catalog {
                 _ => "Catalog unavailable. Enter a model ID or press F5 to retry.",
             };
         }
+    }
+
+    pub(super) fn page_requested(&mut self, cursor: Option<String>) {
+        if let Some(cursor) = cursor {
+            self.requested_cursors.insert(cursor);
+            self.next_cursor = None;
+        } else {
+            *self = Self::default();
+        }
+        self.status = "Loading the model catalog…";
+    }
+
+    pub(super) fn install_page(&mut self, page: ProviderModelPage) {
+        let seen: BTreeSet<_> = self.models.iter().map(|entry| entry.id.as_str()).collect();
+        let new = page
+            .models
+            .into_iter()
+            .filter(|entry| !seen.contains(entry.id.as_str()))
+            .collect::<Vec<_>>();
+        self.models.extend(new);
+        let limit_reached = self.requested_cursors.len() + 1 >= MAX_PAGES;
+        let repeated = page
+            .next_cursor
+            .as_ref()
+            .is_some_and(|cursor| self.requested_cursors.contains(cursor));
+        let missing_rows =
+            page.truncated || ((limit_reached || repeated) && page.next_cursor.is_some());
+        self.next_cursor = page
+            .next_cursor
+            .filter(|cursor| !limit_reached && !self.requested_cursors.contains(cursor));
+        self.status = if missing_rows {
+            "Catalog limit reached. You can enter any model ID."
+        } else if self.models.is_empty() && self.next_cursor.is_none() {
+            "The catalog is empty. Enter a model ID to continue."
+        } else {
+            ""
+        };
     }
 
     fn matches<'a>(&'a self, text: &str) -> impl Iterator<Item = &'a ProviderModel> {
@@ -158,7 +168,7 @@ impl Catalog {
     pub(super) fn status(&self, text: &str) -> &'static str {
         if self.status.is_empty() && !self.models.is_empty() && self.matches(text).next().is_none()
         {
-            "No catalog match. Enter saves the typed model ID."
+            "No catalog match."
         } else {
             self.status
         }

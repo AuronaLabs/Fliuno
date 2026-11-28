@@ -12,15 +12,16 @@ use fliuno_protocol::{
     ApprovalDecision, ApprovalDetails, ApprovalSummary, ArtifactCatalogScope,
     ArtifactCatalogSnapshotPage, ArtifactCatalogSnapshotParams, ArtifactDigest, ArtifactGetParams,
     ArtifactRevision, ArtifactSummary, ContextOptions, Event, ModelConnectionCheck,
-    ModelConnectionCheckParams, ModelProfileDefault, ModelProfileEntry, ModelProfileList,
-    ModelProfileSelectParams, ModelUsageSummary, ModelUsageTotals, ObjectPage, Session,
-    SessionContextParams, SessionForkParams, SessionHistoryListPage, SessionHistoryListParams,
-    SessionHistoryRole, SessionListOrder, SessionListParams, Task, TaskContext,
-    TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
-    TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
-    TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
-    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
-    Workspace, WorkspaceHistorySearchParams,
+    ModelConnectionCheckParams, ModelProfileDefault, ModelProfileEditGetParams,
+    ModelProfileEditParams, ModelProfileEditView, ModelProfileEntry, ModelProfileList,
+    ModelProfileSelectParams, ModelUsageSummary, ModelUsageTotals, ObjectPage,
+    ProviderModelListParams, ProviderModelPage, Session, SessionContextParams, SessionForkParams,
+    SessionHistoryListPage, SessionHistoryListParams, SessionHistoryRole, SessionListOrder,
+    SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan, TaskQueue,
+    TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams, TaskReconciliation,
+    TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState,
+    TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot,
+    WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -47,6 +48,9 @@ pub enum Request {
     Reconnect,
     Diagnostics,
     ModelProfiles,
+    EditModel(ModelProfileEditGetParams),
+    SaveModelEdit(ModelProfileEditParams),
+    BrowseModels(ProviderModelListParams),
     CheckModel(ModelConnectionCheckParams),
     SaveModelDefault(ModelProfileDefault),
     SelectModel(ModelProfileSelectParams),
@@ -166,7 +170,10 @@ pub enum Update {
         model: Option<String>,
         model_profiles: bool,
     },
-    ModelProfiles(ModelProfileList, Option<ModelProfileDefault>),
+    ModelProfiles(ModelProfileList, Option<ModelProfileDefault>, bool),
+    ModelEditOpened(ModelProfileEditView),
+    ModelEditSaved(ModelProfileEditView),
+    ModelCatalogPage(ProviderModelPage),
     ModelDefaultSaved(ModelProfileDefault),
     ModelChecked {
         profile: Option<String>,
@@ -799,7 +806,7 @@ impl Service {
                     } else {
                         None
                     };
-                    Update::ModelProfiles(profiles, default)
+                    Update::ModelProfiles(profiles, default, self.supports("modelProfileEditing"))
                 }
                 Err(error) if !disconnected(error.as_ref()) => {
                     Update::ModelProfileError(profile_error(error.as_ref()))
@@ -815,6 +822,29 @@ impl Service {
                     Err(error) => return Err(error),
                 }
             }
+            Request::EditModel(params) => match self.rpc("modelProfiles/getEdit", json!(params)) {
+                Ok(result) => Update::ModelEditOpened(result),
+                Err(error) if !disconnected(error.as_ref()) => {
+                    Update::ModelProfileError(profile_error(error.as_ref()))
+                }
+                Err(error) => return Err(error),
+            },
+            Request::SaveModelEdit(params) => {
+                match self.rpc("modelProfiles/saveEdit", json!(params)) {
+                    Ok(result) => Update::ModelEditSaved(result),
+                    Err(error) if !disconnected(error.as_ref()) => {
+                        Update::ModelProfileError(profile_error(error.as_ref()))
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Request::BrowseModels(params) => match self.rpc("models/list", json!(params)) {
+                Ok(result) => Update::ModelCatalogPage(result),
+                Err(error) if !disconnected(error.as_ref()) => {
+                    Update::ModelProfileError(profile_error(error.as_ref()))
+                }
+                Err(error) => return Err(error),
+            },
             Request::CheckModel(params) => match self.rpc("models/check", json!(params)) {
                 Ok(check) => Update::ModelChecked {
                     profile: params.profile,

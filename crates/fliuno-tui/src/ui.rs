@@ -2,6 +2,7 @@ mod answer;
 mod commands;
 mod deliverables;
 mod memories;
+mod model_edit;
 mod model_picker;
 mod palette;
 mod panels;
@@ -812,9 +813,24 @@ impl App {
                 self.message = message;
             }
             Update::Activity(previews) => self.activity = previews,
-            Update::ModelProfiles(profiles, default) => {
+            Update::ModelProfiles(profiles, default, editable) => {
                 if let Layer::ModelPicker(picker) = &mut self.layer {
-                    picker.install(profiles, default);
+                    picker.install(profiles, default, editable);
+                }
+            }
+            Update::ModelEditOpened(view) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.edit_opened(view);
+                }
+            }
+            Update::ModelEditSaved(view) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.edit_saved(view);
+                }
+            }
+            Update::ModelCatalogPage(page) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.catalog_page(page);
                 }
             }
             Update::ModelDefaultSaved(default) => {
@@ -893,6 +909,8 @@ impl App {
             if target.insert(&text, edit_limit(edit)) && matches!(edit, Edit::Task) {
                 self.key = uuid::Uuid::new_v4().to_string();
             }
+        } else if let Layer::ModelPicker(picker) = &mut self.layer {
+            picker.paste(value, self.busy);
         } else if let Layer::Deliverables(catalog) = &self.layer {
             if !self.busy {
                 catalog.paste(&mut self.input, value);

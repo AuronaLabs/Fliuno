@@ -2326,3 +2326,106 @@ fn model_picker_switches_the_next_request_and_preserves_conversation_and_draft()
     using_default.quit("\x03");
     provider.join().unwrap();
 }
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn model_editor_browses_an_existing_route_and_applies_saved_settings_after_reopening() {
+    use serde_json::json;
+    use std::net::TcpListener;
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    std::fs::write(root.path().join("fixture.key"), "fixture-editor-key\n").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let settings = format!(
+        r#"[model]
+provider = "openai"
+name = "startup-model" # keep this note
+base_url = "{base}"
+api_key_file = "fixture.key"
+"#
+    );
+    std::fs::write(&config, &settings).unwrap();
+    let (release, wait_for_search) = channel();
+    let (observed, generation) = channel();
+    let provider = thread::spawn(move || {
+        let listing = read_catalog_request(&listener, "fixture-editor-key");
+        wait_for_search
+            .recv_timeout(Duration::from_secs(4))
+            .unwrap();
+        write_catalog_response(
+            listing,
+            200,
+            r#"{"data":[{"id":"other-model"},{"id":"found-model"}]}"#,
+        );
+        let (mut socket, request) = streaming_fixture_input(&listener);
+        observed.send(request).unwrap();
+        let event = json!({"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Edited model replied"}]}]}});
+        write!(socket, "data: {event}\n\n").unwrap();
+    });
+    let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    console.expect("Start a conversation");
+    console.keys("Draft survives edits");
+    console.expect("Draft survives edits");
+    let open_picker = |console: &mut Console| {
+        console.keys("\x1bOPmodel");
+        console.expect("Commands  /  model");
+        console.keys("\r");
+        console.expect("F2 Edit profile");
+    };
+    open_picker(&mut console);
+    console.keys("\x1bOQ");
+    console.expect("Edit model profile");
+    console.keys("\x1b[15~");
+    console.expect("Loading the model catalog");
+    console.keys("found");
+    console.expect("› found");
+    release.send(()).unwrap();
+    console.expect("found-model");
+    console.expect_absent("other-model");
+    console.resize(22, 48);
+    console.capture("workbench-model-catalog-48");
+    console.resize(24, 80);
+    console.capture("workbench-model-catalog-80");
+    console.resize(28, 110);
+    console.capture("workbench-model-catalog-110");
+    console.keys("\r");
+    console.expect("Edit model profile");
+    console.expect("found-model");
+    console.keys("\x1bOR");
+    console.expect("Set reasoning effort");
+    console.keys(&format!("{}\r", "\x1b[B".repeat(5)));
+    console.expect("Reasoning: high");
+    console.resize(22, 48);
+    console.capture("workbench-model-edit-48");
+    console.resize(24, 80);
+    console.capture("workbench-model-edit-80");
+    console.resize(28, 110);
+    console.capture("workbench-model-edit-110");
+    console.keys("\x13");
+    console.expect("Profile saved. Enter to use it now.");
+    console.expect("Conversation  ·  startup-model");
+    console.keys("\x1b");
+    console.expect_absent("Switch model");
+    console.expect("Draft survives edits");
+    let saved = std::fs::read_to_string(&config).unwrap();
+    assert!(saved.contains("name = \"found-model\" # keep this note"));
+    assert!(saved.contains("reasoning_effort = \"high\""));
+    assert!(saved.contains(&format!("base_url = \"{base}\"")));
+    assert!(saved.contains("api_key_file = \"fixture.key\""));
+    open_picker(&mut console);
+    console.expect("[model] [default] [saved]");
+    console.keys("\r");
+    console.expect("Conversation  ·  found-model");
+    console.expect("Draft survives edits");
+    console.keys("\r");
+    let actual = generation.recv_timeout(Duration::from_secs(12)).unwrap();
+    assert_eq!(actual["model"], "found-model");
+    assert_eq!(actual["reasoning"]["effort"], "high");
+    assert!(actual["input"].to_string().contains("Draft survives edits"));
+    console.expect("Edited model replied");
+    console.quit("\x03");
+    provider.join().unwrap();
+}
