@@ -33,6 +33,7 @@ pub(super) enum CommandAction {
     SupplierSettings,
     Language,
     ReadRules,
+    ProjectGuide,
     ProjectReview,
     TogglePlan,
     Help,

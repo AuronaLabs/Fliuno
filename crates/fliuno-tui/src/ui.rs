@@ -10,6 +10,7 @@ mod model_picker;
 mod palette;
 mod panels;
 mod project_activity;
+mod project_guide;
 pub(crate) mod setup;
 mod setup_catalog;
 mod supplier_settings;
@@ -87,6 +88,7 @@ enum Layer {
         remember: Option<Box<PolicyReadRuleCreateParams>>,
     },
     ReadRules(Option<Vec<PolicyReadRule>>, usize),
+    ProjectGuide(Box<project_guide::Panel>),
     ProjectReview {
         return_to_draft: bool,
         scroll: u16,
@@ -197,6 +199,7 @@ pub struct App {
     supplier_settings: bool,
     supplier_catalog: bool,
     read_rules: bool,
+    project_guide: Option<fliuno_protocol::WorkspaceProjectGuide>,
     busy: bool,
     next: Option<Request>,
     reopening: Option<String>,
@@ -251,6 +254,7 @@ impl App {
             supplier_settings: false,
             supplier_catalog: false,
             read_rules: false,
+            project_guide: None,
             busy: true,
             next: None,
             reopening: None,
@@ -374,7 +378,7 @@ impl App {
             key: self.key.clone(),
             input: self.input_artifact.clone(),
             plan_only: self.plan_only,
-            context: Box::new(self.draft_context.clone()),
+            context: Box::new(self.project_context_options()),
             enqueue,
         };
         if self.send(worker, request) {
@@ -564,6 +568,7 @@ impl App {
                 supplier_settings,
                 supplier_catalog,
                 read_rules,
+                project_guide,
             } => {
                 self.online = true;
                 self.model = model.and_then(model_label);
@@ -571,6 +576,7 @@ impl App {
                 self.supplier_settings = supplier_settings;
                 self.supplier_catalog = supplier_catalog;
                 self.read_rules = read_rules;
+                self.project_guide = project_guide;
                 self.activity.clear();
                 self.message.clear();
                 let id = self.workspace.get_or_insert(workspace).id.clone();
@@ -579,7 +585,9 @@ impl App {
                     None => sessions(id, 0, false),
                 });
             }
-            Update::Workspace(workspace) => {
+            Update::ProjectGuide(preview) => self.install_project_guide(*preview),
+            Update::Workspace(workspace, project_guide) => {
+                self.project_guide = project_guide;
                 self.cancel_deferred_send();
                 self.reopening = None;
                 self.park_draft();
@@ -937,6 +945,7 @@ impl App {
                 self.supplier_settings = false;
                 self.supplier_catalog = false;
                 self.read_rules = false;
+                self.project_guide = None;
                 self.activity.clear();
                 self.layer = Layer::None;
                 self.next = None;
@@ -1107,6 +1116,10 @@ impl App {
             return true;
         }
         if key.code == KeyCode::Esc && pressed && self.cancel_deferred_send() {
+            return false;
+        }
+        if matches!(self.layer, Layer::ProjectGuide(_)) {
+            self.project_guide_key(key, worker);
             return false;
         }
         if matches!(self.layer, Layer::Language(_)) {
@@ -1366,6 +1379,12 @@ impl App {
                         self.toggle_plan_mode();
                         if menu.origin != CommandOrigin::Workbench {
                             self.layer = Layer::Edit(Edit::Task);
+                        }
+                        return false;
+                    }
+                    CommandAction::ProjectGuide => {
+                        if !self.open_project_guide(menu.origin, worker) {
+                            self.layer = Layer::Commands(menu);
                         }
                         return false;
                     }
@@ -1801,6 +1820,7 @@ impl App {
             | Layer::History(..)
             | Layer::Commands(_)
             | Layer::Language(_)
+            | Layer::ProjectGuide(_)
             | Layer::ModelPicker(_)
             | Layer::Edit(..) => {
                 unreachable!()
@@ -1831,7 +1851,7 @@ impl App {
             let params = SessionContextParams {
                 session_id: session.id.clone(),
                 through_sequence: None,
-                options: self.draft_context.clone(),
+                options: self.project_context_options(),
             };
             self.send(worker, Request::DraftContext(Box::new(params)));
         }
@@ -2410,6 +2430,14 @@ impl App {
             action: CommandAction::Language,
             search_label: None,
         });
+        if self.online && self.project_guide.is_some() && self.workspace.is_some() && !self.busy {
+            commands.push(Command {
+                label: self.language.text("Review project guide", "审阅项目指南"),
+                alias: Some("guide"),
+                action: CommandAction::ProjectGuide,
+                search_label: Some("Review project guide"),
+            });
+        }
         if self.online && self.read_rules && self.workspace.is_some() && !self.busy {
             commands.push(Command {
                 label: self
@@ -2727,6 +2755,14 @@ fn format_context_attribution(report: &TaskContextAttribution) -> String {
         ),
         format!("{} B of workspace instructions", report.instructions_bytes),
     ];
+    if let Some(guide) = &report.project_guide {
+        lines.push(format!(
+            "Project guide: {} · {} B\nSHA-256: {}",
+            clean(&guide.path),
+            guide.bytes,
+            clean(&guide.sha256)
+        ));
+    }
     if let Some(bytes) = &report.normalized_input_bytes {
         lines.push(format!("\nNormalized fragments (bytes)\nCurrent text {} · media {}\nHistory {} · memory {}\nTool definitions {} · results {} · provider replay {}",
             bytes.current_text, bytes.current_media, bytes.history, bytes.memory,

@@ -3917,3 +3917,110 @@ fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
     reopened.expect_absent(key);
     reopened.quit("\x03");
 }
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn workbench_reviews_project_guide_and_preserves_draft_after_change() {
+    use serde_json::json;
+    use std::net::{Ipv4Addr, TcpListener};
+
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let root = tempfile::tempdir().unwrap();
+    let config = root.path().join("config.toml");
+    let guide = root.path().join("AGENTS.md");
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    std::fs::write(&config, format!(
+        "[workbench]\ntheme='dark'\ndatabase='fixture.db'\n[model]\nprovider='openai'\nprotocol='openai.responses'\nname='fixture-coder'\nbase_url='http://{address}/v1'\napi_key_file='fixture.key'\n"
+    )).unwrap();
+    std::fs::write(root.path().join("fixture.key"), "fixture-key").unwrap();
+    std::fs::write(&guide, "# Project guide\n\nUse focused checks.\n").unwrap();
+    let model = thread::spawn(move || {
+        for (expected, answer) in [
+            (Some("Use focused checks."), "Guide used."),
+            (None, "Guide disabled."),
+        ] {
+            let (mut socket, request) = streaming_fixture_input(&listener);
+            let input = request["input"].as_array().unwrap();
+            let texts: Vec<_> = input
+                .iter()
+                .filter_map(|item| item["content"].as_str())
+                .collect();
+            assert!(!texts.iter().any(|t| t.contains("A newer guide")));
+            assert_eq!(
+                texts.iter().any(|t| t.contains("Use focused checks.")),
+                expected.is_some()
+            );
+            assert_eq!(
+                texts
+                    .iter()
+                    .any(|t| t.contains("configured permissions take precedence")),
+                expected.is_some()
+            );
+            let event = json!({"type":"response.completed","response":{"status":"completed","output":[
+                {"type":"message","content":[{"type":"output_text","text":answer}]}
+            ]}});
+            write!(socket, "data: {event}\n\n").unwrap();
+        }
+    });
+    let open = |console: &mut Console| {
+        console.ready();
+        console.keys("\x1bOP");
+        console.expect("Type to filter");
+        console.keys("guide\r");
+        console.expect("Project guide · AGENTS.md");
+        console.ready();
+    };
+    let mut console = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    console.expect("Enter Send");
+    console.keys("Use the project conventions.");
+    open(&mut console);
+    console.expect("Use focused checks.");
+    console.expect("Enter Enable");
+    for (rows, cols) in [(16, 48), (24, 80), (28, 110)] {
+        console.resize(rows, cols);
+        console.ready();
+        console.expect("Use focused checks.");
+        console.expect("Enter Enable");
+        console.capture(&format!("project-guide-preview-{cols}"));
+    }
+    console.keys("\t");
+    console.expect("Source: AGENTS.md");
+    console.expect("SHA-256:");
+    console.keys("\t");
+    console.expect("Use focused checks.");
+    console.keys("\r");
+    console.expect("Enabled for this workspace");
+    console.ready();
+    console.keys("\x1b");
+    console.expect("Use the project conventions.");
+    console.keys("\r");
+    console.expect("Guide used.");
+    console.quit("\x03");
+
+    std::fs::write(&guide, "A newer guide must be reviewed.\n").unwrap();
+    let mut reopened = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    reopened.expect("Guide used.");
+    reopened.expect("Enter Write");
+    reopened.keys("\r");
+    reopened.expect("Enter Send");
+    reopened.ready();
+    reopened.keys("Continue without the new guide.\r");
+    reopened.expect("AGENTS.md changed or disappeared");
+    reopened.expect("Continue without the new guide.");
+    open(&mut reopened);
+    reopened.expect("Changed or unavailable");
+    reopened.expect("A newer guide must be reviewed.");
+    reopened.resize(20, 48);
+    reopened.ready();
+    reopened.capture("project-guide-changed-48");
+    reopened.keys("d");
+    reopened.expect("Enter Enable");
+    reopened.ready();
+    reopened.keys("\x1b");
+    reopened.expect("Continue without the new guide.");
+    reopened.keys("\r");
+    reopened.expect("Guide disabled.");
+    reopened.quit("\x03");
+    model.join().unwrap();
+}

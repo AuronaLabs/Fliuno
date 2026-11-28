@@ -41,6 +41,8 @@ jobs:
         run: cargo test --locked -p fliuno-tui --test workbench workbench_keeps_language_draft_and_exact_project_review_at_terminal_widths -- --ignored
       - name: Verify long approval previews through a real terminal
         run: cargo test --locked -p fliuno-tui --test workbench workbench_review_keeps_long_preview_and_tool_details_separate -- --ignored
+      - name: Verify project guide consent in a real terminal
+        run: cargo test --locked -p fliuno-tui --test workbench workbench_reviews_project_guide_and_preserves_draft_after_change -- --ignored
       - run: python scripts/check_linux_cgroup.py
         if: runner.os == 'Linux'
       - run: python scripts/export_schema.py --check

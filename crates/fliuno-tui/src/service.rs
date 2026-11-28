@@ -108,6 +108,8 @@ pub enum Request {
     Decide(String, String, ApprovalDecision),
     RememberRead(String, String, Box<PolicyReadRuleCreateParams>),
     ReadRules,
+    ProjectGuide(String),
+    SaveProjectGuide(fliuno_protocol::WorkspaceSetProjectGuideParams),
     RevokeRead(String),
     Answer(String, String, String),
     Steer(String, String),
@@ -192,6 +194,7 @@ pub enum Update {
         supplier_settings: bool,
         supplier_catalog: bool,
         read_rules: bool,
+        project_guide: Option<fliuno_protocol::WorkspaceProjectGuide>,
     },
     ModelProfiles(
         ModelProfileList,
@@ -215,7 +218,8 @@ pub enum Update {
     ModelSelected(ModelProfileEntry),
     ModelProfileError(String),
     Workspaces(ObjectPage<Workspace>),
-    Workspace(Workspace),
+    Workspace(Workspace, Option<fliuno_protocol::WorkspaceProjectGuide>),
+    ProjectGuide(Box<fliuno_protocol::WorkspaceProjectGuidePreview>),
     Sessions {
         workspace: String,
         page: ObjectPage<Session>,
@@ -526,6 +530,7 @@ fn serve(
                     let supplier_settings = server.supports("modelSupplierSettings");
                     let supplier_catalog = server.supports("modelSupplierCatalog");
                     let read_rules = server.supports("workspaceReadRules");
+                    let project_guide = server.workspace_project_guide(&workspace.id)?;
                     service = Some(server);
                     out.send(Update::Online {
                         workspace,
@@ -534,6 +539,7 @@ fn serve(
                         supplier_settings,
                         supplier_catalog,
                         read_rules,
+                        project_guide,
                     })?;
                     Ok(())
                 }) {
@@ -887,6 +893,37 @@ impl Service {
         Ok(())
     }
 
+    fn workspace_project_guide(
+        &mut self,
+        workspace: &str,
+    ) -> Result<Option<fliuno_protocol::WorkspaceProjectGuide>> {
+        if !self.supports("workspaceProjectGuide") {
+            return Ok(None);
+        }
+        let state: fliuno_protocol::WorkspaceProjectGuide = self.rpc(
+            "workspace/getProjectGuide",
+            json!({"workspaceId":workspace}),
+        )?;
+        if state.workspace_id != workspace {
+            return Err("Project guide setting belongs to a different workspace".into());
+        }
+        Ok(Some(state))
+    }
+
+    fn project_guide_preview(&mut self, workspace: &str) -> Result<Update> {
+        if !self.supports("workspaceProjectGuide") || self.workspace.as_deref() != Some(workspace) {
+            return Err("Project guide belongs to a different workspace or is unavailable".into());
+        }
+        let preview: fliuno_protocol::WorkspaceProjectGuidePreview = self.rpc(
+            "workspace/previewProjectGuide",
+            json!({"workspaceId":workspace}),
+        )?;
+        if preview.state.workspace_id != workspace {
+            return Err("Project guide preview belongs to a different workspace".into());
+        }
+        Ok(Update::ProjectGuide(Box::new(preview)))
+    }
+
     fn require_task_queue(&self) -> Result<()> {
         if self.supports("taskQueue") {
             Ok(())
@@ -1076,8 +1113,22 @@ impl Service {
                     self.rpc("workspace/memory/put", json!(record))?;
                 Update::MemorySaved(record.workspace_id)
             }
+            Request::ProjectGuide(workspace) => self.project_guide_preview(&workspace)?,
+            Request::SaveProjectGuide(params) => {
+                if !self.supports("workspaceProjectGuide")
+                    || self.workspace.as_deref() != Some(params.workspace_id.as_str())
+                {
+                    return Err(
+                        "Project guide belongs to a different workspace or is unavailable".into(),
+                    );
+                }
+                let _: fliuno_protocol::WorkspaceProjectGuide =
+                    self.rpc("workspace/setProjectGuide", json!(params))?;
+                self.project_guide_preview(&params.workspace_id)?
+            }
             Request::OpenWorkspace(path) => {
                 let workspace: Workspace = self.rpc("workspace/open", json!({"root":path}))?;
+                let project_guide = self.workspace_project_guide(&workspace.id)?;
                 *root = workspace.root.clone();
                 self.workspace = Some(workspace.id.clone());
                 self.session = None;
@@ -1086,7 +1137,7 @@ impl Service {
                 self.approvals = None;
                 self.feed = None;
                 self.watermark = None;
-                Update::Workspace(workspace)
+                Update::Workspace(workspace, project_guide)
             }
             Request::Sessions(params, browse) => self.sessions(params, browse)?,
             Request::ForkSession(params) => {

@@ -714,6 +714,11 @@ impl App {
             } else if self.draft_context.disable_memory {
                 title.push_str(self.language.text("· Memory off ", "· 已禁用记忆 "));
             }
+            if self.enabled_project_guide().is_some()
+                && self.draft_context.mode == ContextMode::Session
+            {
+                title.push_str(self.language.text("· AGENTS.md ", "· 已选 AGENTS.md "));
+            }
             if self.input_artifact.is_some() {
                 title.push_str(self.language.text(" · Attachment ", " · 附件 "));
             }

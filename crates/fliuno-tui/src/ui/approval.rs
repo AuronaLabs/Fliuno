@@ -120,7 +120,7 @@ impl Review {
         }
     }
 
-    fn verbatim_from(mut self, byte_offset: usize) -> Self {
+    pub(super) fn verbatim_from(mut self, byte_offset: usize) -> Self {
         self.summary.prose_end = byte_offset;
         self
     }
@@ -204,7 +204,7 @@ impl Review {
     }
 }
 
-fn display_text(text: &str) -> String {
+pub(super) fn display_text(text: &str) -> String {
     let mut safe = String::with_capacity(text.len());
     for c in text.chars() {
         match c {

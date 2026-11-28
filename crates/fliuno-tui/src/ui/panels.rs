@@ -314,6 +314,7 @@ impl App {
             Layer::Recovery(..) | Layer::Reconcile(_) | Layer::Backup(_) => (88, 19),
             Layer::Approval { .. } => (88, 21),
             Layer::ReadRules(..) => (76, 17),
+            Layer::ProjectGuide(_) => (88, 21),
             Layer::ProjectReview { .. } => (100, u16::MAX),
             _ => (104, u16::MAX),
         };
@@ -398,6 +399,12 @@ impl App {
             ),
             Layer::TimelineEvent { sequence, .. } => (format!("Event #{sequence}"), "Esc timeline"),
             Layer::Context(..) => ("Context and memory usage".into(), "Esc back"),
+            Layer::ProjectGuide(panel) => (
+                self.language
+                    .text("Project guide · AGENTS.md", "项目指南 · AGENTS.md")
+                    .into(),
+                panel.actions(self.language),
+            ),
             Layer::DraftContext { .. } => ("Draft context".into(), "Esc Return to draft"),
             Layer::Queue(queue, _) => (
                 queue.as_ref().map_or_else(
@@ -711,6 +718,9 @@ impl App {
             Layer::Deliverables(catalog) => self.draw_deliverables(frame, body, catalog),
             Layer::ModelPicker(picker) => picker.draw(frame, body, &self.palette),
             Layer::Language(panel) => panel.draw(frame, body, self.language, &self.palette),
+            Layer::ProjectGuide(panel) => {
+                panel.draw(frame, body, self.language, &self.palette, &self.message)
+            }
             Layer::Diagnostics(text, scroll) => {
                 let state = if self.online {
                     ""
