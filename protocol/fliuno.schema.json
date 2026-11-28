@@ -15100,7 +15100,7 @@
     "DraftContextReport": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "title": "DraftContextReport",
-      "description": "Snapshot of candidate input fragments, not a token count or a send receipt.",
+      "description": "Snapshot of candidate input, not a token count or a send receipt.",
       "type": "object",
       "properties": {
         "throughSequence": {
@@ -15168,6 +15168,17 @@
         },
         "normalizedInputBytes": {
           "$ref": "#/$defs/ModelBudgetInputBytes"
+        },
+        "requestSize": {
+          "description": "Absent for providers without a local request encoder.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DraftRequestSize"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -15354,6 +15365,27 @@
             "toolDefinitions",
             "toolResults",
             "providerReplay"
+          ]
+        },
+        "DraftRequestSize": {
+          "description": "Size of the locally encoded prospective generation request, excluding HTTP headers.",
+          "type": "object",
+          "properties": {
+            "generationBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "transportLimitBytes": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "generationBytes",
+            "transportLimitBytes"
           ]
         }
       }

@@ -123,6 +123,33 @@ impl Kernel {
         } else {
             Some(Message::User { text: p.input })
         };
+        // The transient snapshot is never assigned an execution identity or committed.
+        let draft = Task {
+            id: String::new(),
+            session_id: p.session_id,
+            status: TaskStatus::Running,
+            messages: messages.into_iter().collect(),
+            context: Some(context),
+            pending_approval: None,
+            in_flight_tool: None,
+            pending_tool_input: None,
+            model_outcome_unknown: false,
+            active_reply_identity: None,
+            context_memory_omitted_for_budget: false,
+            output: None,
+            model_steps: 0,
+            max_model_steps: None,
+            backend: TaskBackend::Model,
+            backend_authority: None,
+            agent_run: None,
+            remote_continuation: None,
+            agent_session_continuation: None,
+        };
+        let request_size = self
+            .provider
+            .draft_request_size(&draft, &tools)
+            .map_err(|_| Error::Invalid("cannot encode the prospective model request".into()))?;
+        let context = draft.context.as_ref().expect("draft context is installed");
         Ok(DraftContextReport {
             through_sequence: context.through_sequence,
             model: self.provider.reply_identity(),
@@ -141,12 +168,8 @@ impl Kernel {
                 .project_guide
                 .as_ref()
                 .map(ProjectGuideAttribution::from),
-            normalized_input_bytes: crate::provider::context_input_attribution(
-                Some(&context),
-                false,
-                messages.as_slice(),
-                &tools,
-            )?,
+            normalized_input_bytes: crate::provider::input_attribution(&draft, &tools)?,
+            request_size,
         })
     }
 

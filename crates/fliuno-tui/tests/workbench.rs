@@ -4156,6 +4156,7 @@ fn draft_context_reaches_bilingual_budget_from_slash_and_keeps_draft() {
         console.resize(rows, cols);
         console.ready();
         console.expect("本地输入上限");
+        console.expect("超出字节上限");
         console.expect("工具");
         console.expect("Esc 返回草稿");
         console.capture(&format!("draft-budget-zh-{cols}"));

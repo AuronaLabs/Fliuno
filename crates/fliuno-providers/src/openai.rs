@@ -229,6 +229,17 @@ impl ModelProvider for OpenAiProvider {
         }
     }
 
+    fn draft_request_size(
+        &self,
+        task: &Task,
+        tools: &[ToolSpec],
+    ) -> Result<Option<fliuno_protocol::DraftRequestSize>, String> {
+        let body = self
+            .request(task, tools, true)
+            .map_err(|error| error.to_string())?;
+        crate::http::draft_request_size(&body)
+    }
+
     fn supports_progress(&self) -> bool {
         true
     }

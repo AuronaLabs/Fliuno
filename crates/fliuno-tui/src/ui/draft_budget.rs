@@ -23,6 +23,24 @@ pub(super) fn summary(report: &DraftContextReport, lang: Language) -> Vec<String
                 .into(),
         );
     }
+    if let Some(size) = report.request_size {
+        let limit = report
+            .budget
+            .and_then(|budget| budget.max_input_bytes)
+            .map_or(size.transport_limit_bytes, |limit| {
+                size.transport_limit_bytes.min(u64::from(limit))
+            });
+        let verdict = if size.generation_bytes > limit {
+            lang.text(" · over byte limit", " · 超出字节上限")
+        } else {
+            ""
+        };
+        lines.push(format!(
+            "{} {} B{verdict}",
+            lang.text("Request:", "请求体："),
+            size.generation_bytes
+        ));
+    }
     if report.tool_count > 0 {
         lines.push(format!(
             "{} {} · {} B",

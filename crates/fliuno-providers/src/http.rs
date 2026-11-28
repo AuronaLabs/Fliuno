@@ -19,6 +19,17 @@ const RESPONSE_LIMIT: u64 = 4 * 1024 * 1024;
 const EVENT_LIMIT: usize = 1024 * 1024;
 const COUNT_RESPONSE_LIMIT: u64 = 16 * 1024;
 
+/// Compact body length without allocating a second serialized buffer. Preview
+/// intentionally measures beyond the generation cap so the UI can report excess.
+pub(crate) fn draft_request_size(
+    body: &Value,
+) -> Result<Option<fliuno_protocol::DraftRequestSize>, String> {
+    Ok(Some(fliuno_protocol::DraftRequestSize {
+        generation_bytes: fliuno_core::json_size(body).map_err(|error| error.to_string())? as u64,
+        transport_limit_bytes: REQUEST_LIMIT as u64,
+    }))
+}
+
 struct BoundedRequestBody {
     bytes: Vec<u8>,
     limit: usize,

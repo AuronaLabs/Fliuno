@@ -1016,6 +1016,16 @@ fn draft_context_previews_local_fragments_without_dispatch_or_audit() {
     let requests = wire.requests();
     assert_eq!(requests.len(), 3);
     assert_eq!(
+        report["requestSize"]["generationBytes"],
+        requests[2].headers["content-length"]
+            .parse::<u64>()
+            .unwrap()
+    );
+    assert_eq!(
+        report["requestSize"]["transportLimitBytes"],
+        8 * 1024 * 1024
+    );
+    assert_eq!(
         requests[2].body["tools"].as_array().unwrap().len(),
         report["toolCount"].as_u64().unwrap() as usize
     );

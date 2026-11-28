@@ -70,7 +70,15 @@ pub enum DraftMemoryMode {
     KeywordPreview,
 }
 
-/// Snapshot of candidate input fragments, not a token count or a send receipt.
+/// Size of the locally encoded prospective generation request, excluding HTTP headers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DraftRequestSize {
+    pub generation_bytes: u64,
+    pub transport_limit_bytes: u64,
+}
+
+/// Snapshot of candidate input, not a token count or a send receipt.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DraftContextReport {
@@ -85,4 +93,7 @@ pub struct DraftContextReport {
     pub instructions_bytes: u64,
     pub project_guide: Option<ProjectGuideAttribution>,
     pub normalized_input_bytes: ModelBudgetInputBytes,
+    /// Absent for providers without a local request encoder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_size: Option<DraftRequestSize>,
 }

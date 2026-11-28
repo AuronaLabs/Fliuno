@@ -168,6 +168,15 @@ impl ModelProvider for ChatProvider {
         vec![ModelInputType::Text, ModelInputType::Image]
     }
 
+    fn draft_request_size(
+        &self,
+        task: &Task,
+        tools: &[ToolSpec],
+    ) -> Result<Option<fliuno_protocol::DraftRequestSize>, String> {
+        let body = self.request(task, tools, true)?;
+        crate::http::draft_request_size(&body)
+    }
+
     fn supports_progress(&self) -> bool {
         true
     }

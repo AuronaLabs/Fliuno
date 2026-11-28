@@ -57,7 +57,7 @@
 {"jsonrpc":"2.0","id":9,"method":"session/inspectDraftContext","params":{"sessionId":"<session-id>","input":"检查项目构建","options":{"enableInteraction":true}}}
 ```
 
-报告返回当前模型身份和配置预算、历史选取的事件水位、纳入与省略的历史条数、工具数量、指令字节数，以及启用的指南来源。`normalizedInputBytes` 计量各独立 JSON 片段，无法据此得出完整请求体大小或 Token 用量。省略 `input` 可查看空草稿的固定开销；诊断暂不包含附件，也不会冻结后续正式提交的输入。
+报告返回当前模型身份和配置预算、历史选取的事件水位、纳入与省略的历史条数、工具数量、指令字节数，以及启用的指南来源。`normalizedInputBytes` 计量独立 JSON 片段。四种模型协议另用生成时的编码器计算 `requestSize.generationBytes`，包括系统提示、工具定义和消息封装，不含 HTTP 头；`transportLimitBytes` 是请求体硬上限。两个字段均不代表 Token 数。省略 `input` 可查看空草稿的固定开销；诊断暂不包含附件，也不会冻结后续正式提交的输入。
 
 它不运行生成、供应商计数或 Embedding，不创建任务或写入记忆访问审计。`memoryMode` 为 `off`、`explicit` 或 `keyword_preview`；自动匹配仅预览本机关键词，正式提交可能因语义检索、模型切换或历史变化选到不同内容。选择过期的指南或记忆依然会被拒绝。
 

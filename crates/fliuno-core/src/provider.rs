@@ -231,6 +231,16 @@ pub trait ModelProvider: Send + Sync {
         None
     }
 
+    /// Measure the first generation envelope using the same encoder as execution.
+    /// Implementations must not perform IO, count remotely, or dispatch generation.
+    fn draft_request_size(
+        &self,
+        _task: &Task,
+        _tools: &[ToolSpec],
+    ) -> std::result::Result<Option<fliuno_protocol::DraftRequestSize>, String> {
+        Ok(None)
+    }
+
     fn supports_progress(&self) -> bool {
         false
     }

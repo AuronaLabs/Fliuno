@@ -36,7 +36,7 @@ python -B scripts/measure_draft_context.py ./fliuno-app-server.exe --version 0.0
 
 ## 开发验收记录
 
-- 内核的实际进程测试用回环 Anthropic 服务检查 `session/inspectDraftContext`：预览期间只出现启动时的模型元数据请求，事件水位和记忆审计不变；随后正式提交才进行计数和生成。草稿、工具定义和所选记忆的字节与任务归因一致。
+- 内核的实际进程测试用回环 Anthropic 服务检查 `session/inspectDraftContext`：预览期间只出现启动时的模型元数据请求，事件水位和记忆审计不变；随后正式提交才进行计数和生成。草稿、工具定义和所选记忆的字节与任务归因一致。 完整请求体字节数和随后流式生成请求的 `Content-Length` 一致。
 - Windows ConPTY 在 48/80/110 列验证 `/context`、中文预算和返回键；`F3` 可在有草稿时检查，切换上下文后仍保留草稿且没有请求模型。英文字面和排队续接、显式记忆选择的回归也通过。[48 列画面](workbench.md#发送前查看上下文) 由实际终端捕获重绘，验证排版；颜色仍以终端自身主题为准。
 
 ## 验收门槛
