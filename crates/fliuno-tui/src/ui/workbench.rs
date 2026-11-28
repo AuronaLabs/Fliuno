@@ -295,14 +295,19 @@ impl App {
                 self.append_task_details(detail, &mut lines);
             } else if !detail.artifacts.is_empty() {
                 lines.push(Line::raw(""));
-                let count = detail.artifacts.len();
-                let name = if count == 1 {
-                    "deliverable"
+                let title = if detail.artifacts.len() == 1 {
+                    clean(&detail.artifacts[0].title).replace('\n', " ")
                 } else {
-                    "deliverables"
+                    format!("{} items", detail.artifacts.len())
                 };
                 lines.push(Line::styled(
-                    format!("{count} {name}  ·  v Open"),
+                    format!("Saved in Deliverables: {title}  ·  v Open / export"),
+                    self.palette.quiet,
+                ));
+            }
+            for path in saved_workspace_paths(task) {
+                lines.push(Line::styled(
+                    format!("Saved in workspace: {}", clean(path)),
                     self.palette.quiet,
                 ));
             }
@@ -560,4 +565,36 @@ impl App {
             frame.set_cursor_position(Position::new(body.x + x, body.y + y));
         }
     }
+}
+
+/// Only pair results emitted by the kernel with the matching workspace write.
+/// Model prose, pending approvals and unknown outcomes cannot create a receipt.
+fn saved_workspace_paths(task: &Task) -> Vec<&str> {
+    let mut paths = Vec::new();
+    for message in task.messages.iter().rev() {
+        let Message::ToolResult { call_id, output } = message else {
+            continue;
+        };
+        if output["bytesWritten"].as_u64().is_none() {
+            continue;
+        }
+        let Some(path) = output["path"].as_str() else {
+            continue;
+        };
+        if !paths.contains(&path)
+            && task.messages.iter().any(|message| {
+                matches!(message, Message::ToolCall { call }
+                if call.id == *call_id && matches!(call.name.as_str(),
+                    "workspace_create_text" | "workspace_replace_text" | "workspace_patch_text")
+                    && call.arguments["path"].as_str() == Some(path))
+            })
+        {
+            paths.push(path);
+            if paths.len() == 5 {
+                break;
+            }
+        }
+    }
+    paths.reverse();
+    paths
 }

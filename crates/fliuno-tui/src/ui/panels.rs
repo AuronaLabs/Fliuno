@@ -456,6 +456,7 @@ impl App {
             .style(self.palette.rail)
             .border_style(self.palette.quiet)
             .borders(Borders::ALL)
+            .border_type(ratatui::widgets::BorderType::Rounded)
             .title(Span::styled(title, self.palette.label));
         let inset = u16::from(area.width >= 55 || !matches!(self.layer, Layer::Approval { .. }));
         let body = block.inner(modal).inner(Margin::new(inset, 0));

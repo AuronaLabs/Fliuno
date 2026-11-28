@@ -594,7 +594,8 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     console.keys("a");
     console.expect("y Allow once");
     console.expect("n Deny");
-    console.expect("artifact_create");
+    console.expect("Save a text deliverable");
+    console.expect("No workspace file is written.");
     console.keys("y");
     console.expect("Completed");
     console.ready();
@@ -648,7 +649,7 @@ fn terminal_demo_reviews_and_reopens_one_artifact() {
     reopened.keys("a");
     reopened.expect("y Allow once");
     reopened.expect("n Deny");
-    reopened.expect("artifact_create");
+    reopened.expect("Save a text deliverable");
     reopened.capture("narrow-approval");
     reopened.keys("n");
     reopened.expect("Failed");
@@ -2896,4 +2897,157 @@ api_key_file = "fixture.key"
             );
         }
     }
+}
+
+#[test]
+#[ignore = "requires a matching app-server beside fliuno or at FLIUNO_TEST_APP_SERVER"]
+fn live_project_agent_delivers_inline_then_discovers_patches_and_reports_a_workspace_file() {
+    use serde_json::{Value, json};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let model = thread::spawn(move || {
+        let complete =
+            |text: &str| json!({"type":"message","content":[{"type":"output_text","text":text}]});
+        let call = |id: &str, name: &str, args: Value| {
+            json!({
+                "type":"function_call","call_id":id,"name":name,"arguments":args.to_string()
+            })
+        };
+        for step in 0..6 {
+            let (mut socket, request) = streaming_fixture_input(&listener);
+            let input = request["input"].as_array().unwrap();
+            let result = || {
+                serde_json::from_str::<Value>(input.last().unwrap()["output"].as_str().unwrap())
+                    .unwrap()
+            };
+            let output = match step {
+                0 => {
+                    assert!(
+                        request["instructions"]
+                            .as_str()
+                            .unwrap()
+                            .contains("ordinary writing requests directly")
+                    );
+                    complete("小作文：雨停之后，街道变得明亮。")
+                }
+                1 => {
+                    assert!(
+                        request["tools"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|tool| tool["name"] == "workspace_find")
+                    );
+                    call(
+                        "find",
+                        "workspace_find",
+                        json!({"path":".","mode":"text","query":"Hello world"}),
+                    )
+                }
+                2 => {
+                    let found = result();
+                    assert_eq!(found["matches"][0]["path"], "src/greeting.txt");
+                    call(
+                        "read",
+                        "workspace_read_text",
+                        json!({"path":found["matches"][0]["path"]}),
+                    )
+                }
+                3 => {
+                    let before = result();
+                    assert_eq!(before["content"], "Hello world\n");
+                    call(
+                        "patch",
+                        "workspace_patch_text",
+                        json!({"path":before["path"],"baseSha256":before["sha256"],"patch":"--- a/src/greeting.txt\n+++ b/src/greeting.txt\n@@ -1 +1 @@\n-Hello world\n+Welcome to Fliuno\n"}),
+                    )
+                }
+                4 => {
+                    let receipt = result();
+                    assert_eq!(receipt["bytesWritten"], 18);
+                    call(
+                        "verify",
+                        "workspace_read_text",
+                        json!({"path":receipt["path"]}),
+                    )
+                }
+                5 => {
+                    assert_eq!(result()["content"], "Welcome to Fliuno\n");
+                    complete("已更新问候语，并重新读取核对。")
+                }
+                _ => unreachable!(),
+            };
+            let event = json!({"type":"response.completed","response":{"status":"completed","output":[output]}});
+            write!(socket, "data: {event}\n\n").unwrap();
+        }
+    });
+    let server = std::env::var_os("FLIUNO_TEST_APP_SERVER").map(PathBuf::from);
+    let user = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let config = user.path().join("live.toml");
+    std::fs::create_dir(root.path().join("src")).unwrap();
+    let file = root.path().join("src/greeting.txt");
+    std::fs::write(&file, "Hello world\n").unwrap();
+    std::fs::write(user.path().join("fixture.key"), "fixture-key\n").unwrap();
+    std::fs::write(
+        &config,
+        format!(
+            r#"
+        [workbench]
+        database = "live.db"
+        [model]
+        provider = "openai"
+        name = "fixture-project"
+        api_key_file = "fixture.key"
+        base_url = "http://{address}/v1/"
+    "#
+        ),
+    )
+    .unwrap();
+    let mut terminal = Console::launch_with_config(server.as_deref(), root.path(), Some(&config));
+    terminal.expect("Start a conversation");
+    terminal.keys("写一篇小作文\r");
+    terminal.expect("小作文：雨停之后");
+    terminal.expect_absent("Review operation");
+    terminal.expect("Ask a follow-up");
+    terminal.keys("将项目中的 Hello world 改成 Welcome to Fliuno\r");
+    for (tool, label) in [
+        ("workspace_find", "Search project files"),
+        ("workspace_read_text", "Read a workspace file"),
+        ("workspace_patch_text", "Apply a patch to a workspace file"),
+        ("workspace_read_text", "Read a workspace file"),
+    ] {
+        terminal.expect(tool);
+        terminal.ready();
+        terminal.keys("a");
+        terminal.expect(label);
+        terminal.expect("y Allow once");
+        if tool == "workspace_patch_text" {
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), "Hello world\n");
+            terminal.expect("Path: src/greeting.txt");
+            terminal.expect("+Welcome to Fliuno");
+            for cols in [110, 80, 48] {
+                terminal.resize(24, cols);
+                terminal.expect("y Allow once");
+                terminal.expect("Path: src/greeting.txt");
+                terminal.capture(&format!("project-patch-approval-{cols}"));
+            }
+        }
+        terminal.keys("y");
+        terminal.expect_absent("y Allow once");
+    }
+    terminal.expect("已更新问候语");
+    for cols in [48, 80, 110] {
+        terminal.resize(24, cols);
+        terminal.expect("Saved in workspace: src/greeting.txt");
+        terminal.capture(&format!("project-write-receipt-{cols}"));
+    }
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "Welcome to Fliuno\n"
+    );
+    terminal.quit("\x03");
+    model.join().unwrap();
 }

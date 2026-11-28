@@ -2770,20 +2770,84 @@ fn approval_review(
             if approval.task_id != task || approval.id != id {
                 return None;
             }
-            let arguments =
-                serde_json::to_string_pretty(&approval.call.arguments).unwrap_or_default();
-            let review = approval
-                .execution_plan
-                .as_ref()
-                .and_then(|plan| serde_json::to_string_pretty(plan).ok())
-                .unwrap_or_default();
-            Some((
-                format!(
-                    "{}\n\nWorkspace\n{root}\n\nArguments\n{arguments}\n{review}",
-                    approval.call.name
+            let call = &approval.call;
+            let (action, consequence, preview_key) = match call.name.as_str() {
+                "artifact_create" => (
+                    "Save a text deliverable",
+                    "Creates an item in Deliverables. No workspace file is written.",
+                    Some(("content", "Text to save")),
                 ),
-                true,
-            ))
+                "artifact_create_binary" => (
+                    "Save a downloadable deliverable",
+                    "Creates an item in Deliverables. No workspace file is written.",
+                    None,
+                ),
+                "workspace_create_text" => (
+                    "Create a workspace file",
+                    "Writes a new file at the requested path. Existing files are not overwritten.",
+                    Some(("content", "Text to write")),
+                ),
+                "workspace_patch_text" => (
+                    "Apply a patch to a workspace file",
+                    "Changes the file only if its saved contents still match the reviewed base.",
+                    Some(("patch", "Patch to apply")),
+                ),
+                "workspace_replace_text" => (
+                    "Write a workspace file",
+                    "Creates or replaces the specified file. An existing file must match the reviewed base.",
+                    Some(("content", "Text to write")),
+                ),
+                "workspace_find" => (
+                    "Search project files",
+                    "Searches the selected directory for matching names or text. No file is changed.",
+                    None,
+                ),
+                "workspace_read_text" | "workspace_read_bytes" => (
+                    "Read a workspace file",
+                    "Sends the requested file content to the model. No file is changed.",
+                    None,
+                ),
+                _ => (
+                    "Review this operation",
+                    "Check the target and arguments before allowing it.",
+                    None,
+                ),
+            };
+            let mut arguments = call.arguments.clone();
+            let preview = preview_key.and_then(|(key, label)| {
+                arguments
+                    .as_object_mut()?
+                    .remove(key)
+                    .map(|value| (label, value))
+            });
+            let identity = call.arguments["path"]
+                .as_str()
+                .map(|value| ("Path", value))
+                .or_else(|| {
+                    call.arguments["title"]
+                        .as_str()
+                        .map(|value| ("Title", value))
+                });
+            let mut text = format!("{action}\n{consequence}\n\nWorkspace: {root}\n");
+            if let Some((kind, value)) = identity {
+                text.push_str(&format!("{kind}: {}\n", clean(value).replace('\n', " ")));
+            }
+            text.push_str(
+                "\nAllow once runs this request. Deny stops it without running the operation.\n",
+            );
+            if let Some((label, value)) = preview {
+                text.push_str(&format!(
+                    "\n{label}\n{}\n",
+                    value.as_str().unwrap_or("(invalid text)")
+                ));
+            }
+            if let Some(plan) = &approval.execution_plan {
+                let plan = serde_json::to_string_pretty(plan).unwrap_or_default();
+                text.push_str(&format!("\nExecution details\n{plan}\n"));
+            }
+            let arguments = serde_json::to_string_pretty(&arguments).unwrap_or_default();
+            text.push_str(&format!("\nTool: {}\nArguments\n{arguments}", call.name));
+            Some((text, true))
         }
         ApprovalDetails::AgentPermission { ref approval }
         | ApprovalDetails::HostTool { ref approval } => {
