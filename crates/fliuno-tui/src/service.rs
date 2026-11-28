@@ -26,8 +26,8 @@ use fliuno_protocol::{
     TaskContext, TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
     TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
     TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
-    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
-    Workspace, WorkspaceHistorySearchParams,
+    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, ToolScope, WorkSnapshot,
+    WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -202,6 +202,7 @@ pub enum Update {
         supplier_catalog: bool,
         read_rules: bool,
         project_checks: bool,
+        model_tool_scope: bool,
         project_guide: Option<fliuno_protocol::WorkspaceProjectGuide>,
     },
     ModelProfiles(
@@ -556,6 +557,7 @@ fn serve(
                     let supplier_catalog = server.supports("modelSupplierCatalog");
                     let read_rules = server.supports("workspaceReadRules");
                     let project_checks = server.supports("workspaceProjectChecks");
+                    let model_tool_scope = server.supports("modelToolScope");
                     let project_guide = server.workspace_project_guide(&workspace.id)?;
                     service = Some(server);
                     out.send(Update::Online {
@@ -566,6 +568,7 @@ fn serve(
                         supplier_catalog,
                         read_rules,
                         project_checks,
+                        model_tool_scope,
                         project_guide,
                     })?;
                     Ok(())
@@ -1268,6 +1271,9 @@ impl Service {
                 if *context != ContextOptions::default() && !self.supports("sessionContext") {
                     return Err("This app-server does not support draft context settings".into());
                 }
+                if context.tool_scope != ToolScope::All && !self.supports("modelToolScope") {
+                    return Err("This app-server does not support draft tool scope".into());
+                }
                 context.plan_only = plan_only;
                 context.enable_interaction = !plan_only && self.supports("taskInteraction");
                 let context = (*context != ContextOptions::default()).then_some(context);
@@ -1302,6 +1308,9 @@ impl Service {
             Request::DraftContext(mut params) => {
                 if !self.supports("sessionContext") {
                     return Err("This app-server does not support context preview".into());
+                }
+                if params.options.tool_scope != ToolScope::All && !self.supports("modelToolScope") {
+                    return Err("This app-server does not support draft tool scope".into());
                 }
                 params.options.enable_interaction =
                     !params.options.plan_only && self.supports("taskInteraction");

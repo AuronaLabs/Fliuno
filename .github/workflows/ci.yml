@@ -34,7 +34,7 @@ jobs:
       - name: Verify project Agent through a real terminal and native sandbox
         run: |
           cargo build --locked -p fliuno-app-server --features test-fixtures --bins
-          cargo test --locked -p fliuno-tui --test workbench live_project_agent_delivers_inline_then_edits_and_runs_a_native_check -- --ignored
+          cargo test --locked -p fliuno-tui --test workbench live_project_agent_ -- --ignored --test-threads=1
       - name: Verify supplier settings through a real terminal
         run: cargo test --locked -p fliuno-tui --test workbench workbench_manages_shared_suppliers_and_applies_only_the_selected_model -- --ignored
       - name: Verify bilingual project workflow through a real terminal

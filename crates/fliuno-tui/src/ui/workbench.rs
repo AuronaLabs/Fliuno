@@ -707,6 +707,13 @@ impl App {
             self.language.text(" No session ", " 暂无会话 ").to_owned()
         } else {
             let mut title = format!(" {mode} ");
+            match self.draft_context.tool_scope {
+                ToolScope::All => {}
+                ToolScope::Project => {
+                    title.push_str(self.language.text("· Project tools ", "· 项目工具 "))
+                }
+                ToolScope::None => title.push_str(self.language.text("· No tools ", "· 无工具 ")),
+            }
             if self.draft_context.mode == ContextMode::Isolated {
                 title.push_str(self.language.text("· Isolated ", "· 隔离上下文 "));
             } else if self.draft_context.through_sequence.is_some() {

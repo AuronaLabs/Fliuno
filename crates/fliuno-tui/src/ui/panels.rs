@@ -255,6 +255,18 @@ impl App {
             format!("s  {scope_label} {scope}"),
             self.palette.label,
         )];
+        if self.model_tool_scope {
+            let scope = match options.tool_scope {
+                ToolScope::All => lang.text("All", "全部"),
+                ToolScope::Project => lang.text("Project", "项目"),
+                ToolScope::None => lang.text("None", "无"),
+            };
+            let label = lang.text("Tools   ", "工具");
+            settings.push(Line::styled(
+                format!("t  {label} {scope}"),
+                self.palette.label,
+            ));
+        }
         if !isolated {
             let memory = if options.disable_memory {
                 lang.text("Off", "关闭").into()

@@ -3007,6 +3007,18 @@ api_key_file = "fixture.key"
 #[ignore = "requires a matching app-server and fliuno-app-exec-fixture built with test-fixtures"]
 #[cfg(any(windows, target_os = "linux"))]
 fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
+    project_agent_workflow(false);
+}
+
+#[test]
+#[ignore = "requires a matching app-server and fliuno-app-exec-fixture built with test-fixtures"]
+#[cfg(any(windows, target_os = "linux"))]
+fn live_project_agent_uses_compact_scope_through_edit_and_check() {
+    project_agent_workflow(true);
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn project_agent_workflow(compact: bool) {
     use serde_json::{Value, json};
     use std::net::TcpListener;
 
@@ -3032,7 +3044,24 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             )
         };
         for step in 0..13 {
+            if compact && step == 5 {
+                continue;
+            }
             let (mut socket, request) = streaming_fixture_input(&listener);
+            let tools = request["tools"].as_array().unwrap();
+            assert_eq!(
+                tools
+                    .iter()
+                    .any(|tool| tool["name"] == "workspace_patch_text"),
+                !compact || !(1..=10).contains(&step)
+            );
+            if compact && (1..=10).contains(&step) {
+                assert_eq!(
+                    tools.len(),
+                    8,
+                    "one check, five editor primitives, two interaction tools"
+                );
+            }
             let input = request["input"].as_array().unwrap();
             let result = || {
                 serde_json::from_str::<Value>(input.last().unwrap()["output"].as_str().unwrap())
@@ -3111,9 +3140,11 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                     )
                 }
                 6 => {
-                    assert_eq!(input.last().unwrap()["call_id"], "malformed-patch");
-                    assert_eq!(result()["status"], "not_applied");
-                    assert_eq!(result()["code"], "workspace_patch_format");
+                    if !compact {
+                        assert_eq!(input.last().unwrap()["call_id"], "malformed-patch");
+                        assert_eq!(result()["status"], "not_applied");
+                        assert_eq!(result()["code"], "workspace_patch_format");
+                    }
                     let before = input
                         .iter()
                         .find(|entry| {
@@ -3302,6 +3333,17 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     terminal.expect_absent("Project activity");
     terminal.expect_absent("Plan ·");
     terminal.expect("Ask a follow-up");
+    if compact {
+        terminal.keys("\x1bOR");
+        terminal.expect("Draft context");
+        terminal.ready();
+        terminal.keys("t");
+        terminal.expect("Tools    Project");
+        terminal.expect("Tools: 8");
+        terminal.capture("draft-scope-project-en-110");
+        terminal.keys("\x1b");
+        terminal.expect("Project tools");
+    }
     terminal.keys("将项目中的 Hello world 改成 Welcome to Fliuno\r");
     for (preview, label) in [
         ("Search project files", "Search project files"),
@@ -3331,19 +3373,21 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             }
             terminal.keys("\x1b");
             terminal.expect_absent("Review pending operation");
-            terminal.keys("d");
-            terminal.expect("Project changes & checks");
-            terminal.expect("Patch not applied: src/greeting.txt");
-            terminal.expect("Invalid diff format");
-            terminal.expect_absent("Replaced text");
-            for cols in [48, 80, 110] {
-                terminal.resize(24, cols);
-                terminal.ready();
+            if !compact {
+                terminal.keys("d");
+                terminal.expect("Project changes & checks");
                 terminal.expect("Patch not applied: src/greeting.txt");
-                terminal.capture(&format!("project-patch-correction-{cols}"));
+                terminal.expect("Invalid diff format");
+                terminal.expect_absent("Replaced text");
+                for cols in [48, 80, 110] {
+                    terminal.resize(24, cols);
+                    terminal.ready();
+                    terminal.expect("Patch not applied: src/greeting.txt");
+                    terminal.capture(&format!("project-patch-correction-{cols}"));
+                }
+                terminal.keys("\x1b");
+                terminal.expect_absent("Project changes & checks");
             }
-            terminal.keys("\x1b");
-            terminal.expect_absent("Project changes & checks");
             for cols in [48, 80, 110] {
                 terminal.resize(24, cols);
                 terminal.ready();
@@ -4161,8 +4205,22 @@ fn draft_context_reaches_bilingual_budget_from_slash_and_keeps_draft() {
         console.expect("Esc 返回草稿");
         console.capture(&format!("draft-budget-zh-{cols}"));
     }
+    console.keys("t");
+    console.expect("t  工具 项目");
+    console.expect("工具： 7");
+    console.expect_absent("超出字节上限");
+    for (rows, cols) in [(20, 48), (24, 80), (28, 110)] {
+        console.resize(rows, cols);
+        console.ready();
+        console.expect("t  工具 项目");
+        console.expect("Esc 返回草稿");
+        console.capture(&format!("draft-scope-project-zh-{cols}"));
+    }
+    console.keys("t");
+    console.expect("t  工具 无");
     console.keys("\x1b");
     console.expect_absent("草稿上下文");
+    console.expect("无工具");
     console.keys("Check the project\x1bOR");
     console.expect("19 B");
     console.ready();

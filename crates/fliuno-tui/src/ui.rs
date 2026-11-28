@@ -55,6 +55,7 @@ use fliuno_protocol::{
     ContextDetail, ContextMessage, ContextMode, ContextOptions, DraftContextParams, EventKind,
     SessionForkParams, SessionListOrder, SessionListParams, TaskContext, TaskContextAttribution,
     TaskQueue, TaskQueueItemParams, TaskQueueState, TaskTimelinePage, TaskTimelineParams,
+    ToolScope,
 };
 
 const DRAFT_LIMIT: usize = 48 * 1024;
@@ -203,6 +204,7 @@ pub struct App {
     supplier_catalog: bool,
     read_rules: bool,
     project_checks: bool,
+    model_tool_scope: bool,
     project_guide: Option<fliuno_protocol::WorkspaceProjectGuide>,
     busy: bool,
     next: Option<Request>,
@@ -260,6 +262,7 @@ impl App {
             supplier_catalog: false,
             read_rules: false,
             project_checks: false,
+            model_tool_scope: false,
             project_guide: None,
             busy: true,
             next: None,
@@ -589,6 +592,7 @@ impl App {
                 supplier_catalog,
                 read_rules,
                 project_checks,
+                model_tool_scope,
                 project_guide,
             } => {
                 self.online = true;
@@ -598,6 +602,7 @@ impl App {
                 self.supplier_catalog = supplier_catalog;
                 self.read_rules = read_rules;
                 self.project_checks = project_checks;
+                self.model_tool_scope = model_tool_scope;
                 self.project_guide = project_guide;
                 self.activity.clear();
                 self.message.clear();
@@ -922,6 +927,7 @@ impl App {
             }
             Update::Enqueued(item) => {
                 self.draft_context.through_sequence = None;
+                self.draft_context.tool_scope = ToolScope::All;
                 self.draft.clear();
                 self.input_artifact = None;
                 self.key = uuid::Uuid::new_v4().to_string();
@@ -940,6 +946,7 @@ impl App {
             }
             Update::Started(id) => {
                 self.draft_context.through_sequence = None;
+                self.draft_context.tool_scope = ToolScope::All;
                 self.start_acknowledged = true;
                 self.selected = Some(id);
                 self.draft.clear();
@@ -970,6 +977,7 @@ impl App {
                 self.supplier_catalog = false;
                 self.read_rules = false;
                 self.project_checks = false;
+                self.model_tool_scope = false;
                 self.project_guide = None;
                 self.activity.clear();
                 self.layer = Layer::None;
@@ -1941,6 +1949,13 @@ impl App {
                 options.detail = match options.detail {
                     ContextDetail::Full => ContextDetail::Conversation,
                     ContextDetail::Conversation => ContextDetail::Full,
+                };
+            }
+            KeyCode::Char('t') if self.model_tool_scope => {
+                options.tool_scope = match options.tool_scope {
+                    ToolScope::All => ToolScope::Project,
+                    ToolScope::Project => ToolScope::None,
+                    ToolScope::None => ToolScope::All,
                 };
             }
             KeyCode::Char('p') if options.mode == ContextMode::Session => {
