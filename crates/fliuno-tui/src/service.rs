@@ -882,11 +882,14 @@ impl Service {
                 );
                 clear_model_key(&mut params.connection.credential);
                 model_profile_update(result, |saved| {
-                    let provider = if saved.protocol.as_deref() == Some("chat_completions") {
-                        "openai-chat".into()
-                    } else {
-                        saved.provider.unwrap_or_default()
-                    };
+                    let provider =
+                        if saved.protocol.as_deref().is_some_and(|id| {
+                            matches!(id, "openai.compatible" | "chat_completions")
+                        }) {
+                            "openai-chat".into()
+                        } else {
+                            saved.provider.unwrap_or_default()
+                        };
                     let profile = match params.target {
                         ModelProfileConnectionTarget::Base => None,
                         ModelProfileConnectionTarget::Existing { profile }

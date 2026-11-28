@@ -229,7 +229,7 @@ mod tests {
             json!({"target":target}),
         );
         assert_eq!(view["credential"], "configured");
-        assert_eq!(view["protocol"], "responses");
+        assert_eq!(view["protocol"], "openai.responses");
         assert!(!view.to_string().contains("credential-reference"));
         for method in ["getConnection", "previewConnection", "saveConnection"] {
             assert_eq!(

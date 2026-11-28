@@ -5,12 +5,14 @@ mod model_connection;
 mod model_default;
 mod model_edit;
 mod model_setup;
+mod suppliers;
 pub use credentials::PendingApiKey;
 pub use model_connection::{
     ConnectionCredential, ModelConnectionDraft, ModelConnectionEdit, ModelConnectionTarget,
 };
 pub use model_edit::ModelEdit;
 pub use model_setup::{ModelSetup, ModelSetupCredential};
+pub use suppliers::{SupplierPreset, SupplierSettings};
 
 use serde::{Deserialize, Serialize};
 use std::{
@@ -39,6 +41,7 @@ pub struct Settings {
     pub model: ModelSettings,
     pub models: BTreeMap<String, ModelSettings>,
     pub integrations: Integrations,
+    pub providers: BTreeMap<String, SupplierSettings>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -105,6 +108,7 @@ impl Provider {
 #[serde(default, deny_unknown_fields)]
 pub struct ModelSettings {
     pub provider: Provider,
+    pub supplier: Option<String>,
     pub protocol: Option<ModelProtocol>,
     pub name: Option<String>,
     pub base_url: Option<String>,
@@ -150,11 +154,14 @@ impl ReasoningEffort {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub enum ModelProtocol {
+    #[serde(rename = "openai.responses", alias = "responses")]
     Responses,
+    #[serde(rename = "openai.compatible", alias = "chat_completions")]
     ChatCompletions,
+    #[serde(rename = "claude.message", alias = "messages")]
     Messages,
+    #[serde(rename = "google.gemini.interactions", alias = "interactions")]
     Interactions,
 }
 
@@ -173,12 +180,20 @@ pub struct ModelCatalogDraft {
 pub const MAX_MODEL_CATALOG_DRAFT_BYTES: u64 = 24 * 1024;
 
 impl ModelProtocol {
+    pub(crate) fn adapter(self) -> Provider {
+        match self {
+            Self::Responses | Self::ChatCompletions => Provider::OpenAi,
+            Self::Messages => Provider::Anthropic,
+            Self::Interactions => Provider::Gemini,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Responses => "responses",
-            Self::ChatCompletions => "chat_completions",
-            Self::Messages => "messages",
-            Self::Interactions => "interactions",
+            Self::Responses => "openai.responses",
+            Self::ChatCompletions => "openai.compatible",
+            Self::Messages => "claude.message",
+            Self::Interactions => "google.gemini.interactions",
         }
     }
 }
@@ -374,6 +389,7 @@ impl Settings {
             validate_profile_id(id)?;
             resolve_relative(&mut model.api_key_file, base);
         }
+        suppliers::resolve(&mut settings, base)?;
         Ok(settings)
     }
 

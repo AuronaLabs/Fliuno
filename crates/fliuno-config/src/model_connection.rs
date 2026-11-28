@@ -226,7 +226,19 @@ impl Settings {
         }
         .and_then(Item::as_table_like_mut)
         .ok_or("Model profile is missing")?;
-        let pending = change.connection.stage(path, table, old)?;
+        let pending = if let Some(bound) = old.filter(|model| model.supplier.is_some()) {
+            if !matches!(change.connection.credential, ConnectionCredential::Keep) {
+                return Err(
+                    "This model uses a named supplier. Edit its endpoint and key in [providers]"
+                        .into(),
+                );
+            }
+            // The legacy form can update model fields while preserving the named binding.
+            change.connection.validate(Some(bound))?;
+            None
+        } else {
+            change.connection.stage(path, table, old)?
+        };
         replace_value(table, "name", value(model_name));
         if let Some(effort) = change.reasoning_effort {
             replace_value(table, "reasoning_effort", value(effort.as_str()));

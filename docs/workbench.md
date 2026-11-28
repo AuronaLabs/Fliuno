@@ -92,6 +92,31 @@ name = "your-lab-model"
 api_key_file = "credentials/anthropic.key"
 ```
 
+开发中的 0.0.21 支持在用户配置中定义命名供应商。供应商保存 Base URL 和凭据引用；模型档案独立选择供应商、协议、模型 ID 和思考强度。多个模型可以复用同一个供应商。
+
+```toml
+[providers.fliuno-gpt]
+preset = "openai"
+api_key_file = "credentials/openai.key"
+
+[providers.local]
+preset = "custom"
+base_url = "http://127.0.0.1:1337/v1"
+auth = "none"
+
+[models.office]
+supplier = "fliuno-gpt"
+protocol = "openai.responses"
+name = "your-office-model"
+
+[models.local]
+supplier = "local"
+protocol = "openai.compatible"
+name = "your-local-model"
+```
+
+官方端点预设包括 `openai`、`anthropic` 和 `gemini`。协议 ID 为 `openai.responses`、`openai.compatible`、`claude.message` 和 `google.gemini.interactions`。已有的内联模型连接和旧协议拼写仍可读取。档案引用供应商后，不能再单独覆盖 Base URL 或凭据。本机无 Key 连接仍限于回环地址和 `openai.compatible`。目前请在用户配置中维护供应商，模型选择器可以编辑所绑定的模型和思考强度。
+
 | 项目 | 默认或覆盖方式 |
 | --- | --- |
 | 用户配置 | `~/.fliuno/config.toml`。`--config PATH` 可使用其他文件。配置里的相对路径均以该文件所在目录为基准。 |

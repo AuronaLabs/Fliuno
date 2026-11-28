@@ -1719,7 +1719,7 @@ fn first_launch_guides_live_setup_and_reopens_the_profile() {
     console.capture("conversation-first-launch-48");
     let profile_text = std::fs::read_to_string(&config).unwrap();
     assert!(profile_text.contains("provider = \"openai\""));
-    assert!(profile_text.contains("protocol = \"chat_completions\""));
+    assert!(profile_text.contains("protocol = \"openai.compatible\""));
     assert!(profile_text.contains(&format!("base_url = \"{base}\"")));
     assert!(profile_text.contains("name = \"fixture-catalog-model\""));
     assert!(profile_text.contains("reasoning_effort = \"high\""));

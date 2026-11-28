@@ -39,6 +39,68 @@ fn plain_reply() -> Value {
 }
 
 #[test]
+fn named_suppliers_send_each_profile_to_its_own_endpoint_with_its_own_key() {
+    let (office, office_wire) = fixture(vec![(200, plain_reply())]);
+    let (lab, lab_wire) = fixture(vec![(200, plain_reply())]);
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("office.key"), "office-test-key\n").unwrap();
+    std::fs::write(dir.path().join("lab.key"), "lab-test-key\n").unwrap();
+    let config = dir.path().join("config.toml");
+    std::fs::write(
+        &config,
+        &format!(
+            r#"
+[providers.office]
+base_url = "{office}"
+api_key_file = "office.key"
+[providers.lab]
+base_url = "{lab}"
+api_key_file = "lab.key"
+[models.first]
+supplier = "office"
+protocol = "openai.compatible"
+name = "office-model"
+[models.second]
+supplier = "lab"
+protocol = "openai.compatible"
+name = "lab-model"
+"#
+        ),
+    )
+    .unwrap();
+    let settings = Settings::load(&config).unwrap();
+    let (task, _) = prepared_model_step();
+    for (profile, supplier, own, other, wire) in [
+        (
+            "first",
+            "office",
+            "office-test-key",
+            "lab-test-key",
+            office_wire,
+        ),
+        ("second", "lab", "lab-test-key", "office-test-key", lab_wire),
+    ] {
+        let model = settings.named_model(profile).unwrap();
+        assert_eq!(model.supplier_id(), Some(supplier));
+        let (_, provider) = fliuno_providers::from_settings(model).unwrap();
+        let result = provider
+            .next_classified(&task, &[], &CancellationToken::new())
+            .unwrap();
+        assert!(matches!(result.decision, ModelDecision::Complete(_)));
+        let requests = wire.join().unwrap();
+        let (headers, body) = &requests[0];
+        assert!(headers.starts_with("POST /v1/chat/completions "));
+        assert!(
+            headers
+                .to_ascii_lowercase()
+                .contains(&format!("authorization: bearer {own}\r\n"))
+        );
+        assert!(!headers.contains(other));
+        assert_eq!(body["model"].as_str(), model.name.as_deref());
+    }
+}
+
+#[test]
 fn chat_sends_native_request_and_reads_json_usage() {
     let (base, wire) = fixture(vec![(200, plain_reply())]);
     let provider = provider_at(
