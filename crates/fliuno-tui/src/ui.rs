@@ -2919,36 +2919,79 @@ fn format_draft_context(
 
 fn format_context_attribution(report: &TaskContextAttribution, lang: Language) -> String {
     let mut lines = vec![
-        format!("{} model attempts", report.model_steps),
         format!(
-            "{} history turns · {} omitted · {} summarized",
-            report.history.len(),
-            report.omitted_history,
-            report.summarized_history.len()
+            "{} {}",
+            report.model_steps,
+            lang.text("model attempts", "次模型尝试")
         ),
         format!(
-            "{} memories · {} omitted for budget",
+            "{} {} · {} {} · {} {}",
+            report.history.len(),
+            lang.text("history turns", "条历史"),
+            report.omitted_history,
+            lang.text("omitted", "条省略"),
+            report.summarized_history.len(),
+            lang.text("summarized", "条已摘要"),
+        ),
+        format!(
+            "{} {} · {} {}",
             report.memories.len(),
+            lang.text("memories", "条记忆"),
             report
                 .memories
                 .iter()
                 .filter(|item| item.omitted_for_budget)
-                .count()
+                .count(),
+            lang.text("omitted for budget", "条因预算省略"),
         ),
-        format!("{} B of workspace instructions", report.instructions_bytes),
+        format!(
+            "{}: {} B",
+            lang.text("Workspace instructions", "工作区指令"),
+            report.instructions_bytes
+        ),
     ];
     if let Some(guide) = &report.project_guide {
         lines.push(format!(
-            "Project guide: {} · {} B\nSHA-256: {}",
+            "{}: {} · {} B\nSHA-256: {}",
+            lang.text("Project guide", "项目指南"),
             clean(&guide.path),
             guide.bytes,
             clean(&guide.sha256)
         ));
     }
     if let Some(bytes) = &report.normalized_input_bytes {
-        lines.push(format!("\nNormalized fragments (bytes)\nCurrent text {} · media {}\nHistory {} · memory {}\nTool definitions {} · results {} · provider replay {}",
-            bytes.current_text, bytes.current_media, bytes.history, bytes.memory,
-            bytes.tool_definitions, bytes.tool_results, bytes.provider_replay));
+        lines.extend([
+            format!(
+                "\n{}",
+                lang.text("Normalized fragments (bytes)", "输入片段（字节）")
+            ),
+            format!(
+                "{} {} · {} {}",
+                lang.text("Current text", "本轮文字"),
+                bytes.current_text,
+                lang.text("media", "媒体"),
+                bytes.current_media
+            ),
+            format!(
+                "{} {} · {} {}",
+                lang.text("History", "历史"),
+                bytes.history,
+                lang.text("memory", "记忆"),
+                bytes.memory
+            ),
+            format!(
+                "{} {} · {} {}",
+                lang.text("Tool definitions", "工具定义"),
+                bytes.tool_definitions,
+                lang.text("results", "工具结果"),
+                bytes.tool_results
+            ),
+            format!(
+                "{} {}",
+                lang.text("Provider replay", "供应商续接数据"),
+                bytes.provider_replay
+            ),
+        ]);
     }
     if let Some(EventKind::ModelPreflightObserved {
         model,
@@ -2958,9 +3001,15 @@ fn format_context_attribution(report: &TaskContextAttribution, lang: Language) -
         ..
     }) = report.latest_preflight.as_ref().map(|event| &event.data)
     {
-        let observed = observed_input_tokens
-            .map_or_else(String::new, |tokens| format!(" · reported {tokens}"));
-        lines.push(format!("\n{} · estimated {estimated_input_tokens} tokens · margin {safety_margin_tokens}{observed}", clean(model)));
+        let observed = observed_input_tokens.map_or_else(String::new, |tokens| {
+            format!(" · {} {tokens}", lang.text("reported", "实测"))
+        });
+        lines.push(format!(
+            "\n{} · {} {estimated_input_tokens} tokens · {} {safety_margin_tokens}{observed}",
+            clean(model),
+            lang.text("estimated", "估算"),
+            lang.text("margin", "安全余量")
+        ));
     }
     if let Some(EventKind::ModelBudgetRejected { report, .. }) = report
         .latest_budget_rejection
@@ -2995,22 +3044,23 @@ fn format_context_attribution(report: &TaskContextAttribution, lang: Language) -
                     "{name}: {minimum}{} / {} {unit}",
                     report.observed, report.limit
                 ),
-                lang.text("This model step was not sent.", "该模型步骤未发出。")
+                lang.text("Generation request was not sent.", "生成请求未发出。")
                     .into(),
                 String::new(),
             ],
         );
     }
     if !report.memories.is_empty() {
-        lines.push("\nMemory sources".into());
+        lines.push(format!("\n{}", lang.text("Memory sources", "记忆来源")));
         for source in &report.memories {
             lines.push(format!(
-                "{} · revision {} · {} B{}",
+                "{} · {} {} · {} B{}",
                 clean(&source.id),
+                lang.text("revision", "修订"),
                 source.revision,
                 source.normalized_bytes,
                 if source.omitted_for_budget {
-                    " · omitted"
+                    lang.text(" · omitted", " · 已省略")
                 } else {
                     ""
                 }

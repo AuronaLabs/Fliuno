@@ -4253,7 +4253,7 @@ fn draft_context_reaches_bilingual_budget_from_slash_and_keeps_draft() {
     console.ready();
     console.keys("c");
     console.expect("e 复制为新草稿");
-    console.expect("该模型步骤未发出");
+    console.expect("生成请求未发出");
     console.resize(20, 48);
     console.expect("e 复制为新草稿");
     console.capture("draft-budget-rejection-zh-48");
