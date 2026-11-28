@@ -1313,6 +1313,13 @@ impl App {
                         }
                         return false;
                     }
+                    CommandAction::TogglePlan => {
+                        self.toggle_plan_mode();
+                        if menu.origin != CommandOrigin::Workbench {
+                            self.layer = Layer::Edit(Edit::Task);
+                        }
+                        return false;
+                    }
                     CommandAction::ProjectReview => {
                         self.open_project_review(menu.origin != CommandOrigin::Workbench);
                         return false;
@@ -2216,27 +2223,12 @@ impl App {
                 commands.push(("Browse session tasks", KeyCode::Char('L')));
                 commands.push(("Queued prompts", KeyCode::Char('Q')));
                 commands.push(("Branch current session", KeyCode::Char('b')));
-                let label = if self.plan_only {
-                    "Switch to execution mode"
-                } else {
-                    "Switch to plan mode"
-                };
-                commands.push((label, KeyCode::F(2)));
                 commands.push(("Review draft context", KeyCode::F(3)));
             }
             commands.push(("Workspace inbox", KeyCode::Char('I')));
             commands.push(("Search workspace history", KeyCode::Char('H')));
             if let Some(detail) = &self.detail {
                 let task = &detail.task;
-                if pending_approval_id(task).is_some() {
-                    commands.push(("Review operation", KeyCode::Char('a')));
-                } else if task
-                    .pending_tool_input
-                    .as_ref()
-                    .is_some_and(|pending| pending.requests["kind"] == "clarification")
-                {
-                    commands.push(("Answer clarification", KeyCode::Char('a')));
-                }
                 if !task.status.is_terminal() {
                     if task.status != TaskStatus::Interrupted {
                         commands.push(("Add instruction", KeyCode::Char('i')));
@@ -2267,6 +2259,46 @@ impl App {
 
     fn filtered_commands(&self, menu: &CommandMenu) -> Vec<Command> {
         let mut commands = Vec::new();
+        if menu.origin != CommandOrigin::Slash
+            && self.online
+            && !self.busy
+            && let Some(detail) = &self.detail
+        {
+            if pending_approval_id(&detail.task).is_some() {
+                commands.push(Command::shortcut(
+                    "Review pending operation",
+                    KeyCode::Char('a'),
+                ));
+            } else if detail
+                .task
+                .pending_tool_input
+                .as_ref()
+                .is_some_and(|input| input.requests["kind"] == "clarification")
+            {
+                commands.push(Command::shortcut(
+                    "Answer clarification",
+                    KeyCode::Char('a'),
+                ));
+            }
+        }
+        if self.session.is_some() && !self.demo {
+            commands.push(Command {
+                label: "Review changes and checks",
+                alias: Some("changes"),
+                action: CommandAction::ProjectReview,
+            });
+        }
+        if self.online && self.session.is_some() && !self.busy {
+            commands.push(Command {
+                label: if self.plan_only {
+                    "Switch to execution mode"
+                } else {
+                    "Switch to plan mode"
+                },
+                alias: Some("plan"),
+                action: CommandAction::TogglePlan,
+            });
+        }
         if self.online && self.workspace.is_some() && !self.busy {
             commands.push(Command {
                 label: "Start a new conversation",
@@ -2279,13 +2311,6 @@ impl App {
                 label: "Switch model",
                 alias: Some("model"),
                 action: CommandAction::ModelProfiles,
-            });
-        }
-        if self.session.is_some() && !self.demo {
-            commands.push(Command {
-                label: "Review project changes and checks",
-                alias: Some("changes"),
-                action: CommandAction::ProjectReview,
             });
         }
         if self.online && self.read_rules && self.workspace.is_some() && !self.busy {

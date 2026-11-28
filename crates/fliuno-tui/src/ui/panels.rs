@@ -498,16 +498,23 @@ impl App {
             Layer::DraftContext { preview, scroll } => {
                 self.draw_draft_context(frame, body, preview.as_deref(), *scroll)
             }
-            Layer::Commands(menu) => render_list(
-                frame,
-                body,
-                self.filtered_commands(menu)
-                    .into_iter()
-                    .map(|command| command.caption())
-                    .collect(),
-                menu.index,
-                self.palette.choice,
-            ),
+            Layer::Commands(menu) => {
+                let commands = self.filtered_commands(menu);
+                if commands.is_empty() {
+                    render_text(frame, body, "No matching commands", 0);
+                } else {
+                    render_list(
+                        frame,
+                        body,
+                        commands
+                            .into_iter()
+                            .map(|command| command.caption(body.width.saturating_sub(2)))
+                            .collect(),
+                        menu.index,
+                        self.palette.choice,
+                    );
+                }
+            }
             Layer::Workspaces(page, index) => render_list(
                 frame,
                 body,

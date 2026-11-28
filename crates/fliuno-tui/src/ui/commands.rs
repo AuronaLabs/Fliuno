@@ -31,6 +31,7 @@ pub(super) enum CommandAction {
     ModelProfiles,
     ReadRules,
     ProjectReview,
+    TogglePlan,
     Help,
 }
 
@@ -68,7 +69,11 @@ impl Command {
         })
     }
 
-    pub fn caption(&self) -> String {
+    fn action_is_shortcut(&self) -> bool {
+        matches!(self.action, CommandAction::Shortcut(_))
+    }
+
+    pub fn caption(&self, width: u16) -> String {
         let trigger = self.alias.map_or_else(
             || match self.action {
                 CommandAction::Shortcut(key) => key_label(key),
@@ -76,6 +81,23 @@ impl Command {
             },
             |alias| format!("/{alias}"),
         );
-        format!("{trigger:<15}{}", self.label)
+        let room = usize::from(width);
+        let gap = "  ";
+        if trigger.is_empty() {
+            return super::ellipsis(self.label, room);
+        }
+        if self.label.len() + gap.len() + trigger.len() <= room {
+            return format!(
+                "{:<pad$}{gap}{trigger}",
+                self.label,
+                pad = room - gap.len() - trigger.len()
+            );
+        }
+        let label_room = room.saturating_sub(gap.len() + trigger.len());
+        if label_room < 18 && self.action_is_shortcut() {
+            return super::ellipsis(self.label, room);
+        }
+        let label = super::ellipsis(self.label, label_room);
+        format!("{label}{gap}{trigger}")
     }
 }

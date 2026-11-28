@@ -2218,6 +2218,10 @@ fn composer_commands_start_and_resume_conversations_without_consuming_literal_in
     console.expect_absent("Sessions");
     console.expect("Fliuno  /  ");
     console.expect("Describe a change or ask about the project");
+    console.keys("/plan\t");
+    console.expect("Plan only");
+    console.keys("/plan\t");
+    console.expect("Project prompt");
 
     console.keys("/tmp/notes");
     console.expect("/tmp/notes");
@@ -3209,6 +3213,16 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
             terminal.expect("Now: Update the greeting");
             terminal.expect("Enter Review");
             terminal.expect("Review the pending operation to continue");
+            terminal.keys("\x1bOP");
+            terminal.expect("Review pending operation");
+            for cols in [48, 80, 110] {
+                terminal.resize(24, cols);
+                terminal.ready();
+                terminal.expect("Review pending operation");
+                terminal.capture(&format!("project-commands-{cols}"));
+            }
+            terminal.keys("\x1b");
+            terminal.expect_absent("Review pending operation");
             terminal.keys("d");
             terminal.expect("Project changes & checks");
             terminal.expect("No recorded writes or checks for this turn.");
@@ -3286,7 +3300,7 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
     );
     terminal.expect("Ask a follow-up");
     terminal.keys("/changes");
-    terminal.expect("Review project changes and checks");
+    terminal.expect("Review changes and checks");
     terminal.keys("\t");
     for cols in [48, 80, 110] {
         terminal.resize(24, cols);
