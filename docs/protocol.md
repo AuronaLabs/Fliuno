@@ -987,6 +987,12 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 `taskContextAttribution:true` 时，`task/contextAttribution {taskId}` 返回历史及摘要引用、记忆命中来源和因预算省略状态、说明修订和字节数。`normalizedInputBytes` 是当前可重建的规范化请求估算。`latestPreflight` 和 `latestBudgetRejection` 引用已记录的事件，供应商总量的覆盖范围取自该事件。
 
+### 项目检查清单
+
+本地直连服务公布 `workspaceProjectChecks` 时，`workspace/listProjectChecks` 接收 `{workspaceId}`，返回 `{workspaceId,checks,truncated}`。每条检查包含 `toolName`、`label`、`description` 和 `inputs`；输入只含工作区相对 `path` 与 `status`。`present` 表示当前元数据符合普通文件要求，`missing` 表示缺失，`unavailable` 表示无法确认，`unsupported` 表示链接、目录等不受支持的类型。服务最多返回 32 条当前启用的宿主检查；没有注册时返回空列表。
+
+该接口不给出命令参数、环境变量、凭据和文件内容，也不计算输入摘要或排队执行。清单是当前状态提示，后续的工具请求仍验证注册身份、审批和输入摘要。
+
 ### 项目指南
 
 开发版的 `workspaceProjectGuide:true` 只在启用了管理功能的直接本机连接声明。指南管理独立于 `workspace/setInstructions`，不修改用户手工维护的指令。
