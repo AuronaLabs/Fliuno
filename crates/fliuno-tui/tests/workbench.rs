@@ -3578,6 +3578,8 @@ fn workbench_review_keeps_long_preview_and_tool_details_separate() {
     console.resize(16, 80);
     console.ready();
     console.expect("\\tEND PREVIEW\\r");
+    console.resize(26, 80);
+    console.ready();
     assert!(!root.path().join("notes.txt").exists());
     console.keys("\x1b[H");
     console.expect("BEGIN PREVIEW");
