@@ -44,15 +44,21 @@ impl Picker {
         }
     }
 
-    pub(super) fn settings(origin: CommandOrigin) -> Self {
+    pub(super) fn settings(origin: CommandOrigin, browse: bool) -> Self {
         let mut picker = Self::new(origin);
-        picker.supplier_settings = Some(Box::new(super::supplier_settings::Panel::default()));
+        picker.supplier_settings = Some(Box::new(super::supplier_settings::Panel::new(browse)));
         picker
     }
 
     pub(super) fn supplier_snapshot(&mut self, snapshot: fliuno_protocol::ModelSupplierSnapshot) {
         if let Some(panel) = &mut self.supplier_settings {
             panel.install(snapshot);
+        }
+    }
+
+    pub(super) fn supplier_catalog(&mut self, preview: ModelCatalogPreview) {
+        if let Some(panel) = &mut self.supplier_settings {
+            panel.install_catalog(preview);
         }
     }
 
@@ -231,8 +237,8 @@ impl Picker {
     }
 
     pub(super) fn preferred_height(&self) -> u16 {
-        if self.editing_suppliers() {
-            return 15;
+        if let Some(panel) = &self.supplier_settings {
+            return panel.preferred_height();
         }
         if let Some(panel) = &self.connection {
             return panel.preferred_height();
@@ -344,14 +350,11 @@ impl App {
             return;
         };
         if let Some(panel) = &mut picker.supplier_settings {
-            if self.busy {
-                return;
-            }
             if key.code == KeyCode::Esc {
-                if panel.back() {
+                if !self.busy && panel.back() {
                     self.layer = picker.return_layer();
                 }
-            } else if let Some(request) = panel.key(key)
+            } else if let Some(request) = panel.key(key, self.busy)
                 && !self.send(worker, request)
                 && let Layer::ModelPicker(picker) = &mut self.layer
             {

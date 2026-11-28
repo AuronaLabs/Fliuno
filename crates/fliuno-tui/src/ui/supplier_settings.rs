@@ -1,9 +1,10 @@
 use super::{model_edit::draw_field, setup::MODEL_ROUTES, *};
 use fliuno_config::{is_local_provider_root, provider_api_root, validate_api_key};
 use fliuno_protocol::{
-    ModelProfileConnectionTarget, ModelProfileCredentialInput, ModelProfileCredentialStatus,
-    ModelSupplierBindingParams, ModelSupplierEntry, ModelSupplierPreset, ModelSupplierProfile,
-    ModelSupplierSaveParams, ModelSupplierSnapshot, ModelSupplierTarget,
+    ModelCatalogPreview, ModelProfileConnectionTarget, ModelProfileCredentialInput,
+    ModelProfileCredentialStatus, ModelSupplierBindingParams, ModelSupplierCatalogParams,
+    ModelSupplierEntry, ModelSupplierPreset, ModelSupplierProfile, ModelSupplierSaveParams,
+    ModelSupplierSnapshot, ModelSupplierTarget,
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -13,6 +14,7 @@ use forms::{Binding, Supplier};
 #[derive(Default)]
 pub(super) struct Panel {
     snapshot: Option<ModelSupplierSnapshot>,
+    browse: bool,
     models: bool,
     selected: usize,
     form: Option<Form>,
@@ -22,13 +24,34 @@ pub(super) struct Panel {
 
 enum Form {
     Supplier(Supplier),
-    Binding(Binding),
+    Binding(Box<Binding>),
 }
 
 impl Panel {
+    pub fn new(browse: bool) -> Self {
+        Self {
+            browse,
+            ..Self::default()
+        }
+    }
+
+    pub fn install_catalog(&mut self, preview: ModelCatalogPreview) {
+        if let Some(Form::Binding(form)) = &mut self.form {
+            form.install_catalog(preview);
+        }
+    }
+
+    pub fn preferred_height(&self) -> u16 {
+        match &self.form {
+            Some(Form::Binding(form)) => form.catalog_height().unwrap_or(15),
+            _ => 15,
+        }
+    }
+
     pub fn title(&self) -> &'static str {
         match &self.form {
             Some(Form::Supplier(_)) => "Supplier connection",
+            Some(Form::Binding(form)) if form.in_catalog() => "Supplier model catalog",
             Some(Form::Binding(_)) => "Model binding",
             None => "Model settings",
         }
@@ -85,13 +108,13 @@ impl Panel {
     }
 
     pub fn paste(&mut self, text: &str, busy: bool) {
-        if busy || text.chars().any(char::is_control) {
+        if text.chars().any(char::is_control) {
             return;
         }
         match &mut self.form {
-            Some(Form::Supplier(form)) => form.paste(text),
-            Some(Form::Binding(form)) => form.paste(text),
-            None => (),
+            Some(Form::Supplier(form)) if !busy => form.paste(text),
+            Some(Form::Binding(form)) if !busy || form.in_catalog() => form.paste(text),
+            _ => (),
         }
     }
 
@@ -105,11 +128,12 @@ impl Panel {
         })
     }
 
-    pub fn key(&mut self, key: KeyEvent) -> Option<Request> {
-        if key.kind == KeyEventKind::Release {
+    pub fn key(&mut self, key: KeyEvent, busy: bool) -> Option<Request> {
+        let in_catalog = matches!(&self.form, Some(Form::Binding(form)) if form.in_catalog());
+        if key.kind == KeyEventKind::Release || (busy && !in_catalog) {
             return None;
         }
-        if key.code == KeyCode::F(5) && key.kind == KeyEventKind::Press {
+        if !in_catalog && key.code == KeyCode::F(5) && key.kind == KeyEventKind::Press {
             self.form = None;
             return Some(Request::SupplierSettings);
         }
@@ -118,7 +142,7 @@ impl Panel {
             self.error = None;
             let next = match form {
                 Form::Supplier(form) => form.key(key, &snapshot.revision),
-                Form::Binding(form) => form.key(key, snapshot),
+                Form::Binding(form) => form.key(key, snapshot, busy),
             };
             return match next {
                 Ok(request) => request,
@@ -151,10 +175,11 @@ impl Panel {
                     if !create && entry.is_none() {
                         return None;
                     }
-                    Some(Form::Binding(Binding::new(
+                    Some(Form::Binding(Box::new(Binding::new(
                         entry.filter(|_| !create),
                         snapshot,
-                    )))
+                        self.browse,
+                    ))))
                 } else {
                     let entry = snapshot.suppliers.get(self.selected);
                     if !create && entry.is_none() {
@@ -194,6 +219,17 @@ impl Panel {
                 Line::styled("↑↓ Select  ·  F5 Reload  ·  Esc Close", palette.quiet),
             ]
         };
+        if let Some(Form::Binding(form)) = &self.form
+            && let Some(catalog_hints) = form.catalog_hints()
+        {
+            hints = catalog_hints
+                .iter()
+                .enumerate()
+                .map(|(i, text)| {
+                    Line::styled(*text, if i == 0 { palette.label } else { palette.quiet })
+                })
+                .collect();
+        }
         if self.saved && self.form.is_none() {
             hints.push(Line::styled(
                 "Saved. Use /model to apply a model.",

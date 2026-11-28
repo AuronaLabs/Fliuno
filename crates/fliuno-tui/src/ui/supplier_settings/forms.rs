@@ -441,6 +441,7 @@ enum BindingStep {
     Supplier,
     Protocol,
     Model,
+    Catalog,
     Effort,
     Review,
 }
@@ -450,6 +451,9 @@ pub(super) struct Binding {
     step: BindingStep,
     id: Editor,
     model: Editor,
+    catalog: super::super::setup_catalog::Catalog,
+    search: Editor,
+    browse: bool,
     supplier: usize,
     route: usize,
     effort: usize,
@@ -457,7 +461,11 @@ pub(super) struct Binding {
 }
 
 impl Binding {
-    pub fn new(original: Option<&ModelSupplierProfile>, snapshot: &ModelSupplierSnapshot) -> Self {
+    pub fn new(
+        original: Option<&ModelSupplierProfile>,
+        snapshot: &ModelSupplierSnapshot,
+        browse: bool,
+    ) -> Self {
         let supplier = original
             .and_then(|entry| entry.supplier.as_deref())
             .and_then(|id| snapshot.suppliers.iter().position(|entry| entry.id == id))
@@ -494,6 +502,9 @@ impl Binding {
                     .unwrap_or_default(),
                 256,
             ),
+            catalog: Default::default(),
+            search: Editor::default(),
+            browse,
             supplier,
             route,
             effort,
@@ -541,6 +552,90 @@ impl Binding {
         self.step == BindingStep::Review
     }
 
+    pub fn in_catalog(&self) -> bool {
+        self.step == BindingStep::Catalog
+    }
+
+    pub fn install_catalog(&mut self, preview: ModelCatalogPreview) {
+        if self.in_catalog() {
+            self.catalog.install_preview(preview);
+        }
+    }
+
+    pub fn catalog_hints(&self) -> Option<[&'static str; 2]> {
+        match self.step {
+            BindingStep::Model if self.browse => Some([
+                "Enter Next  ·  F4 Browse models  ·  Esc Back",
+                "F5 Discard draft and reload",
+            ]),
+            BindingStep::Catalog => Some([
+                if self.catalog.selected(self.search.text()).is_some() {
+                    "Enter Pick  ·  Esc Back to manual ID"
+                } else {
+                    "Esc Back to manual ID"
+                },
+                if self.catalog.cursor().is_some() {
+                    "↑↓ Select  ·  F6 More  ·  F5 Refresh"
+                } else {
+                    "↑↓ Select  ·  F5 Refresh"
+                },
+            ]),
+            _ => None,
+        }
+    }
+
+    pub fn catalog_height(&self) -> Option<u16> {
+        self.in_catalog().then(|| {
+            // Space for the border, filter, status, and up to seven catalog rows.
+            (8 + self.catalog.visible_rows(self.search.text())).max(10)
+        })
+    }
+
+    fn query(&mut self, snapshot: &ModelSupplierSnapshot, cursor: Option<String>) -> Request {
+        self.catalog.page_requested(cursor.clone());
+        Request::BrowseSupplier(ModelSupplierCatalogParams {
+            supplier: snapshot.suppliers[self.supplier].id.clone(),
+            revision: snapshot.revision.clone(),
+            protocol: MODEL_ROUTES[self.route].protocol.as_str().into(),
+            cursor,
+        })
+    }
+
+    fn catalog_key(
+        &mut self,
+        event: KeyEvent,
+        snapshot: &ModelSupplierSnapshot,
+        busy: bool,
+    ) -> Option<Request> {
+        if !busy && event.kind == KeyEventKind::Press {
+            match event.code {
+                KeyCode::Enter => {
+                    if let Some(id) = self.catalog.selected(self.search.text()) {
+                        self.model = editor(id, 256);
+                        self.step = BindingStep::Model;
+                    }
+                    return None;
+                }
+                KeyCode::F(5) => return Some(self.query(snapshot, None)),
+                KeyCode::F(6) => {
+                    let cursor = self.catalog.cursor()?.to_owned();
+                    return Some(self.query(snapshot, Some(cursor)));
+                }
+                _ => (),
+            }
+        }
+        if matches!(event.code, KeyCode::Up | KeyCode::Down) {
+            self.catalog.navigate(event.code, self.search.text());
+        } else {
+            let before = self.search.text().to_owned();
+            text_input(&mut self.search, event, 256);
+            if before != self.search.text() {
+                self.catalog.reset_selection();
+            }
+        }
+        None
+    }
+
     pub fn back(&mut self) -> bool {
         self.review.reset();
         self.step = match self.step {
@@ -549,6 +644,7 @@ impl Binding {
             BindingStep::Supplier => BindingStep::Name,
             BindingStep::Protocol => BindingStep::Supplier,
             BindingStep::Model => BindingStep::Protocol,
+            BindingStep::Catalog => BindingStep::Model,
             BindingStep::Effort => BindingStep::Model,
             BindingStep::Review => BindingStep::Effort,
         };
@@ -563,6 +659,9 @@ impl Binding {
             BindingStep::Model => {
                 let _ = self.model.insert(text, 256);
             }
+            BindingStep::Catalog if self.search.insert(text, 256) => {
+                self.catalog.reset_selection();
+            }
             _ => (),
         }
     }
@@ -571,7 +670,20 @@ impl Binding {
         &mut self,
         event: KeyEvent,
         snapshot: &ModelSupplierSnapshot,
+        busy: bool,
     ) -> Result<Option<Request>, String> {
+        if self.in_catalog() {
+            return Ok(self.catalog_key(event, snapshot, busy));
+        }
+        if self.browse
+            && self.step == BindingStep::Model
+            && event.code == KeyCode::F(4)
+            && event.kind == KeyEventKind::Press
+        {
+            self.step = BindingStep::Catalog;
+            self.search = Editor::default();
+            return Ok(Some(self.query(snapshot, None)));
+        }
         let supplier = &snapshot.suppliers[self.supplier];
         if event.code == KeyCode::Enter && event.kind == KeyEventKind::Press {
             self.step = match self.step {
@@ -605,6 +717,7 @@ impl Binding {
                     }
                     BindingStep::Effort
                 }
+                BindingStep::Catalog => return Ok(None),
                 BindingStep::Effort => BindingStep::Review,
                 BindingStep::Review => {
                     let target = match &self.original {
@@ -654,6 +767,7 @@ impl Binding {
                 }
             }
             BindingStep::Model => text_input(&mut self.model, event, 256),
+            BindingStep::Catalog => (),
             BindingStep::Effort => {
                 let count = self.efforts().count();
                 step(event.code, &mut self.effort, count);
@@ -710,6 +824,32 @@ impl Binding {
                 &self.model,
                 "ID accepted by the endpoint",
             ),
+            BindingStep::Catalog => {
+                let status = Paragraph::new(Line::styled(
+                    self.catalog.status(self.search.text()),
+                    palette.quiet,
+                ))
+                .wrap(Wrap { trim: true });
+                let status_height = status.line_count(area.width.max(1)).min(2) as u16;
+                let [heading, field, status_area, list] = Layout::vertical([
+                    Constraint::Length(1),
+                    Constraint::Length(1),
+                    Constraint::Length(status_height),
+                    Constraint::Min(0),
+                ])
+                .areas(area);
+                frame.render_widget(
+                    Line::from(vec![
+                        Span::styled("Supplier: ", palette.quiet),
+                        Span::raw(&supplier.id),
+                    ]),
+                    heading,
+                );
+                draw_field(frame, field, &self.search, "Filter by ID or name", palette);
+                frame.render_widget(status, status_area);
+                self.catalog
+                    .draw(frame, list, self.search.text(), palette.choice);
+            }
             BindingStep::Effort => choices(
                 frame,
                 area,

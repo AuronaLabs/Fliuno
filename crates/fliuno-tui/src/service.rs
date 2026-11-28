@@ -17,16 +17,16 @@ use fliuno_protocol::{
     ModelProfileConnectionTarget, ModelProfileConnectionView, ModelProfileCredentialInput,
     ModelProfileDefault, ModelProfileEditGetParams, ModelProfileEditParams, ModelProfileEditView,
     ModelProfileEntry, ModelProfileList, ModelProfileSelectParams, ModelSupplierBindingParams,
-    ModelSupplierRevision, ModelSupplierSaveParams, ModelSupplierSnapshot, ModelUsageSummary,
-    ModelUsageTotals, ObjectPage, PolicyReadRule, PolicyReadRuleCreateParams,
-    PolicyReadRuleRevokeParams, PolicyReadTool, ProviderModelListParams, ProviderModelPage,
-    Session, SessionContextParams, SessionForkParams, SessionHistoryListPage,
-    SessionHistoryListParams, SessionHistoryRole, SessionListOrder, SessionListParams, Task,
-    TaskContext, TaskContextAttribution, TaskPlan, TaskQueue, TaskQueueItem, TaskQueueItemParams,
-    TaskQueueState, TaskReconcileParams, TaskReconciliation, TaskResumeDisposition,
-    TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState, TaskSummary,
-    TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot, WorkSnapshotParams,
-    Workspace, WorkspaceHistorySearchParams,
+    ModelSupplierCatalogParams, ModelSupplierRevision, ModelSupplierSaveParams,
+    ModelSupplierSnapshot, ModelUsageSummary, ModelUsageTotals, ObjectPage, PolicyReadRule,
+    PolicyReadRuleCreateParams, PolicyReadRuleRevokeParams, PolicyReadTool,
+    ProviderModelListParams, ProviderModelPage, Session, SessionContextParams, SessionForkParams,
+    SessionHistoryListPage, SessionHistoryListParams, SessionHistoryRole, SessionListOrder,
+    SessionListParams, Task, TaskContext, TaskContextAttribution, TaskPlan, TaskQueue,
+    TaskQueueItem, TaskQueueItemParams, TaskQueueState, TaskReconcileParams, TaskReconciliation,
+    TaskResumeDisposition, TaskResumeParams, TaskResumeStatus, TaskStatus, TaskSteeringState,
+    TaskSummary, TaskSummaryBatchParams, TaskTimelinePage, TaskTimelineParams, WorkSnapshot,
+    WorkSnapshotParams, Workspace, WorkspaceHistorySearchParams,
 };
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -54,6 +54,7 @@ pub enum Request {
     Diagnostics,
     ModelProfiles,
     SupplierSettings,
+    BrowseSupplier(ModelSupplierCatalogParams),
     SaveSupplier(ModelSupplierSaveParams),
     BindSupplier(ModelSupplierBindingParams),
     OpenModelConnection(ModelProfileConnectionGetParams),
@@ -189,6 +190,7 @@ pub enum Update {
         model: Option<String>,
         model_profiles: bool,
         supplier_settings: bool,
+        supplier_catalog: bool,
         read_rules: bool,
     },
     ModelProfiles(
@@ -198,6 +200,7 @@ pub enum Update {
     ),
     SupplierSettings(Box<ModelSupplierSnapshot>),
     SupplierSettingsSaved,
+    SupplierCatalog(ModelCatalogPreview),
     ModelConnectionOpened(ModelProfileConnectionTarget, ModelProfileConnectionView),
     ModelConnectionPreviewed(ModelCatalogPreview),
     ModelConnectionSaved(ModelProfileEntry),
@@ -521,6 +524,7 @@ fn serve(
                         .map(str::to_owned);
                     let model_profiles = server.supports("modelProfiles");
                     let supplier_settings = server.supports("modelSupplierSettings");
+                    let supplier_catalog = server.supports("modelSupplierCatalog");
                     let read_rules = server.supports("workspaceReadRules");
                     service = Some(server);
                     out.send(Update::Online {
@@ -528,6 +532,7 @@ fn serve(
                         model,
                         model_profiles,
                         supplier_settings,
+                        supplier_catalog,
                         read_rules,
                     })?;
                     Ok(())
@@ -924,6 +929,10 @@ impl Service {
                 Err(error) => return Err(error),
             },
             Request::SupplierSettings => self.supplier_settings()?,
+            Request::BrowseSupplier(params) => {
+                let result = self.rpc("modelSuppliers/listModels", json!(params));
+                model_profile_update(result, Update::SupplierCatalog)?
+            }
             Request::SaveSupplier(mut params) => {
                 let result = self.model_connection_rpc("modelSuppliers/save", &params);
                 clear_model_key(&mut params.credential);

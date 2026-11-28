@@ -191,6 +191,7 @@ pub struct App {
     model: Option<String>,
     model_profiles: bool,
     supplier_settings: bool,
+    supplier_catalog: bool,
     read_rules: bool,
     busy: bool,
     next: Option<Request>,
@@ -242,6 +243,7 @@ impl App {
             model: None,
             model_profiles: false,
             supplier_settings: false,
+            supplier_catalog: false,
             read_rules: false,
             busy: true,
             next: None,
@@ -554,12 +556,14 @@ impl App {
                 model,
                 model_profiles,
                 supplier_settings,
+                supplier_catalog,
                 read_rules,
             } => {
                 self.online = true;
                 self.model = model.and_then(model_label);
                 self.model_profiles = model_profiles;
                 self.supplier_settings = supplier_settings;
+                self.supplier_catalog = supplier_catalog;
                 self.read_rules = read_rules;
                 self.activity.clear();
                 self.message.clear();
@@ -930,6 +934,7 @@ impl App {
                 self.model = None;
                 self.model_profiles = false;
                 self.supplier_settings = false;
+                self.supplier_catalog = false;
                 self.read_rules = false;
                 self.activity.clear();
                 self.layer = Layer::None;
@@ -945,6 +950,11 @@ impl App {
             Update::SupplierSettings(snapshot) => {
                 if let Layer::ModelPicker(picker) = &mut self.layer {
                     picker.supplier_snapshot(*snapshot);
+                }
+            }
+            Update::SupplierCatalog(preview) => {
+                if let Layer::ModelPicker(picker) = &mut self.layer {
+                    picker.supplier_catalog(preview);
                 }
             }
             Update::SupplierSettingsSaved => {
@@ -1323,7 +1333,7 @@ impl App {
                     CommandAction::SupplierSettings => {
                         if self.send(worker, Request::SupplierSettings) {
                             self.layer = Layer::ModelPicker(Box::new(
-                                model_picker::Picker::settings(menu.origin),
+                                model_picker::Picker::settings(menu.origin, self.supplier_catalog),
                             ));
                         } else {
                             self.layer = Layer::Commands(menu);

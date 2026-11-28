@@ -85,7 +85,7 @@ impl Catalog {
         } else {
             self.status = match (preview.catalog_access, preview.catalog) {
                 (ModelCatalogAccess::Unauthorized, _) => {
-                    "API key rejected. Esc to edit credentials."
+                    "API key rejected. Check the connection credentials."
                 }
                 (ModelCatalogAccess::Forbidden, _) => {
                     "Catalog access denied. Check key permissions."

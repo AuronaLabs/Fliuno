@@ -1550,6 +1550,21 @@ fn read_catalog_request(
     listener: &std::net::TcpListener,
     key: Option<&str>,
 ) -> std::net::TcpStream {
+    let authorization = key.map(|key| format!("Bearer {key}"));
+    read_catalog_route(
+        listener,
+        "/v1/models",
+        "authorization",
+        authorization.as_deref(),
+    )
+}
+
+fn read_catalog_route(
+    listener: &std::net::TcpListener,
+    route: &str,
+    header_name: &str,
+    expected: Option<&str>,
+) -> std::net::TcpStream {
     use std::io::{BufRead, BufReader};
 
     let (mut socket, _) = listener.accept().unwrap();
@@ -1559,7 +1574,7 @@ fn read_catalog_request(
     let mut reader = BufReader::new(&mut socket);
     let mut line = String::new();
     reader.read_line(&mut line).unwrap();
-    assert!(line.starts_with("GET /v1/models HTTP/1.1"), "{line}");
+    assert_eq!(line, format!("GET {route} HTTP/1.1\r\n"));
     let mut authorization = None;
     loop {
         line.clear();
@@ -1567,26 +1582,16 @@ fn read_catalog_request(
         if line == "\r\n" {
             break;
         }
-        if let Some((header, value)) = line.split_once(':')
-            && header.eq_ignore_ascii_case("authorization")
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case(header_name)
         {
             assert!(authorization.replace(value.trim().to_owned()).is_none());
         }
     }
-    assert_eq!(
-        authorization.is_some(),
-        key.is_some(),
-        "unexpected authentication header"
+    assert!(
+        authorization.as_deref() == expected,
+        "incorrect catalog authentication"
     );
-    if let Some(key) = key {
-        assert!(
-            authorization
-                .as_deref()
-                .and_then(|value| value.strip_prefix("Bearer "))
-                == Some(key),
-            "catalog request must use the selected credential"
-        );
-    }
     socket
 }
 
@@ -3389,7 +3394,8 @@ fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
     std::fs::write(root.path().join("original.key"), "original-fixture-key").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let lab_url = format!("http://{}/v1/", listener.local_addr().unwrap());
-    let local_url = "http://127.0.0.1:11434/v1/";
+    let local_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let local_url = format!("http://{}/v1/", local_listener.local_addr().unwrap());
     let key = "supplier-fixture-secret-key";
     let mut console =
         Console::launch_with_config_at(server.as_deref(), root.path(), Some(&config), (22, 48));
@@ -3461,7 +3467,7 @@ fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
     assert!(settings.models.is_empty());
     assert!(!std::fs::read_to_string(&config).unwrap().contains(key));
 
-    add_supplier(&mut console, "local", local_url);
+    add_supplier(&mut console, "local", &local_url);
     console.keys("\x1b[B\x1b[B\r");
     console.expect("No API key (loopback only)");
     console.expect("Review and save");
@@ -3470,7 +3476,7 @@ fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
     console.capture("supplier-list-48");
     console.keys("\t");
     console.expect("[Models]");
-    let bind = |console: &mut Console, profile: &str, model: &str, local: bool| {
+    let bind = |console: &mut Console, profile: &str, model: &str, local: bool, browse: bool| {
         console.keys("n");
         console.expect("Model profile ID");
         console.keys(&format!("{profile}\r"));
@@ -3485,12 +3491,67 @@ fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
         if local {
             console.expect_absent("openai.responses");
         }
+        if profile == "review" {
+            console.keys("\x1b[B");
+            console.expect("> claude.message");
+        }
         console.keys("\r");
         console.expect("ID accepted by the endpoint");
-        console.keys(&format!("{model}\r"));
+        if profile == "review" {
+            console.keys("\x1bOS");
+            console.expect("first-claude");
+            console.expect("F6 More");
+            console.ready();
+            console.keys("\x1b[17~");
+            console.expect("review-model");
+            console.ready();
+            console.expect_absent("F6 More");
+            console.keys("Reviewer");
+            console.expect_absent("first-claude");
+            console.capture("supplier-model-catalog-paged-110");
+            console.keys("\r");
+            console.expect_absent("Supplier model catalog");
+            console.expect("review-model");
+            console.keys("\r");
+        } else if browse && !local {
+            console.expect("F4 Browse models");
+            console.keys("\x1bOS");
+            console.expect("Supplier model catalog");
+            console.expect("alpha-model");
+            console.expect("daily-model");
+            console.ready();
+            console.expect_absent(key);
+            console.keys("daily");
+            console.expect_absent("alpha-model");
+            for (rows, cols) in [(22, 48), (24, 80), (28, 110)] {
+                console.resize(rows, cols);
+                console.ready();
+                console.expect("daily-model");
+                console.expect("Esc Back to manual ID");
+                console.capture(&format!("supplier-model-catalog-{cols}"));
+            }
+            console.keys("\r");
+            console.expect_absent("Supplier model catalog");
+            console.expect("daily-model");
+            console.keys("\r");
+        } else if browse {
+            console.keys("local");
+            console.keys("\x1bOS");
+            console.expect("No model catalog at this URL");
+            console.expect_absent("Enter Pick");
+            console.ready();
+            console.capture("supplier-model-manual-48");
+            console.keys("\x1b");
+            console.expect_absent("Supplier model catalog");
+            console.expect("› local");
+            console.keys("-model\r");
+        } else {
+            console.keys(&format!("{model}\r"));
+        }
         console.expect("Adapter default");
         if !local {
-            console.keys("\x1b[B\x1b[B\x1b[B\x1b[B\x1b[B");
+            let offset = if profile == "review" { 3 } else { 5 };
+            console.keys(&"\x1b[B".repeat(offset));
             console.expect("> high");
         }
         console.keys("\r");
@@ -3498,7 +3559,7 @@ fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
         console.expect(&format!("Model: {model}"));
     };
 
-    bind(&mut console, "daily", "daily-model", false);
+    bind(&mut console, "daily", "daily-model", false, false);
     console.expect("Reasoning: high");
     console.capture("binding-review-48");
     console.resize(16, 48);
@@ -3527,17 +3588,46 @@ fn workbench_manages_shared_suppliers_and_applies_only_the_selected_model() {
     console.expect("[Models]");
     console.ready();
 
-    bind(&mut console, "daily", "daily-model", false);
+    let catalog = thread::spawn(move || {
+        write_catalog_response(
+            read_catalog_request(&listener, Some(key)),
+            200,
+            r#"{"data":[{"id":"alpha-model"},{"id":"daily-model"},{"id":"supplier-fixture-secret-key"}]}"#,
+        );
+        write_catalog_response(
+            read_catalog_route(&listener, "/v1/models?limit=100", "x-api-key", Some(key)),
+            200,
+            r#"{"data":[{"id":"first-claude","display_name":"First model"}],"last_id":"first-claude","has_more":true}"#,
+        );
+        write_catalog_response(
+            read_catalog_route(
+                &listener,
+                "/v1/models?limit=100&after_id=first-claude",
+                "x-api-key",
+                Some(key),
+            ),
+            200,
+            r#"{"data":[{"id":"review-model","display_name":"Reviewer"}],"has_more":false}"#,
+        );
+        write_catalog_response(read_catalog_request(&local_listener, None), 404, r#"{}"#);
+        listener
+    });
+    bind(&mut console, "daily", "daily-model", false, true);
     console.keys("\r");
     console.expect("daily  ·  lab/daily-model");
     console.ready();
-    bind(&mut console, "review", "review-model", false);
+    bind(&mut console, "review", "review-model", false, false);
     console.keys("\r");
     console.expect("review  ·  lab/review-model");
     console.ready();
-    bind(&mut console, "local", "local-model", true);
+    console.resize(22, 48);
+    console.ready();
+    bind(&mut console, "local", "local-model", true, true);
+    let listener = catalog.join().unwrap();
     console.keys("\r");
     console.expect("local  ·  local/local-model");
+    console.resize(28, 110);
+    console.ready();
     console.capture("binding-list-110");
     console.ready();
 
