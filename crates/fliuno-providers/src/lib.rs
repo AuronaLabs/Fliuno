@@ -182,10 +182,7 @@ pub fn validate_live_profile(settings: &fliuno_config::ModelSettings) -> Result<
         .as_deref()
         .filter(|model| !model.trim().is_empty())
         .ok_or("[model] name is required for a live provider")?;
-    fliuno_config::provider_api_root(provider_base(
-        settings.provider,
-        settings.base_url.as_deref(),
-    ))?;
+    fliuno_config::provider_api_root(settings.provider.api_root(settings.base_url.as_deref()))?;
     match settings.provider {
         Provider::Gemini => {
             http::count_route_model_id(model)?;
@@ -232,7 +229,7 @@ pub fn from_settings(
     });
     if protocol == Some(ModelProtocol::ChatCompletions) {
         let provider = openai_chat::ChatProvider::new(
-            provider_base(settings.provider, settings.base_url.as_deref()),
+            settings.provider.api_root(settings.base_url.as_deref()),
             key.as_deref(),
             model,
             settings.reasoning_effort,
@@ -251,15 +248,6 @@ pub fn from_settings(
     )
 }
 
-fn provider_base(kind: fliuno_config::Provider, configured: Option<&str>) -> &str {
-    use fliuno_config::Provider;
-    configured.unwrap_or(match kind {
-        Provider::Demo => "",
-        Provider::OpenAi => "https://api.openai.com/v1/",
-        Provider::Anthropic => "https://api.anthropic.com/v1/",
-        Provider::Gemini => "https://generativelanguage.googleapis.com/v1beta/",
-    })
-}
 fn build_provider(
     kind: fliuno_config::Provider,
     model: &str,
@@ -272,7 +260,7 @@ fn build_provider(
     if model.trim().is_empty() {
         return Err("The model name must not be empty".into());
     }
-    let base = provider_base(kind, base_url);
+    let base = kind.api_root(base_url);
     let provider: Box<dyn ModelProvider> = match kind {
         Provider::Demo => Box::new(DemoProvider),
         Provider::OpenAi => {

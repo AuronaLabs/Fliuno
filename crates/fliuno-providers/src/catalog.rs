@@ -1,8 +1,5 @@
 //! Bounded native model listing. Discovery never starts a generation request.
-use crate::{
-    http::{Http, MetadataError, provider_headers},
-    provider_base,
-};
+use crate::http::{Http, MetadataError, provider_headers};
 use fliuno_config::{
     ModelCatalogDraft, ModelSettings, Provider, ReasoningEffort, provider_api_root,
     validate_api_key,
@@ -221,10 +218,7 @@ fn validate_configuration(settings: &ModelSettings) -> Result<(), String> {
     settings.validate_reasoning_effort()?;
     settings.validate_budget()?;
     settings.validate_model_auth()?;
-    provider_api_root(provider_base(
-        settings.provider,
-        settings.base_url.as_deref(),
-    ))?;
+    provider_api_root(settings.provider.api_root(settings.base_url.as_deref()))?;
     Ok(())
 }
 
@@ -272,7 +266,7 @@ fn catalog_http(
     headers: Option<reqwest::header::HeaderMap>,
 ) -> Result<Http, String> {
     Http::new_with_auth(
-        provider_base(settings.provider, settings.base_url.as_deref()),
+        settings.provider.api_root(settings.base_url.as_deref()),
         "models",
         "models",
         &[],

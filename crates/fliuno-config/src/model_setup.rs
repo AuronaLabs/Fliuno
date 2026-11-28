@@ -1,7 +1,6 @@
 //! Persistence for the first live profile, shared by all local clients.
 use super::{
-    ModelProtocol, ModelSettings, PendingApiKey, Provider, ReasoningEffort, Settings,
-    provider_api_root, read_api_key,
+    ConnectionCredential, ModelConnectionDraft, ModelProtocol, Provider, ReasoningEffort, Settings,
 };
 use std::{fs, io, io::Write, path::Path};
 use toml_edit::{DocumentMut, Item, Table, value};
@@ -18,6 +17,7 @@ pub struct ModelSetup<'a> {
 pub enum ModelSetupCredential<'a> {
     Managed(&'a str),
     File(&'a str),
+    None,
 }
 
 impl Settings {
@@ -28,43 +28,28 @@ impl Settings {
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
         let model = super::model_edit::validate_model_name(setup.model)?;
-        let settings = ModelSettings {
-            provider: setup.provider,
-            protocol: Some(setup.protocol),
-            reasoning_effort: setup.reasoning_effort,
-            ..Default::default()
-        };
-        settings.effective_protocol()?;
-        settings.validate_reasoning_effort()?;
-        let endpoint = setup.base_url.map(provider_api_root).transpose()?;
-        let mut profile = Table::new();
-        profile.insert("provider", value(setup.provider.name()));
-        profile.insert("protocol", value(setup.protocol.as_str()));
-        profile.insert("name", value(model));
-        if let Some(endpoint) = endpoint {
-            profile.insert("base_url", value(endpoint.as_str()));
+        if setup
+            .reasoning_effort
+            .is_some_and(|effort| !setup.provider.reasoning_efforts().contains(&effort))
+        {
+            return Err("The model provider does not accept this reasoning effort".into());
         }
+        let draft = ModelConnectionDraft {
+            provider: setup.provider,
+            protocol: setup.protocol,
+            base_url: setup.base_url,
+            credential: match setup.credential {
+                ModelSetupCredential::Managed(key) => ConnectionCredential::Managed(key),
+                ModelSetupCredential::File(file) => ConnectionCredential::File(file),
+                ModelSetupCredential::None => ConnectionCredential::None,
+            },
+        };
+        let mut profile = Table::new();
+        let pending = draft.stage(path, &mut profile, None)?;
+        profile.insert("name", value(model));
         if let Some(effort) = setup.reasoning_effort {
             profile.insert("reasoning_effort", value(effort.as_str()));
         }
-        let pending = match setup.credential {
-            ModelSetupCredential::File(file) => {
-                read_api_key(&parent.join(file))?;
-                profile.insert("api_key_file", value(file));
-                None
-            }
-            ModelSetupCredential::Managed(key) => {
-                let key = PendingApiKey::stage(path, key)?;
-                let reference = key
-                    .setting()
-                    .parse::<DocumentMut>()
-                    .map_err(|_| "Could not write the credential reference")?;
-                for (name, item) in reference.iter() {
-                    profile.insert(name, item.clone());
-                }
-                Some(key)
-            }
-        };
         let mut document = DocumentMut::new();
         document.insert("model", Item::Table(profile));
         let write = || -> io::Result<()> {

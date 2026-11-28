@@ -1,10 +1,14 @@
 //! User-owned startup settings shared by the terminal client and app-server.
 mod config_edit;
 mod credentials;
+mod model_connection;
 mod model_default;
 mod model_edit;
 mod model_setup;
 pub use credentials::PendingApiKey;
+pub use model_connection::{
+    ConnectionCredential, ModelConnectionDraft, ModelConnectionEdit, ModelConnectionTarget,
+};
 pub use model_edit::ModelEdit;
 pub use model_setup::{ModelSetup, ModelSetupCredential};
 
@@ -56,7 +60,7 @@ pub enum Theme {
     Mono,
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     #[default]
@@ -74,6 +78,15 @@ impl Provider {
             Self::Anthropic => "anthropic",
             Self::Gemini => "gemini",
         }
+    }
+
+    pub fn api_root(self, configured: Option<&str>) -> &str {
+        configured.unwrap_or(match self {
+            Self::Demo => "",
+            Self::OpenAi => "https://api.openai.com/v1/",
+            Self::Anthropic => "https://api.anthropic.com/v1/",
+            Self::Gemini => "https://generativelanguage.googleapis.com/v1beta/",
+        })
     }
 
     /// Values understood by Fliuno's adapter, independent of a specific model.
