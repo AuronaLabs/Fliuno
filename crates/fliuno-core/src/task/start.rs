@@ -450,6 +450,11 @@ impl Kernel {
                 "planOnly applies only to model tasks".into(),
             ));
         }
+        if options.tool_scope != ToolScope::All && backend != TaskBackend::Model {
+            return Err(Error::Invalid(
+                "toolScope applies only to model tasks".into(),
+            ));
+        }
         if let Some(key) = key {
             validate_key(key)?;
         }

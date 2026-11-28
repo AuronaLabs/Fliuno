@@ -1035,6 +1035,10 @@
               "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
+            "toolScope": {
+              "description": "Also applies in isolated context mode. None takes precedence over interaction tools.",
+              "$ref": "#/$defs/ToolScope"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -1150,6 +1154,15 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ToolScope": {
+          "description": "Which host-registered tools may be offered to and called by a model task.\nThis only narrows availability; it does not grant approval or OS authority.",
+          "type": "string",
+          "enum": [
+            "all",
+            "project",
+            "none"
           ]
         },
         "ContextMemoryRef": {
@@ -1280,6 +1293,10 @@
               "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
+            "toolScope": {
+              "description": "Also applies in isolated context mode. None takes precedence over interaction tools.",
+              "$ref": "#/$defs/ToolScope"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -1395,6 +1412,15 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ToolScope": {
+          "description": "Which host-registered tools may be offered to and called by a model task.\nThis only narrows availability; it does not grant approval or OS authority.",
+          "type": "string",
+          "enum": [
+            "all",
+            "project",
+            "none"
           ]
         },
         "ContextMemoryRef": {
@@ -2116,6 +2142,10 @@
               "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
+            "toolScope": {
+              "description": "Also applies in isolated context mode. None takes precedence over interaction tools.",
+              "$ref": "#/$defs/ToolScope"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -2231,6 +2261,15 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ToolScope": {
+          "description": "Which host-registered tools may be offered to and called by a model task.\nThis only narrows availability; it does not grant approval or OS authority.",
+          "type": "string",
+          "enum": [
+            "all",
+            "project",
+            "none"
           ]
         },
         "ContextMemoryRef": {
@@ -2524,6 +2563,10 @@
               "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
+            "toolScope": {
+              "description": "Also applies in isolated context mode. None takes precedence over interaction tools.",
+              "$ref": "#/$defs/ToolScope"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -2639,6 +2682,15 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ToolScope": {
+          "description": "Which host-registered tools may be offered to and called by a model task.\nThis only narrows availability; it does not grant approval or OS authority.",
+          "type": "string",
+          "enum": [
+            "all",
+            "project",
+            "none"
           ]
         },
         "ContextMemoryRef": {
@@ -2856,6 +2908,10 @@
               "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
+            "toolScope": {
+              "description": "Also applies in isolated context mode. None takes precedence over interaction tools.",
+              "$ref": "#/$defs/ToolScope"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -2971,6 +3027,15 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ToolScope": {
+          "description": "Which host-registered tools may be offered to and called by a model task.\nThis only narrows availability; it does not grant approval or OS authority.",
+          "type": "string",
+          "enum": [
+            "all",
+            "project",
+            "none"
           ]
         },
         "ContextMemoryRef": {
@@ -3372,6 +3437,10 @@
               "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
+            "toolScope": {
+              "description": "Also applies in isolated context mode. None takes precedence over interaction tools.",
+              "$ref": "#/$defs/ToolScope"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -3487,6 +3556,15 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ToolScope": {
+          "description": "Which host-registered tools may be offered to and called by a model task.\nThis only narrows availability; it does not grant approval or OS authority.",
+          "type": "string",
+          "enum": [
+            "all",
+            "project",
+            "none"
           ]
         },
         "ContextMemoryRef": {
@@ -8377,6 +8455,10 @@
               "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
+            "toolScope": {
+              "description": "Also applies in isolated context mode. None takes precedence over interaction tools.",
+              "$ref": "#/$defs/ToolScope"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -8492,6 +8574,15 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ToolScope": {
+          "description": "Which host-registered tools may be offered to and called by a model task.\nThis only narrows availability; it does not grant approval or OS authority.",
+          "type": "string",
+          "enum": [
+            "all",
+            "project",
+            "none"
           ]
         },
         "ContextMemoryRef": {
@@ -14354,6 +14445,10 @@
               "description": "Limit this model task to planning, clarification and trusted confined reads.",
               "type": "boolean"
             },
+            "toolScope": {
+              "description": "Also applies in isolated context mode. None takes precedence over interaction tools.",
+              "$ref": "#/$defs/ToolScope"
+            },
             "instructionsRevision": {
               "type": [
                 "integer",
@@ -14469,6 +14564,15 @@
           "enum": [
             "session",
             "isolated"
+          ]
+        },
+        "ToolScope": {
+          "description": "Which host-registered tools may be offered to and called by a model task.\nThis only narrows availability; it does not grant approval or OS authority.",
+          "type": "string",
+          "enum": [
+            "all",
+            "project",
+            "none"
           ]
         },
         "ContextMemoryRef": {

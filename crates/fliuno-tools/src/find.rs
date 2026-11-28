@@ -109,6 +109,10 @@ fn directory(root: &Dir, path: &str) -> std::io::Result<Dir> {
 pub(super) struct Find;
 
 impl Tool for Find {
+    fn is_compact_project_tool(&self) -> bool {
+        true
+    }
+
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: "workspace_find".into(),

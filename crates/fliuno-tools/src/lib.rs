@@ -200,6 +200,13 @@ fn sha256(bytes: &[u8]) -> String {
 }
 
 impl Tool for WorkspaceTool {
+    fn is_compact_project_tool(&self) -> bool {
+        matches!(
+            self.0,
+            Operation::List | Operation::Read | Operation::Create | Operation::Edit
+        )
+    }
+
     fn supports_read_rules(&self) -> bool {
         matches!(self.0, Operation::List | Operation::Read)
     }

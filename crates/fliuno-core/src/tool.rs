@@ -106,6 +106,11 @@ impl From<String> for ToolProposalError {
 /// retried on recovery.
 pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
+    /// Host opt-in for a core editor primitive in the compact project tool set.
+    /// This is independent of the public name, effect and approval policy.
+    fn is_compact_project_tool(&self) -> bool {
+        false
+    }
     /// Only bounded, isolated project check registrations should opt in.
     fn project_check(&self) -> Option<ProjectCheckRegistration> {
         None

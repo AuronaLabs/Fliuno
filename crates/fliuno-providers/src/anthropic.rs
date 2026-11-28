@@ -96,13 +96,16 @@ fn request(model: &str, task: &Task, tools: &[ToolSpec], streaming: bool) -> Res
             Message::ToolCall { .. } | Message::Assistant { .. } => {}
         }
     }
-    Ok(
-        json!({"model":model,"max_tokens":8192,"messages":messages,"stream":streaming,
-            "system":fliuno_core::agent_instructions(),
-            "tool_choice":{"type":"auto","disable_parallel_tool_use":true},
-            "tools":tools.iter().map(|tool| json!({"name":tool.name, "description":tool.description,"input_schema":tool.input_schema})).collect::<Vec<_>>()
-        }),
-    )
+    let mut body = json!({"model":model,"max_tokens":8192,"messages":messages,"stream":streaming,
+        "system":fliuno_core::agent_instructions()
+    });
+    if !tools.is_empty() {
+        body["tool_choice"] = json!({"type":"auto","disable_parallel_tool_use":true});
+        body["tools"] = json!(tools.iter().map(|tool| json!({
+            "name":tool.name, "description":tool.description, "input_schema":tool.input_schema
+        })).collect::<Vec<_>>());
+    }
+    Ok(body)
 }
 
 fn parse(response: Value) -> Result<ModelTurn, String> {

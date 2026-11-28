@@ -1030,3 +1030,125 @@ fn draft_context_previews_local_fragments_without_dispatch_or_audit() {
         report["toolCount"].as_u64().unwrap() as usize
     );
 }
+
+#[test]
+fn draft_tool_scope_survives_queue_restart_and_enforces_the_model_manifest() {
+    let wire = Fixture::start(|request| match request.path.as_str() {
+        "/mock/v1/models/fixture-alias" => Response::json(200, model_metadata(4096)),
+        "/mock/v1/messages/count_tokens" => Response::json(200, json!({"input_tokens":128})),
+        "/mock/v1/messages" if request.body.to_string().contains("try excluded tool") => {
+            Response::json(
+                200,
+                json!({"stop_reason":"tool_use","content":[{
+                    "type":"tool_use","id":"tool_excluded","name":"artifact_create",
+                    "input":{"title":"Excluded","content":"must not be written"}
+                }]}),
+            )
+        }
+        "/mock/v1/messages" => Response::json(
+            200,
+            json!({"stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}),
+        ),
+        path => panic!("unexpected endpoint {path}"),
+    });
+    let directory = TestDirectory::new();
+    let connect = || {
+        let child = directory
+            .command(&wire)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut peer = Peer::from_child(child);
+        let init = peer.call(
+            "initialize",
+            json!({"protocolVersion":"0.1","clientName":"scope-test"}),
+        );
+        assert_eq!(init["capabilities"]["modelToolScope"], true);
+        peer
+    };
+    let mut peer = connect();
+    let workspace = peer.call("workspace/open", json!({"root":directory.0}));
+    let session = peer.call("session/create", json!({"workspaceId":workspace["id"]}));
+    let inspect = |peer: &mut Peer, options: Value| {
+        peer.call(
+            "session/inspectDraftContext",
+            json!({
+                "sessionId":session["id"], "input":"try excluded tool", "options":options
+            }),
+        )
+    };
+    let all = inspect(&mut peer, json!({"enableInteraction":true}));
+    let project = inspect(
+        &mut peer,
+        json!({"enableInteraction":true,"toolScope":"project"}),
+    );
+    let text = inspect(
+        &mut peer,
+        json!({"enableInteraction":true,"toolScope":"none"}),
+    );
+    let plan = inspect(&mut peer, json!({"planOnly":true,"toolScope":"project"}));
+    assert!(all["toolCount"].as_u64().unwrap() > 7);
+    assert_eq!(project["toolCount"], 7);
+    assert_eq!(text["toolCount"], 0);
+    assert_eq!(plan["toolCount"], 4); // list, read, plan and clarification
+    assert_eq!(wire.requests().len(), 1, "preview never dispatches");
+    let item = peer.call(
+        "taskQueue/enqueue",
+        json!({"sessionId":session["id"],
+        "input":"try excluded tool","clientRequestId":"scope-restart",
+        "context":{"enableInteraction":true,"toolScope":"project"}}),
+    );
+    drop(peer);
+
+    let mut peer = connect();
+    let receipt = peer.call(
+        "taskQueue/startNext",
+        json!({"sessionId":session["id"],"queueId":item["queueId"]}),
+    );
+    let task_id = receipt["status"]["taskId"].as_str().unwrap();
+    let task = peer.wait_for_status(task_id, "failed");
+    assert_eq!(task["context"]["options"]["toolScope"], "project");
+    assert!(task["pendingApproval"].is_null());
+    let requests = wire.requests();
+    assert_eq!(requests.len(), 4);
+    let actual = &requests[3];
+    assert_eq!(actual.body["tools"], requests[2].body["tools"]);
+    let mut names: Vec<_> = actual.body["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "task_ask_user",
+            "task_publish_plan",
+            "workspace_create_text",
+            "workspace_edit_text",
+            "workspace_find",
+            "workspace_list",
+            "workspace_read_text"
+        ]
+    );
+    assert_eq!(
+        project["requestSize"]["generationBytes"],
+        actual.headers["content-length"].parse::<u64>().unwrap()
+    );
+    let events = peer.call("events/list", json!({"taskId":task_id}));
+    assert!(!events.to_string().contains("approval_requested"));
+
+    let task = peer.call(
+        "task/start",
+        json!({"sessionId":session["id"],"input":"text only",
+        "context":{"enableInteraction":true,"toolScope":"none"}}),
+    );
+    peer.wait_for_status(task["id"].as_str().unwrap(), "completed");
+    let requests = wire.requests();
+    for request in &requests[4..] {
+        assert!(request.body.get("tools").is_none());
+        assert!(request.body.get("tool_choice").is_none());
+    }
+}

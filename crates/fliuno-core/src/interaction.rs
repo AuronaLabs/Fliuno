@@ -21,11 +21,21 @@ pub(crate) fn allows_model_tool(
     name: &str,
     tool: &dyn Tool,
 ) -> bool {
+    let scope = options
+        .map(|options| options.tool_scope)
+        .unwrap_or_default();
+    if scope == ToolScope::None {
+        return false;
+    }
     if is_internal(name) {
         return options.is_some_and(|options| options.enable_interaction);
     }
-    options.is_none_or(|options| !options.plan_only)
-        || (tool.supports_read_rules() && matches!(tool.spec().effect, ToolEffect::WorkspaceRead))
+    let plan_allows_tool = options.is_none_or(|options| !options.plan_only)
+        || (tool.supports_read_rules() && matches!(tool.spec().effect, ToolEffect::WorkspaceRead));
+    plan_allows_tool
+        && (scope == ToolScope::All
+            || tool.is_compact_project_tool()
+            || tool.project_check().is_some())
 }
 
 #[derive(Deserialize)]

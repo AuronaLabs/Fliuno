@@ -617,6 +617,7 @@ impl RpcServer {
                 "maxConcurrentExecutions":scheduler::WORKER_COUNT
             });
             capabilities["draftContextInspection"] = json!(true);
+            capabilities["modelToolScope"] = json!(true);
             capabilities["modelProfiles"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileEditing"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileConnections"] = json!(self.model_profiles.is_some());

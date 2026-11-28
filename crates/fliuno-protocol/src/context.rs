@@ -45,6 +45,23 @@ impl ContextDetail {
     }
 }
 
+/// Which host-registered tools may be offered to and called by a model task.
+/// This only narrows availability; it does not grant approval or OS authority.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolScope {
+    #[default]
+    All,
+    Project,
+    None,
+}
+
+impl ToolScope {
+    fn is_all(&self) -> bool {
+        *self == Self::All
+    }
+}
+
 pub const MAX_CONTEXT_SCAN_LIMIT: u32 = 512;
 pub const MAX_EXPLICIT_CONTEXT_MEMORIES: usize = 8;
 
@@ -62,6 +79,9 @@ pub struct ContextOptions {
     /// Limit this model task to planning, clarification and trusted confined reads.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub plan_only: bool,
+    /// Also applies in isolated context mode. None takes precedence over interaction tools.
+    #[serde(default, skip_serializing_if = "ToolScope::is_all")]
+    pub tool_scope: ToolScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instructions_revision: Option<u64>,
     /// Explicitly send the enabled project guide revision in session mode.
@@ -136,6 +156,7 @@ impl Default for ContextOptions {
             disable_memory: false,
             enable_interaction: false,
             plan_only: false,
+            tool_scope: ToolScope::All,
             instructions_revision: None,
             project_guide_revision: None,
             memory_selection: None,

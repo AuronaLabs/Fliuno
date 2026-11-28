@@ -809,15 +809,12 @@ fn composed_input(
 
 fn current_tool_authority_digest(kernel: &Kernel, context: &ContextOptions) -> String {
     let tools = kernel
-        .active_model_tools()
-        .filter(|(name, tool)| {
-            crate::interaction::allows_model_tool(Some(context), name, tool.as_ref())
-        })
-        .map(|(name, tool)| {
+        .eligible_current_model_tools(Some(context))
+        .map(|(name, tool, authority)| {
             let spec = tool.spec();
             serde_json::json!({
                 "name": name,
-                "authority": tool.authority(),
+                "authority": authority,
                 "description": spec.description,
                 "effect": spec.effect,
                 "inputSchema": spec.input_schema,

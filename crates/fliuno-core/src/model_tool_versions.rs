@@ -150,7 +150,7 @@ impl Kernel {
             .map(|(name, tool)| (name, self.model_tool_overrides.get(name).unwrap_or(tool)))
     }
 
-    fn eligible_current_model_tools<'a>(
+    pub(crate) fn eligible_current_model_tools<'a>(
         &'a self,
         options: Option<&'a ContextOptions>,
     ) -> impl Iterator<Item = (&'a String, &'a Arc<dyn Tool>, String)> {
