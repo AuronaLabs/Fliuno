@@ -17,7 +17,7 @@
 
 [下载安装包](https://github.com/AuronaLabs/Fliuno/releases/latest) · [更新记录](CHANGELOG.md) · [下一版：项目 Agent](docs/plan-0.0.21.md)
 
-当前已发布版本为 **v0.0.20**。下文的项目编辑、隔离检查和多供应商设置属于 **0.0.21 开发分支**。
+> **稳定版 v0.0.20** 可从发布页安装。下面标有 **0.0.21 开发版** 的功能需要从开发分支构建，安装版里还没有。
 
 ## 开始真实工作
 
@@ -31,9 +31,11 @@
 
 完成后用 `/changes` 查看本轮确认写入的文件、补丁和检查输出。仅需一段文字时可以直接在对话里交付；只有需要下载或写文件时，才走对应的交付流程。[项目工作流](docs/workbench.md#在项目目录里工作) · [如何配置检查](docs/setup.md#在隔离环境里运行项目检查0021)
 
-### 多供应商设置预览 · 0.0.21 开发版
+### 多供应商设置与简体中文 · 0.0.21 开发版
 
 在输入框敲 `/settings` 后按 `Tab`，或按 `F1` 搜索 `settings`。先在 **Suppliers** 中配置 Base URL 和凭据，再切到 **Models**，给每个档案选供应商和协议，按 `F4` 查询并选取模型，或手填模型 ID，再设置思考强度。例如两个档案可以共用 `lab` 的连接，也可以各自连不同的服务。保存到 `~/.fliuno/config.toml` 后，用 `/model` 应用所选档案。旧回复仍显示当时的 `供应商/模型`。[设置步骤和配置示例](docs/workbench.md#命名供应商0021-开发版)
+
+用 `/language` 或 `F1` 切换简体中文。项目主屏、命令、供应商设置、内置操作审阅和改动回执支持中文界面，语言偏好保存在本机，模型回复保留原文。[切换步骤与覆盖范围](docs/workbench.md#切换界面语言)
 
 ## 快速体验
 
@@ -75,6 +77,6 @@ cargo build --locked -p fliuno-tui -p fliuno-app-server
 pwsh -NoProfile -File scripts/check.ps1
 ```
 
-工程检查覆盖格式、Clippy、工作区测试、应用协议 Schema 和离线演示。
+工程检查覆盖格式、Clippy、工作区测试、应用协议 Schema 和离线演示。调试、发布或验收可复用同一个专用构建缓存；在空间紧张时按[构建缓存说明](docs/setup.md#检查与演示)清理。实际终端验收和安装包门槛见[当前迭代计划](docs/plan-0.0.21.md#验收与发布门槛)。
 
 [架构与模块](docs/architecture.md) · [验收记录](docs/execution-evidence.md) · [数据库升级验证](docs/setup.md#版本升级验证) · [开发路线图](docs/roadmap.md)

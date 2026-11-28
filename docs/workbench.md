@@ -1,6 +1,10 @@
 # 使用 Fliuno 终端工作台
 
-[产品首页](../README.md) · [文档中心](README.md) · [迭代规划](roadmap.md)
+[产品首页](../README.md) · [文档中心](README.md) · [更新记录](../CHANGELOG.md)
+
+[安装](#安装) · [接入模型](#接入模型) · [项目工作](#在项目目录里工作) · [切换语言](#切换界面语言) · [恢复与备份](#恢复与备份)
+
+> 本指南以 **v0.0.20** 为安装基线。标为 **0.0.21 开发版** 的章节需要配套的开发版 `fliuno` 与 `fliuno-app-server`。
 
 从项目目录在终端里运行 `fliuno`。首次启动会引导你选择接口、填写可选的 Base URL 并连接 API 密钥。随后可在后台加载的目录里搜索模型：用 `↑` / `↓` 浏览，`Tab` 填入所选模型，`Enter` 保存当前输入的模型 ID。目录不可用时仍可手填。OpenAI 官方接口选 Responses，使用兼容网关或本机服务时按该服务提供的接口选择 Chat Completions。Anthropic 和 Google Gemini 也有各自的原生选项。保存后可直接输入第一条消息，按 `Enter` 发送。`F1` 打开命令搜索，`Esc` 返回对话。用 `Ctrl+N` 或粘贴输入多行。
 
@@ -8,7 +12,7 @@
 
 0.0.18 起，在空输入框键入 `/` 会打开常用命令。继续输入以筛选，按 `↑` 或 `↓` 选择，再按 `Tab` 运行。`/new` 开启当前文件夹的新对话，`/resume` 查看该文件夹的已有会话，`/help` 打开完整命令。`Enter` 会把当前输入留在草稿里，可以继续编辑路径或文本。有草稿时按 `F1` 打开命令，按 `Esc` 回到原草稿。
 
-0.0.18 的首次配置可直接粘贴 API 密钥。输入以圆点隐藏。Windows 将密钥存入当前账户的 Windows 凭据管理器，Debian 将密钥存到配置旁的 `credentials` 目录，文件权限为 `0600`。TOML 只保存引用。选择模型 ID 后可填写自定义 Base URL。最后一步用 `F2` 可以改用已有密钥文件。
+0.0.18 的首次配置可直接粘贴 API 密钥。输入以圆点隐藏。Windows 将密钥存入当前账户的 Windows 凭据管理器，Debian 将密钥存到配置旁的 `credentials` 目录，文件权限为 `0600`。TOML 只保存引用。填写 Base URL 后进入凭据页，此时可按 `F2` 改用已有密钥文件。随后再查询或填写模型 ID。
 
 对话顶栏显示已连接的模型。流式回复和重新打开的会话共用 Markdown 排版，支持标题、列表、行内代码和代码块。窄终端会折行显示代码。
 
@@ -41,6 +45,21 @@
 在配置文件中设置 `[workbench].theme`。`auto` 跟随终端配色，`dark` 与 `light` 使用固定配色，`mono` 使用单色。`--theme` 可覆盖本次运行。任务状态和审批选项都有文字标签。
 
 关闭工作台会结束它启动的本机服务；重开后可从数据库找回任务和待办。结果未知的外部操作不会自动重发。下载会校验 SHA-256，拒绝覆盖已有文件。文本预览上限 64 KiB，下载上限 32 MiB。
+
+## 切换界面语言
+
+**0.0.21 开发版。** 在空输入框键入 `/language` 后按 `Tab`，或按 `F1` 搜索 `language` / `界面语言`。用方向键选择 **English** 或 **简体中文**，按 `Enter` 保存，再按 `Esc` 回到对话。切换保留草稿和模型连接。中文界面的 F1 仍可搜英文命令名；斜杠命令和按键保持一致。
+
+也可编辑已有配置中的 `[workbench]`：
+
+```toml
+[workbench]
+language = "zh-CN"
+```
+
+默认值为 `en`。使用未配置的离线演示时，切换只在当次运行生效，不会创建用户配置。已覆盖项目主屏、命令搜索、`/settings`、供应商目录、内置操作审阅和 `/changes`。首次配置、旧档案选择器及部分历史管理界面仍显示英文；回复、模型 ID、路径、补丁和进程输出保持原文。
+
+48 列终端也能查询模型、查看将要写入的文件并完成审批：[中文模型目录](assets/language-catalog-v021.png) · [中文审批](assets/language-approval-v021.png)。两张图来自 Windows ConPTY 测试。
 
 ## 在项目目录里工作
 
@@ -114,8 +133,8 @@ api_key_file = "credentials/anthropic.key"
 
 供应商保存 Base URL 和凭据引用；模型档案独立选择供应商、协议、模型 ID 和思考强度。多个档案可以复用同一个供应商。该页需要支持模型设置的本地 app-server。
 
-1. 在空输入框键入 `/settings` 后按 `Tab`，或按 `F1` 搜索 `settings`。在 **Suppliers** 页按 `N` 新增连接，或用上下键选中供应商后按 `Enter` 编辑。可选官方预设或填写自定义 Base URL。凭据可选择隐藏输入、已有密钥文件，或为回环连接选择无 Key。
-2. 按 `Tab` 切到 **Models**。按 `N` 新增档案，或用 `Enter` 编辑现有档案；选供应商和协议，输入该服务接受的模型 ID，再设思考强度。`Adapter default` 表示不显式传思考强度。在模型 ID 处按 `F4` 查询已保存供应商的目录，可按 ID 或名称筛选，`Enter` 把所选 ID 填回表单；有下一页时按 `F6`，`F5` 刷新目录。查询失败或网关不提供目录时按 `Esc` 返回，原输入会保留，可继续手填。
+1. 在空输入框键入 `/settings` 后按 `Tab`，或按 `F1` 搜索 `settings`。在 **Suppliers（供应商）** 页按 `N` 新增连接，或用上下键选中供应商后按 `Enter` 编辑。可选官方预设或填写自定义 Base URL。凭据可选择隐藏输入、已有密钥文件，或为回环连接选择无 Key。
+2. 按 `Tab` 切到 **Models（模型）**。按 `N` 新增档案，或用 `Enter` 编辑现有档案；选供应商和协议，输入该服务接受的模型 ID，再设思考强度。`Adapter default` 表示不显式传思考强度。在模型 ID 处按 `F4` 查询已保存供应商的目录，可按 ID 或名称筛选，`Enter` 把所选 ID 填回表单；有下一页时按 `F6`，`F5` 刷新目录。查询失败或网关不提供目录时按 `Esc` 返回，原输入会保留，可继续手填。
 3. 在摘要页核对配置，按 `Enter` 保存，或按 `Esc` 返回上一步。配置被其他进程改过时，旧表单不会覆盖新内容。按 `F5` 放弃当前表单并重新加载，再编辑并核对。供应商端点改变时，必须为新地址重新选择凭据。
 4. 退出设置后用 `/model` 选择并应用档案。保存和应用不会修改启动默认值；要将档案设为启动默认，在模型选择器按 `Ctrl+S`。已有对话和草稿会保留。
 
@@ -155,6 +174,7 @@ name = "your-local-model"
 | 用户配置 | `~/.fliuno/config.toml`。`--config PATH` 可使用其他文件。配置里的相对路径均以该文件所在目录为基准。 |
 | 本地状态 | `~/.fliuno/state/workbench.db`。若新路径尚无数据库，已有的 Windows `%LOCALAPPDATA%\fliuno` 或 Linux `$XDG_STATE_HOME/fliuno` 数据库会继续打开。可用 `--db PATH` 或 `[workbench].database` 明确指定。 |
 | 离线演示 | `fliuno --demo` 使用独立的 `demo.db`。可以用 `--db PATH` 指定演示库。 |
+| 界面语言（0.0.21 开发版） | `[workbench].language`：`en`（默认）或 `zh-CN`。也可由 `/language` 保存。 |
 | 服务程序 | 默认使用同目录的 `fliuno-app-server`。可用 `--server PATH` 或 `[workbench].server` 覆盖。 |
 | 其他能力 | `[integrations]` 可以引用 `mcp`、`mcp_oauth`、`mcp_oauth_vault`、`acp`、`a2a`、`execution`、`terminal`、`skills`、`memory_embedding` 的宿主配置或目录。 |
 
