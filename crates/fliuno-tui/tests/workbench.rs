@@ -2579,7 +2579,9 @@ fn manage_connection_at_width(viewport: (u16, u16)) {
         Console::launch_with_config_at(server.as_deref(), root.path(), Some(&config), viewport);
     console.expect("Enter Send");
     let open = |c: &mut Console| {
-        c.keys("\x1bOPmodel");
+        c.keys("\x1bOP");
+        c.expect("Type to filter");
+        c.keys("model");
         c.expect("Commands  /  model");
         c.keys("\r");
         c.expect("Ctrl+N Add profile");
@@ -2674,6 +2676,9 @@ fn manage_connection_at_width(viewport: (u16, u16)) {
 
     // Reopen the picker before selecting to verify reload even with unchanged model ID.
     console.keys("\x1b");
+    // Let the terminal consume bare Esc before writing the F1 escape sequence.
+    console.expect_absent("Switch model");
+    console.expect("Enter Send");
     open(&mut console);
     console.keys("\r");
     console.expect_absent("Switch model");
