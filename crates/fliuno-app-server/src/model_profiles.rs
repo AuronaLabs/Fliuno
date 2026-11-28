@@ -34,6 +34,10 @@ impl RpcServer {
         self.model_profiles = Some(Catalog { path, active });
     }
 
+    pub(super) fn local_model_config(&self) -> Result<&std::path::Path, RpcError> {
+        Ok(&self.model_profile_catalog()?.path)
+    }
+
     fn model_profile_catalog(&self) -> Result<&Catalog, RpcError> {
         self.model_profiles.as_ref().ok_or_else(|| RpcError {
             code: -32601,

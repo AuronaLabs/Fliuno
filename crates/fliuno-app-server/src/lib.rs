@@ -3,6 +3,7 @@ mod agent_catalog;
 mod agent_login;
 mod approvals;
 mod memory_embeddings;
+mod model_connections;
 mod model_profiles;
 mod scheduler;
 mod terminal_subscriptions;
@@ -73,6 +74,14 @@ impl From<Error> for RpcError {
 
 fn error(id: Value, code: i32, message: impl Into<String>) -> Value {
     json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message.into()}})
+}
+
+fn decode_connection<T: DeserializeOwned>(params: Value) -> Result<T, RpcError> {
+    // Serde errors can contain part of an unexpected input value, including a key.
+    serde_json::from_value(params).map_err(|_| RpcError {
+        code: -32602,
+        message: "Invalid model connection parameters".into(),
+    })
 }
 
 fn decode<T: DeserializeOwned>(params: Value) -> Result<T, RpcError> {
@@ -600,6 +609,7 @@ impl RpcServer {
             });
             capabilities["modelProfiles"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileEditing"] = json!(self.model_profiles.is_some());
+            capabilities["modelProfileConnections"] = json!(self.model_profiles.is_some());
             capabilities["modelProfileDefaults"] = json!(self.model_profiles.is_some());
             capabilities["providerModelCatalog"] = json!(self.model_profiles.is_some());
             capabilities["modelBudgetRejectionEvents"] = json!(true);
@@ -811,6 +821,18 @@ impl RpcServer {
             "modelProfiles/saveEdit" => {
                 let params: ModelProfileEditParams = decode(params)?;
                 json!(self.save_model_profile_edit(params)?)
+            }
+            "modelProfiles/getConnection" => {
+                self.local_model_config()?;
+                json!(self.get_model_connection(decode_connection(params)?)?)
+            }
+            "modelProfiles/previewConnection" => {
+                self.local_model_config()?;
+                json!(self.preview_model_connection(decode_connection(params)?)?)
+            }
+            "modelProfiles/saveConnection" => {
+                self.local_model_config()?;
+                json!(self.save_model_connection(decode_connection(params)?)?)
             }
             "modelProfiles/select" => {
                 let params: ModelProfileSelectParams = decode(params)?;

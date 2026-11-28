@@ -148,16 +148,36 @@ fn key_file(config: &Path, file: &str) -> std::path::PathBuf {
 }
 
 impl Settings {
-    /// Read a config revision even when there is no existing live profile to edit.
-    pub fn model_connection_revision(path: &Path) -> Result<String, String> {
+    /// Read the revision and the exact profile it describes from one snapshot.
+    pub fn read_model_connection(
+        path: &Path,
+        target: ModelConnectionTarget<'_>,
+    ) -> Result<(String, Option<ModelSettings>), String> {
         let text = super::read_file(path, super::config_edit::CONFIG_LIMIT)
             .map_err(|_| "Cannot read model configuration")?;
-        Self::parse(path, &text)?;
-        Ok(revision(&text))
+        let mut settings = Self::parse(path, &text)?;
+        let model = match target {
+            ModelConnectionTarget::Base => Some(settings.model),
+            ModelConnectionTarget::Existing(id) => {
+                validate_profile_id(id)?;
+                Some(
+                    settings
+                        .models
+                        .remove(id)
+                        .ok_or("Model profile is missing")?,
+                )
+            }
+            ModelConnectionTarget::New(id) => {
+                validate_profile_id(id)?;
+                if settings.models.contains_key(id) {
+                    return Err("A model profile already uses this name".into());
+                }
+                None
+            }
+        };
+        Ok((revision(&text), model))
     }
-}
 
-impl Settings {
     /// Add a named connection or replace the connection of an existing profile.
     pub fn save_model_connection(
         path: &Path,
@@ -175,7 +195,13 @@ impl Settings {
                 }
                 (Some(id), None)
             }
-            ModelConnectionTarget::Existing(id) => (Some(id), Some(settings.named_model(id)?)),
+            ModelConnectionTarget::Existing(id) => {
+                validate_profile_id(id)?;
+                (
+                    Some(id),
+                    Some(settings.models.get(id).ok_or("Model profile is missing")?),
+                )
+            }
             ModelConnectionTarget::Base => (None, Some(&settings.model)),
         };
         let model_name = validate_model_name(change.model)?;
@@ -194,7 +220,9 @@ impl Settings {
                 .get_mut("models")
                 .and_then(Item::as_table_like_mut)
                 .and_then(|models| models.get_mut(id)),
-            ModelConnectionTarget::Base => doc.get_mut("model"),
+            ModelConnectionTarget::Base => {
+                Some(doc.entry("model").or_insert(Item::Table(Table::new())))
+            }
         }
         .and_then(Item::as_table_like_mut)
         .ok_or("Model profile is missing")?;
@@ -287,7 +315,9 @@ mod tests {
         let original = "[model]\nprovider = 'openai'\nname = 'original'\napi_key_file = 'old.key'\n[workbench]\ntheme = 'dark'\n";
         fs::write(&path, original).unwrap();
         fs::write(directory.path().join("old.key"), "fixture-old").unwrap();
-        let rev = Settings::model_connection_revision(&path).unwrap();
+        let rev = Settings::read_model_connection(&path, ModelConnectionTarget::Base)
+            .unwrap()
+            .0;
         let rotation = ModelConnectionEdit {
             target: ModelConnectionTarget::Base,
             revision: &rev,

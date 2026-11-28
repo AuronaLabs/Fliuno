@@ -729,6 +729,86 @@ pub struct ModelProfileEditParams {
     pub reasoning_effort: Option<String>,
 }
 
+/// Which user-owned profile a trusted local client is managing.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ModelProfileConnectionTarget {
+    Base,
+    Existing { profile: String },
+    New { profile: String },
+}
+
+/// The API key is write-only. Credential references never appear in views.
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ModelProfileCredentialInput {
+    Keep,
+    Managed {
+        #[schemars(length(min = 1, max = 8192))]
+        key: String,
+    },
+    File {
+        #[schemars(length(min = 1, max = 4096))]
+        path: String,
+    },
+    None,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileConnectionDraft {
+    pub provider: String,
+    pub protocol: String,
+    #[schemars(length(max = 4096))]
+    pub base_url: Option<String>,
+    pub credential: ModelProfileCredentialInput,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileConnectionGetParams {
+    pub target: ModelProfileConnectionTarget,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileConnectionSaveParams {
+    pub target: ModelProfileConnectionTarget,
+    pub revision: String,
+    pub model: String,
+    pub reasoning_effort: Option<String>,
+    pub connection: ModelProfileConnectionDraft,
+}
+
+#[derive(Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileConnectionPreviewParams {
+    pub target: ModelProfileConnectionTarget,
+    pub revision: String,
+    pub connection: ModelProfileConnectionDraft,
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelProfileConnectionView {
+    pub revision: String,
+    pub provider: Option<String>,
+    pub protocol: Option<String>,
+    pub base_url: Option<String>,
+    pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
+    pub credential: ModelProfileCredentialStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProfileCredentialStatus {
+    Unconfigured,
+    Configured,
+    Keyless,
+}
+
 /// The startup preference from the settings file, independent of the active provider.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

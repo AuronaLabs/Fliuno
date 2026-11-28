@@ -144,6 +144,10 @@ api_key_file = "credentials/lab.key"
 reasoning_effort = "medium"
 ```
 
+可信本地 stdio 客户端可使用 `modelProfiles/getConnection` 读取档案连接与配置修订号，`modelProfiles/previewConnection` 查询未保存连接的模型目录，`modelProfiles/saveConnection` 新增或更新档案。客户端应通过 `initialize.capabilities.modelProfileConnections` 检查支持。三种目标分别是 `{"type":"base"}`、`{"type":"existing","profile":"lab"}` 和 `{"type":"new","profile":"lab"}`。预览和保存均须提供当前修订号。
+
+凭据选项为 `keep`（保持当前凭据）、`managed`（传入待保存的 Key）、`file`（使用现有文件）和 `none`（本机无 Key）。改变协议或 API 根地址时不能使用 `keep`。预览不会保存配置或凭据，保存也不会切换当前模型或修改启动默认值。响应只返回凭据状态，不返回凭据引用或内容；此接口在附加连接上不可用。
+
 需要限制模型输入时，可设置以下配置。
 
 ```toml

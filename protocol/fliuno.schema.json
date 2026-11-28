@@ -4646,6 +4646,434 @@
         "reasoningEffort"
       ]
     },
+    "modelProfiles/getConnection": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileConnectionGetParams",
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ModelProfileConnectionTarget"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target"
+      ],
+      "$defs": {
+        "ModelProfileConnectionTarget": {
+          "description": "Which user-owned profile a trusted local client is managing.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "base"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "existing"
+                },
+                "profile": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "profile"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "new"
+                },
+                "profile": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "profile"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "modelProfiles/previewConnection": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileConnectionPreviewParams",
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ModelProfileConnectionTarget"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "connection": {
+          "$ref": "#/$defs/ModelProfileConnectionDraft"
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "revision",
+        "connection"
+      ],
+      "$defs": {
+        "ModelProfileConnectionTarget": {
+          "description": "Which user-owned profile a trusted local client is managing.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "base"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "existing"
+                },
+                "profile": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "profile"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "new"
+                },
+                "profile": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "profile"
+              ]
+            }
+          ]
+        },
+        "ModelProfileConnectionDraft": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "protocol": {
+              "type": "string"
+            },
+            "baseUrl": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 4096
+            },
+            "credential": {
+              "$ref": "#/$defs/ModelProfileCredentialInput"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "protocol",
+            "credential"
+          ]
+        },
+        "ModelProfileCredentialInput": {
+          "description": "The API key is write-only. Credential references never appear in views.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "keep"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "managed"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "key"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "file"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "path"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "none"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
+    "modelProfiles/saveConnection": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileConnectionSaveParams",
+      "type": "object",
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/ModelProfileConnectionTarget"
+        },
+        "revision": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connection": {
+          "$ref": "#/$defs/ModelProfileConnectionDraft"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "revision",
+        "model",
+        "connection"
+      ],
+      "$defs": {
+        "ModelProfileConnectionTarget": {
+          "description": "Which user-owned profile a trusted local client is managing.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "base"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "existing"
+                },
+                "profile": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "profile"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "new"
+                },
+                "profile": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "profile"
+              ]
+            }
+          ]
+        },
+        "ModelProfileConnectionDraft": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "protocol": {
+              "type": "string"
+            },
+            "baseUrl": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 4096
+            },
+            "credential": {
+              "$ref": "#/$defs/ModelProfileCredentialInput"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "protocol",
+            "credential"
+          ]
+        },
+        "ModelProfileCredentialInput": {
+          "description": "The API key is write-only. Credential references never appear in views.",
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "keep"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "managed"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "key"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "file"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "path"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "none"
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
     "modelProfiles/getDefault": {
       "type": "object",
       "additionalProperties": false
@@ -20349,6 +20777,215 @@
           "required": [
             "provider",
             "model"
+          ]
+        }
+      }
+    },
+    "ModelProfileConnectionView": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelProfileConnectionView",
+      "type": "object",
+      "properties": {
+        "revision": {
+          "type": "string"
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protocol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "baseUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasoningEffort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credential": {
+          "$ref": "#/$defs/ModelProfileCredentialStatus"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "credential"
+      ],
+      "$defs": {
+        "ModelProfileCredentialStatus": {
+          "type": "string",
+          "enum": [
+            "unconfigured",
+            "configured",
+            "keyless"
+          ]
+        }
+      }
+    },
+    "ModelCatalogPreview": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ModelCatalogPreview",
+      "description": "Result of previewing one catalog page with a draft profile.",
+      "type": "object",
+      "properties": {
+        "catalog": {
+          "$ref": "#/$defs/ModelCatalogStatus"
+        },
+        "catalogAccess": {
+          "$ref": "#/$defs/ModelCatalogAccess"
+        },
+        "httpStatus": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint16",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "page": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProviderModelPage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "catalog",
+        "catalogAccess"
+      ],
+      "$defs": {
+        "ModelCatalogStatus": {
+          "type": "string",
+          "enum": [
+            "not_checked",
+            "available",
+            "unavailable",
+            "timed_out",
+            "transport_error",
+            "invalid_response",
+            "http_error"
+          ]
+        },
+        "ModelCatalogAccess": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "unverified",
+                "unauthorized",
+                "forbidden"
+              ]
+            },
+            {
+              "description": "The endpoint served a catalog page with the supplied credential.",
+              "type": "string",
+              "const": "accepted"
+            }
+          ]
+        },
+        "ProviderModelPage": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "models": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ProviderModel"
+              }
+            },
+            "nextCursor": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "models",
+            "truncated"
+          ]
+        },
+        "ProviderModel": {
+          "description": "A model advertised by the configured provider endpoint.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "displayName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "maxInputTokens": {
+              "description": "Maximum advertised input size in tokens.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "maxOutputTokens": {
+              "description": "Maximum advertised output size in tokens.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
+            },
+            "supportsThinking": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "reasoningEfforts": {
+              "description": "Levels explicitly advertised as supported. None means no level data.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "id"
           ]
         }
       }
