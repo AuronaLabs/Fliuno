@@ -85,12 +85,12 @@ enum Auth {
 }
 
 impl Auth {
-    fn label(self) -> &'static str {
+    fn label(self, language: Language) -> &'static str {
         match self {
-            Self::Keep => "Keep existing credential settings",
-            Self::Managed => "Enter API key",
-            Self::File => "Read from API key file",
-            Self::None => "No API key (loopback only)",
+            Self::Keep => language.text("Keep existing credential settings", "保留现有凭据设置"),
+            Self::Managed => language.text("Enter API key", "输入 API 密钥"),
+            Self::File => language.text("Read from API key file", "从文件读取 API 密钥"),
+            Self::None => language.text("No API key (loopback only)", "无 API 密钥（仅回环地址）"),
         }
     }
 }
@@ -229,12 +229,22 @@ impl Supplier {
         }
     }
 
-    pub fn key(&mut self, key: KeyEvent, revision: &str) -> Result<Option<Request>, String> {
+    pub fn key(
+        &mut self,
+        key: KeyEvent,
+        revision: &str,
+        language: Language,
+    ) -> Result<Option<Request>, String> {
         if key.code == KeyCode::Enter && key.kind == KeyEventKind::Press {
             self.step = match self.step {
                 SupplierStep::Name => {
                     if !identifier(self.id.text()) {
-                        return Err("Use 1–48 letters, digits, hyphens or underscores.".into());
+                        return Err(language
+                            .text(
+                                "Use 1–48 letters, digits, hyphens or underscores.",
+                                "使用 1–48 个字母、数字、连字符或下划线。",
+                            )
+                            .into());
                     }
                     SupplierStep::Preset
                 }
@@ -256,7 +266,12 @@ impl Supplier {
                         validate_api_key(&self.key)?;
                     }
                     if self.auth == Auth::File && self.key_file.text().trim().is_empty() {
-                        return Err("Enter the API key file path.".into());
+                        return Err(language
+                            .text(
+                                "Enter the API key file path.",
+                                "请输入 API 密钥文件的路径。",
+                            )
+                            .into());
                     }
                     SupplierStep::Review
                 }
@@ -329,16 +344,21 @@ impl Supplier {
         Ok(None)
     }
 
-    pub fn draw(&self, frame: &mut Frame<'_>, area: Rect, palette: &Palette) {
+    pub fn draw(&self, frame: &mut Frame<'_>, area: Rect, palette: &Palette, language: Language) {
         match self.step {
-            SupplierStep::Name => {
-                input(frame, area, palette, "Supplier ID", &self.id, "e.g. office")
-            }
+            SupplierStep::Name => input(
+                frame,
+                area,
+                palette,
+                language.text("Supplier ID", "供应商标识"),
+                &self.id,
+                language.text("e.g. office", "例如 office"),
+            ),
             SupplierStep::Preset => choices(
                 frame,
                 area,
                 palette,
-                "Endpoint preset",
+                language.text("Endpoint preset", "连接地址预设"),
                 PRESETS.iter().map(|(_, label)| (*label).into()).collect(),
                 self.preset,
             ),
@@ -356,8 +376,8 @@ impl Supplier {
                     frame,
                     area,
                     palette,
-                    "Credentials",
-                    auths.iter().map(|a| a.label().into()).collect(),
+                    language.text("Credentials", "凭据"),
+                    auths.iter().map(|a| a.label(language).into()).collect(),
                     auths.iter().position(|a| *a == self.auth).unwrap_or(0),
                 );
             }
@@ -367,27 +387,30 @@ impl Supplier {
                     frame,
                     area,
                     palette,
-                    "API key · hidden",
+                    language.text("API key · hidden", "API 密钥（已隐藏）"),
                     &editor(&mask, 4096),
-                    "Paste or type your key",
+                    language.text("Paste or type your key", "粘贴或输入密钥"),
                 );
             }
             SupplierStep::Credential => input(
                 frame,
                 area,
                 palette,
-                "API key file",
+                language.text("API key file", "API 密钥文件"),
                 &self.key_file,
-                "Path relative to config.toml",
+                language.text("Path relative to config.toml", "相对于 config.toml 的路径"),
             ),
             SupplierStep::Review => self.review.draw(
                 frame,
                 area,
                 palette,
                 &[
-                    ("Supplier", self.id.text()),
+                    (language.text("Supplier", "供应商"), self.id.text()),
                     ("Base URL", self.root().unwrap_or_default()),
-                    ("Credentials", self.auth.label()),
+                    (
+                        language.text("Credentials", "凭据"),
+                        self.auth.label(language),
+                    ),
                 ],
             ),
         }
@@ -562,22 +585,31 @@ impl Binding {
         }
     }
 
-    pub fn catalog_hints(&self) -> Option<[&'static str; 2]> {
+    pub fn catalog_hints(&self, language: Language) -> Option<[&'static str; 2]> {
         match self.step {
             BindingStep::Model if self.browse => Some([
-                "Enter Next  ·  F4 Browse models  ·  Esc Back",
-                "F5 Discard draft and reload",
+                language.text(
+                    "Enter Next  ·  F4 Browse models  ·  Esc Back",
+                    "Enter 下一步  ·  F4 浏览模型  ·  Esc 返回",
+                ),
+                language.text("F5 Discard draft and reload", "F5 放弃草稿并重载"),
             ]),
             BindingStep::Catalog => Some([
                 if self.catalog.selected(self.search.text()).is_some() {
-                    "Enter Pick  ·  Esc Back to manual ID"
+                    language.text(
+                        "Enter Pick  ·  Esc Back to manual ID",
+                        "Enter 选用  ·  Esc 返回手填",
+                    )
                 } else {
-                    "Esc Back to manual ID"
+                    language.text("Esc Back to manual ID", "Esc 返回手填")
                 },
                 if self.catalog.cursor().is_some() {
-                    "↑↓ Select  ·  F6 More  ·  F5 Refresh"
+                    language.text(
+                        "↑↓ Select  ·  F6 More  ·  F5 Refresh",
+                        "↑↓ 选择  ·  F6 更多  ·  F5 刷新",
+                    )
                 } else {
-                    "↑↓ Select  ·  F5 Refresh"
+                    language.text("↑↓ Select  ·  F5 Refresh", "↑↓ 选择  ·  F5 刷新")
                 },
             ]),
             _ => None,
@@ -671,6 +703,7 @@ impl Binding {
         event: KeyEvent,
         snapshot: &ModelSupplierSnapshot,
         busy: bool,
+        language: Language,
     ) -> Result<Option<Request>, String> {
         if self.in_catalog() {
             return Ok(self.catalog_key(event, snapshot, busy));
@@ -689,20 +722,35 @@ impl Binding {
             self.step = match self.step {
                 BindingStep::Name => {
                     if !identifier(self.id.text()) {
-                        return Err("Use 1–48 letters, digits, hyphens or underscores.".into());
+                        return Err(language
+                            .text(
+                                "Use 1–48 letters, digits, hyphens or underscores.",
+                                "使用 1–48 个字母、数字、连字符或下划线。",
+                            )
+                            .into());
                     }
                     if snapshot
                         .models
                         .iter()
                         .any(|entry| entry.profile.as_deref() == Some(self.id.text()))
                     {
-                        return Err("A model profile already uses this name.".into());
+                        return Err(language
+                            .text(
+                                "A model profile already uses this name.",
+                                "已有模型档案使用这个标识。",
+                            )
+                            .into());
                     }
                     BindingStep::Supplier
                 }
                 BindingStep::Supplier => {
                     if supplier.credential == ModelProfileCredentialStatus::Unconfigured {
-                        return Err("Configure the supplier's credential first.".into());
+                        return Err(language
+                            .text(
+                                "Configure the supplier's credential first.",
+                                "请先设置供应商凭据。",
+                            )
+                            .into());
                     }
                     if !Self::routes(supplier).any(|index| index == self.route) {
                         self.route = Self::default_route(supplier);
@@ -713,7 +761,12 @@ impl Binding {
                 BindingStep::Protocol => BindingStep::Model,
                 BindingStep::Model => {
                     if self.model.text().trim().is_empty() {
-                        return Err("Enter the model ID accepted by this endpoint.".into());
+                        return Err(language
+                            .text(
+                                "Enter the model ID accepted by this endpoint.",
+                                "请输入该服务接受的模型 ID。",
+                            )
+                            .into());
                     }
                     BindingStep::Effort
                 }
@@ -783,6 +836,7 @@ impl Binding {
         area: Rect,
         palette: &Palette,
         snapshot: &ModelSupplierSnapshot,
+        language: Language,
     ) {
         let supplier = &snapshot.suppliers[self.supplier];
         match self.step {
@@ -790,16 +844,20 @@ impl Binding {
                 frame,
                 area,
                 palette,
-                "Model profile ID",
+                language.text("Model profile ID", "模型档案标识"),
                 &self.id,
-                "e.g. daily",
+                language.text("e.g. daily", "例如 daily"),
             ),
             BindingStep::Supplier => choices(
                 frame,
                 area,
                 palette,
-                "Supplier connection",
-                snapshot.suppliers.iter().map(supplier_label).collect(),
+                language.text("Supplier connection", "供应商连接"),
+                snapshot
+                    .suppliers
+                    .iter()
+                    .map(|entry| supplier_label(entry, language))
+                    .collect(),
                 self.supplier,
             ),
             BindingStep::Protocol => {
@@ -808,7 +866,7 @@ impl Binding {
                     frame,
                     area,
                     palette,
-                    "Conversation protocol",
+                    language.text("Conversation protocol", "对话协议"),
                     routes
                         .iter()
                         .map(|&i| MODEL_ROUTES[i].protocol.as_str().into())
@@ -820,13 +878,13 @@ impl Binding {
                 frame,
                 area,
                 palette,
-                "Model ID",
+                language.text("Model ID", "模型 ID"),
                 &self.model,
-                "ID accepted by the endpoint",
+                language.text("ID accepted by the endpoint", "填写服务接受的模型 ID"),
             ),
             BindingStep::Catalog => {
                 let status = Paragraph::new(Line::styled(
-                    self.catalog.status(self.search.text()),
+                    self.catalog.localized_status(self.search.text(), language),
                     palette.quiet,
                 ))
                 .wrap(Wrap { trim: true });
@@ -840,12 +898,18 @@ impl Binding {
                 .areas(area);
                 frame.render_widget(
                     Line::from(vec![
-                        Span::styled("Supplier: ", palette.quiet),
+                        Span::styled(language.text("Supplier: ", "供应商："), palette.quiet),
                         Span::raw(&supplier.id),
                     ]),
                     heading,
                 );
-                draw_field(frame, field, &self.search, "Filter by ID or name", palette);
+                draw_field(
+                    frame,
+                    field,
+                    &self.search,
+                    language.text("Filter by ID or name", "按 ID 或名称筛选"),
+                    palette,
+                );
                 frame.render_widget(status, status_area);
                 self.catalog
                     .draw(frame, list, self.search.text(), palette.choice);
@@ -854,8 +918,16 @@ impl Binding {
                 frame,
                 area,
                 palette,
-                "Reasoning effort",
-                self.efforts().map(|(label, _)| label.into()).collect(),
+                language.text("Reasoning effort", "思考强度"),
+                self.efforts()
+                    .map(|(label, value)| {
+                        if value.is_none() {
+                            language.text("Adapter default", "使用协议默认值").into()
+                        } else {
+                            label.into()
+                        }
+                    })
+                    .collect(),
                 self.effort,
             ),
             BindingStep::Review => self.review.draw(
@@ -864,20 +936,24 @@ impl Binding {
                 palette,
                 &[
                     (
-                        "Profile",
+                        language.text("Profile", "档案"),
                         self.original.as_ref().map_or(self.id.text(), |entry| {
                             entry.profile.as_deref().unwrap_or("[model]")
                         }),
                     ),
-                    ("Supplier", &supplier.id),
+                    (language.text("Supplier", "供应商"), &supplier.id),
                     ("Base URL", &supplier.base_url),
-                    ("Protocol", MODEL_ROUTES[self.route].protocol.as_str()),
-                    ("Model", self.model.text().trim()),
                     (
-                        "Reasoning",
+                        language.text("Protocol", "协议"),
+                        MODEL_ROUTES[self.route].protocol.as_str(),
+                    ),
+                    (language.text("Model", "模型"), self.model.text().trim()),
+                    (
+                        language.text("Reasoning", "思考强度"),
                         self.efforts()
                             .nth(self.effort)
-                            .map_or("Adapter default", |(label, _)| label),
+                            .and_then(|(_, value)| value)
+                            .unwrap_or(language.text("Adapter default", "使用协议默认值")),
                     ),
                 ],
             ),

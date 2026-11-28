@@ -3,20 +3,37 @@ use super::*;
 use fliuno_protocol::ToolCall;
 use serde_json::Value;
 
-pub(super) fn describe(call: &ToolCall, plan: Option<&Value>) -> Option<String> {
+pub(super) fn describe(
+    call: &ToolCall,
+    plan: Option<&Value>,
+    language: Language,
+) -> Option<String> {
     let path = || call.arguments["path"].as_str().map(one_line);
     Some(match call.name.as_str() {
         "workspace_find" => match path()?.as_str() {
-            "." => "Search project files".into(),
-            path => format!("Search project files in {path}"),
+            "." => language.text("Search project files", "搜索项目文件").into(),
+            path => format!(
+                "{} {path}",
+                language.text("Search project files in", "搜索目录")
+            ),
         },
-        "workspace_read_text" | "workspace_read_bytes" => format!("Read file: {}", path()?),
-        "workspace_patch_text" => format!("Patch file: {}", path()?),
-        "workspace_edit_text" => format!("Edit file: {}", path()?),
-        "workspace_create_text" | "workspace_replace_text" => format!("Write file: {}", path()?),
+        "workspace_read_text" | "workspace_read_bytes" => {
+            format!("{}: {}", language.text("Read file", "读取文件"), path()?)
+        }
+        "workspace_patch_text" => {
+            format!("{}: {}", language.text("Patch file", "应用补丁"), path()?)
+        }
+        "workspace_edit_text" => format!("{}: {}", language.text("Edit file", "编辑文件"), path()?),
+        "workspace_create_text" | "workspace_replace_text" => {
+            format!("{}: {}", language.text("Write file", "写入文件"), path()?)
+        }
         name if name.starts_with("process_") => {
             let plan = plan.filter(|plan| plan["kind"] == "project_check")?;
-            format!("Run project check: {}", one_line(plan["label"].as_str()?))
+            format!(
+                "{}: {}",
+                language.text("Run project check", "运行项目检查"),
+                one_line(plan["label"].as_str()?)
+            )
         }
         _ => return None,
     })
@@ -33,42 +50,61 @@ impl App {
         lines: &mut Vec<Line<'static>>,
         width: u16,
     ) {
+        let language = self.language;
         let discovery = last_search(task);
         let paths = saved_workspace_paths(task);
-        let checks = project_check_receipts(task);
+        let checks = project_check_receipts(task, language);
         let correction = tool_receipts(task)
             .rev()
-            .any(|(call, output)| unapplied_edit(call, output).is_some());
+            .any(|(call, output)| unapplied_edit(call, output, language).is_some());
         let reviewable = correction || !paths.is_empty() || !checks.is_empty();
         if discovery.is_none() && !reviewable {
             return;
         }
         lines.push(Line::raw(""));
         let review = if !reviewable {
-            "Project activity"
+            language.text("Project activity", "项目进展")
         } else if matches!(self.layer, Layer::Edit(Edit::Task)) {
-            "Project activity  ·  F1 changes"
+            language.text(
+                "Project activity  ·  F1 changes",
+                "项目进展  ·  F1 查看改动",
+            )
         } else {
-            "Project activity  ·  d Review"
+            language.text("Project activity  ·  d Review", "项目进展  ·  d 审阅")
         };
         lines.push(Line::styled(review, self.palette.label));
         if let Some((count, limited)) = discovery {
-            let coverage = if limited { " · scan limited" } else { "" };
+            let coverage = if limited {
+                language.text(" · scan limited", " · 扫描范围有限")
+            } else {
+                ""
+            };
             let matches = if count == 1 { "match" } else { "matches" };
             lines.push(Line::styled(
-                format!("Searched project files: {count} {matches}{coverage}"),
+                match language {
+                    Language::English => {
+                        format!("Searched project files: {count} {matches}{coverage}")
+                    }
+                    Language::SimplifiedChinese => {
+                        format!("已搜索项目文件：{count} 个匹配{coverage}")
+                    }
+                },
                 self.palette.quiet,
             ));
         }
         if correction && paths.is_empty() {
             lines.push(Line::styled(
-                "Edit rejected; no file written",
+                language.text("Edit rejected; no file written", "编辑未成功，未写入文件"),
                 self.palette.quiet,
             ));
         }
         for path in paths {
             lines.push(Line::styled(
-                format!("Saved in workspace: {}", one_line(path)),
+                format!(
+                    "{}: {}",
+                    language.text("Saved in workspace", "已保存到工作区"),
+                    one_line(path)
+                ),
                 self.palette.base,
             ));
         }
@@ -96,8 +132,8 @@ impl App {
 
     pub(super) fn draw_project_review(&self, frame: &mut Frame<'_>, area: Rect, scroll: u16) {
         let lines = self.detail.as_ref().map_or_else(
-            || empty_review(&self.palette),
-            |detail| project_review(&detail.task, &self.palette),
+            || empty_review(&self.palette, self.language),
+            |detail| project_review(&detail.task, &self.palette, self.language),
         );
         let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
         let last_row = paragraph
@@ -172,7 +208,11 @@ fn workspace_write_path<'a>(call: &ToolCall, output: &'a Value) -> Option<&'a st
 }
 
 /// Show why a proposal was rejected without presenting it as a change.
-fn unapplied_edit<'a>(call: &'a ToolCall, output: &Value) -> Option<(&'a str, &'static str)> {
+fn unapplied_edit<'a>(
+    call: &'a ToolCall,
+    output: &Value,
+    language: Language,
+) -> Option<(&'a str, &'static str)> {
     if !matches!(
         call.name.as_str(),
         "workspace_patch_text" | "workspace_edit_text"
@@ -181,12 +221,20 @@ fn unapplied_edit<'a>(call: &'a ToolCall, output: &Value) -> Option<(&'a str, &'
         return None;
     }
     let reason = match output["code"].as_str()? {
-        "workspace_patch_format" => "Invalid diff format",
-        "workspace_patch_mismatch" => "Diff did not match the file",
-        "workspace_patch_no_change" => "Diff did not change the file",
-        "workspace_base_changed" => "File changed after the proposal",
-        "workspace_edit_not_found" => "Original text did not match",
-        "workspace_edit_ambiguous" => "Original text matched more than once",
+        "workspace_patch_format" => language.text("Invalid diff format", "补丁格式无效"),
+        "workspace_patch_mismatch" => {
+            language.text("Diff did not match the file", "补丁与文件不匹配")
+        }
+        "workspace_patch_no_change" => {
+            language.text("Diff did not change the file", "补丁未改动文件")
+        }
+        "workspace_base_changed" => {
+            language.text("File changed after the proposal", "文件在提案后发生变化")
+        }
+        "workspace_edit_not_found" => language.text("Original text did not match", "未匹配到原文"),
+        "workspace_edit_ambiguous" => {
+            language.text("Original text matched more than once", "原文匹配到多处")
+        }
         _ => return None,
     };
     Some((call.arguments["path"].as_str()?, reason))
@@ -198,17 +246,21 @@ struct ProjectCheckReceipt {
     command: Option<String>,
 }
 
-fn project_check_receipts(task: &Task) -> Vec<ProjectCheckReceipt> {
+fn project_check_receipts(task: &Task, language: Language) -> Vec<ProjectCheckReceipt> {
     let mut checks: Vec<_> = tool_receipts(task)
         .rev()
-        .filter_map(|(call, output)| project_check_receipt(call, output))
+        .filter_map(|(call, output)| project_check_receipt(call, output, language))
         .take(3)
         .collect();
     checks.reverse();
     checks
 }
 
-fn project_check_receipt(call: &ToolCall, output: &Value) -> Option<ProjectCheckReceipt> {
+fn project_check_receipt(
+    call: &ToolCall,
+    output: &Value,
+    language: Language,
+) -> Option<ProjectCheckReceipt> {
     let plan = &output["projectCheck"];
     if !call.name.starts_with("process_")
         || plan["kind"] != "project_check"
@@ -218,19 +270,20 @@ fn project_check_receipt(call: &ToolCall, output: &Value) -> Option<ProjectCheck
     }
     let passed = output["success"].as_bool()? && output["termination"] == "exited";
     let reason = match output["termination"].as_str()? {
-        "exited" => output["exitCode"]
-            .as_i64()
-            .map_or_else(|| "no exit code".into(), |code| format!("exit {code}")),
-        "timed_out" => "timed out".into(),
-        "cancelled" => "cancelled".into(),
-        "io_error" => "output error".into(),
-        "cleanup_failed" => "cleanup failed".into(),
+        "exited" => output["exitCode"].as_i64().map_or_else(
+            || language.text("no exit code", "无退出码").into(),
+            |code| format!("{} {code}", language.text("exit", "退出码")),
+        ),
+        "timed_out" => language.text("timed out", "超时").into(),
+        "cancelled" => language.text("cancelled", "已取消").into(),
+        "io_error" => language.text("output error", "输出错误").into(),
+        "cleanup_failed" => language.text("cleanup failed", "清理失败").into(),
         _ => return None,
     };
     let state = if passed {
-        "Check passed"
+        language.text("Check passed", "检查通过")
     } else {
-        "Check failed"
+        language.text("Check failed", "检查失败")
     };
     let label = one_line(plan["label"].as_str()?);
     Some(ProjectCheckReceipt {
@@ -240,7 +293,7 @@ fn project_check_receipt(call: &ToolCall, output: &Value) -> Option<ProjectCheck
     })
 }
 
-fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
+fn project_review(task: &Task, palette: &Palette, language: Language) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for (call, output) in tool_receipts(task) {
         if let Some(path) = workspace_write_path(call, output) {
@@ -248,9 +301,9 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
                 .as_str()
                 .filter(|_| call.name == "workspace_patch_text");
             let operation = match call.name.as_str() {
-                "workspace_patch_text" => "Applied patch",
-                "workspace_edit_text" => "Replaced text",
-                _ => "Wrote file",
+                "workspace_patch_text" => language.text("Applied patch", "已应用补丁"),
+                "workspace_edit_text" => language.text("Replaced text", "已替换文本"),
+                _ => language.text("Wrote file", "已写入文件"),
             };
             lines.push(Line::styled(
                 format!("{operation}: {}", one_line(path)),
@@ -269,13 +322,26 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
             }
             if call.name == "workspace_edit_text" {
                 for (key, label, prefix, color) in [
-                    ("oldText", "Before", '-', Color::Red),
-                    ("newText", "After", '+', Color::Green),
+                    (
+                        "oldText",
+                        language.text("Before", "修改前"),
+                        '-',
+                        Color::Red,
+                    ),
+                    (
+                        "newText",
+                        language.text("After", "修改后"),
+                        '+',
+                        Color::Green,
+                    ),
                 ] {
                     if let Some(text) = call.arguments[key].as_str() {
                         lines.push(Line::styled(label, palette.quiet));
                         if text.is_empty() {
-                            lines.push(Line::styled("(removed)", palette.quiet));
+                            lines.push(Line::styled(
+                                language.text("(removed)", "（已移除）"),
+                                palette.quiet,
+                            ));
                         } else {
                             lines.extend(exact_edit_text(text).split_terminator('\n').map(
                                 |line| {
@@ -287,14 +353,14 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
                 }
             }
             lines.push(Line::default());
-        } else if let Some((path, reason)) = unapplied_edit(call, output) {
+        } else if let Some((path, reason)) = unapplied_edit(call, output, language) {
             lines.push(Line::styled(
                 format!(
-                    "{} not applied: {}",
+                    "{}: {}",
                     if call.name == "workspace_patch_text" {
-                        "Patch"
+                        language.text("Patch not applied", "补丁未应用")
                     } else {
-                        "Edit"
+                        language.text("Edit not applied", "编辑未应用")
                     },
                     one_line(path)
                 ),
@@ -302,7 +368,7 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
             ));
             lines.push(Line::styled(reason, palette.quiet));
             lines.push(Line::default());
-        } else if let Some(check) = project_check_receipt(call, output) {
+        } else if let Some(check) = project_check_receipt(call, output, language) {
             let color = if check.passed {
                 Color::Green
             } else {
@@ -312,18 +378,21 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
             if let Some(command) = check.command {
                 lines.push(Line::styled(command, palette.quiet));
             }
-            for (key, label) in [("stdout", "Output"), ("stderr", "Errors")] {
+            for (key, label) in [
+                ("stdout", language.text("Output", "输出")),
+                ("stderr", language.text("Errors", "错误输出")),
+            ] {
                 let capture = &output[key];
                 let Some(bytes) = capture["bytesSeen"].as_u64().filter(|&bytes| bytes > 0) else {
                     continue;
                 };
                 lines.push(Line::styled(
-                    format!("{label} · {bytes} bytes"),
+                    format!("{label} · {bytes} {}", language.text("bytes", "字节")),
                     palette.label,
                 ));
                 if capture["truncated"] == true {
                     lines.push(Line::styled(
-                        "Showing only the retained tail.",
+                        language.text("Showing only the retained tail.", "仅显示保留的末尾内容。"),
                         palette.quiet,
                     ));
                 }
@@ -332,25 +401,34 @@ fn project_review(task: &Task, palette: &Palette) -> Vec<Line<'static>> {
                 {
                     lines.extend(clean(text).lines().map(|line| Line::raw(line.to_owned())));
                 } else {
-                    lines.push(Line::styled("Non-text output.", palette.quiet));
+                    lines.push(Line::styled(
+                        language.text("Non-text output.", "非文本输出。"),
+                        palette.quiet,
+                    ));
                 }
             }
             lines.push(Line::default());
         }
     }
     if lines.is_empty() {
-        return empty_review(palette);
+        return empty_review(palette, language);
     }
     lines.insert(
         0,
-        Line::styled("This turn · Recorded actions", palette.quiet),
+        Line::styled(
+            language.text("This turn · Recorded actions", "本轮 · 已记录的操作"),
+            palette.quiet,
+        ),
     );
     lines
 }
 
-fn empty_review(palette: &Palette) -> Vec<Line<'static>> {
+fn empty_review(palette: &Palette, language: Language) -> Vec<Line<'static>> {
     vec![Line::styled(
-        "No recorded writes or checks for this turn.",
+        language.text(
+            "No recorded writes or checks for this turn.",
+            "本轮没有已记录的写入或检查。",
+        ),
         palette.quiet,
     )]
 }

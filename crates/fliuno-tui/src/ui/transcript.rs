@@ -12,6 +12,7 @@ struct Entry {
 
 struct Rendered {
     width: u16,
+    language: Language,
     lines: Vec<Line<'static>>,
     positions: Vec<LineStart>,
     rows: usize,
@@ -121,7 +122,12 @@ impl LayoutAtWidth<'_> {
 }
 
 impl Rendered {
-    fn new(width: u16, lines: Vec<Line<'static>>, sources: Vec<SourcePosition>) -> Self {
+    fn new(
+        width: u16,
+        language: Language,
+        lines: Vec<Line<'static>>,
+        sources: Vec<SourcePosition>,
+    ) -> Self {
         debug_assert_eq!(lines.len(), sources.len());
         let mut rows = 0;
         let positions = lines
@@ -142,6 +148,7 @@ impl Rendered {
             .collect();
         Self {
             width,
+            language,
             lines,
             positions,
             rows,
@@ -231,6 +238,7 @@ impl Transcript {
         palette: &Palette,
         width: u16,
         active: Option<&str>,
+        language: Language,
     ) -> (LayoutAtWidth<'_>, bool) {
         let mut layout = LayoutAtWidth::default();
         let mut active_rendered = false;
@@ -247,9 +255,9 @@ impl Transcript {
             let mut cache = entry.cached.borrow_mut();
             if cache
                 .as_ref()
-                .is_none_or(|rendered| rendered.width != width)
+                .is_none_or(|rendered| rendered.width != width || rendered.language != language)
             {
-                *cache = Some(entry.render_at(palette, width));
+                *cache = Some(entry.render_at(palette, width, language));
             }
             drop(cache);
             let rendered = Ref::map(entry.cached.borrow(), |cache| {
@@ -271,7 +279,7 @@ impl Transcript {
 }
 
 impl Entry {
-    fn render_at(&self, palette: &Palette, width: u16) -> Rendered {
+    fn render_at(&self, palette: &Palette, width: u16, language: Language) -> Rendered {
         let mut lines = Vec::new();
         let mut sources = Vec::new();
         match &self.value {
@@ -279,13 +287,18 @@ impl Entry {
                 for message in &turn.messages {
                     match message {
                         ContextMessage::User { text } => {
-                            message_lines(&mut lines, "You", text, palette.label);
+                            message_lines(
+                                &mut lines,
+                                language.text("You", "你"),
+                                text,
+                                palette.label,
+                            );
                             mark_plain(&mut sources, &lines);
                         }
                         ContextMessage::Assistant { text, identity } => {
                             message_heading(
                                 &mut lines,
-                                reply_label(identity.as_ref(), width),
+                                reply_label(identity.as_ref(), width, language),
                                 palette.label,
                             );
                             mark_plain(&mut sources, &lines);
@@ -304,13 +317,16 @@ impl Entry {
             }
             SessionHistoryEntry::Oversized { .. } => {
                 lines.push(Line::styled(
-                    "A previous turn is too large to display. Open history to review it.",
+                    language.text(
+                        "A previous turn is too large to display. Open history to review it.",
+                        "较早的一轮内容过长，请打开历史查看。",
+                    ),
                     palette.quiet,
                 ));
                 mark_plain(&mut sources, &lines);
             }
         }
-        Rendered::new(width, lines, sources)
+        Rendered::new(width, language, lines, sources)
     }
 }
 
@@ -345,9 +361,13 @@ pub(super) fn response_lines(
     lines.extend(answer::render(text, palette, width));
 }
 
-pub(super) fn reply_label(identity: Option<&ReplyIdentity>, width: u16) -> String {
+pub(super) fn reply_label(
+    identity: Option<&ReplyIdentity>,
+    width: u16,
+    language: Language,
+) -> String {
     let Some(identity) = identity else {
-        return "Assistant".into();
+        return language.text("Assistant", "助手").into();
     };
     let label = clean(&format!("{}/{}", identity.supplier, identity.model)).replace('\n', " ");
     ellipsis(&label, usize::from(width))
@@ -399,7 +419,7 @@ mod tests {
             oldest: None,
         };
         let cold = Instant::now();
-        let (layout, _) = history.layout(&palette, area.width, None);
+        let (layout, _) = history.layout(&palette, area.width, None, Language::English);
         let cold = cold.elapsed();
         let mut full = Vec::new();
         for turn in &layout.turns {
@@ -434,7 +454,7 @@ mod tests {
         let start = middle + code.row;
         let anchor = layout.anchor_at(start).unwrap();
         drop(layout);
-        let (wide, _) = history.layout(&palette, 110, None);
+        let (wide, _) = history.layout(&palette, 110, None, Language::English);
         let resolved = wide.resolve(anchor).unwrap();
         let wide_anchor = wide.anchor_at(resolved).unwrap();
         assert_eq!(wide_anchor.sequence, anchor.sequence);
@@ -443,13 +463,13 @@ mod tests {
             anchor.source.unwrap().line
         );
         drop(wide);
-        let (layout, _) = history.layout(&palette, area.width, None);
+        let (layout, _) = history.layout(&palette, area.width, None, Language::English);
         assert_eq!(layout.resolve(anchor), Some(start));
         drop(layout);
 
         let warm = Instant::now();
         for _ in 0..30 {
-            let (layout, _) = history.layout(&palette, area.width, None);
+            let (layout, _) = history.layout(&palette, area.width, None, Language::English);
             let (lines, skip) = layout.visible_lines(end, end + usize::from(area.height));
             let mut buffer = Buffer::empty(area);
             Paragraph::new(lines)

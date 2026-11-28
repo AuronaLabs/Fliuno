@@ -1,5 +1,6 @@
 use super::key_label;
 use crossterm::event::KeyCode;
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum CommandOrigin {
@@ -30,6 +31,7 @@ pub(super) enum CommandAction {
     NewConversation,
     ModelProfiles,
     SupplierSettings,
+    Language,
     ReadRules,
     ProjectReview,
     TogglePlan,
@@ -40,6 +42,7 @@ pub(super) struct Command {
     pub label: &'static str,
     pub alias: Option<&'static str>,
     pub action: CommandAction,
+    pub search_label: Option<&'static str>,
 }
 
 impl Command {
@@ -54,7 +57,13 @@ impl Command {
             label,
             alias,
             action: CommandAction::Shortcut(key),
+            search_label: None,
         }
+    }
+
+    pub fn with_search_label(mut self, label: &'static str) -> Self {
+        self.search_label = Some(label);
+        self
     }
 
     pub fn matches(&self, origin: CommandOrigin, query: &str) -> bool {
@@ -62,8 +71,10 @@ impl Command {
             return self.alias.is_some_and(|alias| alias.starts_with(query));
         }
         let label = self.label.to_ascii_lowercase();
+        let english = self.search_label.map(str::to_ascii_lowercase);
         query.split_whitespace().all(|term| {
             label.contains(term)
+                || english.as_ref().is_some_and(|label| label.contains(term))
                 || self
                     .alias
                     .is_some_and(|alias| alias.contains(term.trim_start_matches('/')))
@@ -87,14 +98,12 @@ impl Command {
         if trigger.is_empty() {
             return super::ellipsis(self.label, room);
         }
-        if self.label.len() + gap.len() + trigger.len() <= room {
-            return format!(
-                "{:<pad$}{gap}{trigger}",
-                self.label,
-                pad = room - gap.len() - trigger.len()
-            );
+        let trigger_width = gap.width() + trigger.width();
+        if self.label.width() + trigger_width <= room {
+            let padding = " ".repeat(room - self.label.width() - trigger_width);
+            return format!("{}{padding}{gap}{trigger}", self.label);
         }
-        let label_room = room.saturating_sub(gap.len() + trigger.len());
+        let label_room = room.saturating_sub(trigger_width);
         if label_room < 18 && self.action_is_shortcut() {
             return super::ellipsis(self.label, room);
         }

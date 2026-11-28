@@ -1,4 +1,4 @@
-use super::{clean, render_list, step};
+use super::{Language, LanguageText, clean, render_list, step};
 use crossterm::event::KeyCode;
 use fliuno_config::ModelCatalogDraft;
 use fliuno_protocol::{
@@ -25,8 +25,76 @@ pub(super) struct Catalog {
     models: Vec<ProviderModel>,
     next_cursor: Option<String>,
     requested_cursors: BTreeSet<String>,
-    status: &'static str,
+    status: CatalogStatus,
     index: usize,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum CatalogStatus {
+    #[default]
+    Ready,
+    StartFailed,
+    QueryTimedOut,
+    QueryFailed,
+    Unauthorized,
+    Forbidden,
+    NoEndpoint,
+    TimedOut,
+    Unavailable,
+    Loading,
+    Limit,
+    Empty,
+    NoMatch,
+}
+
+impl CatalogStatus {
+    fn text(self, language: Language) -> &'static str {
+        match self {
+            Self::Ready => "",
+            Self::StartFailed => language.text(
+                "Could not start the model query. Enter a model ID to continue.",
+                "无法启动查询。可手填模型 ID。",
+            ),
+            Self::QueryTimedOut => language.text(
+                "Model query timed out. Enter an ID or press F5 to retry.",
+                "模型查询超时。可手填 ID 或按 F5 重试。",
+            ),
+            Self::QueryFailed => language.text(
+                "Model query failed. Enter a model ID or press F5 to retry.",
+                "模型查询失败。可手填 ID 或按 F5 重试。",
+            ),
+            Self::Unauthorized => language.text(
+                "API key rejected. Check the connection credentials.",
+                "API 密钥被拒绝。请检查连接凭据。",
+            ),
+            Self::Forbidden => language.text(
+                "Catalog access denied. Check key permissions.",
+                "无法访问目录。请检查密钥权限。",
+            ),
+            Self::NoEndpoint => language.text(
+                "No model catalog at this URL. Enter a model ID.",
+                "该地址没有模型目录。请手填模型 ID。",
+            ),
+            Self::TimedOut => language.text(
+                "Catalog timed out. Enter an ID or press F5 to retry.",
+                "目录查询超时。可手填 ID 或按 F5 重试。",
+            ),
+            Self::Unavailable => language.text(
+                "Catalog unavailable. Enter a model ID or press F5 to retry.",
+                "目录不可用。可手填 ID 或按 F5 重试。",
+            ),
+            Self::Loading => language.text("Loading the model catalog…", "正在读取模型目录…"),
+            Self::Limit => language.text(
+                "Catalog limit reached. You can enter any model ID.",
+                "已达目录显示上限。仍可手填模型 ID。",
+            ),
+            Self::Empty => language.text(
+                "The catalog is empty. Enter a model ID to continue.",
+                "目录为空。请手填模型 ID。",
+            ),
+            Self::NoMatch => language.text("No catalog match.", "没有匹配的模型。"),
+        }
+    }
 }
 
 impl Catalog {
@@ -53,9 +121,7 @@ impl Catalog {
                 self.page_requested(cursor);
                 self.lookup = Some(lookup);
             }
-            Err(_) => {
-                self.status = "Could not start the model query. Enter a model ID to continue."
-            }
+            Err(_) => self.status = CatalogStatus::StartFailed,
         }
     }
 
@@ -66,14 +132,14 @@ impl Catalog {
             Err(TryRecvError::Empty) if lookup.started.elapsed() < Duration::from_secs(8) => return,
             Err(TryRecvError::Empty) => {
                 self.lookup = None;
-                self.status = "Model query timed out. Enter an ID or press F5 to retry.";
+                self.status = CatalogStatus::QueryTimedOut;
                 return;
             }
             Err(TryRecvError::Disconnected) => None,
         };
         self.lookup = None;
         let Some(preview) = preview else {
-            self.status = "Model query failed. Enter a model ID or press F5 to retry.";
+            self.status = CatalogStatus::QueryFailed;
             return;
         };
         self.install_preview(preview);
@@ -84,19 +150,11 @@ impl Catalog {
             self.install_page(page);
         } else {
             self.status = match (preview.catalog_access, preview.catalog) {
-                (ModelCatalogAccess::Unauthorized, _) => {
-                    "API key rejected. Check the connection credentials."
-                }
-                (ModelCatalogAccess::Forbidden, _) => {
-                    "Catalog access denied. Check key permissions."
-                }
-                (_, ModelCatalogStatus::Unavailable) => {
-                    "No model catalog at this URL. Enter a model ID."
-                }
-                (_, ModelCatalogStatus::TimedOut) => {
-                    "Catalog timed out. Enter an ID or press F5 to retry."
-                }
-                _ => "Catalog unavailable. Enter a model ID or press F5 to retry.",
+                (ModelCatalogAccess::Unauthorized, _) => CatalogStatus::Unauthorized,
+                (ModelCatalogAccess::Forbidden, _) => CatalogStatus::Forbidden,
+                (_, ModelCatalogStatus::Unavailable) => CatalogStatus::NoEndpoint,
+                (_, ModelCatalogStatus::TimedOut) => CatalogStatus::TimedOut,
+                _ => CatalogStatus::Unavailable,
             };
         }
     }
@@ -108,7 +166,7 @@ impl Catalog {
         } else {
             *self = Self::default();
         }
-        self.status = "Loading the model catalog…";
+        self.status = CatalogStatus::Loading;
     }
 
     pub(super) fn install_page(&mut self, page: ProviderModelPage) {
@@ -130,11 +188,11 @@ impl Catalog {
             .next_cursor
             .filter(|cursor| !limit_reached && !self.requested_cursors.contains(cursor));
         self.status = if missing_rows {
-            "Catalog limit reached. You can enter any model ID."
+            CatalogStatus::Limit
         } else if self.models.is_empty() && self.next_cursor.is_none() {
-            "The catalog is empty. Enter a model ID to continue."
+            CatalogStatus::Empty
         } else {
-            ""
+            CatalogStatus::Ready
         };
     }
 
@@ -170,12 +228,19 @@ impl Catalog {
     }
 
     pub(super) fn status(&self, text: &str) -> &'static str {
-        if self.status.is_empty() && !self.models.is_empty() && self.matches(text).next().is_none()
+        self.localized_status(text, Language::English)
+    }
+
+    pub(super) fn localized_status(&self, text: &str, language: Language) -> &'static str {
+        let status = if self.status == CatalogStatus::Ready
+            && !self.models.is_empty()
+            && self.matches(text).next().is_none()
         {
-            "No catalog match."
+            CatalogStatus::NoMatch
         } else {
             self.status
-        }
+        };
+        status.text(language)
     }
 
     pub(super) fn draw(&self, frame: &mut Frame<'_>, area: Rect, text: &str, choice: Style) {

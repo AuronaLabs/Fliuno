@@ -15,6 +15,7 @@ use forms::{Binding, Supplier};
 pub(super) struct Panel {
     snapshot: Option<ModelSupplierSnapshot>,
     browse: bool,
+    language: Language,
     models: bool,
     selected: usize,
     form: Option<Form>,
@@ -28,9 +29,10 @@ enum Form {
 }
 
 impl Panel {
-    pub fn new(browse: bool) -> Self {
+    pub fn new(browse: bool, language: Language) -> Self {
         Self {
             browse,
+            language,
             ..Self::default()
         }
     }
@@ -49,11 +51,14 @@ impl Panel {
     }
 
     pub fn title(&self) -> &'static str {
+        let language = self.language;
         match &self.form {
-            Some(Form::Supplier(_)) => "Supplier connection",
-            Some(Form::Binding(form)) if form.in_catalog() => "Supplier model catalog",
-            Some(Form::Binding(_)) => "Model binding",
-            None => "Model settings",
+            Some(Form::Supplier(_)) => language.text("Supplier connection", "供应商连接"),
+            Some(Form::Binding(form)) if form.in_catalog() => {
+                language.text("Supplier model catalog", "供应商模型目录")
+            }
+            Some(Form::Binding(_)) => language.text("Model binding", "模型绑定"),
+            None => language.text("Model settings", "模型设置"),
         }
     }
 
@@ -141,8 +146,8 @@ impl Panel {
         if let Some(form) = &mut self.form {
             self.error = None;
             let next = match form {
-                Form::Supplier(form) => form.key(key, &snapshot.revision),
-                Form::Binding(form) => form.key(key, snapshot, busy),
+                Form::Supplier(form) => form.key(key, &snapshot.revision, self.language),
+                Form::Binding(form) => form.key(key, snapshot, busy, self.language),
             };
             return match next {
                 Ok(request) => request,
@@ -168,7 +173,11 @@ impl Panel {
                 self.error = None;
                 self.form = if self.models {
                     if snapshot.suppliers.is_empty() {
-                        self.error = Some("Add a supplier connection first.".into());
+                        self.error = Some(
+                            self.language
+                                .text("Add a supplier connection first.", "请先添加供应商连接。")
+                                .into(),
+                        );
                         return None;
                     }
                     let entry = snapshot.models.get(self.selected);
@@ -194,33 +203,53 @@ impl Panel {
     }
 
     pub fn draw(&self, frame: &mut Frame<'_>, body: Rect, palette: &Palette) {
+        let language = self.language;
         let review = match &self.form {
             Some(Form::Supplier(form)) => form.reviewing(),
             Some(Form::Binding(form)) => form.reviewing(),
             None => false,
         };
         let mut hints = if self.form.is_some() {
-            let primary = if review { "Enter Save" } else { "Enter Next" };
-            let navigation = if review {
-                "  ·  ↑↓ Scroll  ·  Esc Back"
+            let primary = if review {
+                language.text("Enter Save", "Enter 保存")
             } else {
-                "  ·  Esc Back"
+                language.text("Enter Next", "Enter 下一步")
+            };
+            let navigation = if review {
+                language.text("  ·  ↑↓ Scroll  ·  Esc Back", "  ·  ↑↓ 滚动  ·  Esc 返回")
+            } else {
+                language.text("  ·  Esc Back", "  ·  Esc 返回")
             };
             vec![
                 Line::from(vec![
                     Span::styled(primary, palette.label),
                     Span::styled(navigation, palette.quiet),
                 ]),
-                Line::styled("F5 Discard draft and reload", palette.quiet),
+                Line::styled(
+                    language.text("F5 Discard draft and reload", "F5 放弃草稿并重载"),
+                    palette.quiet,
+                ),
             ]
         } else {
             vec![
-                Line::styled("Tab Switch  ·  N Add  ·  Enter Edit", palette.label),
-                Line::styled("↑↓ Select  ·  F5 Reload  ·  Esc Close", palette.quiet),
+                Line::styled(
+                    language.text(
+                        "Tab Switch  ·  N Add  ·  Enter Edit",
+                        "Tab 切换  ·  N 新增  ·  Enter 编辑",
+                    ),
+                    palette.label,
+                ),
+                Line::styled(
+                    language.text(
+                        "↑↓ Select  ·  F5 Reload  ·  Esc Close",
+                        "↑↓ 选择  ·  F5 重载  ·  Esc 关闭",
+                    ),
+                    palette.quiet,
+                ),
             ]
         };
         if let Some(Form::Binding(form)) = &self.form
-            && let Some(catalog_hints) = form.catalog_hints()
+            && let Some(catalog_hints) = form.catalog_hints(language)
         {
             hints = catalog_hints
                 .iter()
@@ -232,7 +261,10 @@ impl Panel {
         }
         if self.saved && self.form.is_none() {
             hints.push(Line::styled(
-                "Saved. Use /model to apply a model.",
+                language.text(
+                    "Saved. Use /model to apply a model.",
+                    "已保存。用 /model 启用模型。",
+                ),
                 palette.label,
             ));
         }
@@ -246,18 +278,18 @@ impl Panel {
             Layout::vertical([Constraint::Min(1), Constraint::Length(footer_height)]).areas(body);
         frame.render_widget(footer, tail);
         match (&self.form, &self.snapshot) {
-            (Some(Form::Supplier(form)), _) => form.draw(frame, content, palette),
+            (Some(Form::Supplier(form)), _) => form.draw(frame, content, palette, language),
             (Some(Form::Binding(form)), Some(snapshot)) => {
-                form.draw(frame, content, palette, snapshot)
+                form.draw(frame, content, palette, snapshot, language)
             }
             (_, Some(snapshot)) => self.draw_list(frame, content, palette, snapshot),
             (_, None) => render_text(
                 frame,
                 content,
                 if self.error.is_some() {
-                    "F5 to reload settings."
+                    language.text("F5 to reload settings.", "按 F5 重载设置。")
                 } else {
-                    "Reading model settings…"
+                    language.text("Reading model settings…", "正在读取模型设置…")
                 },
                 0,
             ),
@@ -271,6 +303,7 @@ impl Panel {
         palette: &Palette,
         snapshot: &ModelSupplierSnapshot,
     ) {
+        let language = self.language;
         let [tabs, list] =
             Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(area);
         let tab_style = |active| if active { palette.label } else { palette.quiet };
@@ -278,15 +311,19 @@ impl Panel {
             Line::from(vec![
                 Span::styled(
                     if self.models {
-                        "Suppliers"
+                        language.text("Suppliers", "供应商")
                     } else {
-                        "[Suppliers]"
+                        language.text("[Suppliers]", "[供应商]")
                     },
                     tab_style(!self.models),
                 ),
                 Span::raw("   "),
                 Span::styled(
-                    if self.models { "[Models]" } else { "Models" },
+                    if self.models {
+                        language.text("[Models]", "[模型]")
+                    } else {
+                        language.text("Models", "模型")
+                    },
                     tab_style(self.models),
                 ),
             ]),
@@ -310,7 +347,15 @@ impl Panel {
                 palette.choice,
             );
         } else if snapshot.suppliers.is_empty() {
-            render_text(frame, list, "No named suppliers. Press N to add one.", 0);
+            render_text(
+                frame,
+                list,
+                language.text(
+                    "No named suppliers. Press N to add one.",
+                    "还没有命名供应商。按 N 添加。",
+                ),
+                0,
+            );
         } else {
             let [choices, details] =
                 Layout::vertical([Constraint::Min(1), Constraint::Length(3)]).areas(list);
@@ -326,7 +371,11 @@ impl Panel {
                             .iter()
                             .filter(|model| model.supplier.as_deref() == Some(entry.id.as_str()))
                             .count();
-                        format!("{}  ·  {} bound", supplier_label(entry), models)
+                        format!(
+                            "{}  ·  {models} {}",
+                            supplier_label(entry, language),
+                            language.text("bound", "个绑定")
+                        )
                     })
                     .collect(),
                 self.selected,
@@ -346,11 +395,11 @@ impl Panel {
     }
 }
 
-fn supplier_label(entry: &ModelSupplierEntry) -> String {
+fn supplier_label(entry: &ModelSupplierEntry, language: Language) -> String {
     let credential = match entry.credential {
-        ModelProfileCredentialStatus::Configured => "key set",
-        ModelProfileCredentialStatus::Keyless => "no key",
-        ModelProfileCredentialStatus::Unconfigured => "key missing",
+        ModelProfileCredentialStatus::Configured => language.text("key set", "已配置密钥"),
+        ModelProfileCredentialStatus::Keyless => language.text("no key", "无密钥"),
+        ModelProfileCredentialStatus::Unconfigured => language.text("key missing", "缺少密钥"),
     };
     format!("{}  ·  {credential}", entry.id)
 }

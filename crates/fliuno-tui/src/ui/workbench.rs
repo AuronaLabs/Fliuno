@@ -45,7 +45,7 @@ impl App {
             && body.height >= 7
             && match &self.layer {
                 Layer::Commands(menu) => menu.origin != CommandOrigin::Workbench,
-                Layer::ModelPicker(_) => true,
+                Layer::ModelPicker(_) | Layer::Language(_) => true,
                 _ => false,
             };
         if !full_page && !overlay && !matches!(self.layer, Layer::None | Layer::Edit(Edit::Task)) {
@@ -80,21 +80,23 @@ impl App {
 
     fn draw_header(&self, frame: &mut Frame<'_>, area: Rect) {
         let session = match self.layer {
-            Layer::Inbox(_) => "Workspace inbox".into(),
-            Layer::History(_) => "Workspace history".into(),
+            Layer::Inbox(_) => self.language.text("Workspace inbox", "工作区待办").into(),
+            Layer::History(_) => self.language.text("Workspace history", "工作区历史").into(),
             _ => self
                 .session
                 .as_ref()
                 .map(session_name)
-                .unwrap_or_else(|| "No session".into()),
+                .unwrap_or_else(|| self.language.text("No session", "暂无会话").into()),
         };
         let area = area.inner(Margin::new(u16::from(area.width >= 24) * 2, 0));
         let state = if !self.online {
-            "Offline"
+            self.language.text("Offline", "离线")
         } else if self.demo {
-            "Offline demo"
+            self.language.text("Offline demo", "离线演示")
         } else {
-            self.model.as_deref().unwrap_or("Connected")
+            self.model
+                .as_deref()
+                .unwrap_or(self.language.text("Connected", "已连接"))
         };
         let project = if !self.demo && !matches!(self.layer, Layer::Inbox(_) | Layer::History(_)) {
             self.workspace
@@ -153,30 +155,45 @@ impl App {
 
     fn draw_status_line(&self, frame: &mut Frame<'_>, area: Rect, editing: bool, full_page: bool) {
         let message = if self.deferred_send.is_some() {
-            "Will send when conversation opens"
+            self.language
+                .text("Will send when conversation opens", "会话加载后将发送")
         } else if self.reopening.is_some() {
-            "Opening conversation…"
+            self.language.text("Opening conversation…", "正在打开会话…")
         } else if self.busy {
-            "Working"
+            self.language.text("Working", "处理中")
         } else {
             &self.message
         };
         let help = if self.deferred_send.is_some() {
-            "Esc Cancel send"
-        } else if matches!(&self.layer, Layer::ModelPicker(picker) if picker.editing_suppliers()) {
+            self.language.text("Esc Cancel send", "Esc 取消发送")
+        } else if matches!(self.layer, Layer::Language(_))
+            || matches!(&self.layer, Layer::ModelPicker(picker) if picker.editing_suppliers())
+        {
             ""
         } else if editing {
             if !self.demo && area.width < 60 {
                 if self.draft.text().is_empty() {
-                    "Enter Send  Ctrl+N Line  / Menu  Esc Back"
+                    self.language.text(
+                        "Enter Send  Ctrl+N Line  / Menu  Esc Back",
+                        "Enter 发送 · Ctrl+N 换行 · / 命令 · Esc 返回",
+                    )
                 } else {
-                    "Enter Send  Ctrl+N Line  F1 Menu  Esc Back"
+                    self.language.text(
+                        "Enter Send  Ctrl+N Line  F1 Menu  Esc Back",
+                        "Enter 发送 · Ctrl+N 换行 · F1 命令 · Esc 返回",
+                    )
                 }
             } else if !self.demo {
                 if self.draft.text().is_empty() {
-                    "Enter Send  Ctrl+N New line  / Commands  Esc Back"
+                    self.language.text(
+                        "Enter Send  Ctrl+N New line  / Commands  Esc Back",
+                        "Enter 发送 · Ctrl+N 换行 · / 命令 · Esc 返回",
+                    )
                 } else {
-                    "Enter Send  Ctrl+N New line  F1 Commands  Esc Back"
+                    self.language.text(
+                        "Enter Send  Ctrl+N New line  F1 Commands  Esc Back",
+                        "Enter 发送 · Ctrl+N 换行 · F1 命令 · Esc 返回",
+                    )
                 }
             } else if area.width < 60 {
                 "Ctrl+S Send  Ctrl+E Queue  F2 Mode  F3 Context"
@@ -184,21 +201,31 @@ impl App {
                 "Ctrl+S Send  Ctrl+E Queue  F2 Mode  F3 Context  Esc Back"
             }
         } else if full_page {
-            "Enter Open  Esc Back"
+            self.language
+                .text("Enter Open  Esc Back", "Enter 打开 · Esc 返回")
         } else if matches!(self.layer, Layer::None) {
             if !self.demo && !self.can_compose() {
-                "Enter Review  F1 Commands  Tab Details"
+                self.language.text(
+                    "Enter Review  F1 Commands  Tab Details",
+                    "Enter 审阅 · F1 命令 · Tab 详情",
+                )
             } else if !self.demo && !self.show_details && self.transcript.has_older() {
-                "Enter Write  PgUp History  F1 Commands"
+                self.language.text(
+                    "Enter Write  PgUp History  F1 Commands",
+                    "Enter 输入 · PgUp 历史 · F1 命令",
+                )
             } else if !self.demo {
-                "Enter Write  F1 Commands  Tab Details"
+                self.language.text(
+                    "Enter Write  F1 Commands  Tab Details",
+                    "Enter 输入 · F1 命令 · Tab 详情",
+                )
             } else if area.width < 66 {
                 "F1 Menu  n New  Tab Details  Shift+L Tasks"
             } else {
                 "F1 Commands  n New  Tab Details  Shift+L All tasks"
             }
         } else {
-            "Esc Back"
+            self.language.text("Esc Back", "Esc 返回")
         };
         let area = area.inner(Margin::new(u16::from(area.width >= 24) * 2, 0));
         let width = usize::from(area.width);
@@ -216,8 +243,12 @@ impl App {
         let (history, active_rendered) = if self.demo || self.show_details {
             (transcript::LayoutAtWidth::default(), false)
         } else {
-            self.transcript
-                .layout(&self.palette, area.width, self.selected.as_deref())
+            self.transcript.layout(
+                &self.palette,
+                area.width,
+                self.selected.as_deref(),
+                self.language,
+            )
         };
         let saved_rows = history.row_count();
         // A placeholder lets the live tail use the same spacing as if saved
@@ -230,7 +261,10 @@ impl App {
         if let Some(detail) = &self.detail {
             let task = &detail.task;
             if self.show_details {
-                pinned.push(Line::styled("Task detail", self.palette.label));
+                pinned.push(Line::styled(
+                    self.language.text("Task detail", "任务详情"),
+                    self.palette.label,
+                ));
             }
             let (label, color) = status(task.status);
             let mut heading = vec![Span::styled(label, self.palette.status(color))];
@@ -239,11 +273,17 @@ impl App {
                 .as_ref()
                 .is_some_and(|context| context.options.plan_only)
             {
-                heading.push(Span::styled("  ·  Plan only", self.palette.quiet));
+                heading.push(Span::styled(
+                    self.language.text("  ·  Plan only", "  ·  仅规划"),
+                    self.palette.quiet,
+                ));
             }
             if self.demo || self.show_details || task.status != TaskStatus::Completed {
                 if self.follow && area.width >= 48 {
-                    heading.push(Span::styled("  ·  Following", self.palette.quiet));
+                    heading.push(Span::styled(
+                        self.language.text("  ·  Following", "  ·  跟随输出"),
+                        self.palette.quiet,
+                    ));
                 }
                 pinned.push(Line::from(heading));
             }
@@ -259,9 +299,15 @@ impl App {
                     .count();
                 let progress = format!("Plan · {done}/{} complete", plan.steps.len());
                 let width = usize::from(area.width);
-                let hint = if width >= progress.width() + "  ·  Tab Details".width() && !self.demo
+                let hint = if width
+                    >= progress.width()
+                        + self
+                            .language
+                            .text("  ·  Tab Details", "  ·  Tab 详情")
+                            .width()
+                    && !self.demo
                 {
-                    "  ·  Tab Details"
+                    self.language.text("  ·  Tab Details", "  ·  Tab 详情")
                 } else {
                     ""
                 };
@@ -303,13 +349,16 @@ impl App {
                     .take(16)
                 {
                     match message {
-                        Message::User { text } => {
-                            message_lines(&mut lines, "You", text, self.palette.label)
-                        }
+                        Message::User { text } => message_lines(
+                            &mut lines,
+                            self.language.text("You", "你"),
+                            text,
+                            self.palette.label,
+                        ),
                         Message::Assistant { text, identity } if final_reply != Some(index) => {
                             response_lines(
                                 &mut lines,
-                                reply_label(identity.as_ref(), area.width),
+                                reply_label(identity.as_ref(), area.width, self.language),
                                 text,
                                 &self.palette,
                                 area.width,
@@ -321,19 +370,23 @@ impl App {
             }
             if task.status == TaskStatus::Running {
                 let phase = if let Some(call) = &task.in_flight_tool {
-                    project_activity::describe(call, None).map_or_else(
+                    project_activity::describe(call, None, self.language).map_or_else(
                         || format!("Running tool  ·  {}", clean(&call.name)),
                         |action| format!("Running  ·  {action}"),
                     )
                 } else if task.agent_run.is_some() {
-                    "External Agent running".into()
+                    self.language
+                        .text("External Agent running", "外部 Agent 正在运行")
+                        .into()
                 } else if task.model_steps > 0 {
                     let limit = task
                         .max_model_steps
                         .unwrap_or(fliuno_protocol::DEFAULT_TASK_MODEL_STEPS);
                     format!("Model request  ·  Attempt {}/{limit}", task.model_steps)
                 } else {
-                    "Waiting for a model worker".into()
+                    self.language
+                        .text("Waiting for a model worker", "等待模型开始运行")
+                        .into()
                 };
                 pinned.push(Line::styled(phase, self.palette.quiet));
                 if task.in_flight_tool.is_none()
@@ -343,16 +396,28 @@ impl App {
                             && !preview.text.is_empty()
                     })
                 {
-                    let title = reply_label(task.active_reply_identity.as_ref(), area.width);
+                    let title = reply_label(
+                        task.active_reply_identity.as_ref(),
+                        area.width,
+                        self.language,
+                    );
                     response_lines(&mut lines, title, &preview.text, &self.palette, area.width);
                     if preview.clipped {
-                        lines.push(Line::styled("Preview limit reached", self.palette.quiet));
+                        lines.push(Line::styled(
+                            self.language.text("Preview limit reached", "预览达到上限"),
+                            self.palette.quiet,
+                        ));
                     }
                 }
             }
             if !active_rendered && let Some(output) = &task.output {
                 if task.status == TaskStatus::Failed {
-                    message_lines(&mut lines, "Failure reason", output, self.palette.label);
+                    message_lines(
+                        &mut lines,
+                        self.language.text("Failure reason", "失败原因"),
+                        output,
+                        self.palette.label,
+                    );
                 } else {
                     let identity = final_reply.and_then(|index| match &task.messages[index] {
                         Message::Assistant { identity, .. } => identity.as_ref(),
@@ -360,7 +425,7 @@ impl App {
                     });
                     response_lines(
                         &mut lines,
-                        reply_label(identity, area.width),
+                        reply_label(identity, area.width, self.language),
                         output,
                         &self.palette,
                         area.width,
@@ -395,16 +460,25 @@ impl App {
         } else if lines.is_empty() {
             let (title, hint) = if !self.online {
                 if self.busy {
-                    ("Connecting", "")
+                    (self.language.text("Connecting", "正在连接"), "")
                 } else {
-                    ("Disconnected", "r Reconnect  ·  F5 Check configuration")
+                    (
+                        self.language.text("Disconnected", "连接已断开"),
+                        self.language.text(
+                            "r Reconnect  ·  F5 Check configuration",
+                            "r 重连 · F5 检查配置",
+                        ),
+                    )
                 }
             } else if self.selected.is_some() || self.snapshot.is_none() {
-                ("Loading session", "")
+                (self.language.text("Loading session", "正在加载会话"), "")
             } else if self.demo {
-                ("No tasks yet", "")
+                (self.language.text("No tasks yet", "暂无任务"), "")
             } else {
-                ("Work in this folder", "")
+                (
+                    self.language.text("Work in this folder", "在此目录中工作"),
+                    "",
+                )
             };
             lines.push(Line::styled(title, self.palette.label));
             if !hint.is_empty() {
@@ -416,18 +490,39 @@ impl App {
             {
                 lines.push(Line::raw(""));
                 for (label, example) in [
-                    ("Explore", "Find where a feature is implemented."),
-                    ("Change", "Describe the fix you want."),
-                    ("Verify", "Run a configured project check."),
+                    (
+                        self.language.text("Explore", "探索"),
+                        self.language.text(
+                            "Find where a feature is implemented.",
+                            "查找功能的实现位置。",
+                        ),
+                    ),
+                    (
+                        self.language.text("Change", "修改"),
+                        self.language
+                            .text("Describe the fix you want.", "描述你想修复的问题。"),
+                    ),
+                    (
+                        self.language.text("Verify", "验证"),
+                        self.language
+                            .text("Run a configured project check.", "运行已配置的项目检查。"),
+                    ),
                 ] {
                     lines.push(Line::from(vec![
-                        Span::styled(format!("{label:8}"), self.palette.label),
+                        Span::styled(
+                            format!(
+                                "{label}{}",
+                                " ".repeat(8usize.saturating_sub(label.width()))
+                            ),
+                            self.palette.label,
+                        ),
                         Span::styled(example, self.palette.quiet),
                     ]));
                 }
                 lines.push(Line::default());
                 lines.push(Line::styled(
-                    "F2 Plan mode  ·  F1 Commands",
+                    self.language
+                        .text("F2 Plan mode  ·  F1 Commands", "F2 规划模式 · F1 命令"),
                     self.palette.quiet,
                 ));
             }
@@ -483,9 +578,12 @@ impl App {
     fn append_task_actions(&self, detail: &Detail, lines: &mut Vec<Line<'static>>) {
         let task = &detail.task;
         let action = if let Some(approval) = &task.pending_approval {
-            let action =
-                project_activity::describe(&approval.call, approval.execution_plan.as_ref())
-                    .unwrap_or_else(|| clean(&approval.call.name));
+            let action = project_activity::describe(
+                &approval.call,
+                approval.execution_plan.as_ref(),
+                self.language,
+            )
+            .unwrap_or_else(|| clean(&approval.call.name));
             Some(format!("Review operation  ·  a Open\n{action}"))
         } else if pending_approval_id(task).is_some() {
             Some("Review operation  ·  a Open".into())
@@ -597,27 +695,27 @@ impl App {
             return;
         }
         let mode = if self.plan_only {
-            "Plan only"
+            self.language.text("Plan only", "仅规划")
         } else if !self.demo {
-            "Project prompt"
+            self.language.text("Project prompt", "项目输入")
         } else if focused {
-            "New task · Execution"
+            self.language.text("New task · Execution", "新任务 · 执行")
         } else {
-            "Draft · Execution"
+            self.language.text("Draft · Execution", "草稿 · 执行")
         };
         let title = if self.session.is_none() {
-            " No session ".to_owned()
+            self.language.text(" No session ", " 暂无会话 ").to_owned()
         } else {
             let mut title = format!(" {mode} ");
             if self.draft_context.mode == ContextMode::Isolated {
-                title.push_str("· Isolated ");
+                title.push_str(self.language.text("· Isolated ", "· 隔离上下文 "));
             } else if self.draft_context.through_sequence.is_some() {
-                title.push_str("· History pinned ");
+                title.push_str(self.language.text("· History pinned ", "· 历史已固定 "));
             } else if self.draft_context.disable_memory {
-                title.push_str("· Memory off ");
+                title.push_str(self.language.text("· Memory off ", "· 已禁用记忆 "));
             }
             if self.input_artifact.is_some() {
-                title.push_str(" · Attachment ");
+                title.push_str(self.language.text(" · Attachment ", " · 附件 "));
             }
             title
         };
@@ -646,15 +744,25 @@ impl App {
             if self.session.is_some() {
                 frame.render_widget(
                     Paragraph::new(if self.demo {
-                        "n or Enter to write a task"
+                        self.language
+                            .text("n or Enter to write a task", "按 n 或 Enter 输入任务")
                     } else if !focused && !self.can_compose() {
-                        "Review the pending operation to continue"
+                        self.language.text(
+                            "Review the pending operation to continue",
+                            "审阅待批准的操作后继续",
+                        )
                     } else if focused && self.detail.is_some() {
-                        "Ask a follow-up…"
+                        self.language.text("Ask a follow-up…", "继续追问…")
                     } else if focused {
-                        "Describe a change or ask about the project…"
+                        self.language.text(
+                            "Describe a change or ask about the project…",
+                            "描述要做的改动，或询问项目…",
+                        )
                     } else {
-                        "Press Enter to enter a project prompt"
+                        self.language.text(
+                            "Press Enter to enter a project prompt",
+                            "按 Enter 输入项目请求",
+                        )
                     })
                     .style(self.palette.quiet),
                     body,

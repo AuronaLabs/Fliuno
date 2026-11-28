@@ -1,6 +1,7 @@
 mod answer;
 mod commands;
 mod deliverables;
+mod language;
 mod memories;
 mod model_connection;
 mod model_edit;
@@ -15,6 +16,7 @@ mod transcript;
 mod workbench;
 
 use commands::{Command, CommandAction, CommandMenu, CommandOrigin};
+use language::{Language, LanguageText};
 use palette::Palette;
 use transcript::Transcript;
 
@@ -55,6 +57,7 @@ const DRAFT_LIMIT: usize = 48 * 1024;
 
 enum Layer {
     Commands(CommandMenu),
+    Language(language::Panel),
     ModelPicker(Box<model_picker::Picker>),
     Inbox(usize),
     History(usize),
@@ -187,6 +190,8 @@ struct DeferredSend {
 pub struct App {
     demo: bool,
     palette: Palette,
+    language: Language,
+    config_path: Option<PathBuf>,
     online: bool,
     model: Option<String>,
     model_profiles: bool,
@@ -235,10 +240,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(demo: bool, theme: Theme) -> Self {
+    pub fn new(demo: bool, theme: Theme, language: Language, config_path: Option<PathBuf>) -> Self {
         Self {
             demo,
             palette: Palette::new(theme),
+            language,
+            config_path,
             online: false,
             model: None,
             model_profiles: false,
@@ -786,7 +793,7 @@ impl App {
             Update::Approval(task, id, details, remember) => {
                 if self.selected.as_deref() == Some(task.as_str())
                     && matches!(self.layer, Layer::None)
-                    && let Some((mut text, allow_once)) = approval_review(
+                    && let Some((text, allow_once)) = approval_review(
                         &task,
                         &id,
                         self.workspace
@@ -795,13 +802,10 @@ impl App {
                             .as_deref()
                             .unwrap_or(""),
                         *details,
+                        self.language,
+                        remember.is_some(),
                     )
                 {
-                    if remember.is_some()
-                        && let Some(arguments) = text.find("\nTool:")
-                    {
-                        text.insert_str(arguments, "\nRemember the same path and read options\nin this conversation for 1 hour.\nRevoke with /permissions.\n");
-                    }
                     self.message.clear();
                     self.layer = Layer::Approval {
                         task,
@@ -1108,6 +1112,10 @@ impl App {
         if key.code == KeyCode::Esc && pressed && self.cancel_deferred_send() {
             return false;
         }
+        if matches!(self.layer, Layer::Language(_)) {
+            self.language_key(key);
+            return false;
+        }
         if matches!(self.layer, Layer::Deliverables(_)) {
             self.catalog_key(key, worker);
             return false;
@@ -1332,12 +1340,20 @@ impl App {
                     }
                     CommandAction::SupplierSettings => {
                         if self.send(worker, Request::SupplierSettings) {
-                            self.layer = Layer::ModelPicker(Box::new(
-                                model_picker::Picker::settings(menu.origin, self.supplier_catalog),
-                            ));
+                            self.layer =
+                                Layer::ModelPicker(Box::new(model_picker::Picker::settings(
+                                    menu.origin,
+                                    self.supplier_catalog,
+                                    self.language,
+                                )));
                         } else {
                             self.layer = Layer::Commands(menu);
                         }
+                        return false;
+                    }
+                    CommandAction::Language => {
+                        self.layer =
+                            Layer::Language(language::Panel::new(menu.origin, self.language));
                         return false;
                     }
                     CommandAction::ReadRules => {
@@ -1787,6 +1803,7 @@ impl App {
             Layer::Inbox(..)
             | Layer::History(..)
             | Layer::Commands(_)
+            | Layer::Language(_)
             | Layer::ModelPicker(_)
             | Layer::Edit(..) => {
                 unreachable!()
@@ -2237,59 +2254,74 @@ impl App {
         false
     }
 
-    fn commands(&self) -> Vec<(&'static str, KeyCode)> {
+    fn commands(&self) -> Vec<((&'static str, &'static str), KeyCode)> {
         let mut commands = vec![
-            ("Database backups", KeyCode::F(4)),
-            ("Connection and configuration", KeyCode::F(5)),
+            (("Database backups", "数据库备份"), KeyCode::F(4)),
+            (
+                ("Connection and configuration", "连接与配置"),
+                KeyCode::F(5),
+            ),
         ];
         if self.online {
             commands.push((
                 if self.session.is_some() {
-                    "New task"
+                    ("New task", "新建任务")
                 } else {
-                    "New session"
+                    ("New session", "新建会话")
                 },
                 KeyCode::Char('n'),
             ));
-            commands.push(("Workspaces", KeyCode::Char('w')));
-            commands.push(("Sessions", KeyCode::Char('s')));
-            commands.push(("Workspace memories", KeyCode::F(6)));
-            commands.push(("Workspace deliverables", KeyCode::F(7)));
+            commands.push((("Workspaces", "工作区列表"), KeyCode::Char('w')));
+            commands.push((("Sessions", "会话列表"), KeyCode::Char('s')));
+            commands.push((("Workspace memories", "工作区记忆"), KeyCode::F(6)));
+            commands.push((("Workspace deliverables", "工作区交付物"), KeyCode::F(7)));
             if self.session.is_some() {
-                commands.push(("Browse session tasks", KeyCode::Char('L')));
-                commands.push(("Queued prompts", KeyCode::Char('Q')));
-                commands.push(("Branch current session", KeyCode::Char('b')));
-                commands.push(("Review draft context", KeyCode::F(3)));
+                commands.push((("Browse session tasks", "浏览会话任务"), KeyCode::Char('L')));
+                commands.push((("Queued prompts", "排队的提示"), KeyCode::Char('Q')));
+                commands.push((
+                    ("Branch current session", "从当前会话分支"),
+                    KeyCode::Char('b'),
+                ));
+                commands.push((("Review draft context", "查看草稿上下文"), KeyCode::F(3)));
             }
-            commands.push(("Workspace inbox", KeyCode::Char('I')));
-            commands.push(("Search workspace history", KeyCode::Char('H')));
+            commands.push((("Workspace inbox", "工作区待办"), KeyCode::Char('I')));
+            commands.push((
+                ("Search workspace history", "查找工作区历史"),
+                KeyCode::Char('H'),
+            ));
             if let Some(detail) = &self.detail {
                 let task = &detail.task;
                 if !task.status.is_terminal() {
                     if task.status != TaskStatus::Interrupted {
-                        commands.push(("Add instruction", KeyCode::Char('i')));
+                        commands.push((("Add instruction", "补充指令"), KeyCode::Char('i')));
                     }
-                    commands.push(("Cancel task", KeyCode::Char('x')));
+                    commands.push((("Cancel task", "取消任务"), KeyCode::Char('x')));
                 }
                 if detail.resume.is_some() || detail.can_reconcile {
-                    commands.push(("Review task recovery", KeyCode::Char('r')));
+                    commands.push((("Review task recovery", "查看任务恢复"), KeyCode::Char('r')));
                 }
-                commands.push(("Task timeline", KeyCode::Char('t')));
-                commands.push(("Context and memory usage", KeyCode::Char('c')));
+                commands.push((("Task timeline", "任务时间线"), KeyCode::Char('t')));
+                commands.push((
+                    ("Context and memory usage", "上下文与记忆用量"),
+                    KeyCode::Char('c'),
+                ));
                 if task.status == TaskStatus::Completed {
-                    commands.push(("Branch from completed task", KeyCode::Char('B')));
+                    commands.push((
+                        ("Branch from completed task", "从已完成任务分支"),
+                        KeyCode::Char('B'),
+                    ));
                 }
                 if Self::can_implement(detail) {
-                    commands.push(("Draft implementation", KeyCode::Char('P')));
+                    commands.push((("Draft implementation", "生成实施草稿"), KeyCode::Char('P')));
                 }
                 if !detail.artifacts.is_empty() {
-                    commands.push(("Open artifacts", KeyCode::Char('v')));
+                    commands.push((("Open artifacts", "打开交付物"), KeyCode::Char('v')));
                 }
             }
         } else {
-            commands.push(("Reconnect", KeyCode::Char('r')));
+            commands.push((("Reconnect", "重新连接"), KeyCode::Char('r')));
         }
-        commands.push(("Quit", KeyCode::Char('q')));
+        commands.push((("Quit", "退出"), KeyCode::Char('q')));
         commands
     }
 
@@ -2301,80 +2333,107 @@ impl App {
             && let Some(detail) = &self.detail
         {
             if pending_approval_id(&detail.task).is_some() {
-                commands.push(Command::shortcut(
-                    "Review pending operation",
-                    KeyCode::Char('a'),
-                ));
+                commands.push(
+                    Command::shortcut(
+                        self.language
+                            .text("Review pending operation", "审阅待批准的操作"),
+                        KeyCode::Char('a'),
+                    )
+                    .with_search_label("Review pending operation"),
+                );
             } else if detail
                 .task
                 .pending_tool_input
                 .as_ref()
                 .is_some_and(|input| input.requests["kind"] == "clarification")
             {
-                commands.push(Command::shortcut(
-                    "Answer clarification",
-                    KeyCode::Char('a'),
-                ));
+                commands.push(
+                    Command::shortcut(
+                        self.language.text("Answer clarification", "回答澄清问题"),
+                        KeyCode::Char('a'),
+                    )
+                    .with_search_label("Answer clarification"),
+                );
             }
         }
         if self.session.is_some() && !self.demo {
             commands.push(Command {
-                label: "Review changes and checks",
+                label: self
+                    .language
+                    .text("Review changes and checks", "查看改动与检查"),
                 alias: Some("changes"),
                 action: CommandAction::ProjectReview,
+                search_label: None,
             });
         }
         if self.online && self.session.is_some() && !self.busy {
             commands.push(Command {
                 label: if self.plan_only {
-                    "Switch to execution mode"
+                    self.language
+                        .text("Switch to execution mode", "切换到执行模式")
                 } else {
-                    "Switch to plan mode"
+                    self.language.text("Switch to plan mode", "切换到计划模式")
                 },
                 alias: Some("plan"),
                 action: CommandAction::TogglePlan,
+                search_label: None,
             });
         }
         if self.online && self.workspace.is_some() && !self.busy {
             commands.push(Command {
-                label: "Start a new conversation",
+                label: self.language.text("Start a new conversation", "开始新对话"),
                 alias: Some("new"),
                 action: CommandAction::NewConversation,
+                search_label: None,
             });
         }
         if self.model_profiles && !self.busy {
             commands.push(Command {
-                label: "Switch model",
+                label: self.language.text("Switch model", "切换模型"),
                 alias: Some("model"),
                 action: CommandAction::ModelProfiles,
+                search_label: None,
             });
         }
         if self.supplier_settings && !self.busy {
             commands.push(Command {
-                label: "Model settings and suppliers",
+                label: self
+                    .language
+                    .text("Model settings and suppliers", "模型和供应商设置"),
                 alias: Some("settings"),
                 action: CommandAction::SupplierSettings,
+                search_label: None,
             });
         }
+        commands.push(Command {
+            label: self
+                .language
+                .text("Language · 简体中文", "界面语言 · English"),
+            alias: Some("language"),
+            action: CommandAction::Language,
+            search_label: None,
+        });
         if self.online && self.read_rules && self.workspace.is_some() && !self.busy {
             commands.push(Command {
-                label: "Manage read permissions",
+                label: self
+                    .language
+                    .text("Manage read permissions", "管理读取权限"),
                 alias: Some("permissions"),
                 action: CommandAction::ReadRules,
+                search_label: None,
             });
         }
         if menu.origin == CommandOrigin::Slash {
             commands.push(Command {
-                label: "Show all commands",
+                label: self.language.text("Show all commands", "查看全部命令"),
                 alias: Some("help"),
                 action: CommandAction::Help,
+                search_label: None,
             });
         }
-        commands.extend(
-            self.commands()
-                .into_iter()
-                .map(|(label, key)| Command::shortcut(label, key)),
-        );
+        commands.extend(self.commands().into_iter().map(|((en, zh), key)| {
+            Command::shortcut(self.language.text(en, zh), key).with_search_label(en)
+        }));
         let query = menu.query.to_lowercase();
         commands.retain(|command| command.matches(menu.origin, &query));
         commands
@@ -2949,6 +3008,8 @@ fn approval_review(
     id: &str,
     root: &str,
     details: ApprovalDetails,
+    language: Language,
+    remember: bool,
 ) -> Option<(String, bool)> {
     match details {
         ApprovalDetails::ToolCall { approval } => {
@@ -2956,7 +3017,7 @@ fn approval_review(
                 return None;
             }
             if let Some(plan) = approval.execution_plan.as_ref()
-                && let Some(text) = project_check_review(root, plan)
+                && let Some(text) = project_check_review(root, plan, language)
             {
                 return Some((text, true));
             }
@@ -2967,56 +3028,66 @@ fn approval_review(
                 let before = exact_edit_text(call.arguments["oldText"].as_str()?);
                 let replacement = call.arguments["newText"].as_str()?;
                 let after = if replacement.is_empty() {
-                    "(remove text)".into()
+                    language.text("(remove text)", "（移除文本）").into()
                 } else {
                     exact_edit_text(replacement)
                 };
                 return Some((
                     format!(
-                        "Replace an exact text match\nPath: {path}\n\nBefore\n{before}\n\nAfter\n{after}\n\nRequires one match and an unchanged file.\n\nWorkspace: {root}\nBase SHA-256: {base}",
+                        "{}\n{}: {path}\n\n{}\n{before}\n\n{}\n{after}\n\n{}\n\n{}: {root}\n{}: {base}",
+                        language.text("Replace an exact text match", "替换精确匹配的文本"),
+                        language.text("Path", "路径"),
+                        language.text("Before", "替换前"),
+                        language.text("After", "替换后"),
+                        language.text(
+                            "Requires one match and an unchanged file.",
+                            "要求原文只匹配一次，且文件尚未变更。"
+                        ),
+                        language.text("Workspace", "工作区"),
+                        language.text("Base SHA-256", "基准 SHA-256"),
                     ),
                     true,
                 ));
             }
             let (action, consequence, preview_key) = match call.name.as_str() {
                 "artifact_create" => (
-                    "Save a text deliverable",
-                    "Creates an item in Deliverables. No workspace file is written.",
-                    Some(("content", "Text to save")),
+                    language.text("Save a text deliverable", "保存文字交付物"),
+                    language.text("Creates an item in Deliverables. No workspace file is written.", "在交付物中保存一项，不会写入工作区文件。"),
+                    Some(("content", language.text("Text to save", "将要保存的文字"))),
                 ),
                 "artifact_create_binary" => (
-                    "Save a downloadable deliverable",
-                    "Creates an item in Deliverables. No workspace file is written.",
+                    language.text("Save a downloadable deliverable", "保存可下载交付物"),
+                    language.text("Creates an item in Deliverables. No workspace file is written.", "在交付物中保存一项，不会写入工作区文件。"),
                     None,
                 ),
                 "workspace_create_text" => (
-                    "Create a workspace file",
-                    "Writes a new file at the requested path. Existing files are not overwritten.",
-                    Some(("content", "Text to write")),
+                    language.text("Create a workspace file", "创建工作区文件"),
+                    language.text("Writes a new file at the requested path. Existing files are not overwritten.", "在指定路径新建文件，不会覆盖已有文件。"),
+                    Some(("content", language.text("Text to write", "将要写入的文字"))),
                 ),
                 "workspace_patch_text" => (
-                    "Apply a patch to a workspace file",
-                    "Changes the file only if its saved contents still match the reviewed base.",
-                    Some(("patch", "Patch to apply")),
+                    language.text("Apply a patch to a workspace file", "为工作区文件应用补丁"),
+                    language.text("Changes the file only if its saved contents still match the reviewed base.", "仅在文件内容仍与审阅时的基准一致时应用。"),
+                    Some(("patch", language.text("Patch to apply", "将要应用的补丁"))),
                 ),
                 "workspace_replace_text" => (
-                    "Write a workspace file",
-                    "Creates or replaces the specified file. An existing file must match the reviewed base.",
-                    Some(("content", "Text to write")),
+                    language.text("Write a workspace file", "写入工作区文件"),
+                    language.text("Creates or replaces the specified file. An existing file must match the reviewed base.", "新建或替换指定文件。已有文件必须仍与审阅时的基准一致。"),
+                    Some(("content", language.text("Text to write", "将要写入的文字"))),
                 ),
                 "workspace_find" => (
-                    "Search project files",
-                    "Searches the selected directory for matching names or text. No file is changed.",
+                    language.text("Search project files", "搜索项目文件"),
+                    language.text("Searches the selected directory for matching names or text. No file is changed.", "在指定目录匹配文件名或内容，不会改动文件。"),
                     None,
                 ),
                 "workspace_read_text" | "workspace_read_bytes" => (
-                    "Read a workspace file",
-                    "Sends the requested file content to the model. No file is changed.",
+                    language.text("Read a workspace file", "读取工作区文件"),
+                    language.text("Sends the requested file content to the model. No file is changed.", "将请求的文件内容发送给模型，不会改动文件。"),
                     None,
                 ),
                 _ => (
-                    "Review this operation",
-                    "Check the target and arguments before allowing it.",
+                    language.text("Review this operation", "审阅此次操作"),
+                    language.text("Check the target and arguments before allowing it.", "允许前请核对目标和参数。"),
                     None,
                 ),
             };
@@ -3029,31 +3100,51 @@ fn approval_review(
             });
             let identity = call.arguments["path"]
                 .as_str()
-                .map(|value| ("Path", value))
+                .map(|value| (language.text("Path", "路径"), value))
                 .or_else(|| {
                     call.arguments["title"]
                         .as_str()
-                        .map(|value| ("Title", value))
+                        .map(|value| (language.text("Title", "标题"), value))
                 });
-            let mut text = format!("{action}\n{consequence}\n\nWorkspace: {root}\n");
+            let mut text = format!(
+                "{action}\n{consequence}\n\n{}: {root}\n",
+                language.text("Workspace", "工作区")
+            );
             if let Some((kind, value)) = identity {
                 text.push_str(&format!("{kind}: {}\n", clean(value).replace('\n', " ")));
             }
-            text.push_str(
+            text.push_str(language.text(
                 "\nAllow once runs this request. Deny stops it without running the operation.\n",
-            );
+                "\n允许一次会执行此请求。拒绝后不执行。\n",
+            ));
             if let Some((label, value)) = preview {
                 text.push_str(&format!(
                     "\n{label}\n{}\n",
-                    value.as_str().unwrap_or("(invalid text)")
+                    value
+                        .as_str()
+                        .unwrap_or(language.text("(invalid text)", "（无效文本）"))
                 ));
             }
             if let Some(plan) = &approval.execution_plan {
                 let plan = serde_json::to_string_pretty(plan).unwrap_or_default();
-                text.push_str(&format!("\nExecution details\n{plan}\n"));
+                text.push_str(&format!(
+                    "\n{}\n{plan}\n",
+                    language.text("Execution details", "执行详情")
+                ));
+            }
+            if remember {
+                text.push_str(language.text(
+                    "\nRemember the same path and read options\nin this conversation for 1 hour.\nRevoke with /permissions.\n",
+                    "\n在此对话中记住相同路径和读取参数一小时。\n可用 /permissions 撤销。\n",
+                ));
             }
             let arguments = serde_json::to_string_pretty(&arguments).unwrap_or_default();
-            text.push_str(&format!("\nTool: {}\nArguments\n{arguments}", call.name));
+            text.push_str(&format!(
+                "\n{}: {}\n{}\n{arguments}",
+                language.text("Tool", "工具"),
+                call.name,
+                language.text("Arguments", "参数")
+            ));
             Some((text, true))
         }
         ApprovalDetails::AgentPermission { ref approval }
@@ -3077,7 +3168,11 @@ fn approval_review(
     }
 }
 
-fn project_check_review(root: &str, plan: &serde_json::Value) -> Option<String> {
+fn project_check_review(
+    root: &str,
+    plan: &serde_json::Value,
+    language: Language,
+) -> Option<String> {
     if plan["kind"] != "project_check" {
         return None;
     }
@@ -3090,12 +3185,17 @@ fn project_check_review(root: &str, plan: &serde_json::Value) -> Option<String> 
         _ => return None,
     };
     let mut text = format!(
-        "Run project check: {label}\n\nCommand: {command}\nRun from: private snapshot\nIsolation: {isolation}\n\nCopy from {root}\n"
+        "{}: {label}\n\n{}: {command}\n{}\n{}: {isolation}\n\n{} {root}\n",
+        language.text("Run project check", "运行项目检查"),
+        language.text("Command", "命令"),
+        language.text("Run from: private snapshot", "运行位置：私有快照"),
+        language.text("Isolation", "隔离方式"),
+        language.text("Copy from", "复制自"),
     );
     for path in inputs.keys() {
         text.push_str(&format!("  {path}\n"));
     }
-    text.push_str("\nOnly listed copies are checked. Changes in the scratch directory are not written back. Deny skips the check.\n\nExecution details\n");
+    text.push_str(language.text("\nOnly listed copies are checked. Changes in the scratch directory are not written back. Deny skips the check.\n\nExecution details\n", "\n只检查列出的副本。临时目录中的更改不会写回工作区。拒绝会跳过此次检查。\n\n执行详情\n"));
     text.push_str(&serde_json::to_string_pretty(plan).ok()?);
     Some(text)
 }
@@ -3151,7 +3251,7 @@ mod tests {
 
     #[test]
     fn stale_browse_cannot_change_the_current_session() {
-        let mut app = App::new(true, Theme::Auto);
+        let mut app = App::new(true, Theme::Auto, Language::English, None);
         app.workspace = Some(Workspace {
             id: "root".into(),
             root: "test".into(),
@@ -3182,7 +3282,7 @@ mod tests {
 
     #[test]
     fn tiny_layout_draws_and_paste_filters_controls_without_splitting_utf8() {
-        let mut app = App::new(true, Theme::Auto);
+        let mut app = App::new(true, Theme::Auto, Language::English, None);
         app.layer = Layer::Edit(Edit::Task);
         app.paste("交付\x1b\u{202e}\0\t明细\n报告");
         assert_eq!(app.draft.text(), "交付 明细\n报告");
@@ -3198,7 +3298,7 @@ mod tests {
     #[test]
     fn approval_actions_keep_the_terminal_palette_at_supported_sizes() {
         for theme in [Theme::Auto, Theme::Dark, Theme::Light, Theme::Mono] {
-            let mut app = App::new(true, theme);
+            let mut app = App::new(true, theme, Language::English, None);
             app.layer = Layer::Approval {
                 task: "task".into(),
                 id: "approval".into(),
@@ -3253,8 +3353,26 @@ mod tests {
         let details = ApprovalDetails::AgentPermission {
             approval: approval.clone(),
         };
-        assert!(approval_review("task", "different", "root", details.clone()).is_none());
-        let (text, allow_once) = approval_review("task", "approval", "root", details).unwrap();
+        assert!(
+            approval_review(
+                "task",
+                "different",
+                "root",
+                details.clone(),
+                Language::English,
+                false,
+            )
+            .is_none()
+        );
+        let (text, allow_once) = approval_review(
+            "task",
+            "approval",
+            "root",
+            details,
+            Language::English,
+            false,
+        )
+        .unwrap();
         assert!(text.contains("External Agent permission"));
         assert!(text.contains("Read report"));
         assert!(!allow_once);
@@ -3262,7 +3380,15 @@ mod tests {
         approval.allow_once_available = true;
         approval.source = fliuno_protocol::AgentApprovalSource::HostTool;
         let details = ApprovalDetails::HostTool { approval };
-        let (text, allow_once) = approval_review("task", "approval", "root", details).unwrap();
+        let (text, allow_once) = approval_review(
+            "task",
+            "approval",
+            "root",
+            details,
+            Language::English,
+            false,
+        )
+        .unwrap();
         assert!(text.contains("Agent host tool"));
         assert!(allow_once);
     }
@@ -3316,7 +3442,7 @@ mod tests {
                 kind: WorkActionKind::AnswerInput,
             }]),
         };
-        let mut app = App::new(true, Theme::Mono);
+        let mut app = App::new(true, Theme::Mono, Language::English, None);
         app.workspace = Some(Workspace {
             id: "workspace".into(),
             root: "project".into(),
@@ -3373,7 +3499,7 @@ mod tests {
             model_outcome_unknown: false,
             agent_outcome_unknown: false,
         };
-        let mut app = App::new(true, Theme::Mono);
+        let mut app = App::new(true, Theme::Mono, Language::English, None);
         app.layer = Layer::History(0);
         app.history_page = Some(HistoryPage {
             query: "workspace".into(),
@@ -3413,7 +3539,7 @@ mod tests {
 
     #[test]
     fn draft_and_attachment_return_only_in_the_original_session() {
-        let mut app = App::new(true, Theme::Mono);
+        let mut app = App::new(true, Theme::Mono, Language::English, None);
         let session = |id: &str| Session {
             id: id.into(),
             workspace_id: "root".into(),

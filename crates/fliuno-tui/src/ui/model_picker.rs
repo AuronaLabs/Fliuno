@@ -44,9 +44,11 @@ impl Picker {
         }
     }
 
-    pub(super) fn settings(origin: CommandOrigin, browse: bool) -> Self {
+    pub(super) fn settings(origin: CommandOrigin, browse: bool, language: Language) -> Self {
         let mut picker = Self::new(origin);
-        picker.supplier_settings = Some(Box::new(super::supplier_settings::Panel::new(browse)));
+        picker.supplier_settings = Some(Box::new(super::supplier_settings::Panel::new(
+            browse, language,
+        )));
         picker
     }
 

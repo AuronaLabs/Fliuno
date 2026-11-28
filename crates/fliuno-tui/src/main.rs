@@ -109,7 +109,12 @@ fn with_terminal(use_screen: impl FnOnce(&mut Screen) -> io::Result<()>) -> io::
 }
 
 fn run(options: Options, screen: &mut Screen) -> io::Result<()> {
-    let mut app = ui::App::new(options.demo, options.theme);
+    let mut app = ui::App::new(
+        options.demo,
+        options.theme,
+        options.settings.workbench.language,
+        options.config.clone(),
+    );
     let worker = service::Worker::spawn(options)?;
     let mut redraw = true;
     'running: loop {

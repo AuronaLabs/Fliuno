@@ -303,6 +303,7 @@ impl App {
                 (58, (self.filtered_commands(menu).len() as u16 + 4).max(6))
             }
             Layer::Commands(_) => (66, 17),
+            Layer::Language(_) => (54, 11),
             Layer::ModelPicker(picker) => (
                 if picker.editing_connection() { 56 } else { 66 },
                 picker.preferred_height(),
@@ -319,7 +320,7 @@ impl App {
         let top_gap = u16::from(area.height >= 22);
         let width = area.width.min(max_width);
         let height = area.height.saturating_sub(top_gap).min(max_height);
-        let y = if matches!(&self.layer, Layer::ModelPicker(_))
+        let y = if matches!(&self.layer, Layer::ModelPicker(_) | Layer::Language(_))
             || matches!(&self.layer, Layer::Commands(menu) if menu.origin != CommandOrigin::Workbench)
         {
             area.bottom().saturating_sub(height)
@@ -339,14 +340,31 @@ impl App {
         let (title, actions) = match &self.layer {
             Layer::None | Layer::TaskBrowser(_) => return,
             Layer::Commands(menu) if menu.origin == CommandOrigin::Slash => (
-                "Commands".into(),
-                "Tab run  ·  Enter keep as text  ·  Esc back",
+                self.language.text("Commands", "命令").into(),
+                self.language.text(
+                    "Tab run  ·  Enter keep as text  ·  Esc back",
+                    "Tab 执行 · Enter 保留为文本 · Esc 返回",
+                ),
             ),
             Layer::Commands(menu) => (
-                format!("Commands  /  {}", menu.query),
-                "Type to filter  ·  Enter run  ·  Esc back",
+                format!(
+                    "{}  /  {}",
+                    self.language.text("Commands", "命令"),
+                    menu.query
+                ),
+                self.language.text(
+                    "Type to filter  ·  Enter run  ·  Esc back",
+                    "输入筛选 · Enter 执行 · Esc 返回",
+                ),
             ),
             Layer::ModelPicker(picker) => (picker.title().into(), picker.actions()),
+            Layer::Language(_) => (
+                self.language.text("Interface language", "界面语言").into(),
+                self.language.text(
+                    "↑↓ Select · Enter Apply · Esc Back",
+                    "↑↓ 选择 · Enter 应用 · Esc 返回",
+                ),
+            ),
             Layer::Inbox(_) => (
                 "Workspace inbox".into(),
                 "1 attention / 2 running / 3 recent / Enter open / h history",
@@ -402,24 +420,40 @@ impl App {
                 remember,
                 ..
             } => (
-                "Review operation".into(),
+                self.language.text("Review operation", "审阅操作").into(),
                 if self.busy {
-                    "Loading review…  ·  Esc Back"
+                    self.language
+                        .text("Loading review…  ·  Esc Back", "正在加载审阅… · Esc 返回")
                 } else if *allow_once && remember.is_some() {
-                    "y Allow once  ·  n Deny  ·  Esc Back\nr Remember read for 1 hour"
+                    self.language.text(
+                        "y Allow once  ·  n Deny  ·  Esc Back\nr Remember read for 1 hour",
+                        "y 允许一次 · n 拒绝 · Esc 返回\nr 记住读取授权一小时",
+                    )
                 } else if *allow_once {
-                    "y Allow once  ·  n Deny  ·  Esc Back"
+                    self.language.text(
+                        "y Allow once  ·  n Deny  ·  Esc Back",
+                        "y 允许一次 · n 拒绝 · Esc 返回",
+                    )
                 } else {
-                    "n Deny  ·  Esc Back"
+                    self.language
+                        .text("n Deny  ·  Esc Back", "n 拒绝 · Esc 返回")
                 },
             ),
             Layer::ProjectReview { .. } => (
-                "Project changes & checks".into(),
-                "↑↓ Scroll  ·  Home Top  ·  Esc Back",
+                self.language
+                    .text("Project changes & checks", "项目改动与检查")
+                    .into(),
+                self.language.text(
+                    "↑↓ Scroll  ·  Home Top  ·  Esc Back",
+                    "↑↓ 滚动 · Home 顶部 · Esc 返回",
+                ),
             ),
             Layer::ReadRules(..) => (
-                "Read permissions".into(),
-                "↑↓ Select  ·  Del Revoke  ·  Esc Back",
+                self.language.text("Read permissions", "读取权限").into(),
+                self.language.text(
+                    "↑↓ Select  ·  Del Revoke  ·  Esc Back",
+                    "↑↓ 选择 · Del 撤销 · Esc 返回",
+                ),
             ),
             Layer::Recovery(id, _) => {
                 let actions = match self.detail.as_ref().filter(|detail| detail.task.id == *id) {
@@ -466,7 +500,7 @@ impl App {
             Layer::Edit(edit) => (edit.name().into(), "Enter Confirm  ·  Esc Back"),
         };
         let title = if self.busy {
-            format!(" {title} · Working ")
+            format!(" {title} · {} ", self.language.text("Working", "处理中"))
         } else {
             format!(" {title} ")
         };
@@ -507,7 +541,12 @@ impl App {
             Layer::Commands(menu) => {
                 let commands = self.filtered_commands(menu);
                 if commands.is_empty() {
-                    render_text(frame, body, "No matching commands", 0);
+                    render_text(
+                        frame,
+                        body,
+                        self.language.text("No matching commands", "没有匹配的命令"),
+                        0,
+                    );
                 } else {
                     render_list(
                         frame,
@@ -671,6 +710,7 @@ impl App {
             Layer::Memories(panel) => self.draw_memories(frame, body, panel),
             Layer::Deliverables(catalog) => self.draw_deliverables(frame, body, catalog),
             Layer::ModelPicker(picker) => picker.draw(frame, body, &self.palette),
+            Layer::Language(panel) => panel.draw(frame, body, self.language, &self.palette),
             Layer::Diagnostics(text, scroll) => {
                 let state = if self.online {
                     ""
