@@ -165,7 +165,7 @@ fn chat_discards_partial_and_parallel_streams_without_committing_tools() {
     let preview = chunk(json!({"content":"uncommitted"}), None);
     let cases = [
         sse_body(&[preview.clone(), chunk(json!({}), Some("stop"))]),
-        sse_body(&[preview.clone()]) + "data: [DONE]\n\n",
+        sse_body(std::slice::from_ref(&preview)) + "data: [DONE]\n\n",
         sse_body(&[preview.clone(), chunk(json!({}), Some("length"))]) + "data: [DONE]\n\n",
         sse_body(&[
             preview,
