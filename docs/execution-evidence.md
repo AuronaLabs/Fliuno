@@ -46,6 +46,7 @@
 | Windows ConPTY 模型设置 | 两个档案共用一套托管凭据，另一个绑定回环无 Key 供应商。修订冲突保留外部改动，重载后可保存；保存后当前模型不变，显式选择后模拟服务核对模型 ID、凭据与思考强度，旧对话与模型标识可重开。核对 48、80、110 列的设置与摘要截图。[设置截图](assets/model-settings-v021.png) |
 | Windows 模型目录回归 | 独立 RPC 测试验证正确的供应商地址和认证、Anthropic 的 `after_id`、过期修订时不建立连接，以及凭据回显过滤。ConPTY 验证筛选并选中真实返回的 ID、翻页、目录不可用时手填回退，和保存后显式应用。目录页核对 48、80、110 列。[目录截图](assets/model-catalog-v021.png) |
 | Windows ConPTY 语言切换 | 验证英文与简体中文切换、重启后保留语言、中英文命令搜索、原始配置与草稿保留。用回环模型查询供应商目录，审批前确认文件不存在；审批后核对原样写入的 UTF-8 内容、改动回执与重开对话。人工检查 48、80、110 列的截图。[目录](assets/language-catalog-v021.png) · [审批](assets/language-approval-v021.png) |
+| Windows ConPTY 长审批 | 48 列预览检查预计写入的内容和固定按钮，翻页到底可见制表符与回车标记；查看参数后返回并缩放至 80 列，仍能找到末尾。拒绝后确认目标文件未创建。另检查 48 列中文审批和 110 列隔离检查画面。[参数页](assets/approval-details-v021.png) |
 
 复用离线项目验收（先构建带测试夹具的服务，且平台需支持配置中的隔离方式）：
 
@@ -54,6 +55,7 @@ cargo build --locked -p fliuno-app-server --features test-fixtures --bins
 cargo test --locked -p fliuno-tui --test workbench live_project_agent_delivers_inline_then_edits_and_runs_a_native_check -- --ignored
 cargo test --locked -p fliuno-tui --test workbench workbench_manages_shared_suppliers_and_applies_only_the_selected_model -- --ignored
 cargo test --locked -p fliuno-tui --test workbench workbench_keeps_language_draft_and_exact_project_review_at_terminal_widths -- --ignored
+cargo test --locked -p fliuno-tui --test workbench workbench_review_keeps_long_preview_and_tool_details_separate -- --ignored
 ```
 
 真实模型例程、已记录的失败样本与候选门槛见 [0.0.21 计划](plan-0.0.21.md#真实模型编码验收)。发布还需要同一候选提交通过 Windows/Linux 工程检查和 MSI / Debian 12 的安装、升级、启动与卸载。
