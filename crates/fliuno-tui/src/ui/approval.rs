@@ -282,7 +282,7 @@ pub(super) fn review(
             let call = &approval.call;
             if call.name == "workspace_edit_text" {
                 let path = display_text(call.arguments["path"].as_str()?);
-                let base = call.arguments["baseSha256"].as_str()?;
+                call.arguments["baseSha256"].as_str()?;
                 let before = exact_edit_text(call.arguments["oldText"].as_str()?);
                 let replacement = call.arguments["newText"].as_str()?;
                 let after = if replacement.is_empty() {
@@ -291,22 +291,20 @@ pub(super) fn review(
                     exact_edit_text(replacement)
                 };
                 let heading = format!(
-                    "{}\n{}: {path}\n\n",
+                    "{}\n{}: {path}\n{}\n\n",
                     language.text("Replace an exact text match", "替换精确匹配的文本"),
-                    language.text("Path", "路径")
+                    language.text("Path", "路径"),
+                    language.text(
+                        "Requires one match and an unchanged file.",
+                        "要求原文只匹配一次，且文件尚未变更。"
+                    ),
                 );
                 return Some(
                     Review::new(
                         format!(
-                            "{heading}{}\n{before}\n\n{}\n{after}\n\n{}\n\n{}: {root}\n{}: {base}",
+                            "{heading}{}\n{before}\n\n{}\n{after}",
                             language.text("Before", "替换前"),
                             language.text("After", "替换后"),
-                            language.text(
-                                "Requires one match and an unchanged file.",
-                                "要求原文只匹配一次，且文件尚未变更。"
-                            ),
-                            language.text("Workspace", "工作区"),
-                            language.text("Base SHA-256", "基准 SHA-256"),
                         ),
                         {
                             let mut arguments = call.arguments.clone();
@@ -314,11 +312,15 @@ pub(super) fn review(
                                 fields.remove("oldText");
                                 fields.remove("newText");
                             }
-                            format_details(
-                                &call.name,
-                                &arguments,
-                                approval.execution_plan.as_ref(),
-                                language,
+                            format!(
+                                "{}: {root}\n\n{}",
+                                language.text("Workspace", "工作区"),
+                                format_details(
+                                    &call.name,
+                                    &arguments,
+                                    approval.execution_plan.as_ref(),
+                                    language,
+                                )
                             )
                         },
                         true,

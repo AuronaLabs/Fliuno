@@ -3286,8 +3286,18 @@ fn live_project_agent_delivers_inline_then_edits_and_runs_a_native_check() {
                 terminal.ready();
                 terminal.expect("y Allow once");
                 terminal.expect("Path: src/greeting.txt");
+                terminal.expect("Requires one match");
+                terminal.expect_absent("Base SHA-256");
                 terminal.capture(&format!("project-edit-approval-{cols}"));
             }
+            terminal.keys("\t");
+            terminal.expect("baseSha256");
+            terminal.expect("Workspace:");
+            terminal.expect("y Allow once");
+            terminal.capture("project-edit-technical-details-48");
+            terminal.keys("\t");
+            terminal.expect("Path: src/greeting.txt");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), "Hello world\n");
         }
         if preview.starts_with("Run project check:") {
             for cols in [48, 80, 110] {
