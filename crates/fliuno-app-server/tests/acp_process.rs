@@ -126,12 +126,21 @@ impl Peer {
         )
         .unwrap();
         input.flush().unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // The first response includes process startup, database migration, and
+        // isolated Agent registration on a cold runner. Keep the steady-state
+        // deadline for requests after the handshake.
+        let timeout = if method == "initialize" { 30 } else { 10 };
+        let deadline = Instant::now() + Duration::from_secs(timeout);
         loop {
             let response = self
                 .output
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                .unwrap_or_else(|e| panic!("RPC {method} timed out: {e}"));
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "RPC {method} failed waiting for a response: {error}; child: {:?}",
+                        self.child.try_wait()
+                    )
+                });
             if response.get("method").is_some() {
                 continue;
             }
