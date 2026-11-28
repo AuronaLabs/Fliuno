@@ -235,7 +235,7 @@ execution = "execution.json"
 
 项目检查只接收配置中的输入文件及其 SHA-256，不允许模型改命令、参数或环境。批准后最多复制 16 个文件、合计 8 MiB；文件内容变化则须重读并重新审批。检查在私有目录里运行，写入不会回到工作区。程序需要的其他资源可显式配置为固定摘要的 `assets`；不会自动加载整个仓库、工具链缓存或外部依赖。对话会显示命令和退出码；被取消或结果未知的检查不会显示为通过。用户侧配置是执行授权来源，仓库文件不能自行登记检查。
 
-在 **0.0.22 开发版** 工作台，打开 [`/checks`](workbench.md#查看项目检查) 核对注册是否生效及声明的输入是否存在。改完执行配置后需要重启；工作区文件变化时可在清单中按 `R` 刷新。
+在 0.0.22 工作台，打开 [`/checks`](workbench.md#查看项目检查) 核对注册是否生效及声明的输入是否存在。改完执行配置后需要重启；工作区文件变化时可在清单中按 `R` 刷新。
 
 ## 跨轮次终端
 
@@ -275,7 +275,7 @@ cargo run -p fliuno-app-server -- --skills-dir C:/absolute/path/to/skills
 在 GitHub Actions 中先确认内核 CI 和 `Installer candidate` 的 Windows、Debian 作业均通过，且对应同一个 Git 提交。从该候选运行下载 `fliuno-windows-candidate` 和 `fliuno-debian-candidate`，分别解包到同一目录下的两个同名子目录。然后在仓库根目录运行：
 
 ```sh
-python scripts/stage_release.py ./candidate-artifacts ./verified-release --version 0.0.21 --commit FULL_GIT_SHA
+python scripts/stage_release.py ./candidate-artifacts ./verified-release --version 0.0.22 --commit FULL_GIT_SHA
 ```
 
 脚本检查两套候选的构建提交、文件名与 SHA-256，并检查便携包内的两份程序，再生成四份发布资产和合并的 `SHA256SUMS.txt`。它不会上传、创建标签或替换已有输出目录。只有 GitHub Actions 的安装和终端用例能证明候选可用；文件校验确认准备上传的是那批经过验收的产物。
@@ -291,7 +291,7 @@ python examples/ag_ui_http_demo.py
 python examples/ag_ui_http_demo.py --interrupts --inline-media
 ```
 
-`check.ps1` 运行格式、Clippy、测试、生成契约一致性检查和离线进程演示；解释器演示需要本机 Node 24，Windows 另需 CPython 3.12。GitHub Actions 在 Windows、Linux 和 macOS runner 上执行工作区构建与回归检查。macOS runner 目前只验证跨平台编译和不支持隔离时的拒绝行为，不代表 macOS 沙箱已实现；本地验证结果也不代表远程 CI 已经运行。
+`check.ps1` 运行格式、Clippy、测试、生成契约一致性检查和离线进程演示；解释器演示需要本机 Node 24，Windows 另需 CPython 3.12。内核 CI 在 Windows 和 Ubuntu runner 构建并回归；原生安装候选在 Windows 与 Debian 12 分别验证。当前没有 macOS 发布包或对应 CI。
 
 开发和测试构建保留行号堆栈、关闭增量缓存，以控制 Windows 调试产物占用；需要调试局部变量时可通过本地 Cargo 配置覆盖 `profile.dev.debug=2`。
 

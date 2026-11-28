@@ -4,7 +4,7 @@
 
 [安装](#安装) · [接入模型](#接入模型) · [项目工作](#在项目目录里工作) · [切换语言](#切换界面语言) · [恢复与备份](#恢复与备份)
 
-> 本指南以 **v0.0.21** 为安装基线。便携安装时请使用同版本的 `fliuno` 与 `fliuno-app-server`。
+> 本指南以 **v0.0.22** 为安装基线。便携安装时请使用同版本的 `fliuno` 与 `fliuno-app-server`。
 
 从项目目录在终端里运行 `fliuno`。首次启动会引导你选择接口、填写可选的 Base URL 并连接 API 密钥。随后可在后台加载的目录里搜索模型：用 `↑` / `↓` 浏览，`Tab` 填入所选模型，`Enter` 保存当前输入的模型 ID。目录不可用时仍可手填。OpenAI 官方接口选 Responses，使用兼容网关或本机服务时按该服务提供的接口选择 Chat Completions。Anthropic 和 Google Gemini 也有各自的原生选项。保存后可直接输入第一条消息，按 `Enter` 发送。`F1` 打开命令搜索，`Esc` 返回对话。用 `Ctrl+N` 或粘贴输入多行。
 
@@ -12,7 +12,7 @@
 
 0.0.18 起，在空输入框键入 `/` 会打开常用命令。继续输入以筛选，按 `↑` 或 `↓` 选择，再按 `Tab` 运行。`/new` 开启当前文件夹的新对话，`/resume` 查看该文件夹的已有会话，`/help` 打开完整命令。`Enter` 会把当前输入留在草稿里，可以继续编辑路径或文本。有草稿时按 `F1` 打开命令，按 `Esc` 回到原草稿。
 
-**0.0.22 开发版。** 在首次配置按 `F8` 切换英文和简体中文；按 `Enter` 保存模型时一并记住界面语言。退出未保存的配置，不留下语言设置。
+在首次配置按 `F8` 切换英文和简体中文；按 `Enter` 保存模型时一并记住界面语言。退出未保存的配置，不留下语言设置。
 
 ![48 列首次配置：简体中文](assets/setup-zh-v022.png)
 
@@ -61,7 +61,7 @@
 language = "zh-CN"
 ```
 
-默认值为 `en`。使用未配置的离线演示时，切换只在当次运行生效，不会创建用户配置。已覆盖项目主屏、命令搜索、`/settings`、供应商目录、内置操作审阅和 `/changes`。0.0.22 开发版也已覆盖首次配置。旧档案选择器、部分历史管理界面及部分底层诊断仍显示英文；回复、模型 ID、路径、补丁和进程输出保持原文。
+默认值为 `en`。使用未配置的离线演示时，切换只在当次运行生效，不会创建用户配置。已覆盖项目主屏、命令搜索、`/settings`、供应商目录、内置操作审阅、`/changes` 和首次配置。旧档案选择器、部分历史管理界面及部分底层诊断仍显示英文；回复、模型 ID、路径、补丁和进程输出保持原文。
 
 48 列终端也能查询模型、查看将要写入的文件并完成审批：[中文模型目录](assets/language-catalog-v021.png) · [中文审批](assets/language-approval-v021.png)。两张图来自 Windows ConPTY 测试。
 
@@ -85,7 +85,7 @@ language = "zh-CN"
 
 ### 查看项目检查
 
-**0.0.22 开发版。** 输入 `/checks` 后按 `Tab` 打开，或按 `F1` 搜索「查看项目检查」。清单显示已注册检查的名称、用途和固定输入路径。`R` 刷新文件状态，`Tab` 在清单和内部工具标识之间切换，`Esc` 返回原来的位置。显示缺失时，先确认文件在当前项目中；没有检查时，按[部署指南](setup.md#在隔离环境里运行项目检查0021)配置 `[integrations].execution`。
+输入 `/checks` 后按 `Tab` 打开，或按 `F1` 搜索「查看项目检查」。清单显示已注册检查的名称、用途和固定输入路径。`R` 刷新文件状态，`Tab` 在清单和内部工具标识之间切换，`Esc` 返回原来的位置。显示缺失时，先确认文件在当前项目中；没有检查时，按[部署指南](setup.md#在隔离环境里运行项目检查0021)配置 `[integrations].execution`。
 
 要执行某项检查，可在对话中让 Agent 按名称运行。清单只检查文件是否存在及文件类型。Agent 执行前仍需获取输入的当前 SHA-256，由你审阅实际命令及输入；如果批准后文件变了，检查会在启动前拒绝。
 
@@ -93,7 +93,7 @@ language = "zh-CN"
 
 ### 审阅项目指南
 
-**0.0.22 开发版。** 在项目目录启动工作台，输入 `/guide` 后按 `Tab`，或从 `F1` 搜索「项目指南」。预览只在本机显示当前工作区根目录的 `AGENTS.md`。按上下键或翻页键浏览，`Tab` 可查看来源、字节数和 SHA-256。按 `Enter` 启用所显示的版本；`Esc` 回到原草稿。
+在项目目录启动工作台，输入 `/guide` 后按 `Tab`，或从 `F1` 搜索「项目指南」。预览只在本机显示当前工作区根目录的 `AGENTS.md`。按上下键或翻页键浏览，`Tab` 可查看来源、字节数和 SHA-256。按 `Enter` 启用所显示的版本；`Esc` 回到原草稿。
 
 启用后，普通会话的新模型任务会携带这份指南，输入区会显示 `AGENTS.md`；隔离上下文不使用它。指南可以说明项目约定，执行命令和写文件仍按原有权限审阅。仅支持非空 UTF-8 正文，最多 8 KiB；不会加载链接、子目录指南或文件里的导入语句。
 
@@ -106,19 +106,19 @@ language = "zh-CN"
 从[发布页](https://github.com/AuronaLabs/Fliuno/releases/latest)下载对应平台的一份安装包或便携包，并下载同一版本的 `SHA256SUMS.txt`。校验后再运行安装程序。
 
 - **Windows x64**。打开 `.msi` 并按安装器提示操作。安装会注册系统 PATH。完成后打开新的 PowerShell，在项目目录运行 `fliuno`。
-- **Debian amd64**。在下载目录将实际文件名传给 `apt install`，例如 `sudo apt install ./fliuno-v0.0.21-linux-amd64.deb`。完成后进入项目目录，再运行 `fliuno`。
+- **Debian amd64**。在下载目录将实际文件名传给 `apt install`，例如 `sudo apt install ./fliuno-v0.0.22-linux-amd64.deb`。完成后进入项目目录，再运行 `fliuno`。
 - **便携包**。解压 ZIP 或 tar.gz，在解压目录运行 `fliuno` 或 `fliuno.exe`。可通过 `--workspace PATH` 指定项目目录。
 
 安装后运行 `fliuno --version` 确认版本。如果仍显示旧版本，在 PowerShell 中用 `Get-Command fliuno -All`，在 Debian 中用 `command -v fliuno` 检查当前终端实际找到的文件。便携版用解压目录里的程序路径启动。通过系统卸载原生包会保留用户主目录里的 `~/.fliuno`。
 
 ### 校验下载
 
-在下载目录检查 SHA-256。以下使用 v0.0.21 文件名举例；下载其他版本时替换名称。
+在下载目录检查 SHA-256。以下使用 v0.0.22 文件名举例；下载其他版本时替换名称。
 
 Windows PowerShell：
 
 ```powershell
-$asset = 'fliuno-v0.0.21-windows-x64.msi'
+$asset = 'fliuno-v0.0.22-windows-x64.msi'
 Get-FileHash -Algorithm SHA256 -LiteralPath $asset
 Select-String -Path SHA256SUMS.txt -Pattern ('  ' + [regex]::Escape($asset) + '$')
 ```
@@ -126,7 +126,7 @@ Select-String -Path SHA256SUMS.txt -Pattern ('  ' + [regex]::Escape($asset) + '$
 Debian：
 
 ```sh
-asset='fliuno-v0.0.21-linux-amd64.deb'
+asset='fliuno-v0.0.22-linux-amd64.deb'
 sha256sum -- "$asset"
 grep -F -- "  $asset" SHA256SUMS.txt
 ```

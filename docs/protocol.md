@@ -995,7 +995,7 @@ Linux 示例（路径须由宿主预先委派，并在 `cgroup.subtree_control` 
 
 ### 项目指南
 
-开发版的 `workspaceProjectGuide:true` 只在启用了管理功能的直接本机连接声明。指南管理独立于 `workspace/setInstructions`，不修改用户手工维护的指令。
+`workspaceProjectGuide:true`（0.0.22） 只在启用了管理功能的直接本机连接声明。指南管理独立于 `workspace/setInstructions`，不修改用户手工维护的指令。
 
 | 方法 | 参数与返回 |
 | --- | --- |

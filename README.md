@@ -15,19 +15,19 @@
 
 **[开始真实工作](#开始真实工作)** · [使用指南](docs/workbench.md) · [文档中心](docs/README.md)
 
-[下载安装包](https://github.com/AuronaLabs/Fliuno/releases/latest) · [更新记录](CHANGELOG.md) · [0.0.21 开发记录](docs/plan-0.0.21.md)
+[下载安装包](https://github.com/AuronaLabs/Fliuno/releases/latest) · [更新记录](CHANGELOG.md) · [0.0.22 开发记录](docs/plan-0.0.22.md)
 
-> **稳定版 v0.0.21** 已提供 Windows x64 MSI、Debian 12 amd64 `.deb` 和两套便携包。[下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.21) · [安装包验收](docs/execution-evidence.md#0021-安装包验收)
+> **稳定版 v0.0.22** 已提供 Windows x64 MSI、Debian 12 amd64 `.deb` 和两套便携包。[下载](https://github.com/AuronaLabs/Fliuno/releases/tag/v0.0.22) · [安装包验收](docs/execution-evidence.md#0022-安装包验收)
 
 ## 开始真实工作
 
-在要工作的文件夹运行 `fliuno`。首次启动会引导你选择模型、填写可选的 Base URL，并粘贴 API 密钥或选择已有密钥文件。**0.0.22 开发版**可在首次配置按 `F8` 切换简体中文。按 `Enter` 发送，按 `Ctrl+N` 换行，在输入框键入 `/` 查找命令。`/resume` 可续接项目对话，`/model` 可切换已配置的模型。配置、会话、审批和交付物保存在本机。模型请求会发往你配置的服务。
+在要工作的文件夹运行 `fliuno`。首次启动会引导你选择模型、填写可选的 Base URL，并粘贴 API 密钥或选择已有密钥文件。首次配置时按 `F8` 可切换简体中文。按 `Enter` 发送，按 `Ctrl+N` 换行，在输入框键入 `/` 查找命令。`/resume` 可续接项目对话，`/model` 可切换已配置的模型。配置、会话、审批和交付物保存在本机。模型请求会发往你配置的服务。
 
 Windows x64 可以安装 MSI，Debian amd64 可以安装 `.deb`；也可解压便携包，把 `fliuno` 和 `fliuno-app-server` 放在同一目录。[安装与校验](docs/workbench.md#安装) · [升级前备份](docs/workbench.md#从旧版升级) · [接入模型](docs/workbench.md#接入模型)
 
 ### 项目工作流
 
-在项目目录运行 `fliuno`，例如输入：「找到订单折扣的实现，修复边界值错误，运行已配置的检查，并告诉我改了哪个文件。」Agent 可以从未知路径搜索源码、读取文件，并提交可审阅的小范围替换或补丁。写入前会停下来等你批准；审批先展示目标和改动，`Tab` 可查看工具参数。需要运行项目检查时，先由你在宿主配置登记程序，再审阅实际命令和输入文件。
+在项目目录运行 `fliuno`。有 `AGENTS.md` 时，可先用 `/guide` 审阅并启用。然后输入：「找到订单折扣的实现，修复边界值错误，运行已配置的检查，并告诉我改了哪个文件。」Agent 可以从未知路径搜索源码、读取文件，并提交可审阅的小范围替换或补丁。写入前会停下来等你批准；审批先展示目标和改动，`Tab` 可查看工具参数。需要运行项目检查时，先由你在宿主配置登记程序，再审阅实际命令和输入文件。
 
 完成后用 `/changes` 查看本轮确认写入的文件、补丁和检查输出。仅需一段文字时可以直接在对话里交付；只有需要下载或写文件时，才走对应的交付流程。[项目工作流](docs/workbench.md#在项目目录里工作) · [如何配置检查](docs/setup.md#在隔离环境里运行项目检查0021)
 
@@ -51,7 +51,8 @@ Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` �
 
 | 工作流 | 快捷键 |
 | --- | --- |
-| 查看能运行哪些项目检查（开发版） | `/checks` 查看固定输入和缺失项；实际运行仍要审阅和批准。[使用说明](docs/workbench.md#查看项目检查) |
+| 查看能运行哪些项目检查 | `/checks` 查看固定输入和缺失项；实际运行仍要审阅和批准。[使用说明](docs/workbench.md#查看项目检查) |
+| 审阅项目约定 | `/guide` 预览并启用工作区根目录的 `AGENTS.md`。[使用说明](docs/workbench.md#审阅项目指南) |
 | 浏览当前会话的任务 | `Shift+L` 打开完整列表，支持按状态筛选及翻页。 |
 | 审阅计划后开始实施 | `F2` 切换计划模式，任务完成后 `Shift+P` 创建实施草稿。 |
 | 安排后续工作 | `Ctrl+E` 入队，`Shift+Q` 查看并启动下一项。 |
@@ -64,7 +65,7 @@ Windows PowerShell 可用 `.\fliuno.exe --demo`。创建一个会话，按 `N` �
 | --- | --- |
 | **任务协作与审批** | 模型可以发布计划和请求澄清。客户端可中途补充要求、为精确的本机只读操作设置限时授权，并在重连后查看下一步。[应用协议](docs/protocol.md#任务计划与澄清) |
 | **任务与 Agent 调度** | SQLite 持久化任务、审批、交付物和 Run 依赖图，支持并发调度、期限和断线续读。[Run 协议](docs/protocol.md#持久-run-dag) |
-| **模型与上下文** | OpenAI、Anthropic、Gemini 支持 Token 预检和自动上下文压缩。会话可检索工作区长期记忆。[会话上下文](docs/context.md) · [工作区记忆](docs/memory.md) |
+| **模型与上下文** | 配置预算后，支持生成前检查请求体积，并在兼容的模型协议上缩减历史。供应商计数能力因协议而异。会话可检索工作区长期记忆。[会话上下文](docs/context.md) · [工作区记忆](docs/memory.md) |
 | **工具与外部 Agent** | 兼容两代 MCP，包括 Tasks、OAuth 和资源监听，并接入 ACP 和 A2A。[MCP 兼容与配置](docs/mcp.md) |
 | **本机执行** | 由宿主注册工作区文件、命令和终端能力；支持的平台可启用进程隔离。 |
 | **恢复与诊断** | 提供 SQLite 一致性备份、独立路径还原、JSONL 追踪和可选的 OTLP 导出。[备份](docs/backup.md) · [执行诊断](docs/setup.md#执行诊断) |
