@@ -74,12 +74,18 @@ struct Form {
 pub fn run(screen: &mut Screen, options: SetupOptions) -> io::Result<bool> {
     let mut form = Form::default();
     let palette = Palette::new(options.theme);
+    let mut redraw = true;
     loop {
+        let was_loading = form.catalog.loading();
         form.catalog.poll();
-        screen.draw(|frame| form.draw(frame, &options.config, &palette))?;
+        if redraw || (was_loading && !form.catalog.loading()) {
+            screen.draw(|frame| form.draw(frame, &options.config, &palette))?;
+            redraw = false;
+        }
         if form.catalog.loading() && !event::poll(Duration::from_millis(50))? {
             continue;
         }
+        redraw = true;
         match event::read()? {
             Event::Paste(mut text) => {
                 form.insert(&text);
