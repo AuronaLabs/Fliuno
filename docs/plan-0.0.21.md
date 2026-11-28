@@ -94,6 +94,8 @@ Windows ConPTY 已验证语言切换、配置与草稿保留、回环目录、�
 
 开发候选使用 `0.0.21` 二进制版本号。通过 `Installer candidate` 工作流在开发分支构建和验证安装包，升级基线为已发布的 `v0.0.20`；工作流只保留候选产物，不创建发布标签。
 
+[GitHub Actions 产物校验](https://docs.github.com/en/actions/tutorials/store-and-share-data#validating-artifacts)覆盖工作流上传和下载。本地 Codex `a1604a8` 的 `.github/scripts/publish-github-release.sh` 将标签、草稿与发布区分；OpenCode `d284e7c` 的 `.github/release/README.md` 将构建与部署分开并在部署前核对摘要。Fliuno 另在合并 Windows 和 Debian 候选前核对两份 `SOURCE-COMMIT.txt`、精确文件名和逐文件 SHA-256。使用 `scripts/stage_release.py` 生成合并清单；该命令只准备本地目录，不创建标签或上传。
+
 - 用四种协议的离线回放检查实际请求与工具结果回流。中文短文在对话完成，零工具、零审批；托管产物可打开与另存且不冒充工作区文件；工作区写入此前可审阅，拒绝不修改文件，成功显示通过真实结果验证的路径。
 - Windows 和 Debian 12 的临时 Git 仓库运行同一用例：中文请求定位未知文件，读取规则和测试，用小补丁改动，实现一次失败纠正并跑定向检查；比对实际 diff、退出码和最终报告。用离线协议回放验证内核行为，再单独记录真实模型试跑结果；不得把离线回放当作模型质量证据。额外覆盖取消、拒绝、边界路径、重复请求、未知结果和重开恢复。
 - v0.0.20 数据升级后同时连两个供应商。切换协议、模型和默认档案，验证重开后历史标签正确，检查请求、日志和界面未泄露凭据。
