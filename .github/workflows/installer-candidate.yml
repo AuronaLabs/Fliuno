@@ -55,6 +55,9 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $env:FLIUNO_TEST_TUI = "$env:ProgramFiles\Fliuno\fliuno.exe"
           $env:FLIUNO_TEST_APP_SERVER = "$env:ProgramFiles\Fliuno\fliuno-app-server.exe"
+          $env:FLIUNO_TUI_CAPTURE = "$env:RUNNER_TEMP\fliuno-captures"
+          $env:FLIUNO_TEST_THEME = "dark"
+          New-Item -ItemType Directory -Force -Path $env:FLIUNO_TUI_CAPTURE | Out-Null
           cargo test --locked --release -p fliuno-tui --test workbench -- --include-ignored --test-threads=1
       - uses: actions/upload-artifact@v4
         with:
@@ -64,6 +67,12 @@ jobs:
             dist/*.zip
             dist/*.txt
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-terminal-captures
+          path: ${{ runner.temp }}/fliuno-captures/*.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -100,8 +109,18 @@ jobs:
         env:
           FLIUNO_TEST_TUI: /usr/bin/fliuno
           FLIUNO_TEST_APP_SERVER: /usr/bin/fliuno-app-server
+          FLIUNO_TEST_THEME: dark
+          FLIUNO_TUI_CAPTURE: ${{ runner.temp }}/fliuno-captures
           TERM: xterm-256color
-        run: cargo test --locked --release -p fliuno-tui --test workbench -- --include-ignored --test-threads=1
+        run: |
+          mkdir -p "$FLIUNO_TUI_CAPTURE"
+          cargo test --locked --release -p fliuno-tui --test workbench -- --include-ignored --test-threads=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: debian-terminal-captures
+          path: ${{ runner.temp }}/fliuno-captures/*.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: fliuno-debian-candidate
