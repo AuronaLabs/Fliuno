@@ -206,6 +206,28 @@ python examples/mcp_http_demo.py --deny
 cargo run -p fliuno-app-server -- --exec-config C:/absolute/path/to/execution.json
 ```
 
+## 在隔离环境里运行项目检查（0.0.21）
+
+在用户配置的 `[integrations]` 下将 `execution` 指向受信任的 JSON 文件。下面是一个检查配置示例；将 `command` 换成你安装的原生检查程序的绝对路径，`args` 换成该程序接受的固定参数。Windows 使用 `windows_app_container`；Linux 使用 `linux_landlock`。
+
+```json
+{
+  "programs": [{
+    "id": "check-format",
+    "command": "C:/Tools/formatter.exe",
+    "isolation": "windows_app_container",
+    "args": ["--check", "src/main.rs"],
+    "projectCheck": {
+      "label": "检查代码格式",
+      "description": "检查 src/main.rs 是否符合格式要求",
+      "inputs": ["src/main.rs"]
+    }
+  }]
+}
+```
+
+项目检查只接收配置中的输入文件及其 SHA-256，不允许模型改命令、参数或环境。批准后最多复制 16 个文件、合计 8 MiB；文件内容变化则须重读并重新审批。检查在私有目录里运行，写入不会回到工作区。程序需要的其他资源可显式配置为固定摘要的 `assets`；不会自动加载整个仓库、工具链缓存或外部依赖。对话会显示命令和退出码；被取消或结果未知的检查不会显示为通过。用户侧配置是执行授权来源，仓库文件不能自行登记检查。
+
 ## 跨轮次终端
 
 `--terminal-config` 注册由主机固定的原生程序 preset。示例使用独立的 Windows PowerShell 进程；将绝对路径替换为目标平台真实存在且可信的原生可执行文件。`trusted_host` 以当前用户权限运行，支持 cwd 下已有的用户工作内容，但不是文件/网络沙箱。普通 `process_execution` 仍是有 timeout 的前台命令，两种工具的权限范围不同。
